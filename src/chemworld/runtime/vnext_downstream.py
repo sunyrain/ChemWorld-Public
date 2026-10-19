@@ -11,8 +11,13 @@ fallback.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
+from chemworld.foundation.solvents import (
+    HEAT_CAPACITY_RATIOS,
+    RELATIVE_VOLATILITIES,
+    SolventInventory,
+)
 from chemworld.physchem.concentration_units import (
     ConcentrationComponentSpec,
     VacuumConcentrationRequest,
@@ -60,13 +65,15 @@ class PhaseSlice:
         return self.volume_L > 1.0e-12 and self.product_mol + self.impurity_mol > 1.0e-12
 
 
-def run_sorbent_drying(phase: PhaseSlice) -> SorbentDryingResult:
+def run_sorbent_drying(phase: PhaseSlice, *, water_mol: float | None = None) -> SorbentDryingResult:
     """Map a selected phase to the finite-capacity sorbent provider."""
 
     wetting_inventory = max(
         phase.volume_L * (0.02 + 0.08 * min(max(phase.solvent_loss, 0.0), 1.0)),
         1.0e-8,
     )
+    if water_mol is not None:
+        wetting_inventory = water_mol
     feed = {
         _PRODUCT_ID: max(phase.product_mol, 0.0),
         _IMPURITY_ID: max(phase.impurity_mol, 0.0),
@@ -101,6 +108,8 @@ def run_vacuum_concentration(
     *,
     initial_temperature_K: float,
     duration_s: float,
+    solvents: SolventInventory | None = None,
+    carrier_heat_capacity_J_L_K: float = 4167.0,
 ) -> VacuumConcentrationResult:
     """Map a selected phase to an energy-limited vacuum concentration run."""
 
@@ -149,6 +158,26 @@ def run_vacuum_concentration(
             "runtime-vnext-bounded-carrier",
         ),
     }
+    solvent_ids: tuple[str, ...] = (_CARRIER_ID,)
+    if solvents is not None:
+        del feed[_CARRIER_ID]
+        del specifications[_CARRIER_ID]
+        for key in (_PRODUCT_ID, _IMPURITY_ID):
+            specifications[key] = replace(specifications[key], liquid_molar_volume_L_mol=0.0)
+        solvent_ids = tuple(f"carrier-{i}" for i in range(4))
+        for i, key in enumerate(solvent_ids):
+            feed[key] = solvents.volumes_L[i] / 0.018
+            specifications[key] = ConcentrationComponentSpec(
+                key,
+                82_000.0 * RELATIVE_VOLATILITIES[i],
+                1.0,
+                40_700.0,
+                carrier_heat_capacity_J_L_K * 0.018 * HEAT_CAPACITY_RATIOS[i],
+                0.018,
+                operating_temperature,
+                500.0,
+                "finite-surrogate-carrier-v1",
+            )
     equipment = VacuumConcentratorSpec(
         equipment_id="bench_vacuum_concentrator_vnext",
         max_working_volume_L=max(0.20, phase.volume_L * 1.2),
@@ -165,7 +194,7 @@ def run_vacuum_concentration(
         feed_amounts_mol=feed,
         component_specs=specifications,
         target_component_id=_PRODUCT_ID,
-        solvent_component_ids=(_CARRIER_ID,),
+        solvent_component_ids=solvent_ids,
         initial_temperature_K=initial_temperature_K,
         operating_temperature_K=operating_temperature,
         pressure_Pa=30_000.0,
@@ -213,6 +242,8 @@ def run_duty_limited_distillation(
     reflux_ratio: float,
     requested_cut_fraction: float,
     relative_volatility_multiplier: float = 1.0,
+    solvents: SolventInventory | None = None,
+    carrier_heat_capacity_J_L_K: float = 4167.0,
 ) -> DutyLimitedDistillationResult:
     """Map the compact target/impurity cut to the bounded column provider."""
 
@@ -243,6 +274,19 @@ def run_duty_limited_distillation(
             "runtime-vnext-heavy-key",
         ),
     }
+    if solvents is not None:
+        for i, volume in enumerate(solvents.volumes_L):
+            key = f"carrier-{i}"
+            feed[key] = volume / 0.018
+            specs[key] = DistillationComponentSpec(
+                key,
+                250_000.0 * RELATIVE_VOLATILITIES[i],
+                40_700.0,
+                carrier_heat_capacity_J_L_K * 0.018 * HEAT_CAPACITY_RATIOS[i],
+                operating_temperature,
+                500.0,
+                "finite-surrogate-carrier-v1",
+            )
     total = sum(feed.values())
     column = ShortcutColumnSpec(
         theoretical_stages=min(max(2.0 + duration_s / 900.0, 2.0), 20.0),

@@ -110,11 +110,13 @@ def run_agent(
     budget_override: int | None = None,
     episode_mode_override: str | None = None,
     step_callback: Callable[[HistoryRecord, list[dict[str, Any]]], None] | None = None,
+    env_wrapper: Callable[[gym.Env[Any, Any]], gym.Env[Any, Any]] | None = None,
     method_resource_limits: dict[str, Any] | None = None,
     evaluation_policy: EvaluationPolicy = "task_contract",
     world_interventions: tuple[dict[str, Any], ...] | list[dict[str, Any]] | None = None,
     safety_limit_override: float | None = None,
     material_information: Mapping[str, Any] | None = None,
+    research_brief: Mapping[str, Any] | None = None,
     campaign_resource_card: (
         Mapping[str, Any] | CampaignResourceCard | None
     ) = None,
@@ -124,6 +126,7 @@ def run_agent(
     scoring_contract_id: str | None = None,
     observation_noise_mode: str | None = None,
     observation_noise_namespace: str | None = None,
+    full_process_contract_id: str | None = None,
 ) -> list[HistoryRecord]:
     """Run one benchmark episode and optionally write a JSONL trajectory."""
 
@@ -161,12 +164,16 @@ def run_agent(
         env_kwargs["observation_noise_namespace"] = str(
             observation_noise_namespace
         )
+    if full_process_contract_id is not None:
+        env_kwargs["full_process_contract_id"] = full_process_contract_id
     if task_id is not None:
         env_kwargs["task_id"] = task_id
     if composition is not None:
         env_kwargs["composition"] = copy.deepcopy(dict(composition))
     if material_information is not None:
         env_kwargs["material_information"] = dict(material_information)
+    if research_brief is not None:
+        env_kwargs["research_brief"] = copy.deepcopy(dict(research_brief))
     if campaign_resource_card is not None:
         env_kwargs["campaign_resource_card"] = (
             campaign_resource_card
@@ -202,6 +209,8 @@ def run_agent(
         env_id,
         **env_kwargs,
     )
+    if env_wrapper is not None:
+        env = env_wrapper(env)
     initial_obs, task_info = env.reset(seed=seed)
     if not hasattr(env.unwrapped, "task_info"):
         raise RuntimeError(f"{env_id} does not expose task_info()")

@@ -96,9 +96,7 @@ class MechanismSpeciesView:
 
     def target_species_for_state(self, state: WorldState) -> tuple[str, ...]:
         species = tuple(
-            species_id
-            for species_id in self.target_species
-            if species_id in state.species_amounts
+            species_id for species_id in self.target_species if species_id in state.species_amounts
         )
         return species or self.target_species
 
@@ -142,14 +140,64 @@ class MechanismSpeciesView:
         return self.amount(state, self.degradation_species_for_state(state))
 
     def reactant_amount(self, state: WorldState) -> float:
-        return float(state.species_amounts.get(self.reactant_species(state), 0.0))
+        coefficients = self.feed_equivalent_coefficients
+        return min(
+            float(state.species_amounts.get(key, 0.0)) / coefficient
+            for key, coefficient in coefficients.items()
+        )
+
+    @property
+    def feed_species(self) -> tuple[str, ...]:
+        """Finite independently chargeable feed catalog, in mechanism order."""
+        # Unreacted cofeeds may also be analytical impurities; that does not
+        # make them ineligible as separately chargeable starting materials.
+        excluded = {*self.catalyst_species, *self.target_species}
+        return tuple(
+            species.species_id
+            for species in self.mechanism.network.species
+            if self.mechanism.initial_amount_policy.get(species.species_id, 0.0) > 0.0
+            and species.species_id not in excluded
+        ) or (self.reactant_species(),)
+
+    @property
+    def feed_equivalent_coefficients(self) -> dict[str, float]:
+        """Direct target stoichiometry, never the reference recipe's dose ratios.
+
+        Multi-step single-feed networks retain their declared primary-feed basis.
+        Independent cofeeds use the unique target-forming feed stoichiometry.
+        """
+        feeds = set(self.feed_species)
+        candidates = []
+        for reaction in self.mechanism.network.reactions:
+            target = sum(
+                max(reaction.stoichiometry.get(key, 0.0), 0.0) for key in self.target_species
+            )
+            consumed = (
+                {
+                    key: -value / target
+                    for key, value in reaction.stoichiometry.items()
+                    if value < 0 and key in feeds
+                }
+                if target > 0
+                else {}
+            )
+            if consumed:
+                candidates.append(consumed)
+        if len(feeds) > 1:
+            if not candidates or any(value != candidates[0] for value in candidates[1:]):
+                raise ValueError("Independent cofeeds require unambiguous target stoichiometry")
+            return candidates[0]
+        return {self.reactant_species(): 1.0}
 
     def initial_reactant_amount(self, state: WorldState) -> float:
-        reactant = self.reactant_species(state)
         if state.species is not None:
-            amount = state.species.initial_amounts_mol.get(reactant)
-            if amount is not None:
-                return max(float(amount), 0.0)
+            return max(
+                min(
+                    float(state.species.initial_amounts_mol.get(key, 0.0)) / coefficient
+                    for key, coefficient in self.feed_equivalent_coefficients.items()
+                ),
+                0.0,
+            )
         return max(
             self.reactant_amount(state) + self.target_amount(state) + self.impurity_amount(state),
             0.0,
@@ -200,18 +248,19 @@ class MechanismSpeciesView:
         } or {reactant: limiting_amount_mol}
 
     def truth_values(self, state: WorldState) -> dict[str, float]:
-        initial = max(self.initial_reactant_amount(state), 1.0e-12)
+        initial = max(self.initial_reactant_amount(state), 0.0)
+        denominator = max(initial, 1.0e-12)
         target = self.target_amount(state)
         impurity = self.impurity_amount(state)
         remaining = self.reactant_amount(state)
-        consumed = max(initial - remaining, 1.0e-12)
+        consumed = max(initial - remaining, 0.0)
         return {
-            "yield": float(np.clip(target / initial, 0.0, 1.0)),
-            "selectivity": float(np.clip(target / consumed, 0.0, 1.0)),
-            "conversion": float(np.clip(consumed / initial, 0.0, 1.0)),
-            "byproduct_signal": float(np.clip(impurity / initial, 0.0, 1.0)),
+            "yield": float(np.clip(target / denominator, 0.0, 1.0)),
+            "selectivity": float(np.clip(target / max(consumed, 1.0e-12), 0.0, 1.0)),
+            "conversion": float(np.clip(consumed / denominator, 0.0, 1.0)),
+            "byproduct_signal": float(np.clip(impurity / denominator, 0.0, 1.0)),
             "degradation_warning": float(
-                np.clip(self.degradation_amount(state) / initial, 0.0, 1.0)
+                np.clip(self.degradation_amount(state) / denominator, 0.0, 1.0)
             ),
         }
 

@@ -2,23 +2,30 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
 from chemworld.foundation import Observation, PhysicalConstitution, WorldState, equipment_settings
 from chemworld.foundation.state import ProcessLedger, selected_phase_id
+from chemworld.physchem.configurable_spectra import SPECTRAL_MODEL_ID, acquire_spectrum
 from chemworld.physchem.equilibrium_chemistry import (
     SolubilityProductSpec,
     apply_precipitation_hooks,
     solve_monoprotic_acid_base,
 )
+from chemworld.physchem.equilibrium_mechanism import (
+    EquilibriumMechanismFamily,
+    solve_coupled_weak_acid_precipitation,
+)
 from chemworld.physchem.spectroscopy_adapter_manifest import (
     ValidatedInstrumentRuntimeProvider,
 )
+from chemworld.runtime.full_process_contract import unrecoverable_crystallization_result
 from chemworld.runtime.mechanisms import CompiledMechanism
 from chemworld.runtime.phase_ledger_services import ChemWorldPhaseLedgerServices
 from chemworld.runtime.species import MechanismSpeciesView
+from chemworld.runtime.spectral_settings import spectral_settings
 from chemworld.world.observation_contracts import TaskObservationContract
 from chemworld.world.observation_kernel import (
     base_observed_mask,
@@ -34,6 +41,11 @@ from chemworld.world.scoring import (
 )
 from chemworld.world.separation_kernel import downstream_truth_values
 from chemworld.world.species_roles import PHASE_PRODUCT_AMOUNT_KEY
+from chemworld.world.spectral_contract import (
+    SPECTRAL_INSTRUMENTS,
+    acquisition_cost,
+    acquisition_seconds,
+)
 
 
 class ChemWorldObservationKernel:
@@ -95,6 +107,8 @@ class ChemWorldObservationKernel:
 
         instrument_id = instrument_name(action.get("instrument", "hplc"))
         instrument = self.constitution.instruments[instrument_id]
+        if instrument_id in SPECTRAL_INSTRUMENTS:
+            return self._spectral_observation(state, instrument_id, rng)
         truth_values = self._truth_values(state)
         noisy = self._base_public_values(state)
         observed_mask = self._base_observed_mask()
@@ -107,7 +121,17 @@ class ChemWorldObservationKernel:
             )
         )
         selected_keys = set(observable_keys)
+        empty_crystals = unrecoverable_crystallization_result(
+            state, tolerance=self.constitution.tolerance
+        )
+        undefined_crystal_keys = (
+            {"crystal_size", "crystal_purity", "crystal_csd_quality", "crystal_fines_fraction"}
+            if empty_crystals
+            else set()
+        )
         for key in instrument.observable_keys:
+            if key in undefined_crystal_keys:
+                continue
             std = instrument.noise_std.get(key, 0.0) * self.observation_noise_multiplier
             value = float(np.clip(truth_values[key] + rng.normal(0.0, std), 0.0, 1.0))
             if key in selected_keys:
@@ -135,17 +159,26 @@ class ChemWorldObservationKernel:
             state,
             observable_keys=observable_keys,
         )
+        raw_signal = self._raw_signal(
+            instrument_id, noisy, state, rng, species_amounts_mol=public_species_amounts
+        )
+        raw_signal["acquisition"] = {
+            "clock_semantics": "instantaneous_snapshot",
+            "sample_time_s": state.ledger.time_s,
+            "result_time_s": state.ledger.time_s,
+        }
+        if empty_crystals and instrument_id in {"particle_size", "final_assay"}:
+            raw_signal["sample_outcome"] = {
+                "status": "negative_result",
+                "reason": "below_crystal_recovery_threshold",
+                "recovery_threshold_mol": self.constitution.tolerance,
+                "undefined_observables": sorted(undefined_crystal_keys & selected_keys),
+            }
         return Observation(
             values=noisy,
             units=self._observation_units(),
             observed_mask=observed_mask,
-            raw_signal=self._raw_signal(
-                instrument_id,
-                noisy,
-                state,
-                rng,
-                species_amounts_mol=public_species_amounts,
-            ),
+            raw_signal=raw_signal,
             processed_estimate=self._processed_estimate(noisy, observed_mask),
             uncertainty={
                 f"{key}_std": float(std) * self.observation_noise_multiplier
@@ -154,6 +187,76 @@ class ChemWorldObservationKernel:
             },
             instrument_id=instrument_id,
             cost=instrument.cost,
+            sample_consumed_L=instrument.sample_volume_L,
+        )
+
+    def _spectral_observation(
+        self, state: WorldState, instrument_id: str, rng: np.random.Generator
+    ) -> Observation:
+        configuration = spectral_settings(state, instrument_id)
+        packet = acquire_spectrum(
+            instrument_id,
+            (
+                self.species_view.reactant_amount(state) / state.volume_L,
+                self.species_view.target_amount(state) / state.volume_L,
+                self.species_view.impurity_amount(state) / state.volume_L,
+            ),
+            configuration,
+            rng,
+            noise_multiplier=self.observation_noise_multiplier,
+        )
+        seconds = acquisition_seconds(instrument_id, configuration)
+        packet["acquisition"] = {
+            "clock_semantics": "instantaneous_snapshot",
+            "sample_time_s": state.ledger.time_s,
+            "result_time_s": state.ledger.time_s,
+            "analysis_effort_s": seconds,
+            "effort_ledger": "analysis_time_s",
+            "reactor_advance_s": 0.0,
+        }
+        values, mask = self._base_public_values(state), self._base_observed_mask()
+        fit = packet["processed_estimates"]["concentration_mol_L"]
+        a, p, b = (
+            fit[key] for key in ("reactant_reporter", "target_reporter", "impurity_reporter")
+        )
+        instrument = self.constitution.instruments[instrument_id]
+        allowed = (
+            instrument.observable_keys
+            if self.observation_contract is None
+            else self.observation_contract.observable_keys_for_instrument(
+                instrument_id, instrument.observable_keys
+            )
+        )
+        estimates = {
+            "selectivity": p / (p + b) if p is not None and b is not None and p + b > 0 else None,
+            "purity": p / (a + p + b)
+            if all(v is not None for v in (a, p, b)) and a + p + b > 0
+            else None,
+            "byproduct_signal": b / (a + p + b)
+            if all(v is not None for v in (a, p, b)) and a + p + b > 0
+            else None,
+        }
+        for key in allowed:
+            values[key] = estimates[key]
+            mask[key] = estimates[key] is not None
+        values["score"] = self._score(values)
+        self.last_provider_execution = {
+            "model_id": SPECTRAL_MODEL_ID,
+            "maturity": "development",
+            "role": "runtime",
+            "success": True,
+            "failure_reason": None,
+            "provenance": ["finite anonymous reporter calibration; acquired-trace NNLS"],
+        }
+        return Observation(
+            values=values,
+            units=self._observation_units(),
+            observed_mask=mask,
+            raw_signal=packet,
+            processed_estimate=self._processed_estimate(values, mask),
+            uncertainty={},
+            instrument_id=instrument_id,
+            cost=acquisition_cost(instrument_id, configuration),
             sample_consumed_L=instrument.sample_volume_L,
         )
 
@@ -189,6 +292,28 @@ class ChemWorldObservationKernel:
         *,
         species_amounts_mol: dict[str, float] | None = None,
     ) -> dict[str, Any]:
+        if instrument_id == "particle_size":
+            self.last_provider_execution = {
+                "model_id": "synthetic-particle-summary-v1",
+                "maturity": "development",
+                "role": "runtime",
+                "success": True,
+                "failure_reason": None,
+                "provenance": ["population-balance scalar summary with Gaussian noise"],
+            }
+            return {
+                "kind": "particle_size_signal",
+                "d50_um": (
+                    None
+                    if values["crystal_size"] is None
+                    else 250.0 * float(values["crystal_size"])
+                ),
+                "fines_number_fraction": values["crystal_fines_fraction"],
+                "csd_quality": values["crystal_csd_quality"],
+                "fines_threshold_um": 20.0,
+                "weighting": "number",
+                "metadata": {"synthetic": True, "raw_images_available": False},
+            }
         replicate_count = 3 if instrument_id == "final_assay" else 2
         provider_seed = int(rng.integers(0, 2**31 - 1))
         provider_result = self.instrument_provider.evaluate(
@@ -249,20 +374,56 @@ class ChemWorldObservationKernel:
         truth = self.species_view.truth_values(state)
         downstream = (
             self._partition_v3_truth_values(state)
-            if self.scoring_contract.contract_id
-            == PARTITION_S0_EXTRACTION_EFFICIENCY_V3
+            if self.scoring_contract.contract_id == PARTITION_S0_EXTRACTION_EFFICIENCY_V3
             else downstream_truth_values(
                 state,
                 product_amount_mol=self.species_view.target_amount(state),
                 impurity_amount_mol=self.species_view.impurity_amount(state),
-                initial_product_mol=max(
-                    self.species_view.initial_reactant_amount(state), 1.0e-12
-                ),
+                initial_product_mol=max(self.species_view.initial_reactant_amount(state), 1.0e-12),
                 target_species=self.species_view.target_species_for_state(state),
                 impurity_species=self.species_view.impurity_species_for_state(state),
             )
         )
         truth.update(downstream)
+        from chemworld.runtime.full_process_contract import (
+            active,
+            population_active,
+            seed_provenance_active,
+        )
+
+        if active(state):
+            phases = {} if state.phases is None else state.phases.phases
+            denominator = max(self.species_view.initial_reactant_amount(state), 1.0e-12)
+            if state.metadata.get("full_process_task_id") == "reaction-to-distillation":
+                # Same current receiver and original charge as the native purity/recovery assay.
+                truth["distillate_purity"] = downstream["purity"]
+                truth["distillate_recovery"] = downstream["recovery"]
+            if "solid" in phases:
+                solid = phases["solid"].species_amounts_mol
+                product = sum(solid.get(k, 0.0) for k in self.species_view.target_species)
+                impurity = sum(solid.get(k, 0.0) for k in self.species_view.impurity_species)
+                metrics = {} if state.process is None else state.process.metrics
+                seed = metrics.get(
+                    "retained_seed_mol",
+                    equipment_settings(state.equipment, "crystallizer").get("seed_target_mol", 0.0),
+                )
+                if seed_provenance_active(state):
+                    # A filtered slurry can be reheated, seeded or cooled again.
+                    # Its current solid provenance supersedes the last filter receipt.
+                    seed = equipment_settings(state.equipment, "crystallizer").get(
+                        "seed_target_mol", 0.0
+                    )
+                truth["crystal_purity"] = product / max(product + impurity, 1.0e-12)
+                truth["crystal_yield"] = float(
+                    np.clip((product - min(seed, product)) / denominator, 0.0, 1.0)
+                )
+                if population_active(state):
+                    settings = equipment_settings(state.equipment, "crystallizer")
+                    cv = min(max(float(settings.get("csd_cv", 0)), 0), 1)
+                    fines = float(settings.get("csd_fines_number_fraction", 0))
+                    truth["crystal_size"] = min(float(settings.get("csd_d50_m", 0)) / 250e-6, 1)
+                    truth["crystal_fines_fraction"] = fines
+                    truth["crystal_csd_quality"] = 0.55 * (1 - cv) + 0.45 * (1 - fines)
         equilibrium = self._equilibrium_truth_values(state)
         # Once the electrochemical runtime has solved its coupled aqueous
         # state, instrument-facing equilibrium signals must come from that
@@ -275,8 +436,7 @@ class ChemWorldObservationKernel:
     def _partition_v3_truth_values(self, state: WorldState) -> dict[str, float]:
         phase_ledger = self.phase_ledgers.phase_ledger(state)
         product_amount = sum(
-            float(entry.get(PHASE_PRODUCT_AMOUNT_KEY, 0.0))
-            for entry in phase_ledger.values()
+            float(entry.get(PHASE_PRODUCT_AMOUNT_KEY, 0.0)) for entry in phase_ledger.values()
         )
         impurity_amount = sum(
             float(entry.get("impurity_mol", 0.0)) for entry in phase_ledger.values()
@@ -321,9 +481,7 @@ class ChemWorldObservationKernel:
         )
         residual = max(
             abs(float(process_metrics.get("electrolyte_charge_balance_error_eq", 0.0))),
-            abs(
-                float(process_metrics.get("electrolyte_material_balance_error_mol", 0.0))
-            )
+            abs(float(process_metrics.get("electrolyte_material_balance_error_mol", 0.0)))
             / inventory_scale,
         )
         diagnostic = cell.get("aqueous_equilibrium_diagnostic", {})
@@ -373,6 +531,122 @@ class ChemWorldObservationKernel:
                 "precipitation_signal": 0.0,
                 "equilibrium_residual": 1.0,
                 "equilibrium_confidence": 0.0,
+            }
+
+        if state.metadata.get("equilibrium_entity_panel_version"):
+            from chemworld.world.mixtures import working_solvents
+
+            configured_profiles = state.metadata.get("equilibrium_entity_profiles")
+            if not isinstance(configured_profiles, dict) or any(
+                str(i) not in configured_profiles for i in range(4)
+            ):
+                raise ValueError("EQ-E active medium has no registered private profile")
+            medium = working_solvents(state)
+            profile = {
+                key: (
+                    medium.log_property
+                    if key == "activity_coefficient_ratio"
+                    else medium.linear_property
+                )(tuple(configured_profiles[str(i)][key] for i in range(4)))
+                for key in (
+                    "pka_shift",
+                    "log10_ksp",
+                    "cation_fraction",
+                    "activity_coefficient_ratio",
+                )
+            }
+            coupled = solve_coupled_weak_acid_precipitation(
+                acid_total_mol=acid_total,
+                volume_L=volume_L,
+                pka=float(state.metadata["equilibrium_entity_base_pka"])
+                + float(profile["pka_shift"]),
+                log10_ksp=float(profile["log10_ksp"]),
+                mechanism_family="direct_free_ion_precipitation",
+                cation_fraction=float(profile["cation_fraction"]),
+                activity_coefficient_ratio=float(profile["activity_coefficient_ratio"]),
+            )
+            concentration = acid_total / volume_L
+            identity_signal = max(
+                coupled.acid_dissociation_fraction,
+                coupled.precipitation_signal,
+            )
+            concentration_quality = 1.0 - min(
+                abs(np.log10(max(concentration, 1.0e-12)) - np.log10(0.08)) / 4.0,
+                1.0,
+            )
+            confidence = float(
+                np.clip(
+                    0.55 * (1.0 - min(coupled.equilibrium_residual, 1.0))
+                    + 0.20 * min(identity_signal / 0.08, 1.0)
+                    + 0.25 * concentration_quality,
+                    0.0,
+                    1.0,
+                )
+            )
+            return {
+                "pH_normalized": float(np.clip(coupled.pH / 14.0, 0.0, 1.0)),
+                "acid_dissociation_fraction": float(
+                    np.clip(coupled.acid_dissociation_fraction, 0.0, 1.0)
+                ),
+                "precipitation_signal": float(np.clip(coupled.precipitation_signal, 0.0, 1.0)),
+                "equilibrium_residual": float(np.clip(coupled.equilibrium_residual, 0.0, 1.0)),
+                "equilibrium_confidence": confidence,
+            }
+
+        if state.metadata.get("equilibrium_mechanism_benchmark_version") == "eq-s-v0.2":
+            pka = self._hidden_acid_pka(state)
+            mechanism_family = str(
+                state.metadata.get(
+                    "equilibrium_mechanism_family",
+                    "direct_free_ion_precipitation",
+                )
+            )
+            configured_beta = state.metadata.get("equilibrium_aqueous_association_beta_L_per_mol")
+            coupled = solve_coupled_weak_acid_precipitation(
+                acid_total_mol=acid_total,
+                volume_L=volume_L,
+                pka=pka,
+                log10_ksp=float(state.metadata.get("hidden_equilibrium_log10_ksp", -5.2)),
+                mechanism_family=cast(EquilibriumMechanismFamily, mechanism_family),
+                cation_fraction=float(
+                    state.metadata.get(
+                        "equilibrium_precipitating_cation_fraction",
+                        0.15,
+                    )
+                ),
+                association_beta_L_per_mol=(
+                    None if configured_beta is None else float(configured_beta)
+                ),
+                activity_coefficient_ratio=float(
+                    state.metadata.get("equilibrium_activity_coefficient_ratio", 1.0)
+                ),
+            )
+            concentration = acid_total / volume_L
+            identifiability = 1.0 - min(
+                abs(coupled.acid_dissociation_fraction - 0.08) / 0.08,
+                1.0,
+            )
+            concentration_quality = 1.0 - min(
+                abs(np.log10(max(concentration, 1.0e-12)) - np.log10(0.125)) / 4.0,
+                1.0,
+            )
+            confidence = float(
+                np.clip(
+                    0.45 * (1.0 - min(coupled.equilibrium_residual, 1.0))
+                    + 0.30 * identifiability
+                    + 0.25 * concentration_quality,
+                    0.0,
+                    1.0,
+                )
+            )
+            return {
+                "pH_normalized": float(np.clip(coupled.pH / 14.0, 0.0, 1.0)),
+                "acid_dissociation_fraction": float(
+                    np.clip(coupled.acid_dissociation_fraction, 0.0, 1.0)
+                ),
+                "precipitation_signal": float(np.clip(coupled.precipitation_signal, 0.0, 1.0)),
+                "equilibrium_residual": float(np.clip(coupled.equilibrium_residual, 0.0, 1.0)),
+                "equilibrium_confidence": confidence,
             }
 
         pka = self._hidden_acid_pka(state)

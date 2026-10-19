@@ -19,6 +19,8 @@ class HeatTransferSpec:
     jacket_ua_W_per_K: float = 0.0
     jacket_temperature_K: float | None = None
     fixed_heat_W: float = 0.0
+    maximum_jacket_heating_W: float | None = None
+    maximum_jacket_cooling_W: float | None = None
 
     def __post_init__(self) -> None:
         _positive(self.rho_cp_J_per_L_K, "rho_cp_J_per_L_K")
@@ -28,12 +30,24 @@ class HeatTransferSpec:
         if self.jacket_temperature_K is not None:
             _positive(self.jacket_temperature_K, "jacket_temperature_K")
         _finite(self.fixed_heat_W, "fixed_heat_W")
+        for name in ("maximum_jacket_heating_W", "maximum_jacket_cooling_W"):
+            limit = getattr(self, name)
+            if limit is not None:
+                _nonnegative_finite(limit, name)
 
     def jacket_heat_w(self, temperature_K: float) -> float:
         jacket = 0.0
         if self.jacket_temperature_K is not None:
             jacket = self.jacket_ua_W_per_K * (self.jacket_temperature_K - temperature_K)
-        return self.fixed_heat_W + jacket
+        return self.fixed_heat_W + self.limit_jacket_heat_w(jacket)
+
+    def limit_jacket_heat_w(self, jacket: float) -> float:
+        """Bound jacket power continuously; the independent fixed heater is unchanged."""
+        if self.maximum_jacket_heating_W is not None:
+            jacket = min(jacket, self.maximum_jacket_heating_W)
+        if self.maximum_jacket_cooling_W is not None:
+            jacket = max(jacket, -self.maximum_jacket_cooling_W)
+        return jacket
 
     def heat_loss_w(self, temperature_K: float) -> float:
         return self.ua_W_per_K * (temperature_K - self.environment_temperature_K)

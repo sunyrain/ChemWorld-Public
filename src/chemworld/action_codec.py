@@ -7,7 +7,14 @@ from typing import Any
 
 import numpy as np
 
+from chemworld.foundation.samples import CONTAINER_IDS
 from chemworld.world.actions import CATALYSTS, ELECTROLYTE_PROFILES, SOLVENTS
+from chemworld.world.control_contract import (
+    CONTROL_ACTION_FIELDS,
+    CONTROL_CHOICES,
+    CONTROL_NUMERIC,
+    CONTROL_VECTOR_FIELDS,
+)
 from chemworld.world.operations import (
     CAMPAIGN_CONTROL_OPERATIONS,
     INSTRUMENTS,
@@ -15,9 +22,12 @@ from chemworld.world.operations import (
     instrument_name,
     operation_contracts,
 )
+from chemworld.world.spectral_contract import SPECTRAL_BOUNDS, SPECTRAL_FIELDS
+from chemworld.world.stream_contract import STREAM_FIELDS
 
 PHASES = ("reactor_liquid", "aqueous", "organic")
 EXTRACTANTS = SOLVENTS
+FEED_IDS = tuple(f"feed-{i}" for i in range(16))
 GYM_ACTION_KEYS = (
     "operation",
     "amount_mol",
@@ -42,6 +52,16 @@ GYM_ACTION_KEYS = (
     "potential_V",
     "current_mA",
     "electrolyte_profile",
+    "container",
+    "source_container",
+    "destination_container",
+    "capacity_L",
+    "mixing",
+    "component",
+    "vessel",
+    "connection",
+    *CONTROL_VECTOR_FIELDS,
+    *SPECTRAL_FIELDS,
 )
 
 
@@ -56,6 +76,8 @@ class ActionCodec:
     phases: tuple[str, ...] = PHASES
     extractants: tuple[str, ...] = EXTRACTANTS
     electrolyte_profiles: tuple[str, ...] = ELECTROLYTE_PROFILES
+    vessels: tuple[str, ...] = tuple(f"vessel-{i}" for i in range(16))
+    connections: tuple[str, ...] = tuple(f"connection-{i}" for i in range(64))
 
     def canonicalize(self, action: dict[str, Any]) -> dict[str, Any]:
         """Normalize event-action JSON into canonical names and flat payload."""
@@ -70,6 +92,39 @@ class ActionCodec:
             canonical = payload
         canonical["operation"] = self._operation_name(canonical["operation"])
         canonical = self._apply_aliases(canonical)
+        for field, choices in CONTROL_CHOICES.items():
+            if field in canonical:
+                canonical[field] = self._index(canonical[field], choices)
+        control_numeric_fields = set(CONTROL_NUMERIC) | (
+            set(CONTROL_ACTION_FIELDS.get(canonical["operation"], ())) - set(CONTROL_CHOICES)
+        )
+        control_numeric_fields |= set(STREAM_FIELDS.get(canonical["operation"], ())) - {
+            "connection"
+        }
+        control_numeric_fields |= set(SPECTRAL_FIELDS)
+        for field in control_numeric_fields:
+            if field in canonical:
+                if np.asarray(canonical[field]).dtype.kind == "b":
+                    raise ValueError(f"{field} must be numeric, not boolean")
+                canonical[field] = self._float(canonical, field, 0)
+                low, high = CONTROL_NUMERIC[field][:2] if field in CONTROL_NUMERIC else (0.0, 0.0)
+                for boundary in (low, high):
+                    if abs(canonical[field] - boundary) <= abs(boundary) * 1e-7:
+                        canonical[field] = boundary
+        if "component" in canonical:
+            canonical["component"] = self._index(canonical["component"], FEED_IDS)
+        for field, choices in (("vessel", self.vessels), ("connection", self.connections)):
+            if field in canonical:
+                canonical[field] = self._index(canonical[field], choices)
+        for field in ("container", "source_container", "destination_container"):
+            if field in canonical:
+                canonical[field] = self._index(canonical[field], CONTAINER_IDS)
+        if canonical["operation"] in {"create_container", "transfer_material", "route_material"}:
+            for field in ("capacity_L", "transfer_fraction"):
+                if field in canonical:
+                    canonical[field] = self._float(canonical, field, 0)
+            if "mixing" in canonical:
+                canonical["mixing"] = self._index(canonical["mixing"], ("empty_only", "allow"))
         if "solvent" in canonical:
             canonical["solvent"] = self._choice_index(canonical["solvent"], self.solvents)
         if "catalyst" in canonical:
@@ -189,8 +244,23 @@ class ActionCodec:
             self._float(action, "potential_V", 1.2),
             self._float(action, "current_mA", 50.0),
             self._float(action, "electrolyte_profile", 1.0),
+            self._float(action, "container", 1.0),
+            self._float(action, "source_container", 0.0),
+            self._float(action, "destination_container", 1.0),
+            self._float(action, "capacity_L", 0.1),
+            self._float(action, "mixing", 0.0),
+            self._float(action, "component", 0.0),
+            self._float(action, "vessel", 0.0),
+            self._float(action, "connection", 0.0),
         ]
-        vector = np.asarray(values, dtype=np.float32)
+        control_values = [
+            self._float(action, key, CONTROL_NUMERIC[key][3] if key in CONTROL_NUMERIC else 0)
+            for key in CONTROL_VECTOR_FIELDS
+        ]
+        spectral_values = [
+            self._float(action, key, SPECTRAL_BOUNDS[key][3]) for key in SPECTRAL_FIELDS
+        ]
+        vector = np.asarray([*values, *control_values, *spectral_values], dtype=np.float32)
         if not np.all(np.isfinite(vector)):
             raise ValueError("Encoded action vector must contain only finite values")
         return vector
@@ -242,6 +312,21 @@ class ActionCodec:
         required = operation_contracts(
             include_campaign_controls=operation in CAMPAIGN_CONTROL_OPERATIONS
         )[operation].required_fields
+        for index, key in enumerate(("container", "source_container", "destination_container"), 23):
+            decoded[key] = int(np.clip(round(array[index]), 0, len(CONTAINER_IDS) - 1))
+        decoded["capacity_L"] = float(array[26])
+        decoded["mixing"] = int(np.clip(round(array[27]), 0, 1))
+        decoded["component"] = int(np.clip(round(array[28]), 0, len(FEED_IDS) - 1))
+        decoded["vessel"] = int(np.clip(round(array[29]), 0, max(len(self.vessels) - 1, 0)))
+        decoded["connection"] = int(np.clip(round(array[30]), 0, max(len(self.connections) - 1, 0)))
+        for index, key in enumerate(CONTROL_VECTOR_FIELDS, 31):
+            decoded[key] = (
+                int(np.clip(round(array[index]), 0, len(CONTROL_CHOICES[key]) - 1))
+                if key in CONTROL_CHOICES
+                else float(array[index])
+            )
+        for index, key in enumerate(SPECTRAL_FIELDS, 31 + len(CONTROL_VECTOR_FIELDS)):
+            decoded[key] = float(array[index])
         return {"operation": operation, **{key: decoded[key] for key in required}}
 
     def phase_name(self, value: Any) -> str:

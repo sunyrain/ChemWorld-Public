@@ -126,7 +126,7 @@ class ValidatedInstrumentRuntimeProvider:
     def validate_domain(self, inputs: Mapping[str, Any]) -> tuple[str, ...]:
         violations: list[str] = []
         instrument_id = inputs.get("instrument_id")
-        if instrument_id not in instrument_contracts():
+        if instrument_id not in {"hplc", "gc", "uvvis", "ph_meter", "final_assay"}:
             violations.append("instrument_id has no declared runtime contract")
         public_values = inputs.get("public_values")
         if not isinstance(public_values, Mapping):
@@ -300,6 +300,10 @@ def instrument_runtime_model_card() -> ModelCard:
             ),
         ),
         model_limit_notes=(
+            "Current measurements are instantaneous virtual snapshots: sampling and return "
+            "share world time; no queue or concurrent chemical advance is simulated.",
+            "Sampling debits the selected inventory (or representative crystallizer slurry); "
+            "unselected receivers are unchanged. Clock time and chromatogram axes differ.",
             "Reference-validated applies to the synthetic observation contract only.",
             "No real compound identity or empirical instrument accuracy is claimed.",
         ),

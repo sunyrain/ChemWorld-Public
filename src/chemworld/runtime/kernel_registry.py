@@ -15,7 +15,9 @@ from chemworld.runtime.kernel_contracts import (
 )
 from chemworld.runtime.profiles import TaskRuntimeProfile
 from chemworld.runtime.transactions import StatePatch, WorldEvent
+from chemworld.world.control_contract import CONTROL_OPERATIONS
 from chemworld.world.operations import OPERATION_TYPES, operation_contracts
+from chemworld.world.stream_contract import STREAM_OPERATIONS
 
 
 @dataclass(frozen=True)
@@ -102,8 +104,7 @@ class ServiceOperationKernel:
                 cost_delta=transaction.state.ledger.cost - before.ledger.cost,
                 risk_delta=transaction.state.ledger.risk - before.ledger.risk,
                 sample_delta=(
-                    transaction.state.ledger.sample_consumed_L
-                    - before.ledger.sample_consumed_L
+                    transaction.state.ledger.sample_consumed_L - before.ledger.sample_consumed_L
                 ),
                 affected_ledgers=("process",),
                 kernel_id=self.kernel_id,
@@ -227,6 +228,7 @@ class OperationKernelRegistry:
 def affected_ledgers(operation_type: str) -> tuple[str, ...]:
     material = {
         "add_reagent",
+        "add_component",
         "add_catalyst",
         "add_solvent",
         "sample",
@@ -244,6 +246,7 @@ def affected_ledgers(operation_type: str) -> tuple[str, ...]:
         "seed_crystals",
         "cool_crystallize",
         "filter_crystals",
+        "resuspend_crystals",
         "evaporate",
         "distill",
         "collect_fraction",
@@ -281,6 +284,22 @@ def affected_ledgers(operation_type: str) -> tuple[str, ...]:
         affected.append("equipment")
     if operation_type == "measure":
         affected.append("observation")
+    if operation_type == "resuspend_crystals":
+        affected.extend(("samples", "vessels", "equipment"))
+    if operation_type in {"create_container", "transfer_material"}:
+        affected.extend(("samples", "species", "phases", "vessels", "equipment"))
+    if operation_type in {"select_vessel", "route_material"}:
+        affected.extend(
+            ("inactive_vessels", "samples", "species", "phases", "vessels", "equipment", "thermal")
+        )
+    if operation_type in CONTROL_OPERATIONS:
+        affected.extend(("equipment", "species", "phases", "thermal", "process"))
+    if operation_type in STREAM_OPERATIONS:
+        affected.extend(
+            ("inactive_vessels", "samples", "equipment", "species", "phases", "vessels", "thermal")
+        )
+    if operation_type == "configure_instrument":
+        affected.append("equipment")
     return tuple(dict.fromkeys(affected))
 
 

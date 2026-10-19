@@ -67,8 +67,7 @@ def _chromatogram(
         "time_min": _rounded(time_min),
         "intensity": _rounded(intensity),
         "peaks": [
-            peak.to_dict(center_key="retention_time_min", width_key="width_min")
-            for peak in peaks
+            peak.to_dict(center_key="retention_time_min", width_key="width_min") for peak in peaks
         ],
         "baseline": round(float(baseline), 6),
         "normalization": "max_intensity",
@@ -121,9 +120,7 @@ def _species_signal(
     return packet
 
 
-def _require_signal_packet(
-    packet: dict[str, Any] | None, instrument_id: str
-) -> dict[str, Any]:
+def _require_signal_packet(packet: dict[str, Any] | None, instrument_id: str) -> dict[str, Any]:
     """Keep fallback synthesis fail-closed under optimized Python execution."""
 
     if packet is None:
@@ -495,6 +492,28 @@ def final_assay_spectra(
 def raw_signal_schema(instrument_id: str) -> dict[str, Any]:
     """Return the JSON-friendly raw-signal schema advertised by an instrument."""
 
+    if instrument_id in {"nmr", "ir", "ms"}:
+        return {
+            "type": "object",
+            "required": [
+                "kind",
+                "axis",
+                "raw_signal",
+                "calibration",
+                "processed_estimates",
+                "noise",
+                "settings",
+            ],
+            "properties": {"kind": {"const": instrument_id + "_spectrum"}},
+            "additionalProperties": True,
+        }
+    if instrument_id == "particle_size":
+        return {
+            "type": "object",
+            "required": ["kind", "d50_um", "fines_number_fraction"],
+            "properties": {"kind": {"const": "particle_size_signal"}},
+            "additionalProperties": True,
+        }
     if instrument_id in {"hplc", "gc"}:
         axis = "time_min"
         signal = "intensity"

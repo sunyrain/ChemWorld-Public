@@ -42,6 +42,8 @@ def check_nonnegative(constitution: Any, state: WorldState) -> list[CheckResult]
 def check_species_registry(constitution: Any, state: WorldState) -> CheckResult:
     registered = set(constitution.substances)
     present = set(state.species_amounts)
+    for sample in state.samples.samples.values():
+        present.update(sample.species_amounts_mol)
     if state.species is not None:
         present.update(state.species.species_roles)
         present.update(state.species.initial_amounts_mol)

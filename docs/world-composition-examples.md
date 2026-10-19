@@ -1,5 +1,10 @@
 # Public world-authoring examples
 
+These requests are retained from the frozen release and still compile on current
+main. Their old pattern labels are historical: current reports use
+`component-network`, with vessel-qualified state owners. See
+[current foundation](current-foundation.md).
+
 ChemWorld uses one object hierarchy for authored compositions and the 15 registered reference
 tasks: components form a world, a task contract supplies the operating surface, a scenario fixes
 initial state and seeds, and execution produces a trajectory. A controlled world fork is a

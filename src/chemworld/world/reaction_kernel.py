@@ -15,10 +15,13 @@ from chemworld.physchem.batch_reactors import DynamicBatchReactorModel
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.reactor_shared import (
     HeatTransferSpec,
+    JacketTemperatureProgram,
     PressureBoundarySpec,
     ReactorResult,
     ReactorValidityDomain,
 )
+from chemworld.world.mixtures import volumetric_heat_capacity, working_solvents
+from chemworld.world.thermal_control import REACTION_THERMAL_CONTROL_ID
 
 R_GAS = 8.31446261815324
 
@@ -124,13 +127,14 @@ def integrate_compiled_reaction_ode(
     target_temperature_K: float,
     heat: bool,
     stirring_speed_rpm: float,
+    jacket_program: JacketTemperatureProgram | None = None,
 ) -> ReactionIntegrationResult | None:
     """Advance the validated mechanism through the bounded dynamic-batch reactor."""
 
     if compiled_mechanism is None:
         raise ValueError("compiled_mechanism is required for reaction integration")
 
-    duration = _bounded_finite(duration_s, "duration_s", minimum=1.0, maximum=14_400.0)
+    duration = _bounded_finite(duration_s, "duration_s", minimum=1.0e-6, maximum=14_400.0)
     target_temperature = _bounded_finite(
         target_temperature_K,
         "target_temperature_K",
@@ -152,8 +156,7 @@ def integrate_compiled_reaction_ode(
     network.check_conservation(raise_on_error=True)
     species_ids = network.species_ids
     initial_amounts = {
-        species_id: float(state.species_amounts.get(species_id, 0.0))
-        for species_id in species_ids
+        species_id: float(state.species_amounts.get(species_id, 0.0)) for species_id in species_ids
     }
     if any(value < 0.0 or not np.isfinite(value) for value in initial_amounts.values()):
         raise ValueError("reaction species amounts must be finite and nonnegative")
@@ -161,15 +164,15 @@ def integrate_compiled_reaction_ode(
     catalyst = int(reactor_settings.get("catalyst", 0))
     solvent = int(reactor_settings.get("solvent", 0))
     catalyst_effects, solvent_effects = _reaction_effect_tables(world, state)
-    if catalyst_effects.ndim not in {1, 2} or catalyst not in range(
-        catalyst_effects.shape[0]
-    ):
+    if catalyst_effects.ndim not in {1, 2} or catalyst not in range(catalyst_effects.shape[0]):
         raise ValueError("configured catalyst index is outside the world contract")
     if solvent_effects.ndim not in {1, 2} or solvent not in range(solvent_effects.shape[0]):
         raise ValueError("configured solvent index is outside the world contract")
     stirring_factor = 0.70 + 0.30 * (1.0 - np.exp(-stirring_speed / 420.0))
     multipliers = {
-        reaction.reaction_id: _hidden_reaction_modifier(
+        reaction.reaction_id: 0.0
+        if state.quenched
+        else _hidden_reaction_modifier(
             world,
             catalyst=catalyst,
             solvent=solvent,
@@ -180,19 +183,14 @@ def integrate_compiled_reaction_ode(
         for index, reaction in enumerate(network.reactions)
     }
     adjusted_network = RuntimeAdjustedReactionNetwork(network, multipliers)
-    temperature_span = abs(target_temperature - state.temperature_K)
-    maximum_heat_W = 90.0 if target_temperature >= state.temperature_K else 70.0
-    jacket_ua = (
-        0.0
-        if not heat or temperature_span <= 1.0e-12
-        else min(4.0, maximum_heat_W / temperature_span)
-    )
     thermal = HeatTransferSpec(
-        rho_cp_J_per_L_K=float(world.rho_cp_J_per_L_K),
+        rho_cp_J_per_L_K=volumetric_heat_capacity(state, world.rho_cp_J_per_L_K),
         ua_W_per_K=float(world.ua_W_per_K),
         environment_temperature_K=float(world.environment_temperature_K),
-        jacket_ua_W_per_K=jacket_ua,
+        jacket_ua_W_per_K=4.0 if heat else 0.0,
         jacket_temperature_K=target_temperature if heat else None,
+        maximum_jacket_heating_W=90.0,
+        maximum_jacket_cooling_W=70.0,
     )
     maximum_temperature = _maximum_vessel_temperature(state)
     validity_domain = ReactorValidityDomain(
@@ -213,6 +211,7 @@ def integrate_compiled_reaction_ode(
         temperature_K=state.temperature_K,
         duration_s=duration,
         heat_transfer=thermal,
+        jacket_program=jacket_program,
         pressure_boundary=PressureBoundarySpec(pressure_Pa=state.pressure_Pa),
         validity_domain=validity_domain,
         evaluation_times_s=tuple(np.linspace(0.0, duration, 17)),
@@ -239,8 +238,7 @@ def integrate_compiled_reaction_ode(
     )
     if abs(energy_residual) > 1.0e-5 * energy_scale:
         raise RuntimeError(
-            "reaction energy ledger failed to close: "
-            f"residual={energy_residual:.6g} J"
+            f"reaction energy ledger failed to close: residual={energy_residual:.6g} J"
         )
     species_amounts = state.species_amounts.copy()
     species_amounts.update(reactor_result.final_state.amounts_mol)
@@ -266,9 +264,7 @@ def integrate_compiled_reaction_ode(
     )
     provenance = {
         "provider_id": "chemworld_validated_reaction_reactor_runtime_v1",
-        "reaction_network_model_id": (
-            "reaction_ode_mass_action_arrhenius_reference_slice"
-        ),
+        "reaction_network_model_id": ("reaction_ode_mass_action_arrhenius_reference_slice"),
         "reactor_model_id": "dynamic_batch_heat_release_jacket_sampling",
         "reactor_class": "chemworld.physchem.batch_reactors.DynamicBatchReactorModel",
         "reaction_network_class": "chemworld.physchem.reaction_network.ReactionNetworkSpec",
@@ -278,7 +274,8 @@ def integrate_compiled_reaction_ode(
         "mechanism_hash": compiled_mechanism.mechanism_hash,
         "rate_multipliers": multipliers,
         "operation_semantic": "advance",
-        "heat_boundary": "bounded_linear_jacket" if heat else "environment_only_wait",
+        "heat_boundary": "continuous_bounded_linear_jacket" if heat else "environment_only_wait",
+        "reaction_thermal_control_id": REACTION_THERMAL_CONTROL_ID,
     }
     digest = _trajectory_digest(reactor_result, provenance)
     return ReactionIntegrationResult(
@@ -499,7 +496,7 @@ def compiled_reaction_ode_rhs(
     if heat:
         q_jacket = float(np.clip((target_temperature_K - temperature) * 4.0, -70.0, 90.0))
     heat_loss = world.ua_W_per_K * (temperature - world.environment_temperature_K)
-    heat_capacity = float(world.rho_cp_J_per_L_K) * volume
+    heat_capacity = volumetric_heat_capacity(state, world.rho_cp_J_per_L_K) * volume
     if not np.isfinite(heat_capacity) or heat_capacity <= 0.0:
         raise RuntimeError("diagnostic reaction RHS requires positive heat capacity")
     derivatives[species_count] = (q_jacket - heat_loss - reaction_heat_W) / heat_capacity
@@ -519,27 +516,26 @@ def _hidden_reaction_modifier(
     state: WorldState,
 ) -> float:
     catalyst_effects, solvent_effects = _reaction_effect_tables(world, state)
-    if catalyst_effects.ndim not in {1, 2} or catalyst not in range(
-        catalyst_effects.shape[0]
-    ):
+    if catalyst_effects.ndim not in {1, 2} or catalyst not in range(catalyst_effects.shape[0]):
         raise ValueError("catalyst index is outside the world effect table")
-    if solvent_effects.ndim not in {1, 2} or solvent not in range(
-        solvent_effects.shape[0]
-    ):
+    if solvent_effects.ndim not in {1, 2} or solvent not in range(solvent_effects.shape[0]):
         raise ValueError("solvent index is outside the world effect table")
     catalyst_index = catalyst
-    solvent_index = solvent
     catalyst_reaction_index = min(reaction_index, catalyst_effects.shape[-1] - 1)
     solvent_reaction_index = min(reaction_index, solvent_effects.shape[-1] - 1)
+    reactor_settings = equipment_settings(state.equipment, "batch_reactor")
+    catalyst_charged = float(reactor_settings.get("catalyst_amount_mol", 0.0)) > 0.0
     catalyst_factor = (
-        catalyst_effects[catalyst_index, catalyst_reaction_index]
-        if catalyst_effects.ndim == 2
-        else catalyst_effects[catalyst_index]
+        (
+            catalyst_effects[catalyst_index, catalyst_reaction_index]
+            if catalyst_effects.ndim == 2
+            else catalyst_effects[catalyst_index]
+        )
+        if catalyst_charged
+        else 1.0
     )
-    solvent_factor = (
-        solvent_effects[solvent_index, solvent_reaction_index]
-        if solvent_effects.ndim == 2
-        else solvent_effects[solvent_index]
+    solvent_factor = working_solvents(state).log_property(
+        solvent_effects[:, solvent_reaction_index] if solvent_effects.ndim == 2 else solvent_effects
     )
     return float(catalyst_factor * solvent_factor * stirring_factor)
 

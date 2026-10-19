@@ -37,6 +37,8 @@ class CrystallizationGridCase:
     kinetics: CrystallizationKineticsSpec
     seed_mass_g: float = 0.0
     seed_diameter_m: float = 100.0e-6
+    initial_cohorts: tuple[tuple[float, float], ...] | None = None
+    retain_population: bool = False
 
     def run(
         self,
@@ -60,6 +62,8 @@ class CrystallizationGridCase:
             seed_diameter_m=self.seed_diameter_m,
             time_steps=time_steps,
             execution_spec=execution_spec,
+            initial_cohorts=self.initial_cohorts,
+            retain_population=self.retain_population,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -77,6 +81,11 @@ class CrystallizationGridCase:
             "kinetics": self.kinetics.to_dict(),
             "seed_mass_g": self.seed_mass_g,
             "seed_diameter_m": self.seed_diameter_m,
+            **(
+                {"initial_cohorts": self.initial_cohorts, "retain_population": True}
+                if self.retain_population
+                else {}
+            ),
         }
 
 
@@ -387,6 +396,8 @@ def _grid_point(
     seed_target_mol = case.seed_mass_g / 1000.0 / case.kinetics.target_molecular_weight_kg_mol
     seed_particle_mol = _particle_moles(case.seed_diameter_m, case.kinetics)
     seed_count = seed_target_mol / seed_particle_mol if seed_target_mol > 0.0 else 0.0
+    if case.initial_cohorts is not None:
+        seed_count = sum(c[0] for c in case.initial_cohorts)
     expected_count = seed_count + sum(
         report.nucleated_particle_count for report in result.step_reports
     )

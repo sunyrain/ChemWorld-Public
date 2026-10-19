@@ -24,7 +24,7 @@ from chemworld.world.composition_coverage import (
     generate_world_composition_coverage,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0.dev0"
 __all__ = [
     "ENV_ID",
     "ENV_IDS",

@@ -86,7 +86,6 @@ class ConcentrationComponentSpec:
             "activity_coefficient",
             "latent_heat_J_mol",
             "liquid_heat_capacity_J_mol_K",
-            "liquid_molar_volume_L_mol",
             "evaluation_temperature_K",
             "thermal_limit_K",
         ):
@@ -95,6 +94,13 @@ class ConcentrationComponentSpec:
                 field_name,
                 _finite_positive(getattr(self, field_name), field_name),
             )
+        # A dilute tracer may have zero apparent volume; the request still
+        # requires a positive total liquid volume from its carrier components.
+        object.__setattr__(
+            self,
+            "liquid_molar_volume_L_mol",
+            _finite_nonnegative(self.liquid_molar_volume_L_mol, "liquid_molar_volume_L_mol"),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -257,17 +263,13 @@ class VacuumConcentrationRequest:
         exceeded_thermal_limits = [
             key
             for key, spec in specs.items()
-            if feed[key] > 0.0
-            and operating_temperature > spec.thermal_limit_K + tolerance
+            if feed[key] > 0.0 and operating_temperature > spec.thermal_limit_K + tolerance
         ]
         if exceeded_thermal_limits:
             raise ValueError(
-                "operating temperature exceeds component thermal limits: "
-                f"{exceeded_thermal_limits}"
+                f"operating temperature exceeds component thermal limits: {exceeded_thermal_limits}"
             )
-        initial_volume = sum(
-            feed[key] * specs[key].liquid_molar_volume_L_mol for key in feed
-        )
+        initial_volume = sum(feed[key] * specs[key].liquid_molar_volume_L_mol for key in feed)
         if initial_volume > self.equipment.max_working_volume_L + tolerance:
             raise ValueError("feed equivalent liquid volume exceeds equipment capacity")
         if initial_volume + tolerance < self.equipment.minimum_residual_volume_L:
@@ -314,10 +316,7 @@ def _vapor_state(
         vapor = dict.fromkeys(amounts_mol, 0.0)
         latent = 0.0
     else:
-        vapor = {
-            key: contribution / bubble_pressure
-            for key, contribution in contributions.items()
-        }
+        vapor = {key: contribution / bubble_pressure for key, contribution in contributions.items()}
         latent = sum(vapor[key] * specs[key].latent_heat_J_mol for key in vapor)
     return _VaporState(bubble_pressure, vapor, latent)
 
@@ -327,8 +326,7 @@ def _equivalent_liquid_volume_l(
     specs: Mapping[str, ConcentrationComponentSpec],
 ) -> float:
     return sum(
-        max(float(amounts_mol.get(key, 0.0)), 0.0)
-        * spec.liquid_molar_volume_L_mol
+        max(float(amounts_mol.get(key, 0.0)), 0.0) * spec.liquid_molar_volume_L_mol
         for key, spec in specs.items()
     )
 
@@ -393,9 +391,7 @@ class VacuumConcentrationResult:
             "evaporated_amounts_mol": dict(self.evaporated_amounts_mol),
             "initial_equivalent_liquid_volume_L": self.initial_equivalent_liquid_volume_L,
             "final_equivalent_liquid_volume_L": self.final_equivalent_liquid_volume_L,
-            "condensate_equivalent_liquid_volume_L": (
-                self.condensate_equivalent_liquid_volume_L
-            ),
+            "condensate_equivalent_liquid_volume_L": (self.condensate_equivalent_liquid_volume_L),
             "vent_equivalent_liquid_volume_L": self.vent_equivalent_liquid_volume_L,
             "initial_temperature_K": self.initial_temperature_K,
             "final_temperature_K": self.final_temperature_K,
@@ -416,9 +412,7 @@ class VacuumConcentrationResult:
             "initial_solvent_amount_mol": self.initial_solvent_amount_mol,
             "final_solvent_amount_mol": self.final_solvent_amount_mol,
             "solvent_remaining_fraction": self.solvent_remaining_fraction,
-            "target_solvent_remaining_fraction": (
-                self.target_solvent_remaining_fraction
-            ),
+            "target_solvent_remaining_fraction": (self.target_solvent_remaining_fraction),
             "endpoint_met": self.endpoint_met,
             "target_recovery": self.target_recovery,
             "minimum_target_recovery": self.minimum_target_recovery,
@@ -450,8 +444,7 @@ def simulate_vacuum_concentration(
     initial_solvent = sum(feed[key] for key in request.solvent_component_ids)
     initial_vapor = _vapor_state(feed, specs)
     heat_capacity = sum(
-        feed[key] * specs[key].liquid_heat_capacity_J_mol_K
-        for key in component_ids
+        feed[key] * specs[key].liquid_heat_capacity_J_mol_K for key in component_ids
     )
     sensible_required = heat_capacity * (
         request.operating_temperature_K - request.initial_temperature_K
@@ -472,12 +465,10 @@ def simulate_vacuum_concentration(
     )
     target_is_volatile = specs[request.target_component_id].vapor_pressure_Pa > 0.0
     target_constraint_initially_binding = (
-        target_is_volatile
-        and request.minimum_target_recovery >= 1.0 - request.balance_tolerance
+        target_is_volatile and request.minimum_target_recovery >= 1.0 - request.balance_tolerance
     )
     minimum_volume_initially_binding = (
-        initial_volume
-        <= equipment.minimum_residual_volume_L + request.balance_tolerance
+        initial_volume <= equipment.minimum_residual_volume_L + request.balance_tolerance
     )
     if request.duration_s <= request.balance_tolerance:
         termination_reason = "zero_duration"
@@ -495,9 +486,7 @@ def simulate_vacuum_concentration(
         available_energy = request.heater_power_W * request.duration_s
         if sensible_required > available_energy + request.balance_tolerance:
             sensible_energy = available_energy
-            final_temperature = (
-                request.initial_temperature_K + sensible_energy / heat_capacity
-            )
+            final_temperature = request.initial_temperature_K + sensible_energy / heat_capacity
             heating_time = request.duration_s
             elapsed_time = request.duration_s
             termination_reason = "heating_incomplete"
@@ -514,8 +503,7 @@ def simulate_vacuum_concentration(
             elapsed_time = request.duration_s
             if (
                 available_boiling_time <= request.balance_tolerance
-                or equipment.max_evaporation_rate_mol_s
-                <= request.balance_tolerance
+                or equipment.max_evaporation_rate_mol_s <= request.balance_tolerance
             ):
                 termination_reason = (
                     "zero_evaporation_capacity"
@@ -537,10 +525,7 @@ def simulate_vacuum_concentration(
                 )
 
                 def vector_map(values: np.ndarray) -> dict[str, float]:
-                    return {
-                        key: max(float(values[index]), 0.0)
-                        for key, index in indices.items()
-                    }
+                    return {key: max(float(values[index]), 0.0) for key, index in indices.items()}
 
                 def derivative(_time: float, values: np.ndarray) -> np.ndarray:
                     state = _vapor_state(vector_map(values), specs)
@@ -570,8 +555,7 @@ def simulate_vacuum_concentration(
                 def solvent_event(_time: float, values: np.ndarray) -> float:
                     state = vector_map(values)
                     return (
-                        sum(state[key] for key in request.solvent_component_ids)
-                        / initial_solvent
+                        sum(state[key] for key in request.solvent_component_ids) / initial_solvent
                         - request.target_solvent_remaining_fraction
                     )
 
@@ -631,22 +615,14 @@ def simulate_vacuum_concentration(
                         termination_reason = name
                         break
 
-    evaporated = {
-        key: max(feed[key] - final[key], 0.0) for key in component_ids
-    }
+    evaporated = {key: max(feed[key] - final[key], 0.0) for key in component_ids}
     condenser_fraction = equipment.condenser_recovery_fraction
-    condensate = {
-        key: evaporated[key] * condenser_fraction for key in component_ids
-    }
-    vent = {
-        key: evaporated[key] - condensate[key] for key in component_ids
-    }
+    condensate = {key: evaporated[key] * condenser_fraction for key in component_ids}
+    vent = {key: evaporated[key] - condensate[key] for key in component_ids}
     final_volume = _equivalent_liquid_volume_l(final, specs)
     condensate_volume = _equivalent_liquid_volume_l(condensate, specs)
     vent_volume = _equivalent_liquid_volume_l(vent, specs)
-    latent_energy = sum(
-        evaporated[key] * specs[key].latent_heat_J_mol for key in component_ids
-    )
+    latent_energy = sum(evaporated[key] * specs[key].latent_heat_J_mol for key in component_ids)
     heat_duty = sensible_energy + latent_energy
     available_heater_energy = request.heater_power_W * request.duration_s
     if heat_duty > available_heater_energy + max(
@@ -661,19 +637,14 @@ def simulate_vacuum_concentration(
     )
     evaporated_total = sum(evaporated.values())
     average_evaporation_rate = (
-        evaporated_total / boiling_time
-        if boiling_time > request.balance_tolerance
-        else 0.0
+        evaporated_total / boiling_time if boiling_time > request.balance_tolerance else 0.0
     )
     final_solvent = sum(final[key] for key in request.solvent_component_ids)
     solvent_remaining = final_solvent / initial_solvent
     endpoint_met = (
-        solvent_remaining
-        <= request.target_solvent_remaining_fraction + request.balance_tolerance
+        solvent_remaining <= request.target_solvent_remaining_fraction + request.balance_tolerance
     )
-    target_recovery = final[request.target_component_id] / feed[
-        request.target_component_id
-    ]
+    target_recovery = final[request.target_component_id] / feed[request.target_component_id]
     target_constraint_met = (
         target_recovery + request.balance_tolerance >= request.minimum_target_recovery
     )
@@ -691,8 +662,7 @@ def simulate_vacuum_concentration(
     )
 
     component_errors = {
-        key: abs(feed[key] - final[key] - condensate[key] - vent[key])
-        for key in component_ids
+        key: abs(feed[key] - final[key] - condensate[key] - vent[key]) for key in component_ids
     }
     material_error = sum(component_errors.values())
     volume_error = abs(initial_volume - final_volume - condensate_volume - vent_volume)
@@ -703,9 +673,7 @@ def simulate_vacuum_concentration(
             f"material={material_error}, volume={volume_error}"
         )
     if energy_error > request.balance_tolerance:
-        raise RuntimeError(
-            f"vacuum concentration energy ledger failed closure: {energy_error}"
-        )
+        raise RuntimeError(f"vacuum concentration energy ledger failed closure: {energy_error}")
 
     if not endpoint_met:
         warnings.append("declared solvent-removal endpoint was not met")
@@ -807,17 +775,12 @@ def binary_rayleigh_residual(
     if abs(alpha - 1.0) <= 1.0e-12:
         raise ValueError("relative_volatility must differ from one")
     primitive_initial = (
-        log(initial_light_fraction)
-        - alpha * log(1.0 - initial_light_fraction)
+        log(initial_light_fraction) - alpha * log(1.0 - initial_light_fraction)
     ) / (alpha - 1.0)
-    primitive_final = (
-        log(final_light_fraction)
-        - alpha * log(1.0 - final_light_fraction)
-    ) / (alpha - 1.0)
-    return abs(
-        log(initial_total_mol / final_total_mol)
-        - (primitive_initial - primitive_final)
+    primitive_final = (log(final_light_fraction) - alpha * log(1.0 - final_light_fraction)) / (
+        alpha - 1.0
     )
+    return abs(log(initial_total_mol / final_total_mol) - (primitive_initial - primitive_final))
 
 
 def vacuum_concentration_model_card() -> ModelCard:

@@ -9,11 +9,17 @@
 [Student Lab](#student-lab-no-model-required) ·
 [Connect an agent](docs/agents.md) ·
 [Evidence](docs/evidence.md) ·
-[Release verification](scripts/verify_release.py)
+[Current foundation](docs/current-foundation.md)
 
 ChemWorld gives experimental agents a typed laboratory interface rather than an answer-only benchmark. An agent inspects a public task contract, commits physically constrained operations, uses instruments, spends explicit resources, encounters recoverable failures and leaves a transaction-complete trace that can replay exactly.
 
 [Explore every action and observation in the interactive documentation →](https://sunyrain.github.io/ChemWorld-Public/one-experiment/)
+
+Current main is the October 2026 foundation snapshot (`0.5.0.dev0`): multi-vessel
+material routing, repeated crystallization, process controls, finite streams,
+configurable NMR/IR/MS and coupled-equilibrium worlds are now public.
+See [what changed and model scope](docs/current-foundation.md) and the
+[open-source extension roadmap](docs/extension-roadmap.md).
 
 ## Start in five minutes
 
@@ -22,8 +28,8 @@ ChemWorld supports Python 3.11 and 3.12.
 ```bash
 git clone https://github.com/sunyrain/ChemWorld-Public.git
 cd ChemWorld-Public
-python -m pip install -e ".[notebooks]"
-python examples/demo_manual_event_sequence.py
+uv sync --locked --extra dev
+uv run --no-sync python examples/demo_manual_event_sequence.py
 ```
 
 The tutorials require no provider key:
@@ -67,8 +73,10 @@ resource and model provenance separately from environment score.
 
 ## Frozen evidence
 
-Version 0.4.0 adds the provider-free Student Lab on top of the stable runtime. The Lab is an
-interaction surface, not new benchmark evidence; the frozen v0.3.0 runtime evidence remains intact:
+The following results and illustration belong to the frozen August runtime. They remain
+unchanged historical evidence, not a qualification of current main. Reproduce them with the
+[pinned snapshot](https://github.com/sunyrain/ChemWorld-Public/tree/db98e8002fac0512ed9084a3c8c27985cb9fc405);
+the notebook links above also stay pinned:
 
 ![Evidence-derived agent lifecycle, rollback recovery and controlled world changes](docs/assets/representative-agent-and-world-change.svg)
 
@@ -83,16 +91,16 @@ These are finite software-model qualification results. They do not establish uni
 ## Verify offline
 
 ```bash
-python -m pip install -e ".[dev]"
-python scripts/verify_release.py
-python scripts/build_readme_visuals.py --check
-python -m pytest -q
+uv sync --locked --extra dev
+uv run --no-sync pytest -q
+uv run --no-sync python scripts/build_readme_visuals.py --check
 ```
 
-The release verifier checks the exact Git-tracked file set and hashes, evidence sanitization receipts, denominators, failures, replay outcomes and the clean public-history boundary.
+Current checks exercise the runtime and preserve the frozen evidence. The original whole-tree
+release verifier belongs to the pinned August checkout; see [contributing](CONTRIBUTING.md).
 
 ## Release boundary
 
-This repository contains the stable runtime, public protocols, final sanitized evidence, deterministic tutorial outputs, documentation, examples and focused tests. It excludes manuscript files and assets, planning notes, development matrices, draft/interim/pilot results, raw provider responses, provider session identifiers, private evaluator configuration, credentials and all unpublished post-freeze development artifacts.
+This repository contains the current development runtime, public protocols, historical sanitized evidence, pinned tutorial outputs, documentation, examples and focused tests. It excludes manuscript files and assets, development matrices, draft/interim/pilot results, raw provider responses, provider session identifiers, private evaluator configuration, credentials and study-specific development artifacts.
 
 See [CITATION.cff](CITATION.cff) for citation metadata. The software is available under the [MIT License](LICENSE).

@@ -16,8 +16,9 @@ import numpy as np
 from chemworld.physchem.electrochemical_task_contract import (
     ELECTROCHEMICAL_TASK_CONTRACT,
 )
+from chemworld.world.continuous_flow import FIXED_FLOW_REACTOR_VOLUME_L
 
-TASK_RECIPE_SPACE_VERSION = "chemworld-task-recipe-space-1.2"
+TASK_RECIPE_SPACE_VERSION = "chemworld-task-recipe-space-1.3"
 DIAGNOSTIC_RECIPE_DESIGN_V1 = "deterministic_task_aware_relational_diagnostic_design_v1"
 DIAGNOSTIC_RECIPE_DESIGN_V2 = "deterministic_task_aware_relational_diagnostic_design_v2"
 DIAGNOSTIC_RECIPE_DESIGNS = frozenset(
@@ -27,11 +28,9 @@ DIAGNOSTIC_RECIPE_DESIGNS = frozenset(
     }
 )
 
-# Formal world-family interventions may multiply a configured flow residence
-# time by at most 1.75 (extrapolation severity +1).  Complete-recipe baselines
-# cannot inspect the post-configuration affordance between their compiled
-# steps, so the public recipe mapping reserves that worst-case duration.
-FLOW_RECIPE_MAX_RESIDENCE_MULTIPLIER = 1.75
+# Fixed-volume flow hardware derives residence time from Q. Complete-recipe
+# baselines reserve at least one derived residence time before measurement.
+FLOW_RECIPE_MAX_RESIDENCE_MULTIPLIER = 1.0
 
 _CONSERVATIVE_BASE_VECTORS = {
     "equilibrium": (0.5, 0.12, 0.12),
@@ -351,11 +350,11 @@ def task_recipe_coordinate_schema(task_info: dict[str, Any]) -> tuple[dict[str, 
             _categorical_coordinate(2, "catalyst", 4),
             _linear_coordinate(3, "catalyst_amount_mol", 0.00008, 0.00055, "mol"),
             _linear_coordinate(4, "flow_rate_mL_min", 0.2, 4.0, "mL/min"),
-            _linear_coordinate(5, "residence_time_s", 180.0, 2400.0, "s"),
+            _linear_coordinate(5, "feed_volume_L", 0.015, 0.035, "L"),
             _linear_coordinate(6, "flow_temperature_K", 330.0, 430.0, "K"),
             {
                 **_linear_coordinate(7, "requested_run_duration_s", 600.0, 3600.0, "s"),
-                "coupled_minimum": "residence_time_s * 1.75",
+                "coupled_minimum": "fixed_hardware_derived_residence_time_s",
             },
         )
     if kind == "partition":
@@ -855,7 +854,8 @@ def _partition_steps(values: np.ndarray) -> list[dict[str, Any]]:
 
 
 def _flow_steps(values: np.ndarray) -> list[dict[str, Any]]:
-    residence_time_s = _scale(values[5], 180.0, 2400.0)
+    flow_rate_mL_min = _scale(values[4], 0.2, 4.0)
+    residence_time_s = FIXED_FLOW_REACTOR_VOLUME_L * 1000.0 * 60.0 / flow_rate_mL_min
     requested_duration_s = _scale(values[7], 600.0, 3600.0)
     run_duration_s = max(
         requested_duration_s,
@@ -864,7 +864,7 @@ def _flow_steps(values: np.ndarray) -> list[dict[str, Any]]:
     return [
         {
             "operation": "add_solvent",
-            "volume_L": 0.025,
+            "volume_L": _scale(values[5], 0.015, 0.035),
             "solvent": _choice(values[0], 4),
         },
         {"operation": "add_reagent", "amount_mol": _scale(values[1], 0.003, 0.030)},
@@ -875,7 +875,7 @@ def _flow_steps(values: np.ndarray) -> list[dict[str, Any]]:
         },
         {
             "operation": "set_flow_rate",
-            "flow_rate_mL_min": _scale(values[4], 0.2, 4.0),
+            "flow_rate_mL_min": flow_rate_mL_min,
             "residence_time_s": residence_time_s,
         },
         {

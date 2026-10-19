@@ -7,13 +7,14 @@ import json
 import gymnasium as gym
 
 import chemworld  # noqa: F401
+from chemworld.data.logging import observation_to_json
 
 
 def main() -> None:
-    env = gym.make("ChemWorld", world_split="public-dev", budget=8, seed=7)
+    env = gym.make("ChemWorld", task_id="reaction-to-assay", budget=8, seed=7)
     try:
         observation, task_info = env.reset(seed=7)
-        print(json.dumps({"task": task_info["scenario_id"], "initial": _flat(observation)}))
+        print(json.dumps({"task": task_info["task_id"], "initial": _flat(observation)}))
 
         actions = [
             {"operation": "add_solvent", "volume_L": 0.030, "solvent": 2},
@@ -31,8 +32,13 @@ def main() -> None:
             {"operation": "measure", "instrument": "final_assay"},
         ]
 
+        final_assay = False
         for action in actions:
-            observation, reward, _, truncated, info = env.step(action)
+            observation, reward, terminated, truncated, info = env.step(action)
+            committed = info["transaction_status"] == "committed"
+            final_assay = bool(
+                committed and terminated and action.get("instrument") == "final_assay"
+            )
             print(
                 json.dumps(
                     {
@@ -41,20 +47,29 @@ def main() -> None:
                         "reward": round(reward, 4),
                         "observation": _flat(observation),
                         "flags": info["constraint_flags"],
+                        "transaction_status": info["transaction_status"],
+                        "observed_mask": info["observed_mask"],
+                        "terminated": terminated,
+                        "truncated": truncated,
                     },
                     sort_keys=True,
                 )
             )
-            if truncated:
+            if not committed or terminated or truncated:
                 break
+        print(json.dumps({"final_assay_completed": final_assay}))
+        if not final_assay:
+            raise RuntimeError(
+                "Experiment did not reach a committed final assay; see step records."
+            )
     finally:
         env.close()
 
 
-def _flat(observation: dict[str, object]) -> dict[str, float]:
+def _flat(observation: dict[str, object]) -> dict[str, float | None]:
     return {
-        key: round(float(value.reshape(-1)[0]), 4)
-        for key, value in observation.items()
+        key: None if value is None else round(value, 4)
+        for key, value in observation_to_json(observation).items()
     }
 
 

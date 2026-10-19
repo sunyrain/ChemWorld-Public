@@ -9,16 +9,24 @@ import numpy as np
 
 from chemworld.foundation import Operation
 from chemworld.world.actions import SOLVENTS
+from chemworld.world.control_contract import CONTROL_ACTION_FIELDS, CONTROL_OPERATIONS
 from chemworld.world.ontology import chemworld_state_variables
+from chemworld.world.spectral_contract import SPECTRAL_FIELDS, SPECTRAL_INSTRUMENTS
+from chemworld.world.stream_contract import STREAM_FIELDS, STREAM_OPERATIONS
 
 REACTION_OPERATIONS = (
     "add_reagent",
+    "add_component",
     "add_solvent",
     "add_catalyst",
     "heat",
     "wait",
     "sample",
     "quench",
+    "create_container",
+    "transfer_material",
+    "configure_instrument",
+    *CONTROL_OPERATIONS,
     "terminate",
     "measure",
 )
@@ -33,9 +41,14 @@ SEPARATION_OPERATIONS = (
     "concentrate",
     "transfer",
 )
-CRYSTALLIZATION_OPERATIONS = ("seed_crystals", "cool_crystallize", "filter_crystals")
+CRYSTALLIZATION_OPERATIONS = (
+    "seed_crystals",
+    "cool_crystallize",
+    "filter_crystals",
+    "resuspend_crystals",
+)
 DISTILLATION_OPERATIONS = ("evaporate", "distill", "collect_fraction")
-FLOW_OPERATIONS = ("set_flow_rate", "run_flow")
+FLOW_OPERATIONS = ("set_flow_rate", "run_flow", *STREAM_OPERATIONS)
 ELECTROCHEMISTRY_OPERATIONS = ("set_potential", "electrolyze")
 MACRO_OPERATIONS = ("wash", "dry", "concentrate")
 TERMINAL_OPERATIONS = ("terminate",)
@@ -63,6 +76,8 @@ PROCESS_OPERATIONS = (
     *ELECTROCHEMISTRY_OPERATIONS,
 )
 OPERATION_TYPES = (
+    "select_vessel",
+    "route_material",
     *REACTION_OPERATIONS[:-2],
     *SEPARATION_OPERATIONS,
     *PROCESS_OPERATIONS,
@@ -70,13 +85,24 @@ OPERATION_TYPES = (
     "measure",
 )
 CAMPAIGN_OPERATION_TYPES = (*OPERATION_TYPES, *CAMPAIGN_CONTROL_OPERATIONS)
-INSTRUMENTS = ("hplc", "gc", "uvvis", "ph_meter", "final_assay")
+INSTRUMENTS = ("hplc", "gc", "uvvis", "ph_meter", "final_assay", *SPECTRAL_INSTRUMENTS)
+EXTENDED_INSTRUMENTS = (*INSTRUMENTS, "particle_size")
 
 # Operation-specific input contracts are the single source of truth for values
 # whose effective runtime domain is narrower than the shared Gym field space.
 # Services may retain defensive clipping, but validated actions must never be
 # silently reinterpreted by those guards.
 OPERATION_FIELD_BOUNDS: dict[tuple[str, str], tuple[float, float]] = {
+    ("set_flow_stream", "flow_rate_mL_min"): (0.0, 20.0),
+    ("set_flow_rate", "flow_rate_mL_min"): (0.01, 20.0),
+    ("advance_flow", "duration_s"): (1.0, 14400.0),
+    ("advance_flow", "target_temperature_K"): (250.0, 430.0),
+    ("advance_flow", "current_mA"): (0.0, 500.0),
+    ("configure_control", "target_temperature_K"): (250.0, 430.0),
+    ("queue_control_stage", "target_temperature_K"): (250.0, 430.0),
+    ("advance_control", "duration_s"): (1.0, 14400.0),
+    ("route_material", "transfer_fraction"): (0.0, 1.0),
+    ("transfer_material", "transfer_fraction"): (0.0, 1.0),
     ("heat", "duration_s"): (1.0, 14_400.0),
     ("wait", "duration_s"): (1.0, 14_400.0),
     ("add_phase", "volume_L"): (0.0, 0.060),
@@ -89,6 +115,7 @@ OPERATION_FIELD_BOUNDS: dict[tuple[str, str], tuple[float, float]] = {
     ("seed_crystals", "seed_mass_g"): (1.0e-6, 0.050),
     ("cool_crystallize", "target_temperature_K"): (250.0, 330.0),
     ("cool_crystallize", "duration_s"): (1.0, 14_400.0),
+    ("resuspend_crystals", "volume_L"): (0.0001, 0.080),
     ("evaporate", "target_temperature_K"): (298.15, 390.0),
     ("evaporate", "duration_s"): (1.0, 14_400.0),
     ("distill", "target_temperature_K"): (298.15, 430.0),
@@ -181,7 +208,54 @@ def chemworld_operations() -> tuple[Operation, ...]:
     """Return operation contracts for the shared event language."""
 
     return (
+        Operation(
+            "configure_instrument",
+            "Configure finite spectral acquisition",
+            ("instrument", *SPECTRAL_FIELDS),
+            ("not_terminated",),
+        ),
+        *(
+            Operation(name, "Finite-reservoir continuous streams", fields, ("not_terminated",))
+            for name, fields in STREAM_FIELDS.items()
+        ),
+        *(
+            Operation(name, "Persistent bounded process control", fields, ("not_terminated",))
+            for name, fields in CONTROL_ACTION_FIELDS.items()
+        ),
+        Operation(
+            "select_vessel", "Select a declared component vessel", ("vessel",), ("not_terminated",)
+        ),
+        Operation(
+            "route_material",
+            "Route a declared material output",
+            ("connection", "transfer_fraction", "mixing"),
+            ("not_terminated",),
+        ),
+        Operation(
+            "create_container",
+            "Open a single-use storage container",
+            ("container", "capacity_L"),
+            ("not_terminated",),
+        ),
+        Operation(
+            "transfer_material",
+            "Transfer or merge a representative material aliquot",
+            ("source_container", "destination_container", "transfer_fraction", "mixing"),
+            ("not_terminated", "material_routing_valid"),
+        ),
+        Operation(
+            "resuspend_crystals",
+            "Isolate filtrate and resuspend retained crystals in fresh solvent",
+            ("volume_L", "solvent"),
+            ("not_terminated", "has_material", "resuspend_requires_filtered_crystals"),
+        ),
         Operation("add_reagent", "Add reagent", ("amount_mol",), ("not_terminated",)),
+        Operation(
+            "add_component",
+            "Dose one catalog feed independently",
+            ("component", "amount_mol"),
+            ("not_terminated",),
+        ),
         Operation("add_solvent", "Add solvent", ("volume_L", "solvent"), ("not_terminated",)),
         Operation(
             "add_catalyst",
@@ -259,7 +333,10 @@ def chemworld_operations() -> tuple[Operation, ...]:
         ),
         Operation(
             "set_flow_rate",
-            "Configure continuous-flow residence time",
+            (
+                "Configure fixed-volume continuous-flow rate; residence_time_s is a "
+                "compatibility declaration and physical residence is derived from flow rate"
+            ),
             ("flow_rate_mL_min", "residence_time_s"),
             ("not_terminated",),
         ),
@@ -315,9 +392,9 @@ def operation_contracts(
             module = "continuous_flow"
         elif operation.id in electrochemistry:
             module = "electrochemistry"
-        elif operation.id == "measure":
+        elif operation.id in {"measure", "configure_instrument"}:
             module = "observation"
-        elif operation.id in reaction:
+        elif operation.id in reaction or operation.id in {"select_vessel", "route_material"}:
             module = "reaction"
         else:
             module = "general"
@@ -357,7 +434,7 @@ def operation_name(value: Any) -> str:
 
 def instrument_name(value: Any) -> str:
     if isinstance(value, str):
-        if value not in INSTRUMENTS:
+        if value not in (*INSTRUMENTS, "particle_size"):
             raise ValueError(f"Unsupported instrument: {value}")
         return value
     return INSTRUMENTS[_discrete_index(value, len(INSTRUMENTS), "instrument")]

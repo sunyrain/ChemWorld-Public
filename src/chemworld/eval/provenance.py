@@ -11,7 +11,9 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path
+from time import sleep
 from typing import Any
+from uuid import uuid4
 
 from chemworld import __version__
 from chemworld.data.submission import git_commit
@@ -25,6 +27,7 @@ from chemworld.physchem.solver_backend import (
 from chemworld.tasks import get_task
 
 PROVENANCE_SCHEMA_VERSION = "chemworld-solver-provenance-0.2"
+ATOMIC_REPLACE_RETRY_DELAYS_S = (0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64)
 
 
 def canonical_json_bytes(payload: Any) -> bytes:
@@ -48,7 +51,11 @@ def canonical_json_sha256(payload: Any) -> str:
 def file_sha256(path: Path) -> str:
     """Return the SHA-256 of a materialized artifact."""
 
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def repository_tree_sha256(
@@ -81,26 +88,36 @@ def repository_tree_sha256(
     return canonical_json_sha256(entries)
 
 
-def write_json_atomic(
-    path: Path, payload: Any, *, sort_keys: bool = True
-) -> None:
+def write_json_atomic(path: Path, payload: Any, *, sort_keys: bool = True) -> None:
     """Write deterministic, human-readable JSON through an adjacent temp file."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(
-            payload,
-            ensure_ascii=False,
-            allow_nan=False,
-            indent=2,
-            sort_keys=sort_keys,
+    # Keep the adjacent temporary basename short for Windows MAX_PATH while
+    # retaining collision safety for concurrent writers in one directory.
+    temporary = path.with_name(f".atomic-{uuid4().hex[:8]}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                indent=2,
+                sort_keys=sort_keys,
+            )
+            + "\n",
+            encoding="utf-8",
+            newline="\n",
         )
-        + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    temporary.replace(path)
+        for retry_delay_s in (*ATOMIC_REPLACE_RETRY_DELAYS_S, None):
+            try:
+                temporary.replace(path)
+                return
+            except PermissionError:
+                if retry_delay_s is None:
+                    raise
+                sleep(retry_delay_s)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def git_source_commit(root: Path) -> str:
@@ -157,12 +174,7 @@ def git_tracked_tree_dirty(
     excluded_paths: Iterable[str] = (),
     excluded_prefixes: Iterable[str] = (),
 ) -> bool:
-    """Compatibility alias for :func:`git_worktree_dirty`.
-
-    The historical name is imprecise: the shared freeze semantics deliberately
-    include untracked, non-ignored files. New gate code should use the explicit
-    ``git_worktree_dirty`` name.
-    """
+    """Compatibility alias for :func:`git_worktree_dirty`."""
 
     return git_worktree_dirty(
         root,

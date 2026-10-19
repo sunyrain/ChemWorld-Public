@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from chemworld.foundation import WorldState, equipment_settings, selected_phase_id
+from chemworld.foundation import WorldState, selected_phase_id
+from chemworld.world.mixtures import volumetric_heat_capacity, working_solvents
 from chemworld.world.parameters import ChemWorldParameters
 
 
@@ -58,12 +59,16 @@ def account_temperature_transition(
         raise ValueError("thermal transition inputs must be finite")
     if final_temperature_K <= 0.0 or duration_s <= 0.0:
         raise ValueError("thermal transition temperature and duration must be positive")
-    heat_capacity_J_K = max(float(world.rho_cp_J_per_L_K) * state.volume_L, 1.0e-12)
+    heat_capacity_J_K = max(
+        volumetric_heat_capacity(state, world.rho_cp_J_per_L_K) * state.volume_L, 1.0e-12
+    )
     sensible = heat_capacity_J_K * (final_temperature_K - state.temperature_K)
     mean_temperature = 0.5 * (state.temperature_K + final_temperature_K)
-    heat_loss = float(world.ua_W_per_K) * (
-        mean_temperature - float(world.environment_temperature_K)
-    ) * duration_s
+    heat_loss = (
+        float(world.ua_W_per_K)
+        * (mean_temperature - float(world.environment_temperature_K))
+        * duration_s
+    )
     jacket = sensible + heat_loss + phase_change_heat_J
     residual = sensible - (jacket - heat_loss - phase_change_heat_J)
     return ThermalTransitionAccounting(
@@ -84,15 +89,11 @@ def pressure_and_risk(
     solvent_risks: np.ndarray,
     pressure_override_Pa: float | None = None,
 ) -> tuple[float, float]:
-    reactor_settings = equipment_settings(state.equipment, "batch_reactor")
-    solvent = int(reactor_settings.get("solvent", 0))
     active_amounts = state.species_amounts
     active_phase_id = selected_phase_id(state.phases)
     if state.phases is not None and active_phase_id in state.phases.phases:
         active_amounts = state.phases.phases[active_phase_id].species_amounts_mol
-    total_amount = sum(
-        value for key, value in active_amounts.items() if not key.startswith("Cat")
-    )
+    total_amount = sum(value for key, value in active_amounts.items() if not key.startswith("Cat"))
     concentration = 0.0 if state.volume_L <= 0 else total_amount / state.volume_L
     pressure = (
         101_325.0 * (state.temperature_K / 298.15) * (1.0 + 0.025 * concentration)
@@ -109,7 +110,7 @@ def pressure_and_risk(
             0.30 * temperature_risk
             + 0.20 * concentration_risk
             + 0.20 * exotherm_risk
-            + 0.18 * solvent_risks[solvent]
+            + 0.18 * working_solvents(state).linear_property(solvent_risks)
             + 0.12 * (pressure / 550_000.0),
             0.0,
             1.0,

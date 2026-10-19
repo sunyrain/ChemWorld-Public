@@ -85,8 +85,14 @@ def _axis(
     target_kind: TargetKind,
     target_keys: tuple[str, ...],
     rationale: str,
+    modes: tuple[ShiftMode, ...] = (
+        "interpolation",
+        "extrapolation",
+        "composition",
+        "observation_noise",
+    ),
 ) -> WorldAxisSpec:
-    return WorldAxisSpec(axis_id, task_id, label, target_kind, target_keys, rationale)
+    return WorldAxisSpec(axis_id, task_id, label, target_kind, target_keys, rationale, modes)
 
 
 WORLD_AXIS_REGISTRY: dict[str, WorldAxisSpec] = {
@@ -109,6 +115,22 @@ WORLD_AXIS_REGISTRY: dict[str, WorldAxisSpec] = {
             "Changes the effective organic-to-aqueous contact volume ratio.",
         ),
         _axis(
+            "reaction-to-purification",
+            "purification.partition-strength",
+            "downstream distribution-coefficient scale",
+            "domain_parameter",
+            ("partition_coefficient_multiplier",),
+            "Changes the product/impurity partition scale after the upstream reaction.",
+        ),
+        _axis(
+            "reaction-to-purification",
+            "purification.phase-volume-ratio",
+            "downstream phase-volume ratio",
+            "domain_parameter",
+            ("partition_phase_volume_multiplier",),
+            "Changes the effective organic-to-aqueous contact-volume ratio.",
+        ),
+        _axis(
             "reaction-to-crystallization",
             "crystallization.kinetic-profile",
             "primary nucleation-rate scale",
@@ -124,6 +146,38 @@ WORLD_AXIS_REGISTRY: dict[str, WorldAxisSpec] = {
             ("crystallization_solubility_multiplier",),
             "Changes the bounded van't Hoff solubility scale; the public cooling "
             "trajectory remains an Agent-controlled probe.",
+        ),
+        _axis(
+            "reaction-to-crystallization",
+            "crystallization.population-regime",
+            "primary-nucleation versus seed-growth regime",
+            "domain_parameter",
+            (
+                "crystallization_nucleation_multiplier",
+                "crystallization_growth_multiplier",
+            ),
+            "Moves primary nucleation and crystal growth in opposite directions while retaining "
+            "the same mass-conserving population-balance equations.",
+        ),
+        _axis(
+            "reaction-to-crystallization",
+            "crystallization.impurity-occlusion-law",
+            "supersaturation transfer versus surface-saturation impurity occlusion",
+            "initial_state",
+            ("crystallization_impurity_occlusion_law_id",),
+            "Switches between two executable impurity-occlusion equations under the same "
+            "public cooling and seeding contract.",
+            ("extrapolation",),
+        ),
+        _axis(
+            "reaction-to-crystallization",
+            "crystallization.impurity-occlusion-capacity",
+            "constant impurity-occlusion capacity null",
+            "initial_state",
+            ("crystallization_impurity_occlusion_capacity_multiplier",),
+            "Authoring-only scalar null used to test whether one constant capacity "
+            "multiplier can absorb a proposed structural occlusion-law fork.",
+            ("extrapolation",),
         ),
         _axis(
             "reaction-to-distillation",
@@ -152,10 +206,12 @@ WORLD_AXIS_REGISTRY: dict[str, WorldAxisSpec] = {
         _axis(
             "flow-reaction-optimization",
             "flow.residence-thermal-boundary",
-            "residence time and thermal boundary",
+            "fixed-reactor thermal boundary",
             "domain_parameter",
-            ("flow_residence_multiplier", "flow_boundary_ua_multiplier"),
-            "Jointly shifts residence calibration and wall heat-transfer strength.",
+            ("flow_boundary_ua_multiplier",),
+            "Spans insulated to strongly heat-coupled walls while reactor volume remains "
+            "fixed and residence time is derived from flow rate; positive severity is the "
+            "weak-boundary direction.",
         ),
         _axis(
             "electrochemical-conversion",
@@ -190,6 +246,34 @@ WORLD_AXIS_REGISTRY: dict[str, WorldAxisSpec] = {
             ("equilibrium_activity_coefficient_ratio",),
             "Changes the hidden activity-coefficient ratio while retaining the same "
             "acid-base and precipitation solver laws.",
+        ),
+        _axis(
+            "equilibrium-characterization",
+            "equilibrium.mechanism-benchmark",
+            "coupled weak-acid precipitation benchmark substrate",
+            "initial_state",
+            (
+                "equilibrium_mechanism_benchmark_version",
+                "equilibrium_mechanism_family",
+                "hidden_equilibrium_log10_ksp",
+                "equilibrium_precipitating_cation_fraction",
+            ),
+            "Selects the registered EQ-S coupled-equilibrium substrate without exposing "
+            "its hidden mechanism or constants.",
+            ("extrapolation",),
+        ),
+        _axis(
+            "equilibrium-characterization",
+            "equilibrium.aqueous-ion-pair-network",
+            "aqueous ion-pair mechanism topology",
+            "initial_state",
+            (
+                "equilibrium_mechanism_family",
+                "equilibrium_aqueous_association_beta_L_per_mol",
+            ),
+            "Adds a distinct aqueous MA intermediate and its mass-action equation to "
+            "the coupled weak-acid precipitation network.",
+            ("interpolation",),
         ),
     )
 }
@@ -245,6 +329,35 @@ def apply_axis_interventions(
             catalyst_effects[:, 1:] /= factor**0.25
             solvent_effects[:, 0] *= factor
             solvent_effects[:, 1:] /= factor**0.25
+        elif intervention.axis_id == "crystallization.population-regime":
+            factor = exp(log(4.0) * intervention.severity)
+            domain["crystallization_nucleation_multiplier"] *= factor
+            domain["crystallization_growth_multiplier"] /= factor
+        elif intervention.axis_id == "crystallization.impurity-occlusion-law":
+            if intervention.mode != "extrapolation" or intervention.severity != 1.0:
+                raise ValueError(
+                    "crystallization impurity-occlusion law is a frozen binary axis; "
+                    "mode must be extrapolation and severity must equal 1"
+                )
+            metadata = dict(state.metadata)
+            metadata["crystallization_impurity_occlusion_law_id"] = (
+                "surface_saturation_occlusion_v1"
+            )
+            state = state.replace(metadata=metadata)
+        elif intervention.axis_id == "crystallization.impurity-occlusion-capacity":
+            if intervention.mode != "extrapolation" or not 0.0 < intervention.severity <= 1.0:
+                raise ValueError(
+                    "crystallization scalar-null capacity requires extrapolation severity in (0, 1]"
+                )
+            metadata = dict(state.metadata)
+            metadata["crystallization_impurity_occlusion_capacity_multiplier"] = (
+                1.0 + 5.0 * intervention.severity
+            )
+            state = state.replace(metadata=metadata)
+        elif intervention.axis_id == "flow.residence-thermal-boundary":
+            domain["flow_boundary_ua_multiplier"] *= _flow_boundary_multiplier(
+                intervention.mode, intervention.severity
+            )
         elif intervention.axis_id == "equilibrium.acid-base-constants":
             metadata = dict(state.metadata)
             metadata["hidden_equilibrium_pka"] = float(
@@ -256,6 +369,40 @@ def apply_axis_interventions(
             metadata["equilibrium_activity_coefficient_ratio"] = float(
                 metadata.get("equilibrium_activity_coefficient_ratio", 1.0)
             ) * _effect_multiplier(intervention.mode, intervention.severity)
+            state = state.replace(metadata=metadata)
+        elif intervention.axis_id == "equilibrium.mechanism-benchmark":
+            if intervention.mode != "extrapolation" or intervention.severity != 1.0:
+                raise ValueError(
+                    "equilibrium mechanism benchmark is a frozen substrate selector; "
+                    "mode must be extrapolation and severity must equal 1"
+                )
+            metadata = dict(state.metadata)
+            metadata.update(
+                {
+                    "equilibrium_mechanism_benchmark_version": "eq-s-v0.2",
+                    "hidden_equilibrium_log10_ksp": -5.2,
+                    "hidden_equilibrium_ksp": 10.0**-5.2,
+                    "equilibrium_precipitating_cation_fraction": 0.15,
+                    "equilibrium_activity_coefficient_ratio": 1.0,
+                }
+            )
+            metadata.setdefault(
+                "equilibrium_mechanism_family",
+                "direct_free_ion_precipitation",
+            )
+            state = state.replace(metadata=metadata)
+        elif intervention.axis_id == "equilibrium.aqueous-ion-pair-network":
+            if intervention.mode != "interpolation":
+                raise ValueError("aqueous ion-pair network requires interpolation mode")
+            metadata = dict(state.metadata)
+            metadata.update(
+                {
+                    "equilibrium_mechanism_family": "aqueous_ion_pair_intermediate",
+                    "equilibrium_aqueous_association_beta_L_per_mol": (
+                        7000.0 + 2500.0 * intervention.severity
+                    ),
+                }
+            )
             state = state.replace(metadata=metadata)
         else:
             factor = _effect_multiplier(intervention.mode, intervention.severity)
@@ -295,6 +442,18 @@ def _effect_multiplier(mode: ShiftMode, severity: float) -> float:
 
 def _noise_multiplier(severity: float) -> float:
     return exp(log(3.0) * severity)
+
+
+def _flow_boundary_multiplier(mode: ShiftMode, severity: float) -> float:
+    """Return an audited weak-to-strong wall-coupling span for fixed flow hardware."""
+
+    positive_endpoint = {
+        "interpolation": 0.25,
+        "extrapolation": 0.02,
+        "composition": 0.10,
+        "observation_noise": 0.25,
+    }[mode]
+    return exp(log(positive_endpoint) * severity)
 
 
 def _additive_shift(

@@ -20,6 +20,8 @@ body { margin: 0; min-width: 320px; background:
   radial-gradient(circle at 15% 0%, rgba(24, 126, 93, .18), transparent 38rem),
   radial-gradient(circle at 85% 20%, rgba(50, 129, 141, .12), transparent 34rem), #07110f; }
 button, input, select { font: inherit; }
+textarea { width: 100%; box-sizing: border-box; color: #d5ede4; background: #061511; }
+button:focus-visible, a:focus-visible, summary:focus-visible, textarea:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
 button, select, input, summary { cursor: pointer; }
 
 .nav-shell { height: 76px; display: flex; align-items: center; gap: 28px; padding: 0 max(28px, calc((100vw - 1500px) / 2)); border-bottom: 1px solid var(--line); background: rgba(5, 16, 14, .84); backdrop-filter: blur(18px); position: sticky; top: 0; z-index: 20; }

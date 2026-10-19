@@ -7,7 +7,7 @@
 ```bash
 git clone https://github.com/sunyrain/ChemWorld-Public.git
 cd ChemWorld-Public
-python -m pip install -e ".[notebooks]"
+uv sync --locked --extra dev
 ```
 
 ChemWorld 支持 Python 3.11 和 3.12。
@@ -31,16 +31,18 @@ print(env.unwrapped.available_actions()[:3])
 ## 运行完整示例
 
 ```bash
-python examples/demo_manual_event_sequence.py
+uv run --no-sync python examples/demo_manual_event_sequence.py
 ```
 
 随后打开[第一个 notebook](notebooks.md)，逐步查看动作验证、中间 HPLC、终检和资源账本。
 
-## 验证发布版本
+## 检查当前基座
 
 ```bash
-python scripts/verify_release.py
-python scripts/build_readme_visuals.py --check
+uv run --no-sync pytest -q
+uv run --no-sync python scripts/build_readme_visuals.py --check
 ```
 
 安装完成后，这两个检查都可以离线运行。
+
+[当前运行时与旧版复现](current-foundation.md)。

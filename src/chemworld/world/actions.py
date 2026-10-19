@@ -7,8 +7,10 @@ from typing import Any
 
 import numpy as np
 
+from chemworld.foundation.solvents import SOLVENT_IDS
+
 CATALYSTS = ("cat_a", "cat_b", "cat_c", "cat_d")
-SOLVENTS = ("water", "ethanol", "acetonitrile", "toluene")
+SOLVENTS = SOLVENT_IDS
 ELECTROLYTE_PROFILES = (
     "low_support_acetate",
     "high_support_acetate",
@@ -47,9 +49,7 @@ def _scalar(value: Any) -> float:
     return scalar
 
 
-def _categorical_index(
-    value: Any, *, cardinality: int, label: str, clip: bool
-) -> int:
+def _categorical_index(value: Any, *, cardinality: int, label: str, clip: bool) -> int:
     coordinate = _scalar(value)
     if not coordinate.is_integer():
         raise ValueError(f"{label} must be an integer categorical index")

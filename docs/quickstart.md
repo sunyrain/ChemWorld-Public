@@ -7,7 +7,7 @@ This path creates one environment, inspects the public contract and commits a va
 ```bash
 git clone https://github.com/sunyrain/ChemWorld-Public.git
 cd ChemWorld-Public
-python -m pip install -e ".[notebooks]"
+uv sync --locked --extra dev
 ```
 
 ChemWorld supports Python 3.11 and 3.12.
@@ -31,16 +31,18 @@ The public surface tells the agent what it may do. It does not expose evaluator-
 ## Run a complete example
 
 ```bash
-python examples/demo_manual_event_sequence.py
+uv run --no-sync python examples/demo_manual_event_sequence.py
 ```
 
 Then open [the first notebook](notebooks.md) to see validation, intermediate HPLC feedback, final assay and resource accounting step by step.
 
-## Verify the release
+## Check current main
 
 ```bash
-python scripts/verify_release.py
-python scripts/build_readme_visuals.py --check
+uv run --no-sync pytest -q
+uv run --no-sync python scripts/build_readme_visuals.py --check
 ```
 
 Both checks work offline after installation.
+
+[Current runtime and historical reproduction](current-foundation.md).

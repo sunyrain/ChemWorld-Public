@@ -53,14 +53,14 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "enum": ["add_reagent", "add_solvent", "add_catalyst", "heat", "wait", "sample", "quench", "add_phase", "add_extractant", "mix", "settle", "separate_phase", "wash", "dry", "concentrate", "transfer", "seed_crystals", "cool_crystallize", "filter_crystals", "evaporate", "distill", "collect_fraction", "set_flow_rate", "run_flow", "set_potential", "electrolyze", "terminate", "measure"]
+        "enum": ["add_reagent", "add_component", "add_solvent", "add_catalyst", "heat", "wait", "sample", "quench", "create_container", "transfer_material", "select_vessel", "route_material", "configure_instrument", "configure_control", "queue_control_stage", "set_control_feedback", "advance_control", "pause_control", "resume_control", "add_phase", "add_extractant", "mix", "settle", "separate_phase", "wash", "dry", "concentrate", "transfer", "seed_crystals", "cool_crystallize", "filter_crystals", "resuspend_crystals", "evaporate", "distill", "collect_fraction", "set_flow_rate", "run_flow", "set_flow_stream", "advance_flow", "set_potential", "electrolyze", "terminate", "measure"]
       }
     },
     "allowed_instruments": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"type": "string", "enum": ["hplc", "gc", "uvvis", "ph_meter", "final_assay"]}
+      "items": {"type": "string", "enum": ["hplc", "gc", "uvvis", "ph_meter", "final_assay", "nmr", "ir", "ms"]}
     },
     "observation_policy": {"type": "string", "minLength": 1},
     "termination_policy": {"type": "string", "minLength": 1},

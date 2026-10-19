@@ -159,6 +159,29 @@ class PhysicalConstitution:
             *check_ledger_single_source(self, state),
             check_risk_range(self, state),
         ]
+        from chemworld.foundation.state_helpers import equipment_settings
+
+        controller = equipment_settings(state.equipment, "process_controller")
+        if controller:
+            from chemworld.foundation.gas import GasBoundary
+
+            try:
+                gas = GasBoundary.from_dict(controller["gas"])
+                gas_valid = abs(state.pressure_Pa - gas.pressure_pa) <= 1e-6
+            except (KeyError, TypeError, ValueError):
+                gas_valid = False
+            checks.append(
+                CheckResult(
+                    "gas_boundary_balance",
+                    gas_valid,
+                    "plenum component and energy accounting; measured pressure",
+                )
+            )
+        for name, local in sorted(state.inactive_vessels.items()):
+            for check in sorted(self.check_state(local).checks, key=lambda item: item.name):
+                from dataclasses import replace
+
+                checks.append(replace(check, name=f"vessel:{name}:{check.name}"))
         return ConstitutionReport(checks)
 
     def check_observation(
@@ -192,15 +215,12 @@ class PhysicalConstitution:
                 "Public scalar observations must be missing or finite values in [0, 1].",
             )
         )
-        mask_consistent = (
-            all(
-                isinstance(key, str) and isinstance(observed, bool)
-                for key, observed in observation.observed_mask.items()
-            )
-            and all(
-                not observed or observation.values.get(key) is not None
-                for key, observed in observation.observed_mask.items()
-            )
+        mask_consistent = all(
+            isinstance(key, str) and isinstance(observed, bool)
+            for key, observed in observation.observed_mask.items()
+        ) and all(
+            not observed or observation.values.get(key) is not None
+            for key, observed in observation.observed_mask.items()
         )
         checks.append(
             CheckResult(
@@ -210,8 +230,7 @@ class PhysicalConstitution:
             )
         )
         processed_valid = all(
-            _is_missing_or_normalized(value)
-            for value in observation.processed_estimate.values()
+            _is_missing_or_normalized(value) for value in observation.processed_estimate.values()
         )
         uncertainty_valid = all(
             _is_finite_nonnegative(value) for value in observation.uncertainty.values()
@@ -278,7 +297,12 @@ class PhysicalConstitution:
     ) -> CheckResult:
         allowed_element_delta = allowed_element_delta or {}
         unknown_species = (
-            set(before.species_amounts) | set(after.species_amounts)
+            set(before.species_amounts)
+            | set(after.species_amounts)
+            | set(before.samples.total_amounts_mol())
+            | set(after.samples.total_amounts_mol())
+            | {s for local in before.inactive_vessels.values() for s in local.species_amounts}
+            | {s for local in after.inactive_vessels.values() for s in local.species_amounts}
         ) - set(self.substances)
         if unknown_species:
             return CheckResult(
@@ -288,8 +312,16 @@ class PhysicalConstitution:
                 value=float(len(unknown_species)),
                 tolerance=0.0,
             )
-        before_elements = self.element_totals(before.species_amounts)
-        after_elements = self.element_totals(after.species_amounts)
+        before_amounts = before.species_amounts.copy()
+        after_amounts = after.species_amounts.copy()
+        for amounts, state in ((before_amounts, before), (after_amounts, after)):
+            for species, amount in state.samples.total_amounts_mol().items():
+                amounts[species] = amounts.get(species, 0.0) + amount
+            for local in state.inactive_vessels.values():
+                for species, amount in local.species_amounts.items():
+                    amounts[species] = amounts.get(species, 0.0) + amount
+        before_elements = self.element_totals(before_amounts)
+        after_elements = self.element_totals(after_amounts)
         errors: list[float] = []
         elements = before_elements.keys() | after_elements.keys() | allowed_element_delta.keys()
         for element in sorted(elements):

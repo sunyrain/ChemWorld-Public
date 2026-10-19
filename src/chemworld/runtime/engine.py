@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from chemworld.foundation import OperationRecord, PhysicalConstitution, WorldState
@@ -10,7 +10,7 @@ from chemworld.operation_validator import OperationValidation
 from chemworld.runtime.domain_service_registry import DomainServiceRegistry
 from chemworld.runtime.domain_services import ChemWorldDomainServices
 from chemworld.runtime.kernel_contracts import KernelResult, RuntimeContext
-from chemworld.runtime.kernel_registry import OperationKernelRegistry
+from chemworld.runtime.kernel_registry import OperationKernelRegistry, affected_ledgers
 from chemworld.runtime.mechanisms import CompiledMechanism
 from chemworld.runtime.profiles import TaskRuntimeProfile
 from chemworld.runtime.transactions import StatePatch, TransactionManager, WorldEvent
@@ -93,6 +93,72 @@ class ChemWorldRuntime:
         return RuntimeStepResult(
             state=result.state,
             operation_record=result.operation_record,
+            kernel_result=result,
+        )
+
+    def apply_precondition_failure_transaction(
+        self,
+        state: WorldState,
+        action: dict[str, Any],
+        validation: OperationValidation,
+    ) -> RuntimeStepResult:
+        """Rollback a dispatchable action using the authoritative validator checks."""
+
+        operation_type = str(action["operation"])
+        kernel = self.registry.get(operation_type)
+        affected = affected_ledgers(operation_type)
+        failed_preconditions = tuple(
+            key for key, passed in validation.preconditions.items() if not passed
+        )
+        rejection_event = WorldEvent(
+            event_type="operation_rejected",
+            operation_type=operation_type,
+            payload={
+                "kernel_id": kernel.kernel_id,
+                "domain_service_id": self.domain_services.service_id_for_operation(
+                    operation_type
+                ),
+                "affected_ledgers": list(affected),
+                "failed_preconditions": list(failed_preconditions),
+            },
+        )
+        transaction = self.transaction_manager.rollback(
+            state=state,
+            operation_type=operation_type,
+            rollback_reason="precondition_failed",
+            failed_preconditions=failed_preconditions,
+            events=(rejection_event,),
+        )
+        record = self.domain_services.record_operation(
+            operation_type,
+            state,
+            transaction.state,
+            validation.preconditions,
+            action,
+        )
+        if record.is_instrument_measurement:
+            record = replace(record, measurement_cost=0.0, sample_consumed_L=0.0)
+        result = KernelResult(
+            state=transaction.state,
+            operation_record=record,
+            events=transaction.events,
+            patches=transaction.patches,
+            state_delta_summary=record.state_delta_summary,
+            cost_delta=transaction.state.ledger.cost - state.ledger.cost,
+            risk_delta=transaction.state.ledger.risk - state.ledger.risk,
+            sample_delta=(
+                transaction.state.ledger.sample_consumed_L
+                - state.ledger.sample_consumed_L
+            ),
+            affected_ledgers=("process",),
+            kernel_id=kernel.kernel_id,
+            kernel_version=kernel.kernel_version,
+            transaction_status=transaction.transaction_status,
+            rollback_reason=transaction.rollback_reason,
+        )
+        return RuntimeStepResult(
+            state=transaction.state,
+            operation_record=record,
             kernel_result=result,
         )
 

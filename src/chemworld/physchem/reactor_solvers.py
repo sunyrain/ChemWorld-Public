@@ -259,7 +259,7 @@ def _jacket_heat_w(
     jacket = 0.0
     if jacket_temperature_K is not None:
         jacket = thermal.jacket_ua_W_per_K * (jacket_temperature_K - temperature_K)
-    return thermal.fixed_heat_W + jacket
+    return thermal.fixed_heat_W + thermal.limit_jacket_heat_w(jacket)
 
 
 def _feed_heat_w(

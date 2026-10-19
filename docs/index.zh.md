@@ -1,3 +1,5 @@
+> 当前基座见[10月更新](current-foundation.md)。下文已有图示与数值证据对应8月冻结运行时。
+
 <section class="cw-studio-hero" data-cw-autoplay data-source="../assets/data/representative-behavior-and-forks.json" data-locale="zh">
   <div class="cw-studio-glow cw-studio-glow-a"></div>
   <div class="cw-studio-glow cw-studio-glow-b"></div>

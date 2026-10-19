@@ -14,7 +14,7 @@
       <span><strong>ChemWorld</strong><small>Student Lab</small></span>
     </a>
     <div class="local-state"><i></i><span>LOCAL · PROVIDER-FREE</span></div>
-    <a class="repo-link" href="https://github.com/sunyrain/ChemWorld-Public">Public repository ↗</a>
+    <a class="repo-link" href="https://github.com/sunyrain/ChemWorld">Development repository ↗</a>
   </header>
 
   <main>
@@ -22,8 +22,8 @@
       <div class="hero-copy">
         <p class="eyebrow">GUIDED VIRTUAL EXPERIMENTATION</p>
         <h1>把每一步实验操作，<br><em>变成看得见的反馈。</em></h1>
-        <p class="hero-lede">选择任务、编排操作、观察公开指标。每个请求先经过与正式环境相同的校验；无效动作不会改变状态，也不消耗预算。</p>
-        <div class="hero-pills"><span>无需 API key</span><span>动作事务可回放</span><span>隐藏状态不泄露</span></div>
+        <p class="hero-lede">选择任务、编排操作、观察公开指标。请求先经过公开接口校验；校验拒绝不会消耗实验预算。执行阶段的失败及资源后果按环境合同记录。</p>
+        <div class="hero-pills"><span>无需 API key</span><span>动作事务可回放</span><span>公开观测接口</span></div>
       </div>
       <div class="session-ticket">
         <span>SESSION</span><strong id="sessionCode">NOT STARTED</strong>
@@ -41,6 +41,8 @@
           <label>Seed<input id="seedInput" type="number" min="0" value="0"></label>
           <button id="createSession">开始 / 重置</button>
         </div>
+        <button id="closeSession" disabled>导出并关闭会话</button>
+        <p>关闭仅释放会话，不执行终检；重置前会先导出已有操作。</p>
         <article class="mission-card">
           <h3 id="missionTitle">载入任务中…</h3>
           <p id="missionBackground">正在读取 Public task contract。</p>
@@ -96,7 +98,7 @@
         <div id="operationFields" class="operation-fields"></div>
         <details><summary>检查 Action JSON</summary><pre id="actionPreview">{}</pre></details>
         <button id="submitAction" class="execute" disabled>验证并执行 <span>→</span></button>
-        <div id="validationBox" class="validation neutral"><b>i</b><p>创建实验后，只展示当前状态可用的操作。</p></div>
+        <div id="validationBox" class="validation neutral" role="status" aria-live="polite"><b>i</b><p>创建实验后，只展示当前状态可用的操作。</p></div>
       </aside>
     </section>
 
@@ -107,8 +109,9 @@
         <div id="metricGrid" class="metric-grid"></div>
       </article>
       <article class="panel notebook-panel">
-        <div class="panel-heading compact"><span>05</span><div><p>EXPERIMENT NOTEBOOK</p><h2>操作与观测记录</h2></div><button id="downloadLog" disabled>下载 JSON</button></div>
+        <div class="panel-heading compact"><span>05</span><div><p>EXPERIMENT NOTEBOOK</p><h2>操作与观测记录</h2></div><button id="downloadLog" disabled>下载轨迹 JSONL</button><button id="verifyLog" disabled>精确回放</button></div>
         <div class="table-shell"><table><thead><tr><th>Step</th><th>Operation</th><th>公开状态变化</th><th>Reward</th><th>Metrics</th></tr></thead><tbody id="historyBody"><tr><td colspan="5" class="empty">尚未开始实验</td></tr></tbody></table></div>
+        <details><summary>导出副本（下载受阻时可复制）</summary><textarea id="exportCopy" aria-label="Exported trajectory JSONL" readonly rows="8"></textarea></details>
       </article>
     </section>
   </main>

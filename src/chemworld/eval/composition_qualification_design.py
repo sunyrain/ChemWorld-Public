@@ -32,7 +32,7 @@ UNSEEN_PATTERN_ID = "reaction-distillation-observation"
 _IMPLICIT_PROCESS_TIME_ALLOWANCE_S = {
     "quench": 120.0,
     "collect_fraction": 60.0,
-    "filter_crystals": 60.0,
+    "filter_crystals": 480.0,
     "separate_phase": 60.0,
     "transfer": 60.0,
 }

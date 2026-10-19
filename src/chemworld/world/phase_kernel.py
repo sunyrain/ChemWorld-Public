@@ -7,6 +7,7 @@ from typing import TypedDict
 
 import numpy as np
 
+from chemworld.foundation.solvents import SolventInventory
 from chemworld.physchem.extraction_units import DistributionCoefficientModelSpec
 from chemworld.physchem.phase_equilibrium_units import (
     LLEContactorSpec,
@@ -45,6 +46,21 @@ _NOMINAL_IMPURITY_DISTRIBUTION_COEFFICIENTS = np.asarray(
 )
 
 
+def nominal_partition_pair_tables() -> dict[str, tuple[tuple[float, ...], ...]]:
+    """Return the public nominal pair tables without any realized-world state."""
+
+    return {
+        "product_distribution_coefficients": tuple(
+            tuple(float(value) for value in row)
+            for row in _NOMINAL_PRODUCT_DISTRIBUTION_COEFFICIENTS
+        ),
+        "impurity_distribution_coefficients": tuple(
+            tuple(float(value) for value in row)
+            for row in _NOMINAL_IMPURITY_DISTRIBUTION_COEFFICIENTS
+        ),
+    }
+
+
 class PartitionSplitResult(TypedDict):
     partition_coefficient: float
     impurity_partition_coefficient: float
@@ -76,11 +92,15 @@ def partition_split(
     aqueous_volume_L: float,
     coefficient_multiplier: float = 1.0,
     coefficient_exponent: float = 1.0,
+    composition_coupling_multiplier: float = 1.0,
     phase_volume_multiplier: float = 1.0,
+    solvent_inventory: SolventInventory | None = None,
+    extractant_inventory: SolventInventory | None = None,
 ) -> PartitionSplitResult:
     if (
         coefficient_multiplier <= 0.0
         or coefficient_exponent <= 0.0
+        or composition_coupling_multiplier < 1.0
         or phase_volume_multiplier <= 0.0
     ):
         raise ValueError("partition intervention multipliers must be positive")
@@ -93,17 +113,25 @@ def partition_split(
     if nominal_pair_contract == INDEPENDENT_NOMINAL_SOLVENT_EXTRACTANT_PAIR_V1:
         if extractant is None or extractant < 0 or extractant >= 4:
             raise ValueError("independent nominal pairing requires one of four extractants")
-        partition_base = float(
-            PARTITION_V3_PRODUCT_DISTRIBUTION_CALIBRATION
-            * _NOMINAL_PRODUCT_DISTRIBUTION_COEFFICIENTS[solvent, extractant]
+        feed_medium = solvent_inventory or SolventInventory.pure(solvent, 1.0)
+        receiver_medium = extractant_inventory or SolventInventory.pure(extractant, 1.0)
+        partition_base = PARTITION_V3_PRODUCT_DISTRIBUTION_CALIBRATION * feed_medium.log_property(
+            tuple(
+                receiver_medium.log_property(row)
+                for row in _NOMINAL_PRODUCT_DISTRIBUTION_COEFFICIENTS
+            )
         )
-        impurity_partition_base = float(
-            _NOMINAL_IMPURITY_DISTRIBUTION_COEFFICIENTS[solvent, extractant]
+        impurity_partition_base = feed_medium.log_property(
+            tuple(
+                receiver_medium.log_property(row)
+                for row in _NOMINAL_IMPURITY_DISTRIBUTION_COEFFICIENTS
+            )
         )
         independent_nominal_pair = True
     else:
         historical_partition_base = np.array([0.65, 1.25, 2.20, 1.55])
-        partition_base = float(historical_partition_base[solvent])
+        medium = extractant_inventory or solvent_inventory or SolventInventory.pure(solvent, 1.0)
+        partition_base = medium.log_property(historical_partition_base)
         impurity_partition_base = 0.0
         independent_nominal_pair = False
     temperature_factor = 1.0 + 0.0025 * (temperature_K - 298.15)
@@ -135,10 +163,24 @@ def partition_split(
         impurity_partition = max(
             0.05,
             float(
-                (0.18 * partition / coefficient_multiplier + 0.08 * (solvent + 1))
+                (
+                    0.18 * partition / coefficient_multiplier
+                    + medium.linear_property((0.08, 0.16, 0.24, 0.32))
+                )
                 / coefficient_multiplier**0.25
             ),
         )
+    # The parent law (multiplier == 1) is composition independent.  The paired
+    # private family introduces a feed-composition response that cannot be
+    # absorbed by refitting one constant K across two feed anchors.  The
+    # logarithmic form stays positive and is symmetric at equal product and
+    # impurity fractions.
+    feed_total = max(product_mol, 0.0) + max(impurity_mol, 0.0)
+    if feed_total > 0.0 and composition_coupling_multiplier > 1.0:
+        impurity_fraction = max(impurity_mol, 0.0) / feed_total
+        log_strength = float(np.log(composition_coupling_multiplier))
+        partition *= float(np.exp(-log_strength * impurity_fraction))
+        impurity_partition *= float(np.exp(log_strength * impurity_fraction))
     feed = {"product": max(product_mol, 0.0), "impurity": max(impurity_mol, 0.0)}
     if sum(feed.values()) > 0.0:
         distribution_model = DistributionCoefficientModelSpec(
@@ -255,5 +297,6 @@ __all__ = [
     "PARTITION_V3_PRODUCT_DISTRIBUTION_CALIBRATION",
     "PartitionSplitResult",
     "PhaseModuleSpec",
+    "nominal_partition_pair_tables",
     "partition_split",
 ]

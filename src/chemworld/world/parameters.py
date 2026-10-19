@@ -22,11 +22,30 @@ from chemworld.world.electrochemical_material_family import (
 WORLD_FAMILY_VERSION = "chemworld-physical-chemistry-v0.5"
 SUPPORTED_SPLITS = ("public-dev", "public-test", "private-eval")
 
+# Public family-level activity profiles used to generate the generic reaction
+# material effects. World-specific residual multipliers are sampled below and
+# remain hidden. Keeping the nominal profiles explicit lets participant-facing
+# prior dossiers stay synchronized with the executable generator without
+# reading a realized world instance.
+REACTION_NOMINAL_CATALYST_ACTIVITY_PROFILES = (
+    (1.00, 1.05, 0.92, 0.95, 0.88),
+    (1.30, 0.92, 1.15, 1.08, 1.10),
+    (0.82, 1.32, 0.90, 1.18, 0.94),
+    (1.10, 0.86, 1.22, 0.90, 1.20),
+)
+REACTION_NOMINAL_SOLVENT_ACTIVITY_PROFILES = (
+    (0.75, 0.72, 0.68, 0.70, 0.65),
+    (0.96, 1.02, 1.00, 0.95, 1.05),
+    (1.20, 0.98, 1.12, 1.15, 0.98),
+    (1.05, 1.34, 1.28, 1.25, 1.18),
+)
+
 DEFAULT_DOMAIN_PARAMETERS: dict[str, float] = {
     "partition_coefficient_multiplier": 1.0,
     "partition_coefficient_exponent": 1.0,
     "partition_phase_volume_multiplier": 1.0,
     "crystallization_nucleation_multiplier": 1.0,
+    "crystallization_growth_multiplier": 1.0,
     "crystallization_solubility_multiplier": 1.0,
     "distillation_relative_volatility_multiplier": 1.0,
     "flow_rate_multiplier": 1.0,
@@ -206,18 +225,16 @@ def load_chemworld_parameters(
     activation_energy *= rng.lognormal(mean=0.0, sigma=[0.03, 0.05, 0.06, 0.06, 0.05])
 
     catalyst_effects = rng.lognormal(mean=0.0, sigma=0.22, size=(len(CATALYSTS), 5))
-    catalyst_effects[:, 0] *= np.array([1.00, 1.30, 0.82, 1.10])
-    catalyst_effects[:, 1] *= np.array([1.05, 0.92, 1.32, 0.86])
-    catalyst_effects[:, 2] *= np.array([0.92, 1.15, 0.90, 1.22])
-    catalyst_effects[:, 3] *= np.array([0.95, 1.08, 1.18, 0.90])
-    catalyst_effects[:, 4] *= np.array([0.88, 1.10, 0.94, 1.20])
+    catalyst_effects *= np.asarray(
+        REACTION_NOMINAL_CATALYST_ACTIVITY_PROFILES,
+        dtype=float,
+    )
 
     solvent_effects = rng.lognormal(mean=0.0, sigma=0.20, size=(len(SOLVENTS), 5))
-    solvent_effects[:, 0] *= np.array([0.75, 0.96, 1.20, 1.05])
-    solvent_effects[:, 1] *= np.array([0.72, 1.02, 0.98, 1.34])
-    solvent_effects[:, 2] *= np.array([0.68, 1.00, 1.12, 1.28])
-    solvent_effects[:, 3] *= np.array([0.70, 0.95, 1.15, 1.25])
-    solvent_effects[:, 4] *= np.array([0.65, 1.05, 0.98, 1.18])
+    solvent_effects *= np.asarray(
+        REACTION_NOMINAL_SOLVENT_ACTIVITY_PROFILES,
+        dtype=float,
+    )
 
     crystallization_family = crystallization_material_family(
         REACTION_CRYSTALLIZATION_LATENT_MATERIAL_FAMILY
@@ -233,17 +250,11 @@ def load_chemworld_parameters(
     crystallization_rng = np.random.default_rng(crystallization_seed)
     residual_bounds = crystallization_residual.residual_multiplier_bounds
     catalyst_nominal = np.asarray(
-        [
-            row["reaction_multipliers"]
-            for row in crystallization_family.catalyst_profiles
-        ],
+        [row["reaction_multipliers"] for row in crystallization_family.catalyst_profiles],
         dtype=float,
     )
     solvent_nominal = np.asarray(
-        [
-            row["reaction_multipliers"]
-            for row in crystallization_family.solvent_profiles
-        ],
+        [row["reaction_multipliers"] for row in crystallization_family.solvent_profiles],
         dtype=float,
     )
     crystallization_catalyst_effects = catalyst_nominal * np.clip(
@@ -278,17 +289,15 @@ def load_chemworld_parameters(
         )
         return nominal * residual
 
-    crystallization_solvent_solubility_multipliers = (
-        crystallization_profile_vector("solubility_multiplier")
+    crystallization_solvent_solubility_multipliers = crystallization_profile_vector(
+        "solubility_multiplier"
     )
-    crystallization_solvent_nucleation_multipliers = (
-        crystallization_profile_vector("nucleation_multiplier")
+    crystallization_solvent_nucleation_multipliers = crystallization_profile_vector(
+        "nucleation_multiplier"
     )
-    crystallization_solvent_growth_multipliers = (
-        crystallization_profile_vector("growth_multiplier")
-    )
-    crystallization_solvent_occlusion_multipliers = (
-        crystallization_profile_vector("impurity_occlusion_multiplier")
+    crystallization_solvent_growth_multipliers = crystallization_profile_vector("growth_multiplier")
+    crystallization_solvent_occlusion_multipliers = crystallization_profile_vector(
+        "impurity_occlusion_multiplier"
     )
 
     material_family = electrochemical_material_family(NOMINAL_PRIOR_MATERIAL_FAMILY)
@@ -354,9 +363,7 @@ def load_chemworld_parameters(
         crystallization_solvent_nucleation_multipliers=(
             crystallization_solvent_nucleation_multipliers
         ),
-        crystallization_solvent_growth_multipliers=(
-            crystallization_solvent_growth_multipliers
-        ),
+        crystallization_solvent_growth_multipliers=(crystallization_solvent_growth_multipliers),
         crystallization_solvent_occlusion_multipliers=(
             crystallization_solvent_occlusion_multipliers
         ),

@@ -52,7 +52,7 @@ def test_public_composition_examples_compile(
     compiled = chemworld.compile_world_composition(request)
 
     assert report.compatible
-    assert report.pattern == expected_pattern
+    assert report.pattern == "component-network"
     assert compiled.compatibility == report
     assert set(compiled.spec.component_kinds) == expected_components
     assert compiled.task_spec.task_id == request["composition_id"]
@@ -88,7 +88,7 @@ def test_prelaunch_reference_paths_execute_and_fail_closed() -> None:
         compiled = chemworld.compile_world_composition(request)
 
         assert compatibility.compatible
-        assert compatibility.pattern == case["expected_pattern"]
+        assert compatibility.pattern == "component-network"
         assert request["composition_id"] == case["composition_id"]
         assert compiled.task_spec.objective == case["objective"]
         assert len(case["actions"]) == case["submitted_action_count"]
@@ -153,7 +153,7 @@ def test_reference_task_map_covers_registry_once_and_uses_registered_patterns() 
         anchor = get_task(compiled.runtime_task_profile_id)
 
         assert report.compatible
-        assert report.pattern == pattern["pattern_id"]
+        assert report.pattern == "component-network"
         for task_id in pattern["reference_task_ids"]:
             task = get_task(task_id)
             assert task.allowed_operations == anchor.allowed_operations

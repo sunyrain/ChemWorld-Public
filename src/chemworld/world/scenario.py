@@ -91,6 +91,12 @@ class ScenarioInstance:
             "mechanism_family_intervention_hash": self.initial_state.metadata.get(
                 "mechanism_family_intervention_hash"
             ),
+            "equilibrium_entity_panel_version": self.initial_state.metadata.get(
+                "equilibrium_entity_panel_version"
+            ),
+            "equilibrium_entity_panel_hash": self.initial_state.metadata.get(
+                "equilibrium_entity_panel_hash"
+            ),
             "electrochemical_material_family_contract_version": (
                 self.initial_state.metadata.get(
                     "electrochemical_material_family_contract_version"
@@ -165,10 +171,17 @@ class DefaultScenarioGenerator:
             for item in interventions
             if item.get("kind") == "material_law_counterfactual"
         )
+        entity_panel_payloads = tuple(
+            item
+            for item in interventions
+            if item.get("kind") == "equilibrium_entity_panel"
+        )
         if len(mechanism_payloads) > 1:
             raise ValueError("only one mechanism-family intervention is allowed")
         if len(material_law_payloads) > 1:
             raise ValueError("only one material-law counterfactual is allowed")
+        if len(entity_panel_payloads) > 1:
+            raise ValueError("only one equilibrium entity panel is allowed")
         parsed_mechanism_intervention = None
         if mechanism_payloads:
             from chemworld.world.mechanism_family import (
@@ -258,9 +271,18 @@ class DefaultScenarioGenerator:
             item
             for item in interventions
             if item.get("kind")
-            not in {"mechanism_family", "material_law_counterfactual"}
+            not in {
+                "mechanism_family",
+                "material_law_counterfactual",
+                "equilibrium_entity_panel",
+            }
         )
-        if not mechanism_payloads and not material_law_payloads and not axis_payloads:
+        if (
+            not mechanism_payloads
+            and not material_law_payloads
+            and not entity_panel_payloads
+            and not axis_payloads
+        ):
             return instance
         if mechanism_payloads:
             from chemworld.world.mechanism_family import apply_mechanism_family_intervention
@@ -280,6 +302,18 @@ class DefaultScenarioGenerator:
             instance = apply_material_law_counterfactual(
                 instance,
                 MaterialLawCounterfactual.from_dict(material_law_payloads[0]),
+            )
+        if entity_panel_payloads:
+            from chemworld.world.equilibrium_entity import (
+                EquilibriumEntityPanelIntervention,
+                apply_equilibrium_entity_panel,
+            )
+
+            instance = apply_equilibrium_entity_panel(
+                instance,
+                EquilibriumEntityPanelIntervention.from_dict(
+                    entity_panel_payloads[0]
+                ),
             )
         if not axis_payloads:
             return instance

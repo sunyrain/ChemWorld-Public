@@ -1,5 +1,7 @@
 # API 参考
 
+> 当前基座见[10月更新](current-foundation.md)。下文已有图示与数值证据对应8月冻结运行时。
+
 ChemWorld v0.3.0 保持与 v0.2.0 相同的运行时接口。可以先从 Agent-facing helper 开始，再进入世界构建和评测合同。
 
 | 主题 | 参考文档 |

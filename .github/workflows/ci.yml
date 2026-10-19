@@ -18,16 +18,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install development dependencies
-        run: python -m pip install -e ".[dev]"
-      - name: Verify release boundary
-        run: python scripts/verify_release.py
+      - uses: astral-sh/setup-uv@v6
+      - name: Install locked development dependencies
+        run: uv sync --locked --extra dev
       - name: Lint
-        run: ruff check src tests scripts examples
+        run: uv run --no-sync ruff check src tests scripts examples
       - name: Type check
-        run: mypy src/chemworld
+        run: uv run --no-sync mypy src/chemworld
       - name: Test
-        run: pytest -q
+        run: uv run --no-sync pytest -q
 
   wheel-smoke:
     runs-on: ubuntu-latest
@@ -36,28 +35,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-      - name: Build wheel
-        run: |
-          python -m pip install build
-          python -m build --wheel
-      - name: Install wheel outside the checkout
-        run: |
-          python -m venv "$RUNNER_TEMP/chemworld-wheel"
-          "$RUNNER_TEMP/chemworld-wheel/bin/python" -m pip install dist/*.whl
-      - name: Run installed-package smoke test
-        working-directory: ${{ runner.temp }}
-        run: |
-          "$RUNNER_TEMP/chemworld-wheel/bin/python" - <<'PY'
-          import gymnasium as gym
-          import chemworld
-          from importlib.resources import files
-
-          assert chemworld.__version__ == "0.4.0"
-          assert files("chemworld.lab").joinpath("static", "index.html").is_file()
-          env = gym.make("ChemWorld", task_id="reaction-to-assay", seed=0)
-          _, info = env.reset(seed=0)
-          assert info["task_id"] == "reaction-to-assay"
-          assert "add_solvent" in env.unwrapped.available_actions()
-          env.close()
-          PY
+      - uses: astral-sh/setup-uv@v6
+      - name: Install locked development dependencies
+        run: uv sync --locked --extra dev --python 3.11
+      - name: Build and test wheel and source distribution outside the checkout
+        run: uv run --no-sync python scripts/smoke_test_wheel.py --python 3.11

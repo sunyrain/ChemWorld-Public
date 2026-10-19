@@ -1,0 +1,83 @@
+# Current foundation
+
+The October 2026 development snapshot brings the public runtime up to the current
+ChemWorld foundation. Package metadata is `0.5.0.dev0`; this is a source update,
+not a new frozen benchmark or a PyPI release.
+
+## What changed
+
+| Capability | Current public behavior |
+| --- | --- |
+| Materials and vessels | Create containers, transfer identified samples, select vessels and route material through declared component ports. |
+| Component composition | Compile compatible capability networks after dependency, state-owner and resource checks; composition reports use `component-network` and vessel-qualified state owners rather than the old fixed pattern names. |
+| Full-process crystallization | Retain phase inventories, crystal populations and seed provenance through sampling, filtration, resuspension and repeated crystallization. Recovery excludes charged seed and uses tracked initial reagent charge. |
+| Process control | Configure finite ramp/hold programs, queue stages, set feedback and pause/resume advancement. Gas pressure and purge have finite mass and energy accounting. |
+| Continuous streams | Advance finite feed reservoirs, a mixed tank and collected outlets with coupled reaction and thermal dynamics, plus a bounded electrochemical channel. |
+| Measurement design | Configure NMR, IR and MS scan count, resolution and dilution, then acquire a paid, sample-consuming synthetic spectrum. Particle-size measurements are available in compatible crystallization tasks. |
+| Controlled chemistry | Use coupled weak-acid/precipitation worlds with or without an aqueous ion-pair intermediate, and registered crystallization population/occlusion and purification interventions. |
+| Resources and replay | Retain attempted versus committed actions, physical consumption, rejected requests and exactly replayable current-runtime trajectories. |
+| Scientific records | Reusable document storage, versioned notebooks and public-history access are included; study-specific campaign runners are not distributed. |
+
+The global registries contain 43 operation types, 19 world-intervention axes and
+9 instrument definitions when particle sizing is included. Task contracts expose
+only compatible subsets. The previous public snapshot registered 28, 12 and 5,
+respectively. Existing classic optimization and optional reinforcement-learning
+interfaces remain available.
+
+## Try the current runtime
+
+```bash
+uv sync --locked --extra dev
+uv run --no-sync chemworld tasks list
+uv run --no-sync python examples/demo_configurable_spectra.py
+uv run --no-sync python examples/demo_minimal_agent.py --output runs/minimal-agent.jsonl
+uv run --no-sync chemworld verify --submission runs/minimal-agent.jsonl --tolerance 0
+uv run --no-sync chemworld lab --no-browser
+```
+
+Current source checks use `uv run --no-sync pytest -q`. The targeted suite covers
+operation failures, resource accounting, exact replay, multi-vessel routing,
+control, streams, spectra, crystallization and retained historical evidence.
+Optional external reference checks are reported as skipped when their reference
+installation is absent. Install/build checks are described in
+[contributing](https://github.com/sunyrain/ChemWorld-Public/blob/main/CONTRIBUTING.md).
+
+The synchronization check on Windows AMD64 completed with 466 tests passed and
+1 skipped (the optional external IDAES checkout was unavailable), plus Ruff,
+mypy and the strict bilingual documentation build. Wheel and source-distribution
+installs were checked independently on Python 3.11.15 and 3.12.10, including all
+15 task initializations, packaged resources, Student Lab and exact replay of the
+offline examples. These are software integration checks, not a new scientific
+qualification of the historical reports.
+
+## Model scope
+
+Spectra are calibrated synthetic reporter signals, not predictions of arbitrary
+molecular structures. Inactive vessels do not advance autonomously: operating a
+selected vessel advances its local time. The gas plenum does not dissolve or react
+with the liquid. The mixed-tank electrical channel is an idealized two-electron
+model, not a validated battery. World-noise shift modes can include a simultaneous
+physical-parameter change; they should not be treated as pure noise interventions.
+
+## Historical reproduction
+
+The checked-in evidence reports, original manifest and tutorial outputs remain
+unchanged. They describe their original runtime. The home-page animation also
+shows a historical trace. Use the pinned notebook links or check out
+[`db98e800`](https://github.com/sunyrain/ChemWorld-Public/tree/db98e8002fac0512ed9084a3c8c27985cb9fc405)
+before running `scripts/verify_release.py`. That script verifies the frozen whole
+tree; it is not a development preflight for current main.
+
+Current chemistry does not reproduce every old numerical outcome. In particular,
+the original midpoint partition-world comparison still executes and replays,
+but no longer meets its old divergence threshold. Current tests retain that
+negative outcome instead of relabelling the historical qualification as current.
+
+## Synchronization provenance
+
+Runtime source was selected from ChemWorld commit
+`5156c5c137c29c945759f24f13595eef7ef3cda0` (19 October 2026). Public-specific CLI,
+provider adapters, documentation and frozen-evidence consumers are retained;
+manuscripts, private evaluation inputs, study runners and provider payloads are
+not copied. Version metadata, type annotations and public CLI error handling are integrated here.
+The [extension roadmap](extension-roadmap.md) records proposed future work.

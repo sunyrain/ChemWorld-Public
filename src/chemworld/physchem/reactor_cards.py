@@ -146,6 +146,10 @@ def reactor_model_cards() -> tuple[ModelCard, ...]:
                 ),
             ),
             model_limit_notes=(
+                "Current unquenched ChemWorld heat/wait uses Q_jacket = "
+                "clip(4*(T_set-T), -70, 90) W; changing call boundaries does not reset its gain.",
+                "Low-level prescribed semibatch schedules do not imply a public feed "
+                "operation in the ChemWorld event-action contract.",
                 (
                     "This slice closes the dynamic batch heat-release and sampling "
                     "kernel, not a full Cantera/IDAES reactor clone."

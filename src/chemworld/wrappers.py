@@ -287,7 +287,12 @@ class LLMObservationWrapper(gym.Wrapper[Any, Any, Any, Any], RecordConstructorAr
 
 
 class RLObservationWrapper(gym.Wrapper[Any, Any, Any, Any], RecordConstructorArgs):
-    """Return a NaN-safe vector observation and expose mask/cost in info."""
+    """Return finite observations and mask/cost info compatible with Gym's checker.
+
+    Unique episode identity is retained in ``last_audit_metadata`` and the base
+    environment, outside seed-deterministic training info. Raw observations keep
+    their missing-value semantics; the vector always has an explicit mask by default.
+    """
 
     def __init__(
         self,
@@ -304,6 +309,7 @@ class RLObservationWrapper(gym.Wrapper[Any, Any, Any, Any], RecordConstructorArg
         super().__init__(env)
         self.include_mask = include_mask
         self.include_cost = include_cost
+        self.last_audit_metadata: dict[str, Any] = {}
         if not isinstance(env.observation_space, gym.spaces.Dict):
             raise TypeError("RLObservationWrapper requires a Dict observation space.")
         spec = rl_observation_spec(include_cost=include_cost)
@@ -341,6 +347,7 @@ class RLObservationWrapper(gym.Wrapper[Any, Any, Any, Any], RecordConstructorArg
         mask = list(view["mask"])
         vector_values = [*values, *mask] if self.include_mask else values
         payload = dict(info)
+        self.last_audit_metadata = {"campaign_id": payload.pop("campaign_id", None)}
         payload["rl_view"] = view
         payload["observation_mask"] = np.asarray(mask, dtype=np.float32)
         payload["cost_signal"] = float(view["cost"])

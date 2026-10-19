@@ -1,5 +1,9 @@
 # ChemWorld world-composition contract
 
+This page describes the frozen public release. Current main supports component
+networks; see [current foundation](current-foundation.md) for the updated runtime
+and compatibility-report fields. The original qualification remains historical.
+
 This document defines the reader-facing authoring boundary for the published release. It is
 a bounded composition contract, not a claim that every possible chemical workflow or every
 combination of modules has been implemented or qualified.

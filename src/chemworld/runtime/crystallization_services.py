@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -12,6 +13,8 @@ from chemworld.foundation import (
     process_with_metrics,
     upsert_equipment_record,
 )
+from chemworld.foundation.samples import StoredSample
+from chemworld.foundation.solvents import SolventInventory
 from chemworld.foundation.state import PhaseLedger, PhaseRecord
 from chemworld.physchem.crystallization_units import (
     CoolingCrystallizationResult,
@@ -21,14 +24,47 @@ from chemworld.physchem.crystallization_units import (
 )
 from chemworld.physchem.crystallization_validation import CrystallizationGridCase
 from chemworld.physchem.elements import molecular_weight
+from chemworld.runtime.full_process_contract import (
+    population_active,
+    population_settings,
+    seed_provenance_active,
+)
+from chemworld.runtime.material_routing import _active, _contents
 from chemworld.runtime.species import MechanismSpeciesView
+from chemworld.world.actions import SOLVENTS
+from chemworld.world.mixtures import crystallization_medium_modifier
 from chemworld.world.parameters import ChemWorldParameters
 from chemworld.world.thermal_kernel import account_temperature_transition
+
+DEFAULT_CRYSTAL_SEED_DIAMETER_M = 100.0e-6
 
 
 def _action_float(action: dict[str, Any], key: str, default: float) -> float:
     value = action.get(key, default)
     return float(np.asarray(value).reshape(-1)[0])
+
+
+def _effective_seed_diameter_m(crystallizer_settings: dict[str, Any]) -> float:
+    """Return a physical seed diameter for the next population-balance step.
+
+    An empty crystal population correctly reports ``csd_d50_m == 0``.  That
+    population statistic is not a physical seed diameter and must not make a
+    subsequent cooling step invalid.  If crystals are later seeded, the
+    operation contract uses the reference seed diameter below; when no solid
+    population exists, the positive value is accepted by the PBM but carries
+    zero seed mass and therefore creates no particles.
+    """
+
+    recorded_d50_m = crystallizer_settings.get("csd_d50_m")
+    if recorded_d50_m is None:
+        return DEFAULT_CRYSTAL_SEED_DIAMETER_M
+    try:
+        candidate = float(recorded_d50_m)
+    except (TypeError, ValueError):
+        return DEFAULT_CRYSTAL_SEED_DIAMETER_M
+    if candidate > 0.0 and np.isfinite(candidate):
+        return candidate
+    return DEFAULT_CRYSTAL_SEED_DIAMETER_M
 
 
 def _solid_phase_amounts(
@@ -179,6 +215,20 @@ class ChemWorldCrystallizationServices:
         ledger = augmented_state.ledger.with_updates(
             cost=augmented_state.ledger.cost + 0.012 + 0.20 * seed_mass
         )
+        if population_active(state):
+            from math import pi
+
+            cohorts = tuple(tuple(c) for c in previous_settings.get("population_cohorts", ()))
+            seed_particle_mass_g = 1200.0 * pi / 6 * DEFAULT_CRYSTAL_SEED_DIAMETER_M**3 * 1000
+            if seed_mass > 0:
+                cohorts += ((seed_mass / seed_particle_mass_g, DEFAULT_CRYSTAL_SEED_DIAMETER_M),)
+            equipment = upsert_equipment_record(
+                equipment,
+                equipment_id="crystallizer",
+                equipment_type="crystallizer",
+                attached_vessel_id=state.vessel_id,
+                settings=population_settings(cohorts),
+            )
         return augmented_state.replace(
             ledger=ledger,
             equipment=equipment,
@@ -194,62 +244,53 @@ class ChemWorldCrystallizationServices:
         crystallizer_settings = equipment_settings(state.equipment, "crystallizer")
         target_species = self.species_view.primary_target_species
         impurity_species = self.species_view.primary_impurity_species
-        seed_mass_g = float(crystallizer_settings.get("crystal_seed_mass_g", 0.0))
-        seed_target_mol = float(crystallizer_settings.get("seed_target_mol", 0.0))
-        p_mol = self.species_view.target_amount(state)
-        dissolved_product_mol = max(p_mol - seed_target_mol, 0.0)
-        impurity_mol = self.species_view.impurity_amount(state)
+        explicit_seed_mass_g = float(crystallizer_settings.get("crystal_seed_mass_g", 0.0))
+        explicit_seed_target_mol = float(crystallizer_settings.get("seed_target_mol", 0.0))
+        phase_records = {} if state.phases is None else state.phases.phases
+        mother_liquor = phase_records.get("mother_liquor")
+        existing_solid_product, existing_solid_impurity = _solid_phase_amounts(
+            state,
+            target_species=target_species,
+            impurity_species=impurity_species,
+        )
+        feed_amounts = (
+            state.species_amounts if mother_liquor is None else mother_liquor.species_amounts_mol
+        )
+        feed_volume_L = state.volume_L if mother_liquor is None else mother_liquor.volume_L
+        dissolved_product_mol = max(
+            float(feed_amounts.get(target_species, 0.0)),
+            0.0,
+        )
+        impurity_mol = max(float(feed_amounts.get(impurity_species, 0.0)), 0.0)
         target_molecular_weight = self._target_molecular_weight_kg_mol()
-        initial_concentration = dissolved_product_mol / max(state.volume_L, 1.0e-12)
-        solvent_index = int(
-            equipment_settings(state.equipment, "batch_reactor").get("solvent", 0)
-        )
-        material_coupling_enabled = (
-            state.metadata.get("crystallization_material_family_id")
-            == "reaction-crystallization-latent-materials-v1"
-        )
-        if material_coupling_enabled and solvent_index not in range(4):
-            raise ValueError("configured solvent index is outside the material contract")
-        solubility_multiplier = (
-            float(
-                self.world.crystallization_solvent_solubility_multipliers[
-                    solvent_index
-                ]
-            )
-            if material_coupling_enabled
-            else 1.0
-        )
-        nucleation_multiplier = (
-            float(
-                self.world.crystallization_solvent_nucleation_multipliers[
-                    solvent_index
-                ]
-            )
-            if material_coupling_enabled
-            else 1.0
-        )
-        growth_multiplier = (
-            float(
-                self.world.crystallization_solvent_growth_multipliers[solvent_index]
-            )
-            if material_coupling_enabled
-            else 1.0
-        )
-        occlusion_multiplier = (
-            float(
-                self.world.crystallization_solvent_occlusion_multipliers[
-                    solvent_index
-                ]
-            )
-            if material_coupling_enabled
-            else 1.0
-        )
+        # Every crystal already present in the slurry participates in the next
+        # population-balance step.  Passing only the originally charged seed
+        # would recreate material and discard the physical crystal population
+        # on repeated cooling.
+        effective_seed_target_mol = existing_solid_product
+        effective_seed_mass_g = effective_seed_target_mol * target_molecular_weight * 1000.0
+        initial_concentration = dissolved_product_mol / max(feed_volume_L, 1.0e-12)
+        solubility_multiplier = crystallization_medium_modifier(state, self.world, "solubility")
+        nucleation_multiplier = crystallization_medium_modifier(state, self.world, "nucleation")
+        growth_multiplier = crystallization_medium_modifier(state, self.world, "growth")
+        occlusion_multiplier = crystallization_medium_modifier(state, self.world, "occlusion")
         reference_solubility = (
             self.world.crystallization_reference_solubility_mol_L
             * self.world.domain_parameter("crystallization_solubility_multiplier")
             * solubility_multiplier
         )
         dissolution_enthalpy = 20_000.0
+        occlusion_law_id = str(
+            state.metadata.get(
+                "crystallization_impurity_occlusion_law_id",
+                "linear_supersaturation_transfer_v1",
+            )
+        )
+        occlusion_capacity_multiplier = float(
+            state.metadata.get("crystallization_impurity_occlusion_capacity_multiplier", 1.0)
+        )
+        if not 1.0 <= occlusion_capacity_multiplier <= 6.0:
+            raise ValueError("crystallization occlusion capacity multiplier must be in [1, 6]")
         solubility = SolubilityCurveSpec(
             model_id="runtime_vanthoff_material_solubility_v2",
             reference_solubility_mol_L=reference_solubility,
@@ -262,17 +303,26 @@ class ChemWorldCrystallizationServices:
         kinetics = CrystallizationKineticsSpec(
             model_id="runtime_cooling_population_balance_v1",
             primary_nucleation_coefficient_per_L_s=(
-                2.0e7 * self.world.domain_parameter("crystallization_nucleation_multiplier")
+                2.0e7
+                * self.world.domain_parameter("crystallization_nucleation_multiplier")
                 * nucleation_multiplier
             ),
             primary_nucleation_exponent=2.0,
-            growth_coefficient_m_s=2.0e-8 * growth_multiplier,
+            growth_coefficient_m_s=(
+                2.0e-8
+                * self.world.domain_parameter("crystallization_growth_multiplier")
+                * growth_multiplier
+            ),
             growth_exponent=1.0,
             crystal_density_kg_m3=1200.0,
             target_molecular_weight_kg_mol=target_molecular_weight,
             nucleus_diameter_m=8.0e-6,
-            impurity_occlusion_mol_per_mol=0.02 * occlusion_multiplier,
+            impurity_occlusion_mol_per_mol=(
+                0.02 * occlusion_multiplier * occlusion_capacity_multiplier
+            ),
             supersaturation_occlusion_factor=0.5,
+            impurity_occlusion_law_id=occlusion_law_id,
+            impurity_surface_half_saturation_mol_L=0.010,
             fines_threshold_m=20.0e-6,
             provenance_id="chemworld-world-law-v0.2-crystallization-kinetics",
         )
@@ -283,14 +333,20 @@ class ChemWorldCrystallizationServices:
             },
             target_component=target_species,
             impurity_component=impurity_species,
-            solvent_volume_L=max(state.volume_L, 1.0e-9),
+            solvent_volume_L=max(feed_volume_L, 1.0e-9),
             initial_temperature_K=state.temperature_K,
             final_temperature_K=target_temperature,
             duration_s=max(duration, 1.0e-9),
             solubility_curve=solubility,
             kinetics=kinetics,
-            seed_mass_g=seed_mass_g,
-            seed_diameter_m=100.0e-6,
+            seed_mass_g=effective_seed_mass_g,
+            seed_diameter_m=_effective_seed_diameter_m(crystallizer_settings),
+            initial_cohorts=tuple(
+                tuple(c) for c in crystallizer_settings.get("population_cohorts", ())
+            )
+            if population_active(state)
+            else None,
+            retain_population=population_active(state),
         )
         execution_spec = CrystallizationExecutionSpec.closed_loop_runtime()
         provider = self.runtime_provider
@@ -333,23 +389,37 @@ class ChemWorldCrystallizationServices:
         provider_manifest_hash = crystallization_runtime_adapter_manifest().manifest_hash
         crystallized = result.crystals_amounts_mol[target_species]
         crystallized_from_solution = result.crystallized_from_solution_mol
-        occluded_impurity = result.crystals_amounts_mol[impurity_species]
+        occluded_impurity = existing_solid_impurity + result.crystals_amounts_mol[impurity_species]
         process_metrics = {} if state.process is None else state.process.metrics
         initial_p = max(
-            float(process_metrics.get("pre_separation_product_mol", dissolved_product_mol)),
+            float(
+                process_metrics.get(
+                    "pre_separation_product_mol",
+                    max(
+                        self.species_view.target_amount(state) - explicit_seed_target_mol,
+                        0.0,
+                    ),
+                )
+            ),
             dissolved_product_mol,
             1.0e-12,
+        )
+        cumulative_crystallized = (
+            float(process_metrics.get("crystallized_from_solution_mol", 0.0))
+            + crystallized_from_solution
+        )
+        cumulative_crystal_total = crystallized + occluded_impurity
+        cumulative_crystal_purity = (
+            crystallized / cumulative_crystal_total if cumulative_crystal_total > 1.0e-12 else 0.0
         )
         process = process_with_metrics(
             state.process,
             pre_separation_product_mol=initial_p,
-            seed_target_mol=seed_target_mol,
-            crystallized_from_solution_mol=crystallized_from_solution,
-            crystal_yield=float(np.clip(crystallized_from_solution / initial_p, 0.0, 1.0)),
-            seed_excluded_recovery=float(
-                np.clip(crystallized_from_solution / initial_p, 0.0, 1.0)
-            ),
-            crystal_purity=float(np.clip(result.crystal_purity, 0.0, 1.0)),
+            seed_target_mol=explicit_seed_target_mol,
+            crystallized_from_solution_mol=cumulative_crystallized,
+            crystal_yield=float(np.clip(cumulative_crystallized / initial_p, 0.0, 1.0)),
+            seed_excluded_recovery=float(np.clip(cumulative_crystallized / initial_p, 0.0, 1.0)),
+            crystal_purity=float(np.clip(cumulative_crystal_purity, 0.0, 1.0)),
             crystal_size=float(
                 np.clip(result.crystal_size_distribution.d50_m / 250.0e-6, 0.0, 1.0)
             ),
@@ -416,9 +486,13 @@ class ChemWorldCrystallizationServices:
                 "initial_temperature_K": state.temperature_K,
                 "final_temperature_K": target_temperature,
                 "duration_s": duration,
-                "seed_mass_g": seed_mass_g,
+                "explicit_seed_mass_g": explicit_seed_mass_g,
+                "effective_seed_mass_g": effective_seed_mass_g,
+                "prior_solid_target_mol": existing_solid_product,
+                "added_crystallized_from_solution_mol": crystallized_from_solution,
+                "cumulative_solid_target_mol": crystallized,
                 "target_recovery": result.target_recovery,
-                "crystal_purity": result.crystal_purity,
+                "crystal_purity": cumulative_crystal_purity,
                 "csd_d50_m": result.crystal_size_distribution.d50_m,
                 "diagnostics": dict(provider_result.diagnostics),
                 "provenance": list(provider_result.provenance),
@@ -445,8 +519,10 @@ class ChemWorldCrystallizationServices:
                 "reference_solubility_temperature_K": solubility.reference_temperature_K,
                 "feed_concentration_mol_L": initial_concentration,
                 "kinetics_model_id": kinetics.model_id,
-                "seed_target_mol": seed_target_mol,
-                "crystallized_from_solution_mol": crystallized_from_solution,
+                "impurity_occlusion_law_id": kinetics.impurity_occlusion_law_id,
+                "seed_target_mol": explicit_seed_target_mol,
+                "effective_seed_target_mol": effective_seed_target_mol,
+                "crystallized_from_solution_mol": cumulative_crystallized,
                 "thermal_transition": thermal.to_dict(),
                 "material_balance_error_mol": result.material_balance_error_mol,
                 "component_balance_errors_mol": result.component_balance_errors_mol,
@@ -484,6 +560,29 @@ class ChemWorldCrystallizationServices:
                 "provenance": result.provenance,
             },
         )
+        if population_active(state):
+            dissolved_seed = float(crystallizer_settings.get("dissolved_seed_target_mol", 0.0))
+            transferred_seed = min(
+                dissolved_seed,
+                dissolved_seed * crystallized_from_solution / max(dissolved_product_mol, 1e-12),
+            )
+            equipment = upsert_equipment_record(
+                equipment,
+                equipment_id="crystallizer",
+                equipment_type="crystallizer",
+                attached_vessel_id=state.vessel_id,
+                settings={
+                    **population_settings(result.population_cohorts),
+                    **(
+                        {
+                            "seed_target_mol": explicit_seed_target_mol + transferred_seed,
+                            "dissolved_seed_target_mol": dissolved_seed - transferred_seed,
+                        }
+                        if seed_provenance_active(state)
+                        else {}
+                    ),
+                },
+            )
         metadata = {
             **state.metadata,
             "last_energy_transition": {
@@ -498,6 +597,119 @@ class ChemWorldCrystallizationServices:
             phases=phases,
             equipment=equipment,
             metadata=metadata,
+        )
+
+    def resuspend_crystals(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        """Retain the separated filtrate and put wet cake in fresh, isothermal solvent.
+
+        This operation does not force dissolution. Subsequent heating uses the
+        solubility curve, particle shrinkage and dissolution-energy model.
+        """
+        assert state.phases is not None
+        liquor = state.phases.phases["mother_liquor"]
+        solid = state.phases.phases["solid"]
+        cake_liquor = state.phases.phases["cake_liquor"]
+        crystal_settings = equipment_settings(state.equipment, "crystallizer")
+        dissolved_seed = float(crystal_settings.get("dissolved_seed_target_mol", 0.0))
+        liquid_total = liquor.volume_L + cake_liquor.volume_L
+        retained_liquid_fraction = cake_liquor.volume_L / max(liquid_total, 1e-12)
+        volume = _action_float(action, "volume_L", 0.015)
+        solvent = int(_action_float(action, "solvent", 0))
+        if not 0.0001 <= volume <= 0.080 or solvent not in range(len(SOLVENTS)):
+            raise ValueError("Invalid resuspension volume or solvent")
+        sample_id = next(
+            (
+                f"filtrate-{i:04d}"
+                for i in range(1, 17)
+                if f"filtrate-{i:04d}" not in state.samples.samples
+            ),
+            None,
+        )
+        if sample_id is None:
+            raise ValueError("All 16 disposable filtrate containers have been used")
+        source = _active(state)
+        source_contents = _contents(source)
+        sample = StoredSample(
+            sample_id=sample_id,
+            source_vessel_id=state.vessel_id,
+            collection_operation="resuspend_crystals",
+            collected_at_s=state.ledger.time_s,
+            volume_L=liquor.volume_L,
+            species_amounts_mol=liquor.species_amounts_mol,
+            temperature_K=state.temperature_K,
+            solvent=liquor.solvents.dominant_index,
+            quenched=state.quenched,
+            seed_target_mol=dissolved_seed * (1.0 - retained_liquid_fraction),
+            lineage=source.lineage,
+        )
+        sample = replace(
+            sample,
+            contents=replace(
+                _contents(sample),
+                species=source_contents.species,
+                phases=PhaseLedger(
+                    {
+                        "reactor_liquid": replace(
+                            liquor, phase_id="reactor_liquid", vessel_id=sample_id, selected=False
+                        )
+                    }
+                ),
+                reference_sources=source_contents.reference_sources,
+                reference_shares=source_contents.reference_shares,
+            ),
+        )
+        liquid_volume = volume + cake_liquor.volume_L
+        phases = PhaseLedger(
+            {
+                "solid": replace(solid, volume_L=0.0, selected=False),
+                "mother_liquor": replace(
+                    liquor,
+                    volume_L=liquid_volume,
+                    species_amounts_mol=cake_liquor.species_amounts_mol,
+                    solvents=cake_liquor.solvents + SolventInventory.pure(solvent, volume),
+                    selected=True,
+                ),
+            }
+        )
+        equipment = upsert_equipment_record(
+            state.equipment,
+            equipment_id="crystal_filter",
+            equipment_type="solid_liquid_filter",
+            attached_vessel_id=state.vessel_id,
+            status="resuspended",
+            settings={"crystals_filtered": False},
+        )
+        equipment = upsert_equipment_record(
+            equipment,
+            equipment_id="batch_reactor",
+            equipment_type="batch_reactor",
+            attached_vessel_id=state.vessel_id,
+            settings={"solvent_volume_L": liquid_volume, "catalyst_amount_mol": 0.0},
+        )
+        equipment = upsert_equipment_record(
+            equipment,
+            equipment_id="crystallizer",
+            equipment_type="crystallizer",
+            attached_vessel_id=state.vessel_id,
+            settings={"dissolved_seed_target_mol": dissolved_seed * retained_liquid_fraction},
+        )
+        return state.replace(
+            phases=phases,
+            species_amounts=phases.total_amounts_mol(),
+            volume_L=liquid_volume,
+            equipment=equipment,
+            samples=replace(
+                state.samples.append(sample),
+                containers_used=state.samples.containers_used + 1,
+                active_lineage=source.lineage,
+                active_reference_sources=source_contents.reference_sources,
+                active_reference_shares=source_contents.reference_shares,
+            ),
+            ledger=state.ledger.with_updates(
+                cost=state.ledger.cost
+                + 0.030
+                + volume * 8.0 * float(self.world.solvent_costs[solvent])
+            ),
         )
 
     def filter_crystals(self, state: WorldState) -> WorldState:
@@ -532,9 +744,7 @@ class ChemWorldCrystallizationServices:
             retained_seed_mol=retained_seed_mol,
             filtered_product_from_solution_mol=product_from_solution,
             crystal_yield=float(np.clip(product_from_solution / initial_p, 0.0, 1.0)),
-            seed_excluded_recovery=float(
-                np.clip(product_from_solution / initial_p, 0.0, 1.0)
-            ),
+            seed_excluded_recovery=float(np.clip(product_from_solution / initial_p, 0.0, 1.0)),
             crystal_purity=float(np.clip(purity, 0.0, 1.0)),
             recovery=float(np.clip(product_from_solution / initial_p, 0.0, 1.0)),
             purity=float(np.clip(purity, 0.0, 1.0)),
@@ -550,6 +760,29 @@ class ChemWorldCrystallizationServices:
             product_mol=product,
             impurity_mol=impurity,
             mother_liquor_volume_L=state.volume_L * 0.92,
+        )
+        # The wet cake retains 8% of the well-mixed mother liquor, including
+        # its dissolved solutes. Both liquid fractions remain in the ledger.
+        liquor = phases.phases["mother_liquor"]
+        phases = PhaseLedger(
+            {
+                **phases.phases,
+                "mother_liquor": replace(
+                    liquor,
+                    species_amounts_mol={
+                        s: n * 0.92 for s, n in liquor.species_amounts_mol.items()
+                    },
+                ),
+                "cake_liquor": replace(
+                    liquor,
+                    phase_id="cake_liquor",
+                    volume_L=state.volume_L * 0.08,
+                    species_amounts_mol={
+                        s: n * 0.08 for s, n in liquor.species_amounts_mol.items()
+                    },
+                    selected=False,
+                ),
+            }
         )
         phase_totals = phases.total_amounts_mol()
         filter_balance_error = max(
@@ -583,12 +816,34 @@ class ChemWorldCrystallizationServices:
                 ],
             },
         )
-        return state.replace(
-            ledger=ledger,
-            phases=phases,
-            process=process,
-            equipment=equipment,
-        )
+        if population_active(state):
+            equipment = upsert_equipment_record(
+                equipment,
+                equipment_id="crystallizer",
+                equipment_type="crystallizer",
+                attached_vessel_id=state.vessel_id,
+                settings={
+                    **population_settings(
+                        tuple(
+                            (n * 0.96, d)
+                            for n, d in crystallizer_settings.get("population_cohorts", ())
+                        )
+                    ),
+                    "seed_target_mol": retained_seed_mol,
+                    **(
+                        {
+                            "dissolved_seed_target_mol": float(
+                                crystallizer_settings.get("dissolved_seed_target_mol", 0.0)
+                            )
+                            + seed_target_mol
+                            - retained_seed_mol
+                        }
+                        if seed_provenance_active(state)
+                        else {}
+                    ),
+                },
+            )
+        return state.replace(ledger=ledger, phases=phases, process=process, equipment=equipment)
 
 
 __all__ = ["ChemWorldCrystallizationServices"]

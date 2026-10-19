@@ -118,13 +118,16 @@ def seven_slot_reference_ode_rhs(
     volume = max(state.volume_L, 1.0e-6)
     reactor_settings = equipment_settings(state.equipment, "batch_reactor")
     catalyst = int(reactor_settings.get("catalyst", 0))
-    solvent = int(reactor_settings.get("solvent", 0))
+    from chemworld.world.mixtures import volumetric_heat_capacity, working_solvents
+
     concentrations = amounts / volume
     cat_total = max(amounts[5] + amounts[6], 1.0e-12)
     eta_cat = amounts[5] / cat_total
 
     k = world.pre_exponential * np.exp(-world.activation_energy / (R_GAS * temperature))
-    k *= world.catalyst_effects[catalyst] * world.solvent_effects[solvent]
+    k *= world.catalyst_effects[catalyst] * np.array(
+        [working_solvents(state).log_property(tuple(world.solvent_effects[:, j])) for j in range(5)]
+    )
     stir_factor = 0.70 + 0.30 * (1.0 - np.exp(-stirring_speed_rpm / 420.0))
     low_mixing_side_penalty = 1.0 + 0.15 * (
         1.0 / (1.0 + np.exp((stirring_speed_rpm - 360.0) / 90.0))
@@ -152,7 +155,7 @@ def seven_slot_reference_ode_rhs(
         q_jacket = float(np.clip((target_temperature_K - temperature) * 4.0, -70.0, 90.0))
     heat_loss = world.ua_W_per_K * (temperature - world.environment_temperature_K)
     heat_reaction = float(np.dot(world.delta_h_J_per_mol, rates))
-    heat_capacity = max(world.rho_cp_J_per_L_K * volume, 1.0e-6)
+    heat_capacity = max(volumetric_heat_capacity(state, world.rho_cp_J_per_L_K) * volume, 1.0e-6)
     derivatives[7] = (q_jacket - heat_loss - heat_reaction) / heat_capacity
     derivatives[8] = q_jacket
     derivatives[9] = heat_reaction

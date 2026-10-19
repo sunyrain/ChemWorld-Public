@@ -19,6 +19,8 @@ def _generalization_contract(
     *,
     hidden_drivers: tuple[str, ...],
     evaluation: str,
+    support_scope: str = "candidate_task_axis",
+    required_context: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Bind scientific annotations to the executable world-axis registry."""
 
@@ -30,6 +32,8 @@ def _generalization_contract(
         "runtime_target_keys": axis.target_keys,
         "hidden_drivers": hidden_drivers,
         "evaluation": evaluation,
+        "support_scope": support_scope,
+        "required_context": required_context,
     }
 
 
@@ -66,6 +70,24 @@ SERIOUS_GENERALIZATION_CONTRACTS: dict[str, tuple[dict[str, Any], ...]] = {
                 "temperature-dependent solubility response",
             ),
             evaluation="task-recipe response-surface audit",
+        ),
+        _generalization_contract(
+            "crystallization.population-regime",
+            hidden_drivers=("opposed primary nucleation and growth multipliers",),
+            evaluation="development population-response and material-closure checks",
+            support_scope="development_authoring",
+        ),
+        _generalization_contract(
+            "crystallization.impurity-occlusion-law",
+            hidden_drivers=("supersaturation-transfer versus surface-saturation law",),
+            evaluation="development structural-law comparison",
+            support_scope="development_authoring",
+        ),
+        _generalization_contract(
+            "crystallization.impurity-occlusion-capacity",
+            hidden_drivers=("constant occlusion-capacity multiplier",),
+            evaluation="development scalar-null comparison; response can be zero",
+            support_scope="development_authoring",
         ),
     ),
     "reaction-to-distillation": (
@@ -114,6 +136,19 @@ SERIOUS_GENERALIZATION_CONTRACTS: dict[str, tuple[dict[str, Any], ...]] = {
             "equilibrium.activity-coefficient-regime",
             hidden_drivers=("hidden activity-coefficient ratio", "solution concentration"),
             evaluation="task-recipe response-surface audit",
+        ),
+        _generalization_contract(
+            "equilibrium.mechanism-benchmark",
+            hidden_drivers=("coupled weak-acid precipitation substrate",),
+            evaluation="development coupled-equilibrium closure checks",
+            support_scope="development_authoring",
+        ),
+        _generalization_contract(
+            "equilibrium.aqueous-ion-pair-network",
+            hidden_drivers=("aqueous association intermediate and mass-action constant",),
+            evaluation="development paired-network response checks",
+            support_scope="development_authoring",
+            required_context=("equilibrium.mechanism-benchmark substrate",),
         ),
     ),
 }

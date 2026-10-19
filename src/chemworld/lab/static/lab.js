@@ -22,6 +22,8 @@ function wire() {
   $("#operationSelect").addEventListener("change", renderOperationFields);
   $("#submitAction").addEventListener("click", submitAction);
   $("#downloadLog").addEventListener("click", downloadLog);
+  $("#closeSession").addEventListener("click", () => closeSession().catch((error) => showValidation(false, error.message)));
+  $("#verifyLog").addEventListener("click", verifyLog);
 }
 
 function currentTask() {
@@ -41,6 +43,7 @@ async function createSession() {
   const button = $("#createSession");
   button.disabled = true;
   try {
+    if (lab.session) await closeSession();
     const session = await api("/api/sessions", {
       method: "POST",
       body: { task_id: $("#taskSelect").value, seed: Number($("#seedInput").value || 0) },
@@ -86,7 +89,7 @@ function renderSession(session) {
   $("#seedInput").value = session.seed;
   previewTask(task);
   $("#sessionCode").textContent = session.session_id.slice(0, 8).toUpperCase();
-  $("#sessionState").textContent = session.done ? "Episode completed" : `${task.title} · seed ${session.seed}`;
+  $("#sessionState").textContent = session.done ? "Episode ended — check assay count and termination status" : `${task.title} · seed ${session.seed}`;
   $("#experimentBadge").textContent = `EXPERIMENT ${Number(campaign.experiment_index) + 1}`;
   $("#stepCount").textContent = `${campaign.operation_count} / ${campaign.budget}`;
   $("#remainingBudget").textContent = `${campaign.remaining_budget} remaining`;
@@ -97,6 +100,8 @@ function renderSession(session) {
   $("#costValue").textContent = fmt(visible.cost);
   $("#assayValue").textContent = campaign.final_assay_count ?? 0;
   $("#downloadLog").disabled = history.length === 0;
+  $("#verifyLog").disabled = history.length === 0;
+  $("#closeSession").disabled = false;
   renderTwin(latest, session.public_vessel);
   renderActions(session.available_actions, session.done);
   renderReport(session.lab_report, visible);
@@ -151,6 +156,9 @@ function fieldControl(field) {
     const labels = field.choice_labels || {};
     return `<label>${title}<select data-action-field="${esc(field.field)}">${choices.map((choice) => `<option value="${esc(choice)}">${esc(labels[String(choice)] || choice)}</option>`).join("")}</select></label>`;
   }
+  if (field.type === "string") {
+    return `<label>${title}<input data-action-field="${esc(field.field)}" data-text="true" type="text" ${field.required ? "required" : ""}></label>`;
+  }
   const bounds = field.recommended_range || field.bounds || {};
   const low = bounds.low ?? "", high = bounds.high ?? "";
   let initial = low !== "" && high !== "" ? (Number(low) + Number(high)) / 2 : "";
@@ -163,7 +171,7 @@ function buildAction() {
   const action = { operation: lab.affordance.operation };
   document.querySelectorAll("[data-action-field]").forEach((input) => {
     if (input.value === "") return;
-    action[input.dataset.actionField] = input.dataset.numeric === "true" ? Number(input.value) : parseChoice(input.value);
+    action[input.dataset.actionField] = input.dataset.numeric === "true" ? Number(input.value) : input.dataset.text === "true" ? input.value : parseChoice(input.value);
   });
   return action;
 }
@@ -180,7 +188,7 @@ function showValidation(success, message) {
 function renderReport(report, visible) {
   $("#labFeedback").textContent = report?.text || "执行操作后，公开观测与恢复建议会显示在这里。";
   $("#reportInstrument").textContent = report?.instrument_summary?.instrument || "NO INSTRUMENT";
-  const metrics = Object.entries(visible || {}).filter(([, value]) => Number.isFinite(Number(value))).slice(0, 9);
+  const metrics = Object.entries(visible || {}).filter(([, value]) => value !== null && value !== undefined && Number.isFinite(Number(value))).slice(0, 9);
   $("#metricGrid").innerHTML = metrics.map(([key, value]) => `<article><span>${esc(key)}</span><strong>${fmt(value, 4)}</strong></article>`).join("");
 }
 
@@ -198,12 +206,41 @@ function signed(value, unit = "", digits = 3) {
   return `${sign}${Math.abs(number).toFixed(digits)}${unit ? ` ${unit}` : ""}`;
 }
 
-function downloadLog() {
-  if (!lab.session) return;
-  const payload = { task_id: lab.session.task_id, seed: lab.session.seed, history: lab.session.history };
-  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+function saveTrajectory(payload) {
+  $("#exportCopy").value = payload.trajectory_jsonl;
+  const url = URL.createObjectURL(new Blob([payload.trajectory_jsonl], { type: "application/x-ndjson" }));
   const link = document.createElement("a");
-  link.href = url; link.download = `${lab.session.task_id}-student-lab.json`; link.click(); URL.revokeObjectURL(url);
+  link.href = url; link.download = `${payload.task_id}-student-lab.jsonl`;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+async function downloadLog() {
+  if (!lab.session) return;
+  try {
+    saveTrajectory(await api(`/api/sessions/${encodeURIComponent(lab.session.session_id)}/export`));
+    showValidation(true, "已请求下载，请确认文件保存。下载受阻时可复制下方导出副本。");
+  } catch (error) { showValidation(false, error.message); }
+}
+
+async function verifyLog() {
+  if (!lab.session) return;
+  $("#verifyLog").disabled = true;
+  try {
+    const result = await api(`/api/sessions/${encodeURIComponent(lab.session.session_id)}/replay`, { method: "POST", body: {} });
+    showValidation(result.verified, `Replay: ${result.verified ? "passed" : "failed"}; ${result.checked_steps} steps; max error ${result.max_abs_error}`);
+  } catch (error) { showValidation(false, error.message); }
+  finally { $("#verifyLog").disabled = !lab.session; }
+}
+
+async function closeSession() {
+  if (!lab.session) return;
+  const result = await api(`/api/sessions/${encodeURIComponent(lab.session.session_id)}/close`, { method: "POST", body: {} });
+  if (result.export.trajectory_jsonl) saveTrajectory(result.export);
+  lab.session = null;
+  for (const id of ["#closeSession", "#downloadLog", "#verifyLog", "#submitAction", "#operationSelect"]) $(id).disabled = true;
+  $("#sessionState").textContent = "Session closed (no additional assay)";
+  showValidation(true, "已请求下载并保留页面导出副本，请确认保存。会话已释放；关闭未增加终检，也不代表实验成功。");
 }
 
 async function api(url, options = {}) {

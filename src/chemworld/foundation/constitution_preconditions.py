@@ -47,29 +47,21 @@ def check_operation_preconditions(
     if instrument is None and instrument_id.isdigit():
         instruments = list(constitution.instruments.values())
         instrument = instruments[int(instrument_id) % len(instruments)]
-    requires_terminated = (
-        bool(instrument.requires_terminated) if instrument is not None else False
-    )
+    requires_terminated = bool(instrument.requires_terminated) if instrument is not None else False
     final_assay_done = instrument_completed(state.equipment, "final_assay")
     is_final_assay = (
-        operation_type == "measure"
-        and instrument is not None
-        and instrument.id == "final_assay"
+        operation_type == "measure" and instrument is not None and instrument.id == "final_assay"
     )
-    measurement_sample_available = (
-        operation_type != "measure"
-        or (
-            instrument is not None
-            and state.volume_L + constitution.tolerance >= instrument.sample_volume_L
-        )
+    measurement_sample_available = operation_type != "measure" or (
+        instrument is not None
+        and state.volume_L + constitution.tolerance >= instrument.sample_volume_L
     )
     phase_system = has_phase_system(state.phases)
     phase_settled = phases_are_settled(state.phases)
     crystallized = (
         state.phases is not None
         and "solid" in state.phases.phases
-        and sum(state.phases.phases["solid"].species_amounts_mol.values())
-        > constitution.tolerance
+        and sum(state.phases.phases["solid"].species_amounts_mol.values()) > constitution.tolerance
     )
     distillate_ready = (
         state.phases is not None
@@ -77,16 +69,23 @@ def check_operation_preconditions(
         and sum(state.phases.phases["distillate"].species_amounts_mol.values())
         > constitution.tolerance
     )
-    flow_settings = equipment_settings(state.equipment, "flow_reactor")
-    potential_settings = equipment_settings(state.equipment, "electrochemical_cell")
-    reactor_settings = equipment_settings(state.equipment, "batch_reactor")
-    crystallizer_settings = equipment_settings(state.equipment, "crystallizer")
+    flow_settings = equipment_settings(
+        state.equipment, "flow_reactor", fields=("flow_rate_mL_min", "residence_time_s")
+    )
+    potential_settings = equipment_settings(
+        state.equipment, "electrochemical_cell", fields=("potential_V", "current_mA")
+    )
+    reactor_settings = equipment_settings(
+        state.equipment, "batch_reactor", fields=("reaction_advance_index",)
+    )
+    crystallizer_settings = equipment_settings(
+        state.equipment, "crystallizer", fields=("seed_target_mol", "crystal_seed_mass_g")
+    )
     flow_ready = {"flow_rate_mL_min", "residence_time_s"} <= set(flow_settings)
     potential_ready = {"potential_V", "current_mA"} <= set(potential_settings)
     crystallization_ready = (
         int(reactor_settings.get("reaction_advance_index", 0)) > 0
-        or float(crystallizer_settings.get("seed_target_mol", 0.0))
-        > constitution.tolerance
+        or float(crystallizer_settings.get("seed_target_mol", 0.0)) > constitution.tolerance
     )
     seed_mass_g = float(crystallizer_settings.get("crystal_seed_mass_g", 0.0))
     crystallization_reference_temperature_valid = (
@@ -95,8 +94,7 @@ def check_operation_preconditions(
         <= _CRYSTALLIZATION_SOLUBILITY_MAXIMUM_TEMPERATURE_K
     )
     crystallization_seed_population_effective = (
-        seed_mass_g <= 0.0
-        or seed_mass_g >= _CRYSTALLIZATION_MINIMUM_EFFECTIVE_SEED_MASS_G
+        seed_mass_g <= 0.0 or seed_mass_g >= _CRYSTALLIZATION_MINIMUM_EFFECTIVE_SEED_MASS_G
     )
     phase_operations = {
         "add_extractant",
@@ -133,6 +131,7 @@ def check_operation_preconditions(
         "electrolyze",
     }
     needs_material = operation_type in {
+        "resuspend_crystals",
         "heat",
         "wait",
         "terminate",
@@ -153,7 +152,14 @@ def check_operation_preconditions(
         "electrolyze",
     }
     needs_not_terminated = operation_type in {
+        "configure_instrument",
+        "select_vessel",
+        "route_material",
+        "create_container",
+        "transfer_material",
+        "resuspend_crystals",
         "add_reagent",
+        "add_component",
         "add_solvent",
         "add_catalyst",
         "heat",
@@ -181,6 +187,15 @@ def check_operation_preconditions(
         "electrolyze",
         "terminate",
     }
+    from chemworld.world.control_contract import CONTROL_OPERATIONS
+    from chemworld.world.stream_contract import STREAM_OPERATIONS
+
+    if operation_type in CONTROL_OPERATIONS:
+        needs_not_terminated = True
+        needs_volume = operation_type == "advance_control"
+    if operation_type in STREAM_OPERATIONS:
+        needs_not_terminated = True
+        needs_volume = operation_type == "advance_flow"
     return {
         "instrument_available": operation_type != "measure" or instrument is not None,
         "has_volume": not needs_volume or has_volume,
@@ -197,22 +212,27 @@ def check_operation_preconditions(
         "measurement_sample_available": measurement_sample_available,
         "measure_final_not_repeated": not is_final_assay or not final_assay_done,
         "terminate_requires_material": operation_type != "terminate" or has_material,
-        "filter_requires_crystallization": operation_type != "filter_crystals"
-        or crystallized,
-        "cool_crystallize_requires_reaction_or_seed": operation_type
-        != "cool_crystallize"
+        "filter_requires_crystallization": operation_type != "filter_crystals" or crystallized,
+        "resuspend_requires_filtered_crystals": operation_type != "resuspend_crystals"
+        or (
+            bool(equipment_settings(state.equipment, "crystal_filter").get("crystals_filtered"))
+            and state.phases is not None
+            and "solid" in state.phases.phases
+            and "mother_liquor" in state.phases.phases
+            and "cake_liquor" in state.phases.phases
+            and state.quenched
+        ),
+        "cool_crystallize_requires_reaction_or_seed": operation_type != "cool_crystallize"
         or crystallization_ready,
         "cool_crystallize_reference_temperature_in_solubility_domain": operation_type
         != "cool_crystallize"
         or crystallization_reference_temperature_valid,
-        "cool_crystallize_seed_population_effective": operation_type
-        != "cool_crystallize"
+        "cool_crystallize_seed_population_effective": operation_type != "cool_crystallize"
         or crystallization_seed_population_effective,
         "collect_fraction_requires_distillation": operation_type != "collect_fraction"
         or distillate_ready,
         "run_flow_requires_flow_setup": operation_type != "run_flow" or flow_ready,
-        "electrolyze_requires_potential": operation_type != "electrolyze"
-        or potential_ready,
+        "electrolyze_requires_potential": operation_type != "electrolyze" or potential_ready,
     }
 
 

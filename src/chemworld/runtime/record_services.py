@@ -16,6 +16,7 @@ from chemworld.world.operations import instrument_name
 MATERIAL_DELTA_ALLOWED_OPERATIONS = frozenset(
     {
         "add_reagent",
+        "add_component",
         "add_catalyst",
         "add_solvent",
         "sample",
@@ -68,13 +69,12 @@ class ChemWorldOperationRecorder:
         checks = self._constitution_checks(operation, before, after)
         instrument = None
         measurement_cost = 0.0
-        sample_consumed = 0.0
+        sample_consumed = after.ledger.sample_consumed_L - before.ledger.sample_consumed_L
         preconditions_passed = all(preconditions.values())
         if operation == "measure":
             instrument = instrument_name(action.get("instrument", "hplc"))
             if preconditions_passed:
-                measurement_cost = self.constitution.instruments[instrument].cost
-                sample_consumed = self.constitution.instruments[instrument].sample_volume_L
+                measurement_cost = after.ledger.cost - before.ledger.cost
         return OperationRecord(
             operation_type=operation,
             preconditions=preconditions,

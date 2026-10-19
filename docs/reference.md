@@ -1,5 +1,7 @@
 # API reference
 
+> Current main: [October foundation update](current-foundation.md). Existing figures and numerical evidence below describe the frozen August runtime.
+
 ChemWorld exposes the same runtime surface as v0.2.0. Start from the agent-facing helpers, then use the deeper contracts when authoring worlds or evaluation code.
 
 | Topic | Reference |

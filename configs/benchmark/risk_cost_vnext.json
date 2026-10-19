@@ -1,0 +1,104 @@
+{
+  "schema_version": "chemworld-risk-cost-protocol-0.1",
+  "protocol_id": "chemworld-vnext-risk-cost-candidate-0.1",
+  "status": "candidate_controls_only",
+  "benchmark_claim_allowed": false,
+  "risk_semantics": "benchmark_operational_risk_budget_not_real_world_safety",
+  "risk_aggregation": "max_operation_risk_per_experiment",
+  "process_cost_aggregation": "terminal_total_cost_minus_measurement_cost",
+  "measurement_cost_aggregation": "sum_operation_measurement_cost",
+  "runner_binding": {
+    "mode": "vnext_risk_cost",
+    "binds_environment_constraint_flags": true,
+    "binds_public_agent_context": true,
+    "binds_trajectory_safety_limit": true,
+    "policy_hash_required": true
+  },
+  "calibration": {
+    "methods": [
+      "random",
+      "lhs"
+    ],
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "risk_quantile": 0.8,
+    "process_cost_quantile": 0.9
+  },
+  "holdout": {
+    "seeds": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19
+    ],
+    "risk_activation_rate_bounds": [
+      0.1,
+      0.5
+    ],
+    "process_cost_activation_rate_bounds": [
+      0.05,
+      0.25
+    ]
+  },
+  "formal_methods": [
+    "random",
+    "lhs",
+    "gp_bo",
+    "structured_gp_bo",
+    "structured_safe_gp_bo"
+  ],
+  "risk_performance_tradeoff_tasks": [
+    "reaction-to-crystallization",
+    "reaction-to-distillation",
+    "flow-reaction-optimization"
+  ],
+  "minimum_tradeoff_spearman": 0.2,
+  "tasks": {
+    "partition-discovery": {
+      "risk_limit": 0.21225822269916542,
+      "process_cost_limit": 0.12955081641674044
+    },
+    "reaction-to-crystallization": {
+      "risk_limit": 0.257127845287323,
+      "process_cost_limit": 0.6453835582733157
+    },
+    "reaction-to-distillation": {
+      "risk_limit": 0.3852870047092439,
+      "process_cost_limit": 0.7245063233375549
+    },
+    "flow-reaction-optimization": {
+      "risk_limit": 0.32665647864341746,
+      "process_cost_limit": 0.5389897429943085
+    },
+    "electrochemical-conversion": {
+      "risk_limit": 0.19632664322853094,
+      "process_cost_limit": 0.13271164238452915
+    },
+    "equilibrium-characterization": {
+      "risk_limit": 0.1631310492753983,
+      "process_cost_limit": 0.09409476006031041
+    }
+  },
+  "remaining_release_gates": [
+    "rerun all methods after they receive the same task-specific risk policy",
+    "add adaptive measurement policies before claiming measurement efficiency",
+    "validate operational risk budgets against dedicated physical hazard envelopes",
+    "bind risk and cost summaries to replay and method protocol hashes"
+  ]
+}

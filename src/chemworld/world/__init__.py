@@ -30,6 +30,13 @@ from chemworld.world.continuous_flow import ContinuousFlowModuleSpec
 from chemworld.world.crystallization import CrystallizationModuleSpec
 from chemworld.world.distillation import DistillationModuleSpec
 from chemworld.world.electrochemistry import ElectrochemistryModuleSpec
+from chemworld.world.equilibrium_entity import (
+    EQUILIBRIUM_ENTITY_PANEL_VERSION,
+    EquilibriumEntityPanelIntervention,
+    EquilibriumEntityProfileSpec,
+    apply_equilibrium_entity_panel,
+    equilibrium_entity_panel_hash,
+)
 from chemworld.world.instruments import InstrumentContract, instrument_contracts
 from chemworld.world.material_counterfactual import (
     MATERIAL_LAW_COUNTERFACTUAL_VERSION,
@@ -80,6 +87,7 @@ from chemworld.world.world_law import (
 )
 
 __all__ = [
+    "EQUILIBRIUM_ENTITY_PANEL_VERSION",
     "MATERIAL_LAW_COUNTERFACTUAL_VERSION",
     "MECHANISM_FAMILY_INTERVENTION_VERSION",
     "MECHANISM_REACHABLE_TASKS",
@@ -102,6 +110,8 @@ __all__ = [
     "DiscreteCoverageAxis",
     "DistillationModuleSpec",
     "ElectrochemistryModuleSpec",
+    "EquilibriumEntityPanelIntervention",
+    "EquilibriumEntityProfileSpec",
     "GeneratedCompositionCase",
     "InstrumentContract",
     "MaterialLawCounterfactual",
@@ -118,12 +128,14 @@ __all__ = [
     "WorldCompositionDiagnostic",
     "WorldCompositionError",
     "WorldCompositionSpec",
+    "apply_equilibrium_entity_panel",
     "apply_material_law_counterfactual",
     "axes_for_task",
     "check_world_composition_compatibility",
     "compile_recipe",
     "compile_world_composition",
     "constitution_rules",
+    "equilibrium_entity_panel_hash",
     "expand_macro_action",
     "final_assay_spectra",
     "gc_chromatogram",

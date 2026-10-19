@@ -11,6 +11,8 @@ import gymnasium as gym
 import chemworld  # noqa: F401
 from chemworld.data.validation import validate_records
 from chemworld.envs.chemworld_env import ChemWorldEnv
+from chemworld.runtime.semantics import RUNTIME_SEMANTICS_ID
+from chemworld.world.thermal_control import REACTION_THERMAL_CONTROL_ID
 
 
 @dataclass(frozen=True)
@@ -153,6 +155,33 @@ def verify_records(
     """Replay trajectory actions and compare deterministic observations/rewards."""
 
     validate_records(records)
+    for record in records:
+        semantics = {
+            "reaction_thermal_control_id": REACTION_THERMAL_CONTROL_ID,
+            "runtime_semantics_id": RUNTIME_SEMANTICS_ID,
+        }
+        for field, current in semantics.items():
+            if record.get(field) == current:
+                continue
+            return VerificationResult(
+                verified=False,
+                checked_steps=0,
+                max_abs_error=0.0,
+                mismatches=[
+                    {
+                        "step": record["step"],
+                        "field": field,
+                        "recorded": record.get(field),
+                        "replayed": current,
+                        "abs_error": None,
+                        "reason": (
+                            "This trajectory requires its original frozen runtime and uv.lock. "
+                            "Current main does not replay historical physics; see "
+                            "configs/current.json publication.frozen_release for paper evidence."
+                        ),
+                    }
+                ],
+            )
     first = records[0]
     composition_request = first.get("composition_request")
     benchmark_task_id = first.get("benchmark_task_id")
@@ -171,13 +200,10 @@ def verify_records(
             env_kwargs["budget_override"] = int(first["budget"])
             env_kwargs["episode_mode_override"] = str(first["episode_mode"])
         optional_string_kwargs = {
+            "full_process_contract_id": "full_process_contract_id",
             "electrochemical_workflow_mode": "electrochemical_workflow_mode",
-            "electrochemical_material_family_id": (
-                "electrochemical_material_family_id"
-            ),
-            "crystallization_material_family_id": (
-                "crystallization_material_family_id"
-            ),
+            "electrochemical_material_family_id": ("electrochemical_material_family_id"),
+            "crystallization_material_family_id": ("crystallization_material_family_id"),
             "scoring_contract_id": "scoring_contract_id",
             "observation_noise_mode": "observation_noise_mode",
             "observation_noise_namespace": "observation_noise_namespace",
@@ -186,11 +212,6 @@ def verify_records(
             value = first.get(record_key)
             if isinstance(value, str) and value:
                 env_kwargs[env_key] = value
-        observation_seed = first.get("observation_seed")
-        if isinstance(observation_seed, int) and not isinstance(
-            observation_seed, bool
-        ):
-            env_kwargs["observation_seed_override"] = observation_seed
         # New trajectories carry the evaluator-only normalized configuration
         # separately so a misindexed arm can be reconstructed without exposing
         # the transposition to the agent-facing material dossier.  Fall back
@@ -213,7 +234,14 @@ def verify_records(
             "objective": _objective_from_record(first),
             "seed": int(first["seed"]),
         }
+    # Observation streams can be overridden for composed worlds as well as
+    # benchmark tasks. Reconstruct the recorded stream independently of seed.
+    observation_seed = first.get("observation_seed")
+    if isinstance(observation_seed, int) and not isinstance(observation_seed, bool):
+        env_kwargs["observation_seed_override"] = observation_seed
     campaign_resource_card = first.get("campaign_resource_card")
+    if isinstance(first.get("research_brief"), dict):
+        env_kwargs["research_brief"] = dict(first["research_brief"])
     if isinstance(campaign_resource_card, dict):
         env_kwargs["campaign_resource_card"] = dict(campaign_resource_card)
     if world_interventions:
@@ -299,6 +327,52 @@ def verify_records(
             replay_audit_info = {**info, **replay_provenance}
             replay_observation = _scalar_observation(observation)
             recorded_observation = record["observation"]
+            if (
+                campaign_resource_card
+                and campaign_resource_card.get("hard_limits", {}).get("per_batch")
+            ):
+                for field in (
+                    "batch_resource_preflight", "batch_resource_state",
+                    "batch_budget_exhausted", "last_terminal_summary",
+                ):
+                    recorded_local = record.get("environment_outcome", {}).get(field)
+                    replayed_local = info.get(field)
+                    if field == "batch_resource_preflight":
+                        # Receipt IDs include the new replay session identity.
+                        # Compare all resource decisions and amounts exactly.
+                        recorded_local = {k: v for k, v in (recorded_local or {}).items()
+                                          if k != "event_id"}
+                        replayed_local = {k: v for k, v in (replayed_local or {}).items()
+                                          if k != "event_id"}
+                    mismatches.extend(_jsonish_mismatches(
+                        step=int(record["step"]), field=field,
+                        recorded=recorded_local, replayed=replayed_local, tolerance=tolerance,
+                    ))
+            for inventory_field, default_inventory in (
+                ("sample_inventory", []), ("material_routing", {})
+            ):
+                recorded_inventory = record.get("environment_outcome", {}).get(inventory_field)
+                if recorded_inventory is None:
+                    continue
+                inventory_mismatches = _jsonish_mismatches(
+                    step=int(record["step"]),
+                    field=inventory_field,
+                    recorded=recorded_inventory,
+                    replayed=info.get(inventory_field, default_inventory),
+                    tolerance=tolerance,
+                )
+                mismatches.extend(inventory_mismatches)
+                max_abs_error = max(
+                    max_abs_error,
+                    max(
+                        (
+                            float(item["abs_error"])
+                            for item in inventory_mismatches
+                            if item.get("abs_error") is not None
+                        ),
+                        default=0.0,
+                    ),
+                )
 
             reward_error = abs(float(record["reward"]) - float(reward))
             max_abs_error = max(max_abs_error, reward_error)
@@ -390,6 +464,12 @@ def verify_records(
                 "transaction_status",
                 "rollback_reason",
                 "state_delta_summary",
+                "observed_mask",
+                "raw_signal",
+                "processed_estimate",
+                "uncertainty",
+                "measurement_cost",
+                "sample_consumed",
             )
             for field in replay_metadata_fields:
                 if field not in record:

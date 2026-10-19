@@ -1,0 +1,53 @@
+{
+  "schema_version": "chemworld-resource-limits-0.1",
+  "protocol_id": "chemworld-resource-limits-0.1",
+  "benchmark_claim_allowed": false,
+  "evaluation_budget": {
+    "complete_experiments": 40,
+    "wall_time_limit_s_per_run": 1800.0,
+    "primary_fairness_axis": "complete_experiments"
+  },
+  "checkpoints": [4, 8, 12, 20, 40],
+  "resource_policy": {
+    "overrun_policy": "fail_closed",
+    "incomplete_accounting_policy": "exclude_run_and_report_failure",
+    "resource_axes_are_not_scalarized": true,
+    "required_run_ledger": [
+      "operation_count",
+      "complete_experiment_count",
+      "decision_wall_time_s",
+      "update_wall_time_s",
+      "run_wall_time_s",
+      "model_call_count",
+      "input_token_count",
+      "output_token_count",
+      "monetary_cost_usd",
+      "training_environment_step_count",
+      "cpu_time_s",
+      "gpu_time_s"
+    ],
+    "llm_hard_limits_per_evaluation_run": {
+      "provider_request_limit_per_operation": 6,
+      "failed_requests_count_toward_limit": true,
+      "input_tokens": 1000000,
+      "output_tokens": 200000,
+      "monetary_cost_usd": 50.0
+    },
+    "rl_hard_limits_per_task_training": {
+      "training_environment_steps": 1000000,
+      "gpu_time_s": 28800.0
+    }
+  },
+  "llm_evidence_policy": {
+    "private_chain_of_thought_required": false,
+    "structured_decision_record_required": true,
+    "required_model_provenance": [
+      "provider",
+      "model_id",
+      "model_snapshot_or_access_date",
+      "prompt_hash",
+      "request_parameters",
+      "tokenizer_or_provider_usage_source"
+    ]
+  }
+}

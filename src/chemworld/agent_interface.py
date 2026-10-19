@@ -2,20 +2,25 @@
 
 The functions in this module are intentionally thin adapters over the existing
 task registry, operation validator, observation contracts, and campaign state.
-They do not read hidden ledgers or rate constants.
+The full-process sensor view exposes explicitly declared operational readouts,
+never latent composition, process-quality summaries, or rate constants.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from contextvars import ContextVar
 from copy import deepcopy
-from typing import Any
+from functools import wraps
+from typing import Any, Concatenate, ParamSpec, TypeVar
 
 import numpy as np
 
 from chemworld.data.logging import to_builtin
 from chemworld.envs.spaces import OBSERVATION_KEYS
-from chemworld.foundation import equipment_settings
+from chemworld.foundation import equipment_settings, selected_phase_id
+from chemworld.foundation.samples import CONTAINER_IDS
 from chemworld.materials import material_choice_labels
 from chemworld.operation_validator import (
     ELECTROCHEMICAL_MIN_ADAPTED_CURRENT_DELTA_MA,
@@ -27,19 +32,87 @@ from chemworld.physchem.crystallization_units import (
 from chemworld.physchem.electrochemical_task_contract import (
     ELECTROCHEMICAL_WORKFLOW_AUTONOMOUS_OPEN_V1,
 )
+from chemworld.runtime.component_network import public_network
+from chemworld.runtime.continuous_streams import public_streams
+from chemworld.runtime.control_program import public_control
+from chemworld.runtime.spectral_settings import public_spectral_settings
 from chemworld.world.actions import CATALYSTS, ELECTROLYTE_PROFILES, SOLVENTS
+from chemworld.world.control_contract import CONTROL_CHOICES, CONTROL_NUMERIC
 from chemworld.world.operations import (
     CAMPAIGN_CONTROL_OPERATIONS,
-    INSTRUMENTS,
     OPERATION_FIELD_BOUNDS,
     OPERATION_FIELD_CHOICES,
     OPERATION_TYPES,
     operation_contracts,
 )
+from chemworld.world.operations import (
+    EXTENDED_INSTRUMENTS as INSTRUMENTS,
+)
+from chemworld.world.spectral_contract import SPECTRAL_BOUNDS
 
 PUBLIC_ACTION_SCHEMA_VERSION = "chemworld-public-action-affordance-0.2"
 
+# Synchronous public-view builders never execute actions. Reuse the verified
+# resource snapshot only within that read, then discard it even on exceptions.
+# ContextVar isolates concurrent callers; nested calls for another env/state
+# receive their own scope. Nothing is cached by state identity across requests.
+_RESOURCE_READ: ContextVar[tuple[Any, Any, Any, dict[str, Any]] | None] = ContextVar(
+    "chemworld_public_resource_read", default=None
+)
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _resource_read(
+    function: Callable[Concatenate[Any, _P], _R],
+) -> Callable[Concatenate[Any, _P], _R]:
+    @wraps(function)
+    def read(env: Any, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        base = _base_env(env)
+        ledger = getattr(base, "_campaign_resource_ledger", None)
+        state = getattr(base, "_state", None)
+        active = _RESOURCE_READ.get()
+        if ledger is None or (
+            active is not None and active[0] is base and active[1] is ledger and active[2] is state
+        ):
+            return function(env, *args, **kwargs)
+        token = _RESOURCE_READ.set((base, ledger, state, {}))
+        try:
+            return function(env, *args, **kwargs)
+        finally:
+            _RESOURCE_READ.reset(token)
+
+    return read
+
+
+def _campaign_snapshot(base: Any, ledger: Any) -> dict[str, Any]:
+    active = _RESOURCE_READ.get()
+    if (
+        active is None
+        or active[0] is not base
+        or active[1] is not ledger
+        or active[2] is not getattr(base, "_state", None)
+    ):
+        return ledger.snapshot()
+    cache = active[3]
+    if "snapshot" not in cache:
+        cache["snapshot"] = ledger.snapshot()
+    return cache["snapshot"]
+
+
 FIELD_UNITS: dict[str, str] = {
+    **{key: values[2] for key, values in SPECTRAL_BOUNDS.items()},
+    **{key: values[2] for key, values in CONTROL_NUMERIC.items()},
+    **dict.fromkeys(CONTROL_CHOICES, "categorical"),
+    "vessel": "categorical",
+    "connection": "categorical",
+    "capacity_L": "L",
+    "container": "categorical",
+    "source_container": "categorical",
+    "destination_container": "categorical",
+    "mixing": "categorical",
     "amount_mol": "mol",
     "volume_L": "L",
     "catalyst_amount_mol": "mol",
@@ -65,6 +138,9 @@ FIELD_UNITS: dict[str, str] = {
 }
 
 FIELD_RANGES: dict[str, tuple[float, float]] = {
+    **{key: (values[0], values[1]) for key, values in SPECTRAL_BOUNDS.items()},
+    **{key: (values[0], values[1]) for key, values in CONTROL_NUMERIC.items()},
+    "capacity_L": (0.0001, 0.1),
     "amount_mol": (0.0, 0.040),
     "volume_L": (0.0, 0.080),
     "catalyst_amount_mol": (0.0, 0.005),
@@ -76,13 +152,21 @@ FIELD_RANGES: dict[str, tuple[float, float]] = {
     "transfer_fraction": (0.0, 1.0),
     "seed_mass_g": (0.0, 1.0),
     "reflux_ratio": (0.0, 10.0),
-    "flow_rate_mL_min": (0.01, 20.0),
+    "flow_rate_mL_min": (0.0, 20.0),
     "residence_time_s": (1.0, 7200.0),
     "potential_V": (-3.0, 3.0),
     "current_mA": (0.0, 500.0),
 }
 
 FIELD_CHOICES: dict[str, list[Any]] = {
+    **{key: list(range(len(values))) for key, values in CONTROL_CHOICES.items()},
+    "vessel": list(range(16)),
+    "connection": list(range(64)),
+    "component": list(range(16)),
+    "container": list(range(1, 17)),
+    "source_container": list(range(len(CONTAINER_IDS))),
+    "destination_container": list(range(len(CONTAINER_IDS))),
+    "mixing": [0, 1],
     "instrument": list(INSTRUMENTS),
     "catalyst": list(range(len(CATALYSTS))),
     "solvent": list(range(len(SOLVENTS))),
@@ -93,7 +177,7 @@ FIELD_CHOICES: dict[str, list[Any]] = {
 }
 
 OPERATION_GROUPS: dict[str, tuple[str, ...]] = {
-    "reaction_setup": ("add_solvent", "add_reagent", "add_catalyst"),
+    "reaction_setup": ("add_solvent", "add_reagent", "add_component", "add_catalyst"),
     "reaction_control": ("heat", "wait", "quench", "terminate"),
     "sampling_and_measurement": ("sample", "measure"),
     "phase_setup": ("add_phase", "add_extractant"),
@@ -130,7 +214,7 @@ TASK_PROMPT_PROFILES: dict[str, dict[str, Any]] = {
         "failure_modes": [
             "precondition failure",
             "budget exhaustion before final_assay",
-            "unsafe high-temperature or high-risk trajectory",
+            "process/procedure penalty at or above the task limit",
         ],
     },
     "reaction-to-purification": {
@@ -286,7 +370,7 @@ ELECTROCHEMICAL_AUTONOMOUS_OPEN_PROMPT_PROFILE: dict[str, Any] = {
         "Complete each chosen experiment through terminate and final_assay.",
     ],
     "constraints": [
-        "Material identities become locked when the corresponding physical fixture is charged.",
+        "Catalyst and electrolyte identities are fixed; solvent composition changes with dosing.",
         "Terminate is legal only after at least one committed electrolysis.",
         "No diagnostic instrument, second stage, or setpoint change is mandatory.",
     ],
@@ -302,7 +386,7 @@ ELECTROCHEMICAL_AUTONOMOUS_OPEN_PROMPT_PROFILE: dict[str, Any] = {
     "failure_modes": [
         "terminating before electrolysis",
         "budget exhaustion before final_assay",
-        "invalid material changes after the cell formulation is locked",
+        "invalid catalyst or electrolyte changes after the corresponding fixture is charged",
     ],
 }
 
@@ -376,6 +460,10 @@ def _field_schema(
         payload["recommended_range"] = {"low": low, "high": high}
         payload["lower_bound_inclusive"] = not (
             field in {"amount_mol", "catalyst_amount_mol", "sample_volume_L"}
+            or (
+                operation in {"transfer_material", "route_material"}
+                and field == "transfer_fraction"
+            )
             or (field == "volume_L" and operation in {"add_solvent", "add_phase", "add_extractant"})
         )
         payload["upper_bound_inclusive"] = True
@@ -385,6 +473,14 @@ def _field_schema(
     choices = list(operation_choices) if operation_choices is not None else FIELD_CHOICES.get(field)
     if choices is not None:
         payload["choices"] = list(choices)
+        if field in {"container", "source_container", "destination_container"}:
+            payload["choice_labels"] = {str(i): CONTAINER_IDS[i] for i in choices}
+        elif field == "mixing":
+            payload["choice_labels"] = {"0": "empty destination only", "1": "allow mixing"}
+        elif field in CONTROL_CHOICES:
+            payload["choice_labels"] = {
+                str(i): name for i, name in enumerate(CONTROL_CHOICES[field])
+            }
         labels = material_choice_labels(field, task_id=task_id)
         if labels:
             payload["choice_labels"] = labels
@@ -393,13 +489,7 @@ def _field_schema(
 
 def _locked_recipe_choice(base: Any, operation: str, field: str) -> Any | None:
     lock_contract = {
-        "add_solvent": ("solvent", "batch_reactor", "solvent_volume_L"),
         "add_catalyst": ("catalyst", "batch_reactor", "catalyst_amount_mol"),
-        "add_extractant": (
-            "extractant",
-            "liquid_liquid_extractor",
-            "extractant_volume_L",
-        ),
     }.get(operation)
     if lock_contract is None:
         return None
@@ -409,12 +499,13 @@ def _locked_recipe_choice(base: Any, operation: str, field: str) -> Any | None:
     state = getattr(base, "_state", None)
     if state is None:
         return None
-    settings = equipment_settings(state.equipment, equipment_id)
+    settings = equipment_settings(state.equipment, equipment_id, fields=(charged_key, field))
     if float(settings.get(charged_key, 0.0)) <= 0.0:
         return None
     return settings.get(field)
 
 
+@_resource_read
 def action_schema(env: Any, operation: str) -> dict[str, Any]:
     """Return the public JSON-friendly schema for one operation."""
 
@@ -436,6 +527,19 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
         _field_schema(field, operation=operation, task_id=task_id)
         for field in contract.required_fields
     ]
+    from chemworld.runtime.full_process_contract import population_active
+
+    if operation == "distill" and state is not None and population_active(state):
+        fields.append(
+            {
+                "field": "cut_fraction",
+                "required": False,
+                "type": "number",
+                "bounds": {"low": 0.005, "high": 0.9},
+                "description": "Requested fraction of feed distilled; independent of "
+                "duration. Actual cut is limited by duty. Omission uses legacy duration rule.",
+            }
+        )
     if operation == "measure":
         allowed_instruments = getattr(base, "allowed_instruments", set(INSTRUMENTS))
         fields = [
@@ -480,12 +584,30 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
             if public_choices != choices:
                 field["choices"] = public_choices
                 field["state_dependent_choices"] = True
+            if field_name in {"vessel", "connection"}:
+                network = public_network(state)
+                entries = (
+                    []
+                    if network is None
+                    else network["vessels" if field_name == "vessel" else "connections"]
+                )
+                field["choice_labels"] = {str(item["index"]): item["id"] for item in entries}
         locked = _locked_recipe_choice(base, operation, field_name)
         if locked is not None:
             field["choices"] = [locked]
             field["locked_for_current_experiment"] = True
     _apply_campaign_resource_schema(base, operation, fields)
     constraints: list[dict[str, Any]] = []
+    if operation in {"select_vessel", "route_material"} and state is not None:
+        constraints.append(
+            {"id": "component_network", "kind": "material_ports", "network": public_network(state)}
+        )
+    if operation == "transfer_material" and state is not None:
+        from chemworld.runtime.material_routing import material_routes
+
+        constraints.append(
+            {"id": "material_routing", "kind": "material_routes", "routes": material_routes(state)}
+        )
     if operation == "cool_crystallize" and state is not None:
         constraints.extend(
             [
@@ -522,7 +644,9 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
             }
         )
         if state is not None:
-            cell_settings = equipment_settings(state.equipment, "electrochemical_cell")
+            cell_settings = equipment_settings(
+                state.equipment, "electrochemical_cell", fields=("setpoint_history",)
+            )
             setpoint_history = tuple(cell_settings.get("setpoint_history", ()))
             if (
                 len(setpoint_history) == 1
@@ -567,6 +691,20 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
             "Use validate_action(action) before executing.",
             "Payload aliases are canonicalized by the environment action codec.",
             "Fields outside operation and required_fields are rejected atomically.",
+            *(
+                [
+                    "Storage domain: quenched finite-catalog mixed liquids and crystal slurries; "
+                    "sealed isothermal storage has no reaction, evaporation or phase evolution.",
+                    "Transfer is instantaneous and proportional in every phase; liquid heat "
+                    "capacity determines adiabatic mixing temperature.",
+                    "Each transfer uses a new disposable tool (cost 0.005); each new container "
+                    "costs 0.02 and retires when emptied. Occupied destinations require mixing=1.",
+                    "Addresses: active=0, container-01..16=1..16, filtrate-0001..0016=17..32. "
+                    "Use the material_routes constraint for compatible source/destination bounds.",
+                ]
+                if operation in {"create_container", "transfer_material"}
+                else []
+            ),
         ],
     }
 
@@ -627,11 +765,12 @@ def validate_action(env: Any, action: dict[str, Any]) -> dict[str, Any]:
     return to_builtin(payload)
 
 
+@_resource_read
 def available_actions(env: Any, *, include_invalid: bool = False) -> list[dict[str, Any]]:
     """Return current operation affordances for agents and tool planners."""
 
     base = _base_env(env)
-    valid = set(base.operation_validator.valid_operations(base._state))
+    affordances = base.operation_validator.operation_affordances(base._state)
     allowed = set(getattr(base, "allowed_operations", set(OPERATION_TYPES)))
     actions: list[dict[str, Any]] = []
     operation_types = tuple(getattr(base.operation_validator, "operation_types", OPERATION_TYPES))
@@ -646,17 +785,15 @@ def available_actions(env: Any, *, include_invalid: bool = False) -> list[dict[s
             )()
             if not discard_available and not include_invalid:
                 continue
-        affordance = base.operation_validator.operation_affordance(operation, base._state)
+        affordance = affordances[operation]
         validation = affordance.to_dict()
         schema = action_schema(base, operation)
-        resource_reasons = list(
-            _campaign_resource_rejection_reasons_for_operation(base, operation)
-        )
+        resource_reasons = list(_campaign_resource_rejection_reasons_for_operation(base, operation))
         resource_reasons.extend(
             _campaign_schema_resource_rejection_reasons(base, operation, schema)
         )
         resource_reasons = list(dict.fromkeys(resource_reasons))
-        is_valid = operation in valid and not resource_reasons
+        is_valid = affordance.is_valid and not resource_reasons
         if resource_reasons:
             validation["preconditions"] = {
                 **validation["preconditions"],
@@ -685,9 +822,52 @@ def available_actions(env: Any, *, include_invalid: bool = False) -> list[dict[s
     return actions
 
 
+@_resource_read
+def resource_blocked_actions(env: Any) -> list[dict[str, Any]]:
+    """Return physically valid operations blocked only by campaign resources."""
+
+    base = _base_env(env)
+    valid = set(base.operation_validator.valid_operations(base._state))
+    allowed = set(getattr(base, "allowed_operations", set(OPERATION_TYPES)))
+    blocked: list[dict[str, Any]] = []
+    operation_types = tuple(getattr(base.operation_validator, "operation_types", OPERATION_TYPES))
+    for operation in operation_types:
+        if operation not in valid or operation not in allowed:
+            continue
+        if (
+            operation == "discard_batch"
+            and not getattr(
+                base,
+                "_campaign_batch_discard_available",
+                lambda: False,
+            )()
+        ):
+            continue
+        schema = action_schema(base, operation)
+        reasons = list(_campaign_resource_rejection_reasons_for_operation(base, operation))
+        reasons.extend(_campaign_schema_resource_rejection_reasons(base, operation, schema))
+        reasons = list(dict.fromkeys(reasons))
+        if not reasons:
+            continue
+        blocked.append(
+            {
+                "operation": operation,
+                "status": "cannot_complete",
+                "reason_codes": reasons,
+                "message": (
+                    f"Operation {operation} cannot be completed with the remaining "
+                    "campaign resources: " + ", ".join(reasons) + "."
+                ),
+            }
+        )
+    return blocked
+
+
 _CAMPAIGN_RESOURCE_STOCK_FIELDS: dict[str, tuple[str, str]] = {
+    "add_component": ("reagent_mol", "amount_mol"),
     "add_reagent": ("reagent_mol", "amount_mol"),
     "add_solvent": ("solvent_L", "volume_L"),
+    "resuspend_crystals": ("solvent_L", "volume_L"),
     "add_catalyst": ("catalyst_mol", "catalyst_amount_mol"),
     "seed_crystals": ("seed_g", "seed_mass_g"),
     "add_extractant": ("extractant_L", "volume_L"),
@@ -705,10 +885,57 @@ def _campaign_remaining(base: Any) -> dict[str, Any]:
     ledger = _campaign_ledger(base)
     if ledger is None:
         return {}
-    snapshot = ledger.snapshot()
+    snapshot = _campaign_snapshot(base, ledger)
     state = snapshot.get("state", {})
     remaining = state.get("remaining", {})
-    return dict(remaining) if isinstance(remaining, dict) else {}
+    result = deepcopy(remaining) if isinstance(remaining, dict) else {}
+    local = getattr(base, "_batch_resource_ledger", None)
+    if local is not None:
+        def intersect(global_values: dict[str, Any], local_values: dict[str, Any]) -> None:
+            for key, value in local_values.items():
+                if isinstance(value, dict):
+                    intersect(global_values.setdefault(key, {}), value)
+                elif isinstance(value, (int, float)):
+                    existing = global_values.get(key)
+                    global_values[key] = min(existing, value) if existing is not None else value
+        intersect(result, local.snapshot()["state"]["remaining"])
+    return result
+
+
+def _campaign_duration_capacity_s(
+    base: Any,
+    operation: str,
+) -> tuple[float | None, str | None]:
+    """Return the executable duration ceiling from the owning resource ledger."""
+
+    ledger = _campaign_ledger(base)
+    if ledger is None:
+        return None, None
+    snapshot = _campaign_snapshot(base, ledger)
+    state = snapshot.get("state", {})
+    if not isinstance(state, dict):
+        return None, None
+    remaining = state.get("remaining", {})
+    if not isinstance(remaining, dict):
+        return None, None
+    raw_remaining = remaining.get("process_time_s")
+    if raw_remaining is None:
+        return None, None
+    capacity = max(float(raw_remaining), 0.0)
+    limiting_reason = "process_time_limit"
+    reserve = state.get("protected_closeout_reserve")
+    if isinstance(reserve, dict):
+        allowed = reserve.get("allowed_operation_classes", [])
+        allowed_operations = (
+            {str(item) for item in allowed} if isinstance(allowed, list | tuple) else set()
+        )
+        if operation not in allowed_operations:
+            capacity = max(
+                capacity - float(reserve.get("protected_process_time_s", 0.0)),
+                0.0,
+            )
+            limiting_reason = "protected_closeout_process_time_reserve"
+    return capacity, limiting_reason
 
 
 def _campaign_starts_vessel(base: Any, operation: str) -> bool:
@@ -728,10 +955,16 @@ def _campaign_resource_rejection_reasons_for_action(
     operation = str(action.get("operation", ""))
     if not operation:
         return ()
-    return ledger.preview_rejection_reasons(
+    reasons = ledger.preview_rejection_reasons(
         action,
         starts_vessel=_campaign_starts_vessel(base, operation),
     )
+    local = getattr(base, "_batch_resource_ledger", None)
+    if local is not None:
+        reasons += tuple("per_batch:" + reason for reason in local.preview_rejection_reasons(
+            action, starts_vessel=_campaign_starts_vessel(base, operation),
+        ))
+    return reasons
 
 
 def _campaign_measure_resource_choices(
@@ -777,9 +1010,14 @@ def _campaign_resource_rejection_reasons_for_operation(
     reasons: list[str] = []
     if int(remaining.get("operation_attempts", 0)) < 1:
         reasons.append("operation_attempt_limit")
-    if _campaign_starts_vessel(base, operation) and int(
-        remaining.get("vessel_starts", 0)
-    ) < 1:
+    operation_repeats = remaining.get("operation_repeats", {})
+    if (
+        operation in ledger.card.operation_repeat_limits
+        and isinstance(operation_repeats, dict)
+        and int(operation_repeats.get(operation, 0)) < 1
+    ):
+        reasons.append(f"operation_repeat_limit:{operation}")
+    if _campaign_starts_vessel(base, operation) and int(remaining.get("vessel_starts", 0)) < 1:
         reasons.append("vessel_start_limit")
     if operation == "measure":
         schema_choices = [
@@ -825,26 +1063,42 @@ def _campaign_schema_resource_rejection_reasons(
     ledger = _campaign_ledger(base)
     if ledger is None:
         return ()
+    reasons: list[str] = []
     stock_contract = _CAMPAIGN_RESOURCE_STOCK_FIELDS.get(operation)
-    if stock_contract is None:
-        return ()
-    stock_id, field_name = stock_contract
-    if stock_id not in ledger.card.stock_limits:
-        return ()
     remaining = _campaign_remaining(base)
-    stocks = remaining.get("stocks", {})
-    available = float(stocks.get(stock_id, 0.0)) if isinstance(stocks, dict) else 0.0
+    stock_id = ""
+    field_name = ""
+    available: float | None = None
+    if stock_contract is not None:
+        stock_id, field_name = stock_contract
+        if stock_id in ledger.card.stock_limits:
+            stocks = remaining.get("stocks", {})
+            available = float(stocks.get(stock_id, 0.0)) if isinstance(stocks, dict) else 0.0
+    duration_capacity_s, duration_reason = _campaign_duration_capacity_s(
+        base,
+        operation,
+    )
     for field in schema.get("fields", []):
-        if not isinstance(field, dict) or field.get("field") != field_name:
+        if not isinstance(field, dict):
             continue
         bounds = field.get("bounds")
         if not isinstance(bounds, dict):
             continue
         low = float(bounds.get("low", 0.0))
         high = float(bounds.get("high", 0.0))
-        if available <= 1.0e-12 or high <= low + 1.0e-12:
-            return (f"stock_limit:{stock_id}",)
-    return ()
+        if (
+            available is not None
+            and field.get("field") == field_name
+            and (available <= 1.0e-12 or high < low - 1.0e-12)
+        ):
+            reasons.append(f"stock_limit:{stock_id}")
+        if (
+            duration_capacity_s is not None
+            and field.get("field") == "duration_s"
+            and high < low - 1.0e-12
+        ):
+            reasons.append(duration_reason or "process_time_limit")
+    return tuple(dict.fromkeys(reasons))
 
 
 def _apply_campaign_resource_schema(
@@ -866,6 +1120,8 @@ def _apply_campaign_resource_schema(
             stocks = remaining.get("stocks", {})
             if isinstance(stocks, dict):
                 stock_remaining = max(float(stocks.get(stock_id, 0.0)), 0.0)
+                if operation == "add_reagent":
+                    stock_remaining /= ledger.reagent_charge_molar_multiplier
     for field in fields:
         field_name = str(field.get("field", ""))
         if (
@@ -877,6 +1133,22 @@ def _apply_campaign_resource_schema(
             if isinstance(bounds, dict) and stock_remaining is not None:
                 old_high = float(bounds.get("high", stock_remaining))
                 new_high = min(old_high, stock_remaining)
+                field["bounds"] = {
+                    "low": float(bounds.get("low", 0.0)),
+                    "high": new_high,
+                }
+                field["recommended_range"] = {
+                    "low": float(bounds.get("low", 0.0)),
+                    "high": new_high,
+                }
+                field["state_dependent_bounds"] = True
+                field["resource_limited"] = new_high < old_high
+        if field_name == "duration_s":
+            duration_capacity_s, _ = _campaign_duration_capacity_s(base, operation)
+            bounds = field.get("bounds")
+            if duration_capacity_s is not None and isinstance(bounds, dict):
+                old_high = float(bounds.get("high", duration_capacity_s))
+                new_high = min(old_high, duration_capacity_s)
                 field["bounds"] = {
                     "low": float(bounds.get("low", 0.0)),
                     "high": new_high,
@@ -977,6 +1249,8 @@ def experiment_lifecycle_contract(episode_mode: Any) -> dict[str, str]:
         else "A valid final_assay completes the experiment and ends the episode."
     )
     return {
+        "terminate_action_template": '{"operation":"terminate"}',
+        "final_assay_action_template": ('{"operation":"measure","instrument":"final_assay"}'),
         "terminate_effect": (
             "terminate marks the current process as terminated; it does not by itself "
             "complete the experiment."
@@ -995,6 +1269,11 @@ def experiment_lifecycle_contract(episode_mode: Any) -> dict[str, str]:
             "is exposed only when the campaign ledger still permits it."
             if episode_mode == "campaign"
             else "discard_batch is unavailable outside campaign mode."
+        ),
+        "discard_batch_action_template": (
+            '{"operation":"discard_batch","reason":"<participant rationale>"}'
+            if episode_mode == "campaign"
+            else "unavailable outside campaign mode"
         ),
     }
 
@@ -1074,7 +1353,9 @@ def task_prompt(env: Any) -> dict[str, Any]:
         experiment_lifecycle=experiment_lifecycle,
     )
     return {
-        "text": text,
+        "text": text + "\nRisk signal: " + info["risk_signal_contract"]["interpretation"],
+        "runtime_semantics_id": info.get("runtime_semantics_id"),
+        "risk_signal_contract": deepcopy(info["risk_signal_contract"]),
         "task_id": info.get("task_id"),
         "objective": info.get("objective"),
         "budget": info.get("budget"),
@@ -1108,17 +1389,11 @@ def task_prompt(env: Any) -> dict[str, Any]:
         "material_catalog": info.get("material_catalog", {}),
         "material_information": info.get("material_information"),
         **(
-            {
-                "campaign_resources": deepcopy(
-                    info["campaign_resources"]
-                )
-            }
+            {"campaign_resources": deepcopy(info["campaign_resources"])}
             if "campaign_resources" in info
             else {}
         ),
-        "electrochemical_workflow_mode": info.get(
-            "electrochemical_workflow_mode"
-        ),
+        "electrochemical_workflow_mode": info.get("electrochemical_workflow_mode"),
         "measurement_policy": profile["measurement_policy"],
         "experiment_lifecycle": experiment_lifecycle,
         "recommended_strategy": list(profile["recommended_strategy"]),
@@ -1134,9 +1409,7 @@ def campaign_state(env: Any) -> dict[str, Any]:
 
     base = _base_env(env)
     summaries = deepcopy(getattr(base, "_experiment_summaries", []))
-    completed_summaries = [
-        summary for summary in summaries if summary.get("final_assay") is True
-    ]
+    completed_summaries = [summary for summary in summaries if summary.get("final_assay") is True]
     scored = [
         _safe_float(summary.get("leaderboard_score"), default=-1.0)
         for summary in completed_summaries
@@ -1296,6 +1569,13 @@ def _area_value(peak: dict[str, Any]) -> float:
     return 0.0
 
 
+def _spectral_fit(info: dict[str, Any]) -> dict[str, Any]:
+    """Expose the existing public fit separately from endpoint proxy estimates."""
+    raw = info.get("raw_signal", {})
+    fit = raw.get("processed_estimates", {}) if isinstance(raw, dict) else {}
+    return to_builtin(fit) if isinstance(fit, dict) else {}
+
+
 def spectra_summary(info: dict[str, Any]) -> dict[str, Any]:
     """Summarize public raw signals without exposing hidden mechanism identities."""
 
@@ -1307,6 +1587,17 @@ def spectra_summary(info: dict[str, Any]) -> dict[str, Any]:
         channels = []
     if isinstance(spectra, dict) and not channels:
         channels = sorted(str(key) for key in spectra)
+    axis = raw_signal_dict.get("axis", {})
+    signal = raw_signal_dict.get("raw_signal", {})
+    axis_values = axis.get("values", []) if isinstance(axis, dict) else []
+    signal_values = signal.get("values", []) if isinstance(signal, dict) else []
+    sample_count = (
+        len(axis_values)
+        if isinstance(axis_values, list)
+        and isinstance(signal_values, list)
+        and len(axis_values) == len(signal_values)
+        else 0
+    )
     peak_tables = _find_peak_tables(raw_signal)
     grouped: dict[str, float] = {
         "target": 0.0,
@@ -1345,8 +1636,15 @@ def spectra_summary(info: dict[str, Any]) -> dict[str, Any]:
         "instrument": info.get("instrument_source") or info.get("instrument"),
         "packet_kind": raw_signal_dict.get("kind"),
         "has_spectral_packet": bool(
-            peak_tables or spectra or channels or raw_signal_dict.get("kind") == "ph_meter_signal"
+            sample_count
+            or peak_tables
+            or spectra
+            or channels
+            or raw_signal_dict.get("kind") == "ph_meter_signal"
         ),
+        "sample_count": sample_count,
+        "axis_unit": axis.get("unit") if isinstance(axis, dict) else None,
+        "spectral_fit": _spectral_fit(info),
         "channels": [str(channel) for channel in channels],
         "channel_count": len(channels),
         "peak_table_count": len(peak_tables),
@@ -1359,11 +1657,18 @@ def spectra_summary(info: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _recovery_suggestion(env: Any, info: dict[str, Any]) -> str | None:
+def _recovery_suggestion(
+    env: Any,
+    info: dict[str, Any],
+    *,
+    actions: list[dict[str, Any]] | None = None,
+) -> str | None:
     flags = info.get("constraint_flags", {})
     if not flags.get("precondition_failed") and not info.get("error_message"):
         return None
-    options = [entry["operation"] for entry in available_actions(env)]
+    options = [
+        entry["operation"] for entry in (available_actions(env) if actions is None else actions)
+    ]
     if options:
         return "Retry with a currently valid operation such as " + ", ".join(options[:4]) + "."
     return (
@@ -1444,21 +1749,29 @@ def _failure_summary(info: dict[str, Any]) -> dict[str, Any]:
     ]
     return {
         "precondition_failed": bool(flags.get("precondition_failed", False)),
+        "campaign_resource_rejected": bool(flags.get("campaign_resource_rejected", False)),
         "constitution_failed": bool(flags.get("constitution_failed", False)),
         "transaction_status": info.get("transaction_status"),
         "rollback_reason": info.get("rollback_reason"),
         "error_message": info.get("error_message"),
+        "resource_rejection_reasons": to_builtin(
+            info.get("campaign_resource_rejection_reasons", [])
+        ),
         "failed_preconditions": failed_preconditions,
     }
 
 
-def _next_action_hints(env: Any, *, limit: int = 5) -> list[str]:
-    return [entry["operation"] for entry in available_actions(env)[:limit]]
-
-
-def lab_report_view(env: Any, observation: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
+@_resource_read
+def lab_report_view(
+    env: Any,
+    observation: dict[str, Any],
+    info: dict[str, Any],
+    *,
+    _actions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Return a compact public lab report for LLMs and students."""
 
+    actions = available_actions(env) if _actions is None else _actions
     summary = spectra_summary(info)
     campaign = campaign_state(env)
     progress = _campaign_progress(campaign)
@@ -1469,11 +1782,21 @@ def lab_report_view(env: Any, observation: dict[str, Any], info: dict[str, Any])
     score = _safe_float(observation.get("score"), default=0.0)
     cost = _safe_float(observation.get("cost"), default=0.0)
     risk = _safe_float(observation.get("safety_risk"), default=0.0)
-    failed = failure["precondition_failed"]
-    status = "failed_precondition" if failed else "accepted"
+    resource_rejected = failure["campaign_resource_rejected"]
+    failed = failure["precondition_failed"] or resource_rejected
+    status = (
+        "cannot_complete" if resource_rejected else "failed_precondition" if failed else "accepted"
+    )
+    operation = info.get("operation_type") or "none"
+    opening = (
+        f"Operation {operation} cannot be completed with the remaining campaign resources."
+        if resource_rejected
+        else f"Operation {operation} was {status}."
+    )
     lines = [
-        f"Operation {info.get('operation_type') or 'none'} was {status}.",
-        f"Visible score={score:.3f}, cost={cost:.3f}, safety_risk={risk:.3f}.",
+        opening,
+        f"Visible score={score:.3f}, cost={cost:.3f}, safety_risk={risk:.3f} "
+        "(mixed process/procedure penalty, not a physical hazard probability).",
         (
             "Key public metrics: "
             + _format_metric_map(
@@ -1520,11 +1843,23 @@ def lab_report_view(env: Any, observation: dict[str, Any], info: dict[str, Any])
             f"{final_assay['leaderboard_eligible']}, score={score_text}."
         )
     if summary["has_spectral_packet"]:
-        channels = ", ".join(summary["channels"]) or "public peaks"
-        lines.append(
-            f"Spectra packet: {summary['packet_kind'] or 'instrument_signal'} "
-            f"with {summary['channel_count']} channels ({channels})."
-        )
+        if summary["sample_count"]:
+            lines.append(
+                f"Spectra packet: {summary['packet_kind']} with {summary['sample_count']} "
+                f"sampled points (axis: {summary['axis_unit']})."
+            )
+            if summary["spectral_fit"]:
+                lines.append(
+                    "Public reporter concentration estimates, fit standard errors and "
+                    "missingness are available in spectral_fit; they are separate from "
+                    "endpoint proxy metrics."
+                )
+        else:
+            channels = ", ".join(summary["channels"]) or "public peaks"
+            lines.append(
+                f"Spectra packet: {summary['packet_kind'] or 'instrument_signal'} "
+                f"with {summary['channel_count']} channels ({channels})."
+            )
     dominant = summary["dominant_peak"]
     if dominant["group"] is not None:
         lines.append(
@@ -1533,7 +1868,9 @@ def lab_report_view(env: Any, observation: dict[str, Any], info: dict[str, Any])
         )
     if summary["warnings"]:
         lines.append("Spectral warnings: " + ", ".join(summary["warnings"]) + ".")
-    recovery = _recovery_suggestion(env, info)
+    if failure["resource_rejection_reasons"]:
+        lines.append("Resource limits: " + ", ".join(failure["resource_rejection_reasons"]) + ".")
+    recovery = _recovery_suggestion(env, info, actions=actions)
     if recovery is not None:
         lines.append(f"Recovery suggestion: {recovery}")
     if campaign["best_score"] is not None:
@@ -1551,15 +1888,121 @@ def lab_report_view(env: Any, observation: dict[str, Any], info: dict[str, Any])
         "campaign_state": campaign,
         "campaign_progress": progress,
         "failure_summary": failure,
-        "next_action_hints": _next_action_hints(env),
+        "next_action_hints": [entry["operation"] for entry in actions[:5]],
         "recovery_suggestion": recovery,
         "constraint_flags": to_builtin(info.get("constraint_flags", {})),
     }
 
 
+def full_process_operational_state(env: Any, info: dict[str, Any]) -> dict[str, Any]:
+    """Expose process controls and sensor readings, never composition or model parameters.
+
+    This is an additive development interface for the three full-process tasks.
+    It deliberately separates current controls from carried analytical results.
+    """
+    base = _base_env(env)
+    if getattr(base, "task_id", None) not in {
+        "reaction-to-purification",
+        "reaction-to-crystallization",
+        "reaction-to-distillation",
+    }:
+        return {}
+    state = getattr(base, "_state", None)
+    if state is None:
+        return {}
+    selected = selected_phase_id(state.phases)
+    fresh = (
+        info.get("operation_type") == "measure"
+        and info.get("transaction_status") == "committed"
+        and info.get("instrument") is not None
+    )
+    process = state.process
+    has_previous = bool(process is not None and process.last_observation)
+    phases = {} if state.phases is None else state.phases.phases
+    from chemworld.runtime.full_process_contract import (
+        CRYSTAL_RECOVERY_DEFINITION,
+        active,
+        sample_domain,
+    )
+
+    resolved = active(state)
+    return {
+        "schema_version": "chemworld-full-process-operational-state-0.1",
+        "sensor_contract": "Ideal temperature and volume readouts; analytical quality requires "
+        "a paid instrument. Phase identities and selection are operation bookkeeping.",
+        "temperature_K": float(state.temperature_K),
+        "active_volume_L": float(state.volume_L),
+        "process_time_s": float(state.ledger.time_s),
+        "quenched": bool(state.quenched),
+        "terminated": bool(state.terminated),
+        "selected_phase": selected,
+        "phases": {
+            str(key): {
+                "phase_type": phase.phase_type,
+                "volume_L": float(phase.volume_L),
+                "selected": bool(phase.selected),
+                "settled": bool(phase.settled),
+            }
+            for key, phase in phases.items()
+        },
+        "measurement_context": {
+            "fresh_measurement_this_step": fresh,
+            "status": "measured_this_step"
+            if fresh
+            else ("carried_not_remeasured" if has_previous else "not_measured"),
+            "instrument_this_step": info.get("instrument") if fresh else None,
+            "selected_phase_at_measurement": selected if fresh else None,
+            "scope_note": "Current phase selection does not relabel an earlier reading. "
+            "Reaction metrics and downstream metrics follow their own instrument contracts; "
+            "they are not all assays of the same material.",
+            "purification_default_metric_phase": (
+                "organic" if selected is None and "organic" in phases else None
+            ),
+        },
+        "sampling_contract": (
+            "Only the selected liquid phase is depleted. Solid and mother_liquor form one "
+            "representative analytical slurry group, including after filtration; they are not "
+            "separately stored bottles. "
+            + (
+                CRYSTAL_RECOVERY_DEFINITION
+                if base.task_id == "reaction-to-crystallization"
+                else "Recovery/yield denominators are original reactant charge."
+            )
+            if resolved
+            else "Current runtime proportionally depletes all inventories during "
+            "sampling, including saved phases. It is not isolated receiver sampling."
+        ),
+        "sample_domain": list(sample_domain(state)) if resolved else None,
+        "receiver_selection_contract": (
+            "collect_fraction=0 selects an existing saved collected_fraction without mixing "
+            "new distillate. Positive fractions add current distillate to that saved receiver."
+            if resolved and base.task_id == "reaction-to-distillation"
+            else None
+        ),
+        "particle_measurement_contract": (
+            "Paid particle_size measurement is available after crystals exist: non-destructive, "
+            "120 seconds, cost 0.04, noisy number-weighted d50 and fines below 20 um."
+            if resolved and base.task_id == "reaction-to-crystallization"
+            else "Crystal size and fines are measured only by final_assay in the current task; "
+            "HPLC does not provide an online particle-size measurement."
+            if base.task_id == "reaction-to-crystallization"
+            else None
+        ),
+    }
+
+
+@_resource_read
 def tool_json_view(env: Any, observation: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
     """Return a structured public observation bundle for tool agents."""
 
+    actions = available_actions(env)
+    material_state = getattr(_base_env(env), "_state", None)
+    operational = full_process_operational_state(env, info)
+    research = getattr(_base_env(env), "research_brief", None)
+    if research is not None:
+        from chemworld.research_brief import public_research_brief, research_operational_state
+
+        operational = research_operational_state(_base_env(env), info)
     return {
         "mode": "tool_json",
         "task": {
@@ -1568,6 +2011,7 @@ def tool_json_view(env: Any, observation: dict[str, Any], info: dict[str, Any]) 
         },
         "observation": to_builtin(observation),
         "raw_signal": to_builtin(info.get("raw_signal", {})),
+        "spectral_fit": _spectral_fit(info),
         "processed_estimate": to_builtin(info.get("processed_estimate", {})),
         "uncertainty": to_builtin(info.get("uncertainty", {})),
         "observed_keys": to_builtin(info.get("observed_keys", [])),
@@ -1576,8 +2020,25 @@ def tool_json_view(env: Any, observation: dict[str, Any], info: dict[str, Any]) 
         "cost_components": to_builtin(info.get("cost_components", {})),
         "constraints": to_builtin(info.get("constraint_flags", {})),
         "campaign_state": campaign_state(env),
-        "available_actions": available_actions(env),
-        "lab_report": lab_report_view(env, observation, info),
+        "sample_inventory": (
+            material_state.samples.public_summary() if material_state is not None else []
+        ),
+        "material_routing": (
+            material_state.samples.routing_summary() if material_state is not None else {}
+        ),
+        "component_network": public_network(material_state) if material_state is not None else None,
+        "process_control": public_control(material_state) if material_state is not None else None,
+        "continuous_streams": public_streams(material_state)
+        if material_state is not None
+        else None,
+        "spectral_configurations": public_spectral_settings(material_state)
+        if material_state is not None
+        else {},
+        "available_actions": actions,
+        "resource_blocked_actions": resource_blocked_actions(env),
+        "lab_report": lab_report_view(env, observation, info, _actions=actions),
+        **({"operational_state": operational} if operational else {}),
+        **({"research_brief": public_research_brief(research)} if research is not None else {}),
     }
 
 
@@ -1601,6 +2062,7 @@ def observation_view(
     raise ValueError("mode must be one of 'rl', 'tool_json', or 'lab_report'")
 
 
+@_resource_read
 def agent_view_bundle(
     env: Any,
     observation: dict[str, Any],
@@ -1608,10 +2070,12 @@ def agent_view_bundle(
 ) -> dict[str, Any]:
     """Return all standard agent-facing views for trajectory export."""
 
+    tool_view = observation_view(env, "tool_json", observation, info)
     return {
         "rl": observation_view(env, "rl", observation, info),
-        "tool_json": observation_view(env, "tool_json", observation, info),
-        "lab_report": observation_view(env, "lab_report", observation, info),
+        "tool_json": tool_view,
+        # Preserve independent returned dictionaries without recomputing views.
+        "lab_report": deepcopy(tool_view["lab_report"]),
     }
 
 
@@ -1622,6 +2086,7 @@ __all__ = [
     "campaign_state",
     "lab_report_view",
     "observation_view",
+    "resource_blocked_actions",
     "rl_observation_spec",
     "rl_observation_view",
     "spectra_summary",

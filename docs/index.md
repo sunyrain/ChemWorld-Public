@@ -1,3 +1,5 @@
+> Current main: [October foundation update](current-foundation.md). Existing figures and numerical evidence below describe the frozen August runtime.
+
 <section class="cw-studio-hero" data-cw-autoplay data-source="assets/data/representative-behavior-and-forks.json" data-locale="en">
   <div class="cw-studio-glow cw-studio-glow-a"></div>
   <div class="cw-studio-glow cw-studio-glow-b"></div>

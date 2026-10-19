@@ -1,5 +1,8 @@
 # ChemWorld capability map
 
+This is the frozen release map. See [current foundation](current-foundation.md)
+for the October update, including vessels, control, streams and configurable spectra.
+
 This table is the reader-facing summary of the published surface. It describes what the
 world substrate and instrument contract expose; it does not claim that every row has been
 qualified in every possible combination.

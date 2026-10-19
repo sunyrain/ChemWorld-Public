@@ -72,6 +72,8 @@ plugins:
             Connect an agent: 接入 Agent
             One experiment: 一次完整实验
             World foundations: 世界基座
+            Current foundation: 当前基座
+            Extension roadmap: 扩展待办
             Evidence: 证据
             Notebooks: Notebook 教程
             API reference: API 参考
@@ -86,10 +88,12 @@ extra_javascript:
 nav:
   - Home: index.md
   - 5-minute quickstart: quickstart.md
-        - Connect an agent: agents.md
-        - Student Lab: student-lab.md
+  - Connect an agent: agents.md
+  - Student Lab: student-lab.md
   - One experiment: one-experiment.md
   - World foundations: world-foundations.md
+  - Current foundation: current-foundation.md
+  - Extension roadmap: extension-roadmap.md
   - Evidence: evidence.md
   - Notebooks: notebooks.md
   - API reference: reference.md

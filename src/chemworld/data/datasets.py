@@ -96,6 +96,17 @@ def flatten_record(record: dict[str, Any]) -> dict[str, Any]:
         "instrument": record.get("instrument"),
         "task_contract_hash": record.get("task_contract_hash"),
         "runtime_profile_hash": record.get("runtime_profile_hash"),
+        "runtime_semantics_id": record.get("runtime_semantics_id"),
+        "transaction_status": record.get("transaction_status"),
+        "rollback_reason": record.get("rollback_reason"),
+        "terminated": record.get("terminated"),
+        "truncated": record.get("truncated"),
+        "measurement_cost": record.get("measurement_cost"),
+        "sample_consumed": record.get("sample_consumed"),
+        "observed_mask": json.dumps(to_builtin(record.get("observed_mask", {})), sort_keys=True),
+        "sample_outcome": json.dumps(
+            to_builtin(record.get("raw_signal", {}).get("sample_outcome")), sort_keys=True
+        ),
         "mechanism_id": record.get("mechanism_id"),
         "mechanism_hash": record.get("mechanism_hash"),
         "scoring_contract_hash": record.get("scoring_contract_hash"),
@@ -187,11 +198,7 @@ def export_dataset(
 
 def _unique_nonempty(records: list[dict[str, Any]], key: str) -> list[str]:
     return sorted(
-        {
-            str(record[key])
-            for record in records
-            if key in record and record[key] not in {None, ""}
-        }
+        {str(record[key]) for record in records if key in record and record[key] not in {None, ""}}
     )
 
 
@@ -300,21 +307,67 @@ def _replay_verification_summary(path: str | Path) -> dict[str, Any]:
             default=0.0,
         ),
         "mismatch_count": sum(
-            int(group["mismatch_count"])
-            for group in groups
-            if group["mismatch_count"] is not None
+            int(group["mismatch_count"]) for group in groups if group["mismatch_count"] is not None
         ),
         "groups": groups,
+    }
+
+
+def _outcome_counts(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Count recorded attempts and batch endings; a missing assay is never a zero score."""
+    counts = dict.fromkeys(
+        (
+            "experiment_count",
+            "final_assay_experiment_count",
+            "negative_final_assay_count",
+            "discarded_experiment_count",
+            "truncated_open_experiment_count",
+            "open_experiment_count",
+        ),
+        0,
+    )
+    for _, campaign in _records_by_campaign(records):
+        batches: dict[int, list[dict[str, Any]]] = {}
+        for record in campaign:
+            batches.setdefault(int(record.get("experiment_index", 0)), []).append(record)
+        for batch in batches.values():
+            counts["experiment_count"] += 1
+            committed = [r for r in batch if r.get("transaction_status") == "committed"]
+            assays = [r for r in committed if r.get("instrument") == "final_assay"]
+            if assays:
+                counts["final_assay_experiment_count"] += 1
+                if any(
+                    r.get("raw_signal", {}).get("sample_outcome", {}).get("status")
+                    == "negative_result"
+                    for r in assays
+                ):
+                    counts["negative_final_assay_count"] += 1
+            elif any(r.get("operation_type") == "discard_batch" for r in committed):
+                counts["discarded_experiment_count"] += 1
+            elif any(r.get("truncated") is True for r in batch):
+                counts["truncated_open_experiment_count"] += 1
+            else:
+                counts["open_experiment_count"] += 1
+    return {
+        **counts,
+        "operation_count": len(records),
+        "committed_action_count": sum(r.get("transaction_status") == "committed" for r in records),
+        "rejected_action_count": sum(
+            r.get("transaction_status") in {"rolled_back", "validation_failed"} for r in records
+        ),
+        "unclassified_action_count": sum(
+            r.get("transaction_status") not in {"committed", "rolled_back", "validation_failed"}
+            for r in records
+        ),
+        "open_experiment_semantics": "recording ended without final assay, discard, or truncation",
+        "negative_final_assay_is_subset_of_final_assay": True,
     }
 
 
 def dataset_card(path: str | Path) -> dict[str, Any]:
     records = load_dataset_records(path)
     task_ids = sorted(
-        {
-            str(record.get("benchmark_task_id") or record.get("task_id"))
-            for record in records
-        }
+        {str(record.get("benchmark_task_id") or record.get("task_id")) for record in records}
     )
     seeds = sorted({int(record["seed"]) for record in records})
     world_law_versions = sorted({str(record.get("world_family_version")) for record in records})
@@ -324,10 +377,7 @@ def dataset_card(path: str | Path) -> dict[str, Any]:
     commit_hash = git_commit()
     protocol_hashes = _protocol_hashes(records)
     agent_manifests = sorted(
-        {
-            str(record.get("agent_metadata", {}).get("agent_name", "unknown"))
-            for record in records
-        }
+        {str(record.get("agent_metadata", {}).get("agent_name", "unknown")) for record in records}
     )
     return {
         "schema_version": DATASET_CARD_SCHEMA_VERSION,
@@ -341,6 +391,8 @@ def dataset_card(path: str | Path) -> dict[str, Any]:
         "commit_hash": commit_hash,
         "seeds": seeds,
         "record_count": len(records),
+        "outcome_counts": _outcome_counts(records),
+        "runtime_semantics_ids": _unique_nonempty(records, "runtime_semantics_id"),
         "agent_manifests": agent_manifests,
         "provenance": {
             "generator": "ChemWorld",

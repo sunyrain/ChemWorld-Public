@@ -71,6 +71,12 @@ def validate_record(record: dict[str, Any]) -> None:
                 "evaluation_outcome.leaderboard_score must match the leaderboard_score alias"
             )
 
+    if not isinstance(record["action"], dict):
+        raise ValueError("Trajectory action must be a JSON object")
+    if not isinstance(record["observation"], dict):
+        raise ValueError("Trajectory observation must be a JSON object")
+    if not isinstance(record.get("observed_mask", {}), dict):
+        raise ValueError("Trajectory observed_mask must be a JSON object")
     action_missing = EVENT_ACTION_KEYS - record["action"].keys()
     if action_missing:
         raise ValueError(f"Action is missing keys: {sorted(action_missing)}")

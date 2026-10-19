@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -9,9 +10,11 @@ import numpy as np
 from chemworld.foundation import (
     WorldState,
     equipment_settings,
+    process_with_metrics,
     upsert_equipment_record,
 )
-from chemworld.foundation.state import selected_phase_id
+from chemworld.foundation.solvents import ORGANIC_DISTRIBUTION_RATIOS, SolventInventory
+from chemworld.foundation.state import PhaseLedger, PhaseRecord, selected_phase_id
 from chemworld.physchem.extraction_units import (
     DistributionCoefficientModelSpec,
 )
@@ -63,6 +66,81 @@ class ChemWorldPhaseSeparationServices:
         self.nominal_pair_contract = nominal_pair_contract
         self.phase_ledgers = ChemWorldPhaseLedgerServices(species_view)
 
+    def _removed_inventory_summary(
+        self,
+        state: WorldState,
+        *,
+        operation: str,
+        inventories: dict[str, dict[str, Any]],
+    ) -> tuple[dict[str, Any], float, float, float]:
+        target_species = set(self.species_view.target_species_for_state(state))
+        impurity_species = set(self.species_view.impurity_species_for_state(state))
+        removed_volume = 0.0
+        removed_product = 0.0
+        removed_impurity = 0.0
+        normalized: dict[str, dict[str, Any]] = {}
+        for inventory_id, values in inventories.items():
+            amounts = values.get("species_amounts_mol", {})
+            amounts = dict(amounts) if isinstance(amounts, dict) else {}
+            product = float(values.get("product_mol", 0.0)) + sum(
+                float(amounts.get(species_id, 0.0)) for species_id in target_species
+            )
+            impurity = float(values.get("impurity_mol", 0.0)) + sum(
+                float(amounts.get(species_id, 0.0)) for species_id in impurity_species
+            )
+            volume = max(float(values.get("volume_L", 0.0)), 0.0)
+            removed_volume += volume
+            removed_product += product
+            removed_impurity += impurity
+            normalized[str(inventory_id)] = {
+                "volume_L": volume,
+                "product_mol": product,
+                "impurity_mol": impurity,
+                "species_amounts_mol": {
+                    str(species_id): float(amount)
+                    for species_id, amount in amounts.items()
+                    if float(amount) > 0.0
+                },
+            }
+        history = list(state.metadata.get("removed_phase_inventory_history", ()))
+        history.append(
+            {
+                "operation": operation,
+                "time_s": state.ledger.time_s,
+                "inventories": normalized,
+            }
+        )
+        return (
+            {"removed_phase_inventory_history": history},
+            removed_volume,
+            removed_product,
+            removed_impurity,
+        )
+
+    @staticmethod
+    def _account_removed_inventory(
+        state: WorldState,
+        *,
+        removed_volume_L: float,
+        removed_product_mol: float,
+        removed_impurity_mol: float,
+    ) -> WorldState:
+        metrics = {} if state.process is None else state.process.metrics
+        process = process_with_metrics(
+            state.process,
+            removed_phase_product_mol=(
+                float(metrics.get("removed_phase_product_mol", 0.0)) + removed_product_mol
+            ),
+            removed_phase_impurity_mol=(
+                float(metrics.get("removed_phase_impurity_mol", 0.0)) + removed_impurity_mol
+            ),
+        )
+        process = replace(
+            process,
+            waste_L=process.waste_L + removed_volume_L,
+        )
+        return state.replace(process=process)
+
     def add_phase(self, state: WorldState, action: dict[str, Any]) -> WorldState:
         volume = float(np.clip(action_float(action, "volume_L", 0.015), 0.0, 0.060))
         phase_name = str(action.get("phase", "aqueous"))
@@ -95,17 +173,13 @@ class ChemWorldPhaseSeparationServices:
             attached_vessel_id=state.vessel_id,
             settings={
                 "extractant": extractant,
-                "extractant_volume_L": float(
-                    extractor_settings.get("extractant_volume_L", 0.0)
-                )
+                "extractant_volume_L": float(extractor_settings.get("extractant_volume_L", 0.0))
                 + volume,
             },
         )
         risk = min(
             1.0,
-            state.ledger.risk
-            + 0.04
-            + 0.05 * float(self.world.solvent_risks[extractant]),
+            state.ledger.risk + 0.04 + 0.05 * float(self.world.solvent_risks[extractant]),
         )
         ledger = state.ledger.with_updates(
             cost=state.ledger.cost + 0.025 + 0.80 * volume,
@@ -125,19 +199,28 @@ class ChemWorldPhaseSeparationServices:
     def mix_phases(self, state: WorldState, action: dict[str, Any]) -> WorldState:
         duration = float(np.clip(action_float(action, "duration_s", 180.0), 0.0, 1800.0))
         stirring = float(np.clip(action_float(action, "stirring_speed_rpm", 700.0), 100.0, 1200.0))
+        process_metrics = {} if state.process is None else state.process.metrics
+        if "pre_separation_product_mol" not in process_metrics:
+            state = state.replace(
+                process=process_with_metrics(
+                    state.process,
+                    pre_separation_product_mol=max(
+                        self.phase_ledgers.phase_product_amount(state),
+                        1.0e-12,
+                    ),
+                )
+            )
         phase_ledger = self.phase_ledgers.phase_ledger(state)
         phase_ledger.setdefault(
             "aqueous",
             {
-                "volume_L": max(
-                    state.volume_L - phase_ledger.get("organic", {}).get("volume_L", 0.0), 0.0
-                ),
+                "volume_L": 0.0,
                 PHASE_PRODUCT_AMOUNT_KEY: 0.0,
                 "impurity_mol": 0.0,
                 "solvent_loss": 0.0,
             },
         )
-        organic = phase_ledger.setdefault("organic", empty_phase(0.015))
+        organic = phase_ledger.setdefault("organic", empty_phase())
         aqueous = phase_ledger["aqueous"]
         reactor_liquid = phase_ledger.pop("reactor_liquid", None)
         if reactor_liquid is not None:
@@ -147,10 +230,7 @@ class ChemWorldPhaseSeparationServices:
         extractor_settings = equipment_settings(state.equipment, "liquid_liquid_extractor")
         reactor_settings = equipment_settings(state.equipment, "batch_reactor")
         partition_inputs: dict[str, Any] = {}
-        if (
-            self.nominal_pair_contract
-            == INDEPENDENT_NOMINAL_SOLVENT_EXTRACTANT_PAIR_V1
-        ):
+        if self.nominal_pair_contract == INDEPENDENT_NOMINAL_SOLVENT_EXTRACTANT_PAIR_V1:
             solvent = int(reactor_settings.get("solvent", 0))
             partition_inputs = {
                 "extractant": int(extractor_settings.get("extractant", solvent)),
@@ -165,7 +245,16 @@ class ChemWorldPhaseSeparationServices:
                     reactor_settings.get("solvent", 0),
                 )
             )
+        carrier_pool = SolventInventory()
+        if state.phases is not None:
+            for phase in state.phases.phases.values():
+                carrier_pool = carrier_pool + phase.solvents
+        organic_medium, aqueous_medium = carrier_pool.split(
+            organic["volume_L"], ORGANIC_DISTRIBUTION_RATIOS
+        )
         split = partition_split(
+            solvent_inventory=aqueous_medium,
+            extractant_inventory=organic_medium,
             product_mol=p_total,
             impurity_mol=impurity_total,
             solvent=solvent,
@@ -174,11 +263,10 @@ class ChemWorldPhaseSeparationServices:
             stirring_speed_rpm=stirring,
             organic_volume_L=organic["volume_L"],
             aqueous_volume_L=aqueous["volume_L"],
-            coefficient_multiplier=self.world.domain_parameter(
-                "partition_coefficient_multiplier"
-            ),
-            coefficient_exponent=self.world.domain_parameter(
-                "partition_coefficient_exponent"
+            coefficient_multiplier=self.world.domain_parameter("partition_coefficient_multiplier"),
+            coefficient_exponent=self.world.domain_parameter("partition_coefficient_exponent"),
+            composition_coupling_multiplier=float(
+                state.metadata.get("partition_composition_coupling_multiplier", 1.0)
             ),
             phase_volume_multiplier=self.world.domain_parameter(
                 "partition_phase_volume_multiplier"
@@ -243,40 +331,75 @@ class ChemWorldPhaseSeparationServices:
         target = str(action.get("target_phase", "organic"))
         if target not in {"organic", "aqueous"}:
             target = "organic"
-        phase_ledger = self.phase_ledgers.phase_ledger(state)
-        selected = phase_ledger.get(
-            target,
-            {
-                "volume_L": state.volume_L,
-                PHASE_PRODUCT_AMOUNT_KEY: self.phase_ledgers.phase_product_amount(state),
-                "impurity_mol": 0.0,
-                "solvent_loss": 0.0,
-            },
+        if state.phases is None or target not in state.phases.phases:
+            raise ValueError(f"target phase is unavailable: {target}")
+        selected = state.phases.phases[target]
+        removed = {
+            phase_id: {
+                "volume_L": phase.volume_L,
+                "species_amounts_mol": phase.species_amounts_mol,
+            }
+            for phase_id, phase in state.phases.phases.items()
+            if phase_id != target
+        }
+        metadata_updates, removed_volume, removed_product, removed_impurity = (
+            self._removed_inventory_summary(
+                state,
+                operation="separate_phase",
+                inventories=removed,
+            )
         )
-        entrained_volume_L = float(
-            state.metadata.get("extraction_entrained_aqueous_volume_L", 0.0)
-        )
+        entrained_volume_L = float(state.metadata.get("extraction_entrained_aqueous_volume_L", 0.0))
         contact_volume_L = sum(
-            max(float(values.get("volume_L", 0.0)), 0.0)
-            for values in phase_ledger.values()
+            max(float(phase.volume_L), 0.0) for phase in state.phases.phases.values()
         )
         entrainment_fraction = float(
             np.clip(entrained_volume_L / max(contact_volume_L, 1.0e-12), 0.0, 1.0)
         )
-        phase_ledger[target] = {
-            "volume_L": selected["volume_L"],
-            PHASE_PRODUCT_AMOUNT_KEY: selected[PHASE_PRODUCT_AMOUNT_KEY],
-            "impurity_mol": selected["impurity_mol"],
-            "solvent_loss": selected.get("solvent_loss", 0.0) + entrainment_fraction,
-        }
+        selected_record = PhaseRecord(
+            phase_id=selected.phase_id,
+            vessel_id=selected.vessel_id,
+            phase_type=selected.phase_type,
+            volume_L=selected.volume_L,
+            species_amounts_mol=selected.species_amounts_mol,
+            settled=True,
+            selected=True,
+            metadata=selected.metadata,
+        )
+        phases = PhaseLedger({target: selected_record})
         ledger = state.ledger.with_updates(cost=state.ledger.cost + 0.025)
-        return self.phase_ledgers.with_phase_ledger(
-            state,
-            phase_ledger,
-            phase_settled=True,
-            selected_phase=target,
+        process_metrics = {} if state.process is None else state.process.metrics
+        process = process_with_metrics(
+            state.process,
+            solvent_loss=min(
+                1.0,
+                float(process_metrics.get("solvent_loss", 0.0)) + entrainment_fraction,
+            ),
+        )
+        candidate = state.replace(
+            species_amounts=phases.total_amounts_mol(),
+            phases=phases,
+            metadata=self.phase_ledgers.phase_metadata(
+                state,
+                {},
+                updates=metadata_updates,
+            ),
             ledger=ledger,
-            volume_L=phase_ledger[target]["volume_L"],
+            process=process,
+            volume_L=selected.volume_L,
+        )
+        selected_ledger = self.phase_ledgers.phase_ledger(candidate)
+        candidate = candidate.replace(
+            process=process_with_metrics(
+                candidate.process,
+                **self.phase_ledgers.phase_process_metrics(candidate, selected_ledger),
+            )
+        )
+        return self._account_removed_inventory(
+            candidate,
+            removed_volume_L=removed_volume,
+            removed_product_mol=removed_product,
+            removed_impurity_mol=removed_impurity,
         )
 
     def wash_phase(self, state: WorldState, action: dict[str, Any]) -> WorldState:
@@ -297,9 +420,7 @@ class ChemWorldPhaseSeparationServices:
             "impurity": max(float(phase["impurity_mol"]), 0.0),
         }
         if sum(feed.values()) <= 0.0 or target != "organic":
-            ledger = state.ledger.with_updates(
-                cost=state.ledger.cost + 0.02 + 0.25 * volume
-            )
+            ledger = state.ledger.with_updates(cost=state.ledger.cost + 0.02 + 0.25 * volume)
             return self.phase_ledgers.with_phase_ledger(
                 state,
                 phase_ledger,
@@ -316,9 +437,7 @@ class ChemWorldPhaseSeparationServices:
                     0.05,
                 ),
                 "impurity": max(
-                    float(
-                        state.metadata.get("impurity_partition_coefficient", 0.25)
-                    ),
+                    float(state.metadata.get("impurity_partition_coefficient", 0.25)),
                     0.05,
                 ),
             },
@@ -335,9 +454,7 @@ class ChemWorldPhaseSeparationServices:
                     extraction_stages=1,
                     extraction_stage_efficiency=0.95,
                     extraction_entrainment_fraction=0.01,
-                    maximum_contact_volume_L=max(
-                        volume + float(phase["volume_L"]), 0.10
-                    ),
+                    maximum_contact_volume_L=max(volume + float(phase["volume_L"]), 0.10),
                 ),
                 temperature_K=state.temperature_K,
             )
@@ -352,18 +469,25 @@ class ChemWorldPhaseSeparationServices:
             volume,
             1.0e-12,
         )
-        wash_waste = phase_ledger.setdefault("wash_aqueous", empty_phase())
-        wash_waste[PHASE_PRODUCT_AMOUNT_KEY] += removed["product"]
-        wash_waste["impurity_mol"] += removed["impurity"]
-        wash_waste["volume_L"] += max(
-            volume - stage.entrained_volume_L,
-            0.0,
+        removed_wash_volume = max(volume - stage.entrained_volume_L, 0.0)
+        metadata_updates, removed_volume, removed_product, removed_impurity = (
+            self._removed_inventory_summary(
+                state,
+                operation="wash",
+                inventories={
+                    "wash_aqueous": {
+                        "product_mol": removed["product"],
+                        "impurity_mol": removed["impurity"],
+                        "volume_L": removed_wash_volume,
+                    }
+                },
+            )
         )
         ledger = state.ledger.with_updates(
             cost=state.ledger.cost + 0.02 + 0.25 * volume,
             risk=min(1.0, state.ledger.risk + 0.02 * (1.0 - result.impurity_rejection)),
         )
-        return self.phase_ledgers.with_phase_ledger(
+        next_state = self.phase_ledgers.with_phase_ledger(
             state,
             phase_ledger,
             metadata_updates={
@@ -371,14 +495,19 @@ class ChemWorldPhaseSeparationServices:
                 "wash_distribution_model_id": result.distribution_model_id,
                 "wash_material_balance_error_mol": result.material_balance_error_mol,
                 "wash_converged": result.all_stages_converged,
-                "wash_entrained_aqueous_volume_L": (
-                    result.entrained_volume_L
-                ),
+                "wash_entrained_aqueous_volume_L": (result.entrained_volume_L),
                 "wash_provenance": list(result.provenance),
+                **metadata_updates,
             },
             selected_phase=target,
             ledger=ledger,
             volume_L=phase["volume_L"],
+        )
+        return self._account_removed_inventory(
+            next_state,
+            removed_volume_L=removed_volume,
+            removed_product_mol=removed_product,
+            removed_impurity_mol=removed_impurity,
         )
 
     def dry_phase(self, state: WorldState) -> WorldState:
@@ -403,36 +532,48 @@ class ChemWorldPhaseSeparationServices:
             "drying_model_id": "chemworld_sorbent_drying_vnext",
             "drying_skipped_empty_phase": not phase_slice.has_material,
         }
-        if phase_slice.has_material:
-            result = run_sorbent_drying(phase_slice)
-            phase[PHASE_PRODUCT_AMOUNT_KEY] = result.dried_liquid_amounts_mol.get(
-                "product", 0.0
+        removed_volume = 0.0
+        removed_product = 0.0
+        removed_impurity = 0.0
+        medium = state.phases.phases[target].solvents if state.phases else SolventInventory()
+        water_mol = medium.volumes_L[0] / 0.018
+        metadata_updates["drying_skipped_no_water"] = water_mol <= 0
+        if phase_slice.has_material and water_mol > 0:
+            result = run_sorbent_drying(phase_slice, water_mol=water_mol)
+            phase[PHASE_PRODUCT_AMOUNT_KEY] = result.dried_liquid_amounts_mol.get("product", 0.0)
+            phase["impurity_mol"] = result.dried_liquid_amounts_mol.get("impurity", 0.0)
+            removed_water_L = result.spent_sorbent_inventory_mol.get("residual_water", 0.0) * 0.018
+            medium = SolventInventory(
+                (max(medium.volumes_L[0] - removed_water_L, 0.0), *medium.volumes_L[1:])
             )
-            phase["impurity_mol"] = result.dried_liquid_amounts_mol.get(
-                "impurity", 0.0
-            )
-            phase["volume_L"] = result.dried_liquid_volume_L
+            phase["volume_L"] = medium.volume_L
             phase["solvent_loss"] = result.residual_drying_component_fraction
-            spent = phase_ledger.setdefault("spent_sorbent", empty_phase())
-            spent[PHASE_PRODUCT_AMOUNT_KEY] += result.spent_sorbent_inventory_mol.get(
-                "product", 0.0
+            removed_metadata, removed_volume, removed_product, removed_impurity = (
+                self._removed_inventory_summary(
+                    state,
+                    operation="dry",
+                    inventories={
+                        "spent_sorbent": {
+                            "product_mol": result.spent_sorbent_inventory_mol.get("product", 0.0),
+                            "impurity_mol": result.spent_sorbent_inventory_mol.get("impurity", 0.0),
+                            "volume_L": removed_water_L,
+                        }
+                    },
+                )
             )
-            spent["impurity_mol"] += result.spent_sorbent_inventory_mol.get(
-                "impurity", 0.0
-            )
-            spent["volume_L"] += result.retained_liquid_volume_L
             metadata_updates.update(
                 {
                     "drying_endpoint_met": result.endpoint_met,
+                    "drying_carrier_removed_L": removed_water_L,
                     "drying_material_balance_error_mol": result.material_balance_error_mol,
                     "drying_volume_balance_error_L": result.volume_balance_error_L,
                     "drying_product_recovery": result.product_recovery,
                     "drying_warnings": list(result.warnings),
                     "drying_provenance": list(result.provenance),
                     "drying_provider_path": (
-                        "chemworld.physchem.drying_adapter_manifest."
-                        "SorbentDryingProvider"
+                        "chemworld.physchem.drying_adapter_manifest.SorbentDryingProvider"
                     ),
+                    **removed_metadata,
                 }
             )
         ledger = state.ledger.with_updates(
@@ -446,13 +587,23 @@ class ChemWorldPhaseSeparationServices:
             status="dried",
             settings=metadata_updates,
         )
-        return self.phase_ledgers.with_phase_ledger(
+        next_state = self.phase_ledgers.with_phase_ledger(
             state,
             phase_ledger,
             selected_phase=target,
             ledger=ledger,
             volume_L=phase["volume_L"],
             equipment=equipment,
+        )
+        if next_state.phases is not None:
+            phases = next_state.phases.phases.copy()
+            phases[target] = replace(phases[target], solvents=medium)
+            next_state = next_state.replace(phases=PhaseLedger(phases))
+        return self._account_removed_inventory(
+            next_state,
+            removed_volume_L=removed_volume,
+            removed_product_mol=removed_product,
+            removed_impurity_mol=removed_impurity,
         )
 
     def concentrate_phase(self, state: WorldState, action: dict[str, Any]) -> WorldState:
@@ -480,37 +631,50 @@ class ChemWorldPhaseSeparationServices:
         }
         concentration_extent = 0.0
         heat_duty_J = 0.0
+        removed_volume = 0.0
+        removed_product = 0.0
+        removed_impurity = 0.0
         if phase_slice.has_material:
             result = run_vacuum_concentration(
                 phase_slice,
                 initial_temperature_K=state.temperature_K,
                 duration_s=duration,
+                solvents=state.phases.phases[target].solvents if state.phases else None,
+                carrier_heat_capacity_J_L_K=self.world.rho_cp_J_per_L_K,
             )
             phase[PHASE_PRODUCT_AMOUNT_KEY] = result.liquid_amounts_mol.get("product", 0.0)
             phase["impurity_mol"] = result.liquid_amounts_mol.get("impurity", 0.0)
             phase["volume_L"] = result.final_equivalent_liquid_volume_L
-            condensate = phase_ledger.setdefault("concentrate_condensate", empty_phase())
-            condensate[PHASE_PRODUCT_AMOUNT_KEY] += result.condensate_amounts_mol.get(
-                "product", 0.0
+            removed_metadata, removed_volume, removed_product, removed_impurity = (
+                self._removed_inventory_summary(
+                    state,
+                    operation="concentrate",
+                    inventories={
+                        "concentrate_condensate": {
+                            "product_mol": result.condensate_amounts_mol.get("product", 0.0),
+                            "impurity_mol": result.condensate_amounts_mol.get("impurity", 0.0),
+                            "volume_L": result.condensate_equivalent_liquid_volume_L,
+                        },
+                        "concentrate_vent": {
+                            "product_mol": result.vent_amounts_mol.get("product", 0.0),
+                            "impurity_mol": result.vent_amounts_mol.get("impurity", 0.0),
+                            "volume_L": result.vent_equivalent_liquid_volume_L,
+                        },
+                    },
+                )
             )
-            condensate["impurity_mol"] += result.condensate_amounts_mol.get(
-                "impurity", 0.0
-            )
-            condensate["volume_L"] += result.condensate_equivalent_liquid_volume_L
-            vent = phase_ledger.setdefault("concentrate_vent", empty_phase())
-            vent[PHASE_PRODUCT_AMOUNT_KEY] += result.vent_amounts_mol.get("product", 0.0)
-            vent["impurity_mol"] += result.vent_amounts_mol.get("impurity", 0.0)
-            vent["volume_L"] += result.vent_equivalent_liquid_volume_L
             concentration_extent = 1.0 - result.solvent_remaining_fraction
             phase["solvent_loss"] += concentration_extent
             heat_duty_J = result.heat_duty_J
             metadata_updates.update(
                 {
                     "concentration_endpoint_met": result.endpoint_met,
+                    "remaining_carriers_L": [
+                        result.liquid_amounts_mol.get(f"carrier-{i}", 0.0) * 0.018 for i in range(4)
+                    ],
+                    "final_temperature_K": result.final_temperature_K,
                     "concentration_termination_reason": result.termination_reason,
-                    "concentration_material_balance_error_mol": (
-                        result.material_balance_error_mol
-                    ),
+                    "concentration_material_balance_error_mol": (result.material_balance_error_mol),
                     "concentration_energy_balance_error_J": result.energy_balance_error_J,
                     "concentration_target_recovery": result.target_recovery,
                     "concentration_warnings": list(result.warnings),
@@ -519,6 +683,7 @@ class ChemWorldPhaseSeparationServices:
                         "chemworld.physchem.concentration_adapter_manifest."
                         "VacuumConcentrationProvider"
                     ),
+                    **removed_metadata,
                 }
             )
         ledger = state.ledger.with_updates(
@@ -535,13 +700,28 @@ class ChemWorldPhaseSeparationServices:
             status="concentrated",
             settings=metadata_updates,
         )
-        return self.phase_ledgers.with_phase_ledger(
+        next_state = self.phase_ledgers.with_phase_ledger(
             state,
             phase_ledger,
             selected_phase=target,
             ledger=ledger,
             volume_L=phase["volume_L"],
             equipment=equipment,
+        )
+        if "remaining_carriers_L" in metadata_updates and next_state.phases is not None:
+            phases = next_state.phases.phases.copy()
+            phases[target] = replace(
+                phases[target],
+                solvents=SolventInventory(tuple(metadata_updates["remaining_carriers_L"])),
+            )
+            next_state = next_state.replace(
+                phases=PhaseLedger(phases), temperature_K=metadata_updates["final_temperature_K"]
+            )
+        return self._account_removed_inventory(
+            next_state,
+            removed_volume_L=removed_volume,
+            removed_product_mol=removed_product,
+            removed_impurity_mol=removed_impurity,
         )
 
     def transfer_phase(self, state: WorldState, action: dict[str, Any]) -> WorldState:
@@ -568,31 +748,36 @@ class ChemWorldPhaseSeparationServices:
             "transfer_skipped_empty_phase": not phase_slice.has_material,
         }
         delivered_fraction = 0.0
+        removed_volume = 0.0
+        removed_product = 0.0
+        removed_impurity = 0.0
         if phase_slice.has_material:
             result = run_bounded_transfer(phase_slice, fraction=fraction)
             phase[PHASE_PRODUCT_AMOUNT_KEY] = result.target_delivered_amounts_mol.get(
                 "product", 0.0
             )
-            phase["impurity_mol"] = result.target_delivered_amounts_mol.get(
-                "impurity", 0.0
-            )
+            phase["impurity_mol"] = result.target_delivered_amounts_mol.get("impurity", 0.0)
             phase["volume_L"] = result.target_delivered_volume_L
-            source_heel = phase_ledger.setdefault("transfer_source_heel", empty_phase())
-            source_heel[PHASE_PRODUCT_AMOUNT_KEY] += result.source_remaining_amounts_mol.get(
-                "product", 0.0
+            removed_metadata, removed_volume, removed_product, removed_impurity = (
+                self._removed_inventory_summary(
+                    state,
+                    operation="transfer",
+                    inventories={
+                        "transfer_source_heel": {
+                            "product_mol": result.source_remaining_amounts_mol.get("product", 0.0),
+                            "impurity_mol": result.source_remaining_amounts_mol.get(
+                                "impurity", 0.0
+                            ),
+                            "volume_L": result.source_remaining_volume_L,
+                        },
+                        "transfer_line_holdup": {
+                            "product_mol": result.final_line_amounts_mol.get("product", 0.0),
+                            "impurity_mol": result.final_line_amounts_mol.get("impurity", 0.0),
+                            "volume_L": result.final_line_volume_L,
+                        },
+                    },
+                )
             )
-            source_heel["impurity_mol"] += result.source_remaining_amounts_mol.get(
-                "impurity", 0.0
-            )
-            source_heel["volume_L"] += result.source_remaining_volume_L
-            line_holdup = phase_ledger.setdefault("transfer_line_holdup", empty_phase())
-            line_holdup[PHASE_PRODUCT_AMOUNT_KEY] += result.final_line_amounts_mol.get(
-                "product", 0.0
-            )
-            line_holdup["impurity_mol"] += result.final_line_amounts_mol.get(
-                "impurity", 0.0
-            )
-            line_holdup["volume_L"] += result.final_line_volume_L
             delivered_fraction = result.overall_source_delivery_fraction
             phase["solvent_loss"] += 1.0 - delivered_fraction
             metadata_updates.update(
@@ -605,9 +790,9 @@ class ChemWorldPhaseSeparationServices:
                     "transfer_warnings": list(result.warnings),
                     "transfer_provenance": list(result.provenance),
                     "transfer_provider_path": (
-                        "chemworld.physchem.transfer_adapter_manifest."
-                        "TransferUnitProvider"
+                        "chemworld.physchem.transfer_adapter_manifest.TransferUnitProvider"
                     ),
+                    **removed_metadata,
                 }
             )
         ledger = state.ledger.with_updates(cost=state.ledger.cost + 0.01)
@@ -619,13 +804,19 @@ class ChemWorldPhaseSeparationServices:
             status="transferred",
             settings=metadata_updates,
         )
-        return self.phase_ledgers.with_phase_ledger(
+        next_state = self.phase_ledgers.with_phase_ledger(
             state,
             phase_ledger,
             selected_phase=target,
             ledger=ledger,
             volume_L=phase["volume_L"],
             equipment=equipment,
+        )
+        return self._account_removed_inventory(
+            next_state,
+            removed_volume_L=removed_volume,
+            removed_product_mol=removed_product,
+            removed_impurity_mol=removed_impurity,
         )
 
 

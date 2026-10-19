@@ -6,7 +6,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from chemworld.world.control_contract import CONTROL_OPERATIONS
 from chemworld.world.operations import OPERATION_TYPES
+from chemworld.world.stream_contract import STREAM_OPERATIONS
 
 
 @dataclass(frozen=True)
@@ -41,10 +43,15 @@ class DomainServiceRegistry:
                     "ChemWorldPrimitiveOperationServices",
                     (
                         "add_reagent",
+                        "add_component",
                         "add_solvent",
                         "add_catalyst",
                         "sample",
                         "quench",
+                        "create_container",
+                        "transfer_material",
+                        "select_vessel",
+                        "route_material",
                         "evaporate",
                         "terminate",
                     ),
@@ -54,7 +61,7 @@ class DomainServiceRegistry:
                     "reaction_thermal",
                     "reaction",
                     "ChemWorldReactionThermalServices",
-                    ("heat", "wait"),
+                    ("heat", "wait", *CONTROL_OPERATIONS),
                     ("reaction",),
                 ),
                 DomainServiceContract(
@@ -78,7 +85,7 @@ class DomainServiceRegistry:
                     "crystallization",
                     "crystallization",
                     "ChemWorldCrystallizationServices",
-                    ("seed_crystals", "cool_crystallize", "filter_crystals"),
+                    ("seed_crystals", "cool_crystallize", "filter_crystals", "resuspend_crystals"),
                     ("crystallization",),
                 ),
                 DomainServiceContract(
@@ -92,7 +99,7 @@ class DomainServiceRegistry:
                     "continuous_flow",
                     "continuous_flow",
                     "ChemWorldFlowServices",
-                    ("set_flow_rate", "run_flow"),
+                    ("set_flow_rate", "run_flow", *STREAM_OPERATIONS),
                     ("continuous_flow",),
                 ),
                 DomainServiceContract(
@@ -106,7 +113,7 @@ class DomainServiceRegistry:
                     "instrument_cost",
                     "observation",
                     "ChemWorldInstrumentCostServices",
-                    ("measure",),
+                    ("measure", "configure_instrument"),
                     ("observation",),
                 ),
             )
@@ -135,8 +142,7 @@ class DomainServiceRegistry:
         missing = sorted(expected - owners)
         if missing:
             raise ValueError(
-                f"Invalid domain service registry operation coverage: "
-                f"{{'missing': {missing}}}"
+                f"Invalid domain service registry operation coverage: {{'missing': {missing}}}"
             )
 
     def service_id_for_operation(self, operation: str) -> str:
@@ -201,10 +207,7 @@ class DomainServiceRegistry:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "services": {
-                contract.service_id: contract.to_dict()
-                for contract in self.contracts
-            },
+            "services": {contract.service_id: contract.to_dict() for contract in self.contracts},
             "operation_service_map": self.operation_map(),
         }
 

@@ -1,5 +1,7 @@
 # World foundations
 
+> Current main: [October foundation update](current-foundation.md). Existing figures and numerical evidence below describe the frozen August runtime.
+
 ChemWorld separates what an experimental agent may observe from what an experiment author may control. That separation makes causal world families possible without turning hidden evaluator state into an answer key.
 
 ## The public contract

@@ -18,6 +18,32 @@ PARTITION_S0_EXTRACTION_EFFICIENCY_V3 = "partition-s0-extraction-efficiency-v3"
 FLOW_S0_BALANCED_PROCESS_V1 = "continuous-flow-s0-balanced-process-v1"
 
 
+def risk_signal_contract() -> dict[str, Any]:
+    """Explain the existing mixed penalty signal without changing score arithmetic."""
+    return {
+        "contract_id": "mixed-process-and-procedure-penalty-v1",
+        "field": "safety_risk",
+        "kind": "dimensionless_benchmark_penalty",
+        "includes": ["process_model_proxies", "invalid_action_and_rollback_penalties"],
+        "physical_hazard_probability": False,
+        "unsafe_flag": "observed_penalty_at_or_above_task_limit",
+        "missing_penalty": (
+            "Rejected observations remain masked; unsafe=false then means no observed exceedance, "
+            "not a safety assessment."
+        ),
+        "cost_components": {
+            "safety_risk": "task_penalty_limit_exceeded",
+            "high_cost": "normalized_process_cost_limit_exceeded",
+            "precondition_failure": "rejected_operation",
+            "constitution_failure": "transaction_invariant_failure",
+        },
+        "interpretation": (
+            "Procedure penalties can increase on a rejected action with no physical state change. "
+            "Process proxies are synthetic; this signal is not a calibrated laboratory hazard."
+        ),
+    }
+
+
 @dataclass(frozen=True)
 class ObjectiveWeights:
     yield_weight: float

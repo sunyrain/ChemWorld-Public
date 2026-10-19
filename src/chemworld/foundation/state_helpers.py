@@ -77,12 +77,33 @@ def scale_phase_ledger(
 def equipment_settings(
     equipment: EquipmentLedger | None,
     equipment_id: str,
+    *,
+    fields: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    """Return a defensive copy of a typed equipment record's settings."""
+    """Copy settings, optionally projecting fields before copying nested data.
+
+    Scalar admission checks must not traverse unrelated, growing execution
+    histories. Both forms retain defensive-copy semantics for selected values.
+    """
 
     if equipment is None or equipment_id not in equipment.equipment:
         return {}
-    return deepcopy(equipment.equipment[equipment_id].settings)
+    settings = equipment.equipment[equipment_id].settings
+    if fields is not None:
+        return deepcopy({key: settings[key] for key in fields if key in settings})
+    return deepcopy(settings)
+
+
+def equipment_setting_truth(
+    equipment: EquipmentLedger | None,
+    equipment_id: str,
+    field: str,
+) -> bool:
+    """Read presence/truth without copying or exposing a mutable setting."""
+
+    if equipment is None or equipment_id not in equipment.equipment:
+        return False
+    return bool(equipment.equipment[equipment_id].settings.get(field))
 
 
 def equipment_status(

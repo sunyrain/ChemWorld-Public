@@ -16,6 +16,8 @@ from chemworld.data.schema import (
     TRAJECTORY_COMPATIBILITY_ALIASES,
     TRAJECTORY_SCHEMA_VERSION,
 )
+from chemworld.runtime.semantics import RUNTIME_SEMANTICS_ID
+from chemworld.world.thermal_control import REACTION_THERMAL_CONTROL_ID
 
 
 def to_builtin(value: Any) -> Any:
@@ -110,6 +112,11 @@ class TrajectoryLogger:
             "sample_consumed": float(info.get("sample_consumed", 0.0)),
             "terminated": bool(terminated),
             "truncated": bool(truncated),
+            "last_terminal_summary": to_builtin(info.get("last_terminal_summary")),
+            "batch_discarded": bool(info.get("batch_discarded", False)),
+            "right_censored_open_batch": bool(info.get("right_censored_open_batch", False)),
+            "sample_inventory": to_builtin(info.get("sample_inventory", [])),
+            "material_routing": to_builtin(info.get("material_routing", {})),
         }
         default_agent_visible_observation = {
             "observation": observation_payload,
@@ -129,6 +136,11 @@ class TrajectoryLogger:
             **default_environment_outcome,
             **to_builtin(environment_outcome or {}),
         }
+        if "batch_resource_preflight" in info:
+            for field in (
+                "batch_resource_preflight", "batch_resource_state", "batch_budget_exhausted",
+            ):
+                resolved_environment_outcome[field] = to_builtin(info.get(field))
         resolved_agent_visible_observation = {
             **default_agent_visible_observation,
             **to_builtin(agent_visible_observation or {}),
@@ -206,6 +218,16 @@ class TrajectoryLogger:
             "observation_noise_mode": task_info.get(
                 "observation_noise_mode"
             ),
+            "full_process_contract_id": task_info.get("full_process_contract_id"),
+            "runtime_semantics_id": task_info.get("runtime_semantics_id", RUNTIME_SEMANTICS_ID),
+            "risk_signal_contract": to_builtin(task_info.get("risk_signal_contract")),
+            "reaction_thermal_control_id": task_info.get(
+                "reaction_thermal_control_id", REACTION_THERMAL_CONTROL_ID
+            ),
+            "research_brief": {
+                key: to_builtin(task_info["research_brief"][key])
+                for key in ("schema_version", "card", "prior_record")
+            } if task_info.get("research_brief") is not None else None,
             "observation_noise_namespace": task_info.get(
                 "observation_noise_namespace"
             ),
@@ -329,4 +351,15 @@ class TrajectoryLogger:
 
 def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
     with Path(path).open("r", encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle if line.strip()]
+        records = []
+        for line_number, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{line_number}: invalid JSON: {exc.msg}") from exc
+            if not isinstance(record, dict):
+                raise ValueError(f"{path}:{line_number}: trajectory record must be a JSON object")
+            records.append(record)
+        return records

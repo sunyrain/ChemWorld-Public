@@ -1,5 +1,7 @@
 # Evidence
 
+> Current main: [October foundation update](current-foundation.md). Existing figures and numerical evidence below describe the frozen August runtime.
+
 ChemWorld v0.3.0 retains the four frozen, sanitized evidence groups from v0.2.0. The presentation layer adds no new benchmark experiment.
 
 | Evidence group | Frozen result | What it supports |

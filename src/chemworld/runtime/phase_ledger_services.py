@@ -188,8 +188,6 @@ class ChemWorldPhaseLedgerServices:
         truth_values = downstream_truth_values(
             state,
             phase_ledger,
-            product_amount_mol=self.phase_product_amount(state),
-            impurity_amount_mol=self.phase_impurity_amount(state),
             target_species=self.species_view.target_species_for_state(state),
             impurity_species=self.species_view.impurity_species_for_state(state),
         )
@@ -214,7 +212,7 @@ class ChemWorldPhaseLedgerServices:
         *,
         metadata_updates: dict[str, Any] | None = None,
         phase_settled: bool | None = None,
-        selected_phase: str | object | None = SELECTED_PHASE_UNSET,
+        selected_phase: str | None | object = SELECTED_PHASE_UNSET,
         ledger: Any | None = None,
         volume_L: float | None = None,
         equipment: EquipmentLedger | None = None,

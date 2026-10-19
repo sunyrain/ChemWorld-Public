@@ -8,17 +8,18 @@ import json
 import threading
 import webbrowser
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from importlib.resources import files
 from typing import Any
 from urllib.parse import urlparse
 
+from chemworld.lab.http_security import LocalServer, RequestRejected, check_local, read_local_json
 from chemworld.lab.session import LabSessionManager, task_catalog
 
 MAX_REQUEST_BYTES = 64 * 1024
 
 
-class LabServer(ThreadingHTTPServer):
+class LabServer(LocalServer):
     """Loopback-first server that owns in-memory Gym sessions."""
 
     daemon_threads = True
@@ -36,6 +37,11 @@ class LabHandler(BaseHTTPRequestHandler):
     server: LabServer
 
     def do_GET(self) -> None:
+        try:
+            check_local(self)
+        except RequestRejected as exc:
+            self._error(exc.status, str(exc))
+            return
         path = urlparse(self.path).path
         if path == "/api/health":
             self._json({"status": "ok", "provider_required": False})
@@ -45,7 +51,11 @@ class LabHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/sessions/"):
             try:
-                self._json(self.server.sessions.get(path.split("/")[3]).state())
+                session = self.server.sessions.get(path.split("/")[3])
+                if path.endswith("/export"):
+                    self._json(session.export())
+                else:
+                    self._json(session.state())
             except KeyError as exc:
                 self._error(HTTPStatus.NOT_FOUND, str(exc))
             return
@@ -68,27 +78,24 @@ class LabHandler(BaseHTTPRequestHandler):
                 session_id = path.split("/")[3]
                 self._json(self.server.sessions.get(session_id).step(action))
                 return
+            if path.startswith("/api/sessions/") and path.endswith("/replay"):
+                self._json(self.server.sessions.get(path.split("/")[3]).replay())
+                return
+            if path.startswith("/api/sessions/") and path.endswith("/close"):
+                self._json(self.server.sessions.close(path.split("/")[3]))
+                return
             self._error(HTTPStatus.NOT_FOUND, "unknown endpoint")
+        except RequestRejected as exc:
+            self._error(exc.status, str(exc))
         except KeyError as exc:
             self._error(HTTPStatus.NOT_FOUND, str(exc))
         except (TypeError, ValueError) as exc:
             self._error(HTTPStatus.BAD_REQUEST, str(exc))
-        except Exception as exc:  # pragma: no cover - fail closed at the HTTP boundary
-            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        except Exception:  # pragma: no cover - fail closed at the HTTP boundary
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "Lab operation failed")
 
     def _request_json(self) -> dict[str, Any]:
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-        except ValueError as exc:
-            raise ValueError("invalid Content-Length") from exc
-        if length < 0 or length > MAX_REQUEST_BYTES:
-            raise ValueError("request body is too large")
-        if length == 0:
-            return {}
-        payload = json.loads(self.rfile.read(length).decode("utf-8"))
-        if not isinstance(payload, dict):
-            raise ValueError("request body must be a JSON object")
-        return payload
+        return read_local_json(self)
 
     def _static(self, path: str) -> None:
         route = {"": "index.html", "/": "index.html"}.get(path, path.lstrip("/"))
@@ -118,7 +125,7 @@ class LabHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def _json(self, payload: Any, *, status: HTTPStatus = HTTPStatus.OK) -> None:
-        content = json.dumps(payload, ensure_ascii=False).encode()
+        content = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))

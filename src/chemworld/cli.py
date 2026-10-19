@@ -307,9 +307,15 @@ def _scenarios_list(args: argparse.Namespace) -> None:
 
 
 def _scenarios_show(args: argparse.Namespace) -> None:
+    try:
+        card = get_scenario_card(args.scenario_id, split=args.split)
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown scenario {args.scenario_id!r}; use 'chemworld scenarios list'."
+        ) from exc
     print(
         json.dumps(
-            get_scenario_card(args.scenario_id, split=args.split),
+            card,
             indent=2,
             sort_keys=True,
         )
@@ -320,7 +326,7 @@ def _load_json_file(path: str | Path) -> dict[str, Any]:
     with Path(path).open("r", encoding="utf-8-sig") as handle:
         payload = json.load(handle)
     if not isinstance(payload, dict):
-        raise SystemExit(f"{path} must contain a JSON object")
+        raise ValueError(f"{path} must contain a JSON object")
     return payload
 
 
@@ -693,7 +699,10 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     args.command_line = ["chemworld", *(argv if argv is not None else sys.argv[1:])]
-    args.func(args)
+    try:
+        args.func(args)
+    except (OSError, ValueError, gym.error.UnregisteredEnv) as exc:
+        parser.exit(2, f"chemworld: error: {exc}\n")
 
 
 if __name__ == "__main__":

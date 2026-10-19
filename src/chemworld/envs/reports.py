@@ -11,8 +11,17 @@ import numpy as np
 from chemworld import __version__
 from chemworld.backends import semi_mechanistic_backend_spec
 from chemworld.envs.spaces import OBSERVATION_KEYS, value_or_default
+from chemworld.foundation.solvents import MIXTURE_MODEL_ID
 from chemworld.foundation.state import OperationRecord
 from chemworld.materials import public_material_catalog
+from chemworld.physchem.coupled_flow import FLOW_MODEL
+from chemworld.runtime.component_network import public_network
+from chemworld.runtime.continuous_streams import public_streams
+from chemworld.runtime.control_program import control_settings, public_control
+from chemworld.runtime.semantics import RUNTIME_SEMANTICS_ID
+from chemworld.runtime.species import MechanismSpeciesView
+from chemworld.runtime.spectral_settings import public_spectral_settings
+from chemworld.world.control_contract import CONTROL_MODEL
 from chemworld.world.instruments import instrument_contracts
 from chemworld.world.operations import (
     OPERATION_TYPES,
@@ -20,7 +29,8 @@ from chemworld.world.operations import (
     chemworld_state_variable_contracts,
     operation_contracts,
 )
-from chemworld.world.scoring import safety_cost_from_flags
+from chemworld.world.scoring import risk_signal_contract, safety_cost_from_flags
+from chemworld.world.thermal_control import REACTION_THERMAL_CONTROL_ID
 from chemworld.world.world_law import world_law_spec
 
 
@@ -47,6 +57,9 @@ def build_task_info(env: Any) -> dict[str, Any]:
         "observation_policy": (None if task_spec is None else task_spec.observation_policy),
         "success_metrics": ([] if task_spec is None else list(task_spec.success_metrics)),
         "runtime_profile_hash": env.runtime.profile.profile_hash,
+        "reaction_thermal_control_id": REACTION_THERMAL_CONTROL_ID,
+        "runtime_semantics_id": RUNTIME_SEMANTICS_ID,
+        "risk_signal_contract": risk_signal_contract(),
         "mechanism_summary": build_public_mechanism_summary(compiled_mechanism),
         "scoring_contract": env.scoring_contract.to_dict(),
         "scoring_contract_hash": env.scoring_contract.contract_hash,
@@ -58,11 +71,37 @@ def build_task_info(env: Any) -> dict[str, Any]:
         "allowed_operations": sorted(env.allowed_operations),
         "allowed_instruments": sorted(env.allowed_instruments),
         "material_catalog": public_material_catalog(task_id=env.task_id),
+        "control_model": deepcopy(CONTROL_MODEL),
+        "continuous_stream_model": deepcopy(FLOW_MODEL),
+        "mixture_model": {
+            "id": MIXTURE_MODEL_ID,
+            "catalog_size": 4,
+            "volume_rule": "additive_carrier_volume_L",
+            "heat_capacity_rule": "volume_weighted_endpoint_ratios",
+            "positive_property_rule": "log_volume_fraction_interpolation",
+            "domain": "finite_surrogate_media_not_calibrated_real_solvent_mixtures",
+            "solute_volume_rule": "dilute_tracer_solutes_do_not_add_carrier_volume",
+        },
+        "feed_catalog": [
+            {
+                "id": f"feed-{i}",
+                "component": i,
+                "reference_recipe_mol_per_amount_mol": MechanismSpeciesView(compiled_mechanism)
+                .reagent_charge_amounts(
+                    env.scenario_instance.initial_state, limiting_amount_mol=1.0
+                )
+                .get(species, 0.0),
+            }
+            for i, species in enumerate(MechanismSpeciesView(compiled_mechanism).feed_species)
+        ],
         "kernel_maturity": env.kernel_maturity.to_dict(),
         "physics_maturity": env.kernel_maturity.lowest_level.value,
         "proxy_allowed": env.kernel_maturity.proxy_allowed,
         "instruments": {
-            key: contract.to_dict() for key, contract in instrument_contracts().items()
+            key: contract.to_dict()
+            for key, contract in instrument_contracts(
+                include_particle_size=getattr(env, "full_process_contract_id", None) is not None,
+            ).items()
         },
         "operations": [operation.to_dict() for operation in chemworld_operations()],
         "operation_contracts": {
@@ -76,16 +115,18 @@ def build_task_info(env: Any) -> dict[str, Any]:
         "backend": semi_mechanistic_backend_spec().to_dict(),
         "observation_keys": list(OBSERVATION_KEYS),
     }
+    if getattr(env, "full_process_contract_id", None) is not None:
+        payload["full_process_contract_id"] = env.full_process_contract_id
     if env.task_id == "electrochemical-conversion":
-        payload["electrochemical_workflow_mode"] = (
-            env.electrochemical_workflow_mode
-        )
+        payload["electrochemical_workflow_mode"] = env.electrochemical_workflow_mode
     if env.compiled_composition is not None:
         payload["composition"] = env.compiled_composition.to_public_dict()
         payload["composition_request"] = env.compiled_composition.spec.to_dict()
     if env.task_id in {
         "electrochemical-conversion",
+        "partition-discovery",
         "reaction-to-crystallization",
+        "reaction-to-distillation",
     }:
         material_information = {
             "mode": env.material_information_condition,
@@ -93,13 +134,14 @@ def build_task_info(env: Any) -> dict[str, Any]:
         dossier = env.material_information_dossier()
         if dossier is not None:
             material_information["dossier"] = dossier
-            material_information["dossier_sha256"] = (
-                env.material_information_sha256
-            )
+            material_information["dossier_sha256"] = env.material_information_sha256
         payload["material_information"] = material_information
-    campaign_resources = env.public_campaign_resource_state(
-        include_card=True
-    )
+    campaign_resources = env.public_campaign_resource_state(include_card=True)
+    if getattr(env, "research_brief", None) is not None:
+        from chemworld.research_brief import public_research_brief
+
+        payload["research_brief"] = public_research_brief(env.research_brief)
+        payload["description"] = payload["research_brief"]["commission"]
     if campaign_resources is not None:
         payload["campaign_resources"] = campaign_resources
     if env.debug_truth:
@@ -160,9 +202,7 @@ def build_evaluator_provenance(env: Any) -> dict[str, Any]:
         "observation_noise_namespace": env.observation_noise_namespace,
         "last_observation_noise": env.observation_noise_provenance(),
         "campaign_resource_card_sha256": (
-            None
-            if env.campaign_resource_card is None
-            else env.campaign_resource_card.card_sha256
+            None if env.campaign_resource_card is None else env.campaign_resource_card.card_sha256
         ),
         "world_family_intervention_version": metadata.get("world_family_intervention_version"),
         "world_family_intervention_hash": metadata.get("world_family_intervention_hash"),
@@ -173,9 +213,7 @@ def build_evaluator_provenance(env: Any) -> dict[str, Any]:
         "electrochemical_material_family_contract_version": metadata.get(
             "electrochemical_material_family_contract_version"
         ),
-        "electrochemical_material_family_id": metadata.get(
-            "electrochemical_material_family_id"
-        ),
+        "electrochemical_material_family_id": metadata.get("electrochemical_material_family_id"),
         "electrochemical_material_family_sha256": metadata.get(
             "electrochemical_material_family_sha256"
         ),
@@ -185,9 +223,7 @@ def build_evaluator_provenance(env: Any) -> dict[str, Any]:
         "crystallization_material_family_contract_version": metadata.get(
             "crystallization_material_family_contract_version"
         ),
-        "crystallization_material_family_id": metadata.get(
-            "crystallization_material_family_id"
-        ),
+        "crystallization_material_family_id": metadata.get("crystallization_material_family_id"),
         "crystallization_material_family_sha256": metadata.get(
             "crystallization_material_family_sha256"
         ),
@@ -200,9 +236,7 @@ def build_evaluator_provenance(env: Any) -> dict[str, Any]:
         # dossier (or opaque mode).  The evaluator still needs the exact
         # configuration to reconstruct a misindexed arm during trajectory
         # replay, so keep it in evaluator-only provenance.
-        "material_information_config": deepcopy(
-            getattr(env, "material_information_config", None)
-        ),
+        "material_information_config": deepcopy(getattr(env, "material_information_config", None)),
     }
 
 
@@ -415,6 +449,17 @@ def build_step_info(
         "operation_id": env._operation_id,
         "experiment_ended": False,
         "experiment_summaries": deepcopy(env._experiment_summaries),
+        "sample_inventory": env._state.samples.public_summary(),
+        "material_routing": env._state.samples.routing_summary(),
+        "component_network": public_network(env._state),
+        "process_control": public_control(env._state),
+        "continuous_streams": public_streams(env._state),
+        "spectral_configurations": public_spectral_settings(env._state),
+        "control_trace": (
+            control_settings(env._state).get("last_samples", [])
+            if operation_record.operation_type == "advance_control"
+            else []
+        ),
         "task_id": env.task_id,
         "scenario_id": None if env.scenario_spec is None else env.scenario_spec.scenario_id,
         "initial_state_id": env.scenario_spec.initial_state_id,
@@ -462,6 +507,7 @@ def build_step_info(
             else f"Action precondition failed: {', '.join(failed_preconditions)}"
         ),
         "constraint_flags": constraint_flags,
+        "risk_signal_contract": risk_signal_contract(),
         "env_version": __version__,
         "world_family_version": env.world.family_version,
     }

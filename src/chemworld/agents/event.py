@@ -103,8 +103,8 @@ class ScriptedChemistryAgent(BaseAgent):
             {"operation": "wait", "duration_s": 900.0, "stirring_speed_rpm": 720.0},
             {"operation": "measure", "instrument": "hplc"},
             {"operation": "wait", "duration_s": 600.0, "stirring_speed_rpm": 720.0},
-            {"operation": "measure", "instrument": reaction_diagnostic},
             {"operation": "quench"},
+            {"operation": "measure", "instrument": reaction_diagnostic},
         ]
         if purification_enabled:
             sequence.extend(

@@ -341,7 +341,26 @@ def _apply_public_cross_field_constraints(
             continue
         kind = constraint.get("kind")
         parameters = constraint.get("parameters")
-        if kind == "cross_field_upper_bound" and isinstance(parameters, Mapping):
+        if kind == "material_routes" and constraint.get("routes"):
+            routes = constraint["routes"]
+            route = min(routes, key=lambda item: (
+                item["source_container"] != payload["source_container"],
+                item["destination_container"] != payload["destination_container"],
+            ))
+            payload["source_container"] = route["source_container"]
+            payload["destination_container"] = route["destination_container"]
+            payload["mixing"] = max(int(payload["mixing"]), route["minimum_mixing"])
+            maximum = float(route["maximum_fraction"])
+            space = event_action_space["transfer_fraction"]
+            if not isinstance(space, gym.spaces.Box):
+                raise TypeError("transfer_fraction must use a Box action component")
+            value = float(np.asarray(min(_scalar(payload["transfer_fraction"]), maximum),
+                                     dtype=space.dtype))
+            if value > maximum:
+                value = float(np.nextafter(np.asarray(value, dtype=space.dtype),
+                                           np.asarray(0, dtype=space.dtype)))
+            payload["transfer_fraction"] = _box_payload(space, value)
+        elif kind == "cross_field_upper_bound" and isinstance(parameters, Mapping):
             if constraint.get("id") != "payload_coupling:maximum_cooling_rate_K_s":
                 continue
             current = float(parameters["current_temperature_K"])

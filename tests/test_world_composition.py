@@ -191,10 +191,9 @@ def test_unregistered_component_combination_fails_before_execution() -> None:
         {"kind": "observation", "role": "measurement", "parameters": {}},
     ]
 
-    with pytest.raises(WorldCompositionError, match="registered v1 compatibility domain") as exc:
+    with pytest.raises(WorldCompositionError, match="missing_dependency") as exc:
         chemworld.compile_world_composition(request)
     assert "missing_dependency" in _diagnostic_codes(exc.value)
-    assert "unsupported_combination" in _diagnostic_codes(exc.value)
 
 
 def test_fixed_task_and_composition_are_mutually_exclusive() -> None:
@@ -220,9 +219,9 @@ def test_compatibility_report_is_public_and_preexecution() -> None:
     compiled = chemworld.compile_world_composition(_request())
 
     assert report.compatible
-    assert report.pattern == "reaction-thermal-observation"
+    assert report.pattern == "component-network"
     assert report.minimum_resources["operation_budget"] == 4
-    assert report.state_owners["temperature_control"] == "thermal"
+    assert report.state_owners["reactor:temperature_control"] == "thermal"
     assert compiled.to_public_dict()["compatibility"] == report.to_dict()
 
 

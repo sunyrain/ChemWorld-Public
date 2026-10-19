@@ -8,6 +8,7 @@ from math import exp, isfinite, pi, sqrt
 
 R_J_PER_MOL_K = 8.31446261815324
 DEFAULT_MAXIMUM_COOLING_RATE_K_S = 0.25
+SURFACE_SATURATION_MAX_LOADING_RATIO = 4.0
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,8 @@ class CrystallizationKineticsSpec:
     nucleus_diameter_m: float
     impurity_occlusion_mol_per_mol: float = 0.0
     supersaturation_occlusion_factor: float = 0.0
+    impurity_occlusion_law_id: str = "linear_supersaturation_transfer_v1"
+    impurity_surface_half_saturation_mol_L: float = 0.010
     fines_threshold_m: float = 20.0e-6
     provenance_id: str = ""
 
@@ -93,12 +96,21 @@ class CrystallizationKineticsSpec:
             ),
         ):
             _nonnegative_finite(value, name)
+        if self.impurity_occlusion_law_id not in {
+            "linear_supersaturation_transfer_v1",
+            "surface_saturation_occlusion_v1",
+        }:
+            raise ValueError("unsupported impurity_occlusion_law_id")
         for name, value in (
             ("primary_nucleation_exponent", self.primary_nucleation_exponent),
             ("growth_exponent", self.growth_exponent),
             ("crystal_density_kg_m3", self.crystal_density_kg_m3),
             ("target_molecular_weight_kg_mol", self.target_molecular_weight_kg_mol),
             ("nucleus_diameter_m", self.nucleus_diameter_m),
+            (
+                "impurity_surface_half_saturation_mol_L",
+                self.impurity_surface_half_saturation_mol_L,
+            ),
             ("fines_threshold_m", self.fines_threshold_m),
         ):
             _positive_finite(value, name)
@@ -117,6 +129,10 @@ class CrystallizationKineticsSpec:
             "nucleus_diameter_m": self.nucleus_diameter_m,
             "impurity_occlusion_mol_per_mol": self.impurity_occlusion_mol_per_mol,
             "supersaturation_occlusion_factor": (self.supersaturation_occlusion_factor),
+            "impurity_occlusion_law_id": self.impurity_occlusion_law_id,
+            "impurity_surface_half_saturation_mol_L": (
+                self.impurity_surface_half_saturation_mol_L
+            ),
             "fines_threshold_m": self.fines_threshold_m,
             "provenance_id": self.provenance_id,
         }
@@ -275,6 +291,7 @@ class CoolingCrystallizationResult:
     step_reports: tuple[CrystallizationStepReport, ...]
     warnings: tuple[str, ...]
     provenance: dict[str, str]
+    population_cohorts: tuple[tuple[float, float], ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -305,6 +322,11 @@ class CoolingCrystallizationResult:
             "step_reports": [report.to_dict() for report in self.step_reports],
             "warnings": list(self.warnings),
             "provenance": dict(self.provenance),
+            **(
+                {"population_cohorts": [list(c) for c in self.population_cohorts]}
+                if self.population_cohorts
+                else {}
+            ),
         }
 
 
@@ -337,6 +359,8 @@ def cooling_crystallization(
     seed_diameter_m: float = 100.0e-6,
     time_steps: int = 120,
     execution_spec: CrystallizationExecutionSpec | None = None,
+    initial_cohorts: tuple[tuple[float, float], ...] | None = None,
+    retain_population: bool = False,
 ) -> CoolingCrystallizationResult:
     """Integrate a compact size-cohort cooling-crystallization model."""
 
@@ -369,7 +393,17 @@ def cooling_crystallization(
 
     seed_target_mol = seed_mass_g / 1000.0 / kinetics.target_molecular_weight_kg_mol
     cohorts: list[_CrystalCohort] = []
-    if seed_target_mol > 0.0:
+    if initial_cohorts is not None:
+        for count, diameter in initial_cohorts:
+            _positive_finite(count, "cohort particle count")
+            _positive_finite(diameter, "cohort diameter")
+            cohorts.append(_CrystalCohort(count, diameter))
+        population_mol = sum(
+            c.particle_count * _particle_moles(c.diameter_m, kinetics) for c in cohorts
+        )
+        if abs(population_mol - seed_target_mol) > 1.0e-10:
+            raise ValueError("initial cohort population does not close supplied solid mass")
+    elif seed_target_mol > 0.0:
         seed_particle_mol = _particle_moles(seed_diameter_m, kinetics)
         seed_particle_count = seed_target_mol / seed_particle_mol
         if seed_particle_count < policy.minimum_effective_seed_particles:
@@ -413,6 +447,7 @@ def cooling_crystallization(
             nucleated_target,
             relative_supersaturation=relative_supersaturation,
             dissolved_impurity=dissolved_impurity,
+            solvent_volume_L=solvent_volume_L,
             kinetics=kinetics,
         )
         dissolved_impurity -= impurity_step
@@ -438,6 +473,7 @@ def cooling_crystallization(
             growth_target,
             relative_supersaturation=relative_supersaturation,
             dissolved_impurity=dissolved_impurity,
+            solvent_volume_L=solvent_volume_L,
             kinetics=kinetics,
         )
         dissolved_impurity -= growth_impurity
@@ -535,6 +571,9 @@ def cooling_crystallization(
         growth_solver_iterations=solver_iterations,
         growth_solver_max_residual_mol=solver_max_residual,
         crystal_size_distribution=csd,
+        population_cohorts=tuple((c.particle_count, c.diameter_m) for c in cohorts)
+        if retain_population
+        else (),
         step_reports=tuple(reports),
         warnings=tuple(warnings),
         provenance={
@@ -620,11 +659,24 @@ def _occlude_impurity(
     *,
     relative_supersaturation: float,
     dissolved_impurity: float,
+    solvent_volume_L: float,
     kinetics: CrystallizationKineticsSpec,
 ) -> float:
-    ratio = kinetics.impurity_occlusion_mol_per_mol * (
-        1.0 + kinetics.supersaturation_occlusion_factor * relative_supersaturation
-    )
+    if kinetics.impurity_occlusion_law_id == "linear_supersaturation_transfer_v1":
+        ratio = kinetics.impurity_occlusion_mol_per_mol * (
+            1.0 + kinetics.supersaturation_occlusion_factor * relative_supersaturation
+        )
+    else:
+        impurity_concentration = dissolved_impurity / max(solvent_volume_L, 1.0e-12)
+        surface_coverage = impurity_concentration / (
+            kinetics.impurity_surface_half_saturation_mol_L + impurity_concentration
+        )
+        ratio = (
+            kinetics.impurity_occlusion_mol_per_mol
+            * SURFACE_SATURATION_MAX_LOADING_RATIO
+            * surface_coverage
+            * (1.0 + kinetics.supersaturation_occlusion_factor * relative_supersaturation**2)
+        )
     return min(dissolved_impurity, max(0.0, target_transfer_mol * ratio))
 
 

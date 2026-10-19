@@ -8,13 +8,16 @@ from typing import Any
 import numpy as np
 from gymnasium import spaces
 
+from chemworld.foundation.samples import CONTAINER_IDS
 from chemworld.world.actions import CATALYSTS, ELECTROLYTE_PROFILES, SOLVENTS
+from chemworld.world.control_contract import CONTROL_CHOICES, CONTROL_NUMERIC
 from chemworld.world.operations import (
     INSTRUMENTS,
     OPERATION_TYPES,
     PUBLIC_OBSERVATION_KEYS,
     operation_contracts,
 )
+from chemworld.world.spectral_contract import SPECTRAL_BOUNDS
 
 OBSERVATION_KEYS = PUBLIC_OBSERVATION_KEYS
 
@@ -84,7 +87,24 @@ def make_action_space() -> spaces.Dict:
 
     return ConditionalActionDict(
         {
+            **{
+                key: spaces.Box(bounds[0], bounds[1], shape=(1,), dtype=np.float32)
+                for key, bounds in SPECTRAL_BOUNDS.items()
+            },
             "operation": spaces.Discrete(len(OPERATION_TYPES)),
+            "container": spaces.Discrete(len(CONTAINER_IDS)),
+            "source_container": spaces.Discrete(len(CONTAINER_IDS)),
+            "destination_container": spaces.Discrete(len(CONTAINER_IDS)),
+            "capacity_L": spaces.Box(0.0001, 0.1, shape=(1,), dtype=np.float32),
+            "mixing": spaces.Discrete(2),
+            "component": spaces.Discrete(16),
+            **{key: spaces.Discrete(len(choices)) for key, choices in CONTROL_CHOICES.items()},
+            **{
+                key: spaces.Box(low, high, shape=(1,), dtype=np.float32)
+                for key, (low, high, _unit, _default) in CONTROL_NUMERIC.items()
+            },
+            "vessel": spaces.Discrete(16),
+            "connection": spaces.Discrete(64),
             "amount_mol": spaces.Box(0.0, 0.040, shape=(1,), dtype=np.float32),
             "volume_L": spaces.Box(0.0, 0.080, shape=(1,), dtype=np.float32),
             "catalyst_amount_mol": spaces.Box(0.0, 0.005, shape=(1,), dtype=np.float32),
@@ -102,7 +122,7 @@ def make_action_space() -> spaces.Dict:
             "transfer_fraction": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32),
             "seed_mass_g": spaces.Box(0.0, 0.050, shape=(1,), dtype=np.float32),
             "reflux_ratio": spaces.Box(0.0, 10.0, shape=(1,), dtype=np.float32),
-            "flow_rate_mL_min": spaces.Box(0.01, 20.0, shape=(1,), dtype=np.float32),
+            "flow_rate_mL_min": spaces.Box(0.0, 20.0, shape=(1,), dtype=np.float32),
             "residence_time_s": spaces.Box(1.0, 7200.0, shape=(1,), dtype=np.float32),
             "potential_V": spaces.Box(-3.0, 3.0, shape=(1,), dtype=np.float32),
             "current_mA": spaces.Box(0.0, 500.0, shape=(1,), dtype=np.float32),
@@ -122,9 +142,7 @@ def make_observation_space() -> spaces.Dict:
     )
 
 
-def value_or_default(
-    values: dict[str, float | None], key: str, default: float = 0.0
-) -> float:
+def value_or_default(values: dict[str, float | None], key: str, default: float = 0.0) -> float:
     value = values.get(key)
     return default if value is None else float(value)
 
@@ -138,9 +156,7 @@ def to_observation(values: dict[str, float | None]) -> dict[str, np.ndarray]:
             raise ValueError(f"observation value {key!r} must be numeric, not boolean")
         resolved = float(value)
         if not np.isfinite(resolved) or not 0.0 <= resolved <= 1.0:
-            raise ValueError(
-                f"observation value {key!r} must be finite and lie in [0, 1]"
-            )
+            raise ValueError(f"observation value {key!r} must be finite and lie in [0, 1]")
         return resolved
 
     return {

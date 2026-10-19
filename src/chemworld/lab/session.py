@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import tempfile
 import threading
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from http import HTTPStatus
+from pathlib import Path
+from typing import Any, cast
 
 import gymnasium as gym
 
 import chemworld  # noqa: F401
-from chemworld.data.logging import observation_to_json, to_builtin
+from chemworld.data.logging import TrajectoryLogger, load_jsonl, observation_to_json, to_builtin
+from chemworld.envs.chemworld_env import ChemWorldEnv
+from chemworld.eval.verify import verify_records
+from chemworld.lab.http_security import RequestRejected
 from chemworld.materials import action_material_display
 from chemworld.tasks import get_task, list_tasks
 
@@ -49,6 +55,29 @@ _TASK_COPY: dict[str, tuple[str, str, str]] = {
 }
 
 _EFFECTS: dict[str, tuple[str, str, str]] = {
+    "configure_instrument": (
+        "配置光谱采集",
+        "设置扫描次数、分辨率和稀释倍率；measure 才采集。",
+        "measure",
+    ),
+    "set_flow_stream": ("设置进出料流", "设置声明连接的阀流量；零值关闭阀门，不推进时间。", "flow"),
+    "advance_flow": (
+        "推进有限库存连续流",
+        "实际扣减上游库存并收集出口；同时记账热量与电荷。",
+        "flow",
+    ),
+    "configure_control": ("配置过程控制", "配置持久过程控制；不会自动推进时间。", "heat"),
+    "queue_control_stage": ("追加控制阶段", "向有限队列追加声明的设定值阶段。", "heat"),
+    "set_control_feedback": ("设定传感反馈", "设定温度或压力阈值及合同允许的响应。", "measure"),
+    "advance_control": ("推进控制程序", "按实际时间、能量及气体收支记账。", "heat"),
+    "pause_control": ("暂停程序", "暂停持久控制；不是完成终检。", "terminate"),
+    "resume_control": ("恢复程序", "从持久游标恢复，不重做已完成阶段。", "heat"),
+    "select_vessel": ("切换容器", "切换到声明容器，消耗操作预算但不推进物理时间。", "transfer"),
+    "route_material": ("沿端口转移", "沿声明连接转移物料，遵守显式混合政策。", "transfer"),
+    "add_component": ("独立组分投料", "加入公开投料目录的单个组分，按实际摩尔数记账。", "feed"),
+    "create_container": ("创建容器", "创建有身份的空容器，不产生物料。", "transfer"),
+    "transfer_material": ("路由物料", "按公开合同转移有身份的物料，保留来源与损失。", "transfer"),
+    "resuspend_crystals": ("复悬晶体", "将隔离晶体放回液体处理状态。", "crystallize"),
     "add_solvent": ("累计加液", "向当前容器加入溶剂并增加体积。", "feed"),
     "add_reagent": ("累计投料", "向当前容器加入试剂，已有物料不会被替换。", "feed"),
     "add_catalyst": ("加入催化剂", "向当前容器加入催化剂。", "feed"),
@@ -158,15 +187,48 @@ class LabSession:
         task = get_task(self.task_id)
         self._env = gym.make("ChemWorld", **task.env_kwargs(seed=self.seed))
         self._env.reset(seed=self.seed)
+        base = cast(ChemWorldEnv, self._env.unwrapped)
+        self._task_info = {**base.task_info(), **base.evaluator_provenance()}
         self._history: list[dict[str, Any]] = []
         self._lock = threading.RLock()
+        self._closed = False
+        self._storage = tempfile.TemporaryDirectory(prefix="chemworld-lab-")
+        self._trajectory = Path(self._storage.name) / "trajectory.jsonl"
+        self._logger = TrajectoryLogger(self._trajectory)
+        self._replay: dict[str, Any] | None = None
 
     def close(self) -> None:
         with self._lock:
+            self._closed = True
+            self._logger.close()
             self._env.close()
+            self._storage.cleanup()
+
+    def export(self) -> dict[str, Any]:
+        with self._lock:
+            if self._closed:
+                raise ValueError("Session is closed")
+            return {
+                "trajectory_jsonl": self._trajectory.read_text(encoding="utf-8"),
+                "history": list(self._history),
+                "task_id": self.task_id,
+                "seed": self.seed,
+            }
+
+    def replay(self) -> dict[str, Any]:
+        with self._lock:
+            if self._closed:
+                raise ValueError("Session is closed")
+            if not self._history:
+                raise ValueError("No executed actions to replay")
+            if self._replay is None:
+                self._replay = verify_records(load_jsonl(self._trajectory), tolerance=0.0).to_dict()
+            return dict(self._replay)
 
     def state(self) -> dict[str, Any]:
         with self._lock:
+            if self._closed:
+                raise ValueError("Session is closed")
             base: Any = self._env.unwrapped
             campaign = to_builtin(base.campaign_state())
             report = to_builtin(base.observation_view("lab_report"))
@@ -204,6 +266,10 @@ class LabSession:
 
     def step(self, action: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
+            if self._closed:
+                raise ValueError("Session is closed")
+            if len(self._history) >= 1000:
+                raise ValueError("Session action limit reached; export and close this session")
             base: Any = self._env.unwrapped
             validation = dict(base.validate_action(action))
             if not validation.get("valid", False):
@@ -219,6 +285,18 @@ class LabSession:
                 }
             campaign_before = base.campaign_state()
             observation, reward, terminated, truncated, info = self._env.step(action)
+            self._replay = None
+            self._logger.log(
+                task_info=self._task_info,
+                step=len(self._history) + 1,
+                action=action,
+                observation=observation,
+                reward=float(reward),
+                terminated=terminated,
+                truncated=truncated,
+                info=info,
+                agent_metadata={"agent_id": "manual-lab"},
+            )
             report = to_builtin(base.observation_view("lab_report"))
             campaign = to_builtin(base.campaign_state())
             canonical = dict(validation.get("canonical_action") or action)
@@ -240,7 +318,7 @@ class LabSession:
             }
             self._history.append(record)
             return {
-                "accepted": True,
+                "accepted": info["transaction_status"] == "committed",
                 "validation": to_builtin(validation),
                 "feedback": {
                     "message": report.get("text"),
@@ -255,16 +333,33 @@ class LabSession:
 class LabSessionManager:
     """Thread-safe in-memory session registry."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_sessions: int = 16) -> None:
+        if max_sessions < 1:
+            raise ValueError("max_sessions must be positive")
+        self.max_sessions = max_sessions
         self._sessions: dict[str, LabSession] = {}
         self._lock = threading.RLock()
 
     def create(self, task_id: str, seed: int | None = None) -> LabSession:
         task = get_task(task_id)
-        session = LabSession(task_id=task_id, seed=task.seeds[0] if seed is None else seed)
         with self._lock:
+            if len(self._sessions) >= self.max_sessions:
+                raise RequestRejected(
+                    "Close an existing session first", HTTPStatus.SERVICE_UNAVAILABLE
+                )
+            session = LabSession(task_id=task_id, seed=task.seeds[0] if seed is None else seed)
             self._sessions[session.session_id] = session
         return session
+
+    def close(self, session_id: str) -> dict[str, Any]:
+        with self._lock:
+            session = self.get(session_id)
+            with session._lock:
+                exported = session.export()
+                count = session.state()["campaign_state"]["final_assay_count"]
+                session.close()
+                del self._sessions[session_id]
+            return {"closed": True, "final_assay_count": count, "export": exported}
 
     def get(self, session_id: str) -> LabSession:
         with self._lock:
