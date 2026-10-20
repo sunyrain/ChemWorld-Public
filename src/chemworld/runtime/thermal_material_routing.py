@@ -6,7 +6,7 @@ mixing operation does not simulate a valve, pipe or pressure-driven flow.
 """
 
 from dataclasses import replace
-from math import isfinite
+from math import fsum, isfinite
 
 from scipy.optimize import brentq
 
@@ -24,7 +24,9 @@ def feed_packet(state, physics, action):
         raise ValueError("feed must identify an inactive finite source")
     source = state.inactive_vessels[source_id]
     amount = action.get("amount_mol")
-    available = sum(source.species_amounts.values())
+    # JSON may reorder species keys. A finite packet must not change its
+    # normalization (and subsequent physical history) with that representation.
+    available = fsum(source.species_amounts.values())
     if (
         isinstance(amount, bool)
         or not isinstance(amount, (float, int))
@@ -153,7 +155,7 @@ def exchange_packet(source, target, physics, amounts, *, fraction=0.0, fixed_sou
         ):
             raise ValueError("material endpoints must share thermodynamic reference data")
     thermal = model.thermodynamics
-    enthalpy = sum(
+    enthalpy = fsum(
         amount
         * (
             thermal.species_energy_j_mol(key, source.temperature_K)
@@ -164,7 +166,7 @@ def exchange_packet(source, target, physics, amounts, *, fraction=0.0, fixed_sou
     carrier_energy = moved.heat_capacity() * (
         source.temperature_K - thermal.reference_temperature_K
     )
-    carrier_energy += sum(
+    carrier_energy += fsum(
         amount * thermal.species_energy_j_mol(key, source.temperature_K)
         for key, amount in moved.species_amounts().items()
     )
@@ -173,7 +175,7 @@ def exchange_packet(source, target, physics, amounts, *, fraction=0.0, fixed_sou
     target_candidate = _set_energy(
         _replace_inventory(target, target_amounts, target_slots), model, old_target_energy + energy
     )
-    reference_fraction = sum(amounts.values()) / sum(source.species_amounts.values())
+    reference_fraction = fsum(amounts.values()) / fsum(source.species_amounts.values())
     reference_amounts = {
         key: value * reference_fraction for key, value in source.species.initial_amounts_mol.items()
     }
@@ -183,7 +185,7 @@ def exchange_packet(source, target, physics, amounts, *, fraction=0.0, fixed_sou
     source_candidate = _replace_inventory(source, source_amounts, source_slots)
     if fixed_source:
         source_candidate = source_candidate.replace(
-            pressure_Pa=sum(source_amounts.values())
+            pressure_Pa=fsum(source_amounts.values())
             * R_J_PER_MOL_K
             * source.temperature_K
             / (source.volume_L / 1000)
@@ -232,7 +234,7 @@ def add_finite_feed(state, physics, action):
     return target.replace(
         inactive_vessels={**state.inactive_vessels, source_id: source},
         ledger=state.ledger.with_updates(
-            cost=state.ledger.cost + 0.03 * sum(amounts.values()) / 0.01
+            cost=state.ledger.cost + 0.03 * fsum(amounts.values()) / 0.01
         ),
         metadata={**target.metadata, "last_material_packet": receipt},
     )
@@ -264,11 +266,11 @@ def route_gas_packet(state, physics, action):
     if isinstance(action.get("mixing"), bool) or action.get("mixing") not in (0, 1):
         raise ValueError("declare empty-only or allowed mixing")
     target_occupied = (target.volume_L > 0 if background_model(target,physics) is not None
-                       else sum(target.species_amounts.values()) > 1e-12)
+                       else fsum(target.species_amounts.values()) > 1e-12)
     if target_occupied and action["mixing"] != 1:
         raise ValueError("occupied destination requires explicit mixing")
     empty = (state.volume_L <= 0 if background_model(state,physics) is not None
-             else sum(state.species_amounts.values()) <= 0)
+             else fsum(state.species_amounts.values()) <= 0)
     if empty:
         raise ValueError("source gas inventory is empty")
     amounts = {key: value * fraction for key, value in state.species_amounts.items()}

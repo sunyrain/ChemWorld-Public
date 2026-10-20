@@ -299,6 +299,13 @@ class OperationValidator:
             .get(f"{bounds_operation}:{field}", authored)
         )
         if authored is not None:
+            if (state.lab_clock is not None and operation_type == "wait"
+                    and field == "duration_s"):
+                # A declared lab time resolution is a native clock domain,
+                # not a relaxation of the historical batch-operation schema.
+                rule = dict(self.action_codec.modules.components()[
+                    "lab_schedule"].parameters)["duration_range_s"]
+                dynamic_low = rule.minimum
             dynamic_low = max(dynamic_low, authored[0])
             dynamic_high = min(dynamic_high, authored[1])
         if operation_type in {"add_reagent", "add_component"} and field == "amount_mol":

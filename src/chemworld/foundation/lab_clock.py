@@ -28,6 +28,7 @@ class LabClockState:
     running: tuple[dict, ...] = ()
     completed: tuple[dict, ...] = ()
     detector_rng: dict = field(default_factory=dict)
+    detector_noise: dict = field(default_factory=dict)
     # Trusted sampling receipts, appended only by executed acquisitions.
     exchanges: tuple[dict, ...] = ()
     stopped: bool = False
@@ -36,6 +37,7 @@ class LabClockState:
         for key in ("queued", "running", "completed", "exchanges"):
             object.__setattr__(self, key, tuple(deepcopy(getattr(self, key))))
         object.__setattr__(self, "detector_rng", deepcopy(self.detector_rng))
+        object.__setattr__(self, "detector_noise", deepcopy(self.detector_noise))
 
     def to_dict(self, *, include_hidden=True):
         if include_hidden:

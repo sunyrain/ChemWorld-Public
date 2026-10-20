@@ -388,7 +388,8 @@ def _render(args: argparse.Namespace) -> None:
         "composition": _load_json_file(args.composition),
     }
     env = ChemWorldRuntime(**kwargs, seed=args.seed, render_mode="ansi",
-                           observation_noise_mode=args.noise_mode)
+                           observation_noise_mode=args.noise_mode,
+                           observation_seed_override=args.observation_seed)
     logger = None
     history = []
     try:
@@ -675,6 +676,8 @@ def build_parser() -> argparse.ArgumentParser:
     render_world.add_argument("--task")
     render_world.add_argument("--composition", help="Explicit world/task composition JSON.")
     render_parser.add_argument("--seed", type=int, default=0)
+    render_parser.add_argument("--observation-seed", type=int,
+                               help="Independent detector seed; defaults to world seed.")
     render_parser.add_argument("--actions", nargs="*", default=[])
     render_parser.add_argument("--noise-mode", choices=("sequential", "keyed"),
                                default="sequential")

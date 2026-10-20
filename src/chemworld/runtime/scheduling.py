@@ -89,14 +89,19 @@ def validate_lab(composition):
             raise ValueError("lab analyzer must have exactly one physical owner")
 
 
-def initialize_lab(state, composition, rng):
+def initialize_lab(state, composition, rng, *, detector_noise=None):
     if composition is None or composition.physics is None or composition.physics.lab_clock is None:
         return state
     # Shared systems are all enabled from t=0. Initialize declared carrier
     # stocks for every vessel now, not lazily when it is selected later.
     for local in local_states(state).values():
         state = install_local(state, initialize_solvents(local))
-    return state.replace(lab_clock=LabClockState(detector_rng=deepcopy(rng.bit_generator.state)))
+    return state.replace(
+        lab_clock=LabClockState(
+            detector_rng=deepcopy(rng.bit_generator.state),
+            detector_noise=detector_noise or {},
+        )
+    )
 
 
 def public_lab(state):
@@ -206,6 +211,27 @@ class LabScheduleServices:
         spec = self.modules.instrument_specs()[instrument]
         rng = np.random.Generator(np.random.PCG64())
         rng.bit_generator.state = deepcopy(state.lab_clock.detector_rng)
+        noise = state.lab_clock.detector_noise
+        keyed = noise.get("mode") == "keyed"
+        if keyed:
+            from chemworld.runtime.observation_noise import (
+                ObservationNoiseCoordinate,
+                keyed_noise_provenance,
+                keyed_observation_rng,
+            )
+
+            # Queue identity is persistent and cannot be affected by polling.
+            # The laboratory namespace separates deferred and direct readings.
+            coordinate = ObservationNoiseCoordinate(
+                namespace=noise["namespace"] + ":lab",
+                base_observation_seed=noise["seed"],
+                experiment_index=noise["experiment_index"],
+                operation_type="measure",
+                instrument=instrument,
+                replicate_index=job["sequence"],
+            )
+            rng = keyed_observation_rng(coordinate)
+            job = {**job, "noise_provenance": keyed_noise_provenance(coordinate)}
         specimen = result.measurement_state.replace(equipment=after.equipment, ledger=after.ledger)
         try:
             reading = spec.native_observer(specimen, action, rng)
@@ -274,7 +300,9 @@ class LabScheduleServices:
             ),
             lab_clock=replace(
                 state.lab_clock,
-                detector_rng=deepcopy(rng.bit_generator.state),
+                detector_rng=(
+                    state.lab_clock.detector_rng if keyed else deepcopy(rng.bit_generator.state)
+                ),
                 exchanges=(
                     *state.lab_clock.exchanges,
                     *(

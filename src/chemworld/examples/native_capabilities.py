@@ -3,6 +3,7 @@
 import argparse
 import json
 from dataclasses import asdict
+from pathlib import Path
 
 from chemworld.world.domain_modules import DomainModuleRegistry
 
@@ -21,6 +22,11 @@ def capability_rows(registry=None):
                     "interfaces": list(component.interfaces),
                     "state_owners": list(component.state_owners),
                     "processes": list(component.processes),
+                    "ports": {
+                        "input": list(component.input_ports),
+                        "output": list(component.outputs),
+                        "unit": component.port_unit,
+                    },
                     "parameters": {key: asdict(rule) for key, rule in component.parameters},
                 }
                 for name, component in module.components
@@ -32,10 +38,26 @@ def capability_rows(registry=None):
                 }
                 for operation in module.operations
             },
-            "instruments": [instrument.definition.id for instrument in module.instruments],
+            "instruments": {
+                instrument.definition.id: instrument.contract.to_dict()
+                for instrument in module.instruments
+            },
         }
         for module in registry.modules
     ]
+
+
+def bound_capabilities(session):
+    """Reuse the bound runtime's public contracts, without another range registry."""
+    from chemworld.runtime.component_network import public_network
+
+    return {
+        "scope": "Current bound task and active vessel; not every possible future state.",
+        "active_vessel": session._state.vessel_id,
+        "actions": session.available_actions(include_invalid=True),
+        "connections": public_network(session._state),
+        "modules": capability_rows(session.domain_modules),
+    }
 
 
 def markdown():
@@ -69,7 +91,19 @@ def markdown():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    parser.add_argument("--composition", type=Path, help="Export bound public contracts as JSON")
     args = parser.parse_args()
+    if args.composition:
+        from chemworld.runtime import ChemWorldRuntime
+
+        payload = json.loads(args.composition.read_text())
+        session = ChemWorldRuntime(composition=payload.get("composition", payload))
+        try:
+            session.reset(seed=7)
+            print(json.dumps(bound_capabilities(session), indent=2))
+        finally:
+            session.close()
+        return
     print(markdown() if args.format == "markdown" else json.dumps(capability_rows(), indent=2))
 
 

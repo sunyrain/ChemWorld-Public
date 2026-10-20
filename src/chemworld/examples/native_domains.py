@@ -23,7 +23,7 @@ def mixed_clock_world():
     """Independent A/B SSA and deterministic vessels; no same-vessel hybrid."""
     from chemworld.world.biochemical_worlds import biochemical_world
 
-    payload = biochemical_world("reversible", seed=31).to_dict()
+    payload = biochemical_world("reversible", seed=7).to_dict()
     physics = payload["physics"]
     state = WorldState.from_dict(physics["initial_states"]["reactor"])
     physics["initial_states"]["reactor"] = state.replace(
@@ -54,7 +54,12 @@ def mixed_clock_world():
     payload["vessels"].append({"id": "continuous", "capacity_L": 0.1})
     payload["components"] = [c for c in payload["components"] if c["kind"] != "material_input"]
     payload["components"] += [
-        {"id": name + ":" + kind, "vessel": name, "kind": kind, "parameters": {}}
+        {
+            "id": name + ":" + kind,
+            "vessel": name,
+            "kind": kind,
+            "parameters": {"duration_range_s": [1e-6, 14400]} if kind == "lab_schedule" else {},
+        }
         for name, kinds in (
             ("reactor", ("lab_schedule",)),
             ("continuous", ("thermal", "reaction", "lab_schedule")),
@@ -141,8 +146,7 @@ def connected_heater_world():
     physics["thermal_models"]["adsorber"] = model
     physics["sorbent_models"] = adsorption["physics"]["sorbent_models"]
     gas["components"] += [
-        {"id": name + ":heater-port", "kind": "heater_connection",
-         "vessel": name, "parameters": {}}
+        {"id": name + ":heater-port", "kind": "heater_connection", "vessel": name, "parameters": {}}
         for name in ("reactor", "adsorber", "cell")
     ]
     gas["task"].update(
@@ -182,7 +186,7 @@ def workflow(name):
             {"operation": "reconnect_heater", "vessel": "cell"},
             {"operation": "select_vessel", "vessel": "cell"},
             {"operation": "configure_electrical_control", "current_A": 0.02},
-            {"operation": "heat", "target_temperature_K": 330, "duration_s": 20},
+            {"operation": "heat", "target_temperature_K": 355, "duration_s": 20},
             {"operation": "measure", "instrument": "battery_meter"},
         ]
     elif name == "membrane":
@@ -192,7 +196,7 @@ def workflow(name):
         spec = membrane_world_spec(MembraneSpec(fouling=MembraneFoulingSpec()))
         actions = [
             action
-            for path, duration in (("process", 300), ("rinse", 60), ("process", 120))
+            for path, duration in (("process", 300), ("rinse", 60)) * 3
             for action in (
                 {"operation": "set_flow_rate", "flow_rate_mL_min": 20, "flow_path": path},
                 {"operation": "run_flow", "duration_s": duration},
@@ -222,8 +226,11 @@ def workflow(name):
         actions = [
             {"operation": "wait", "duration_s": 2},
             {"operation": "queue_lab_measure"},
-            {"operation": "wait", "duration_s": 1},
+            {"operation": "queue_lab_measure"},
+            {"operation": "wait", "duration_s": 0.25},
             {"operation": "select_vessel", "vessel": "continuous"},
+            {"operation": "wait", "duration_s": 0.75},
+            {"operation": "wait", "duration_s": 1},
             {"operation": "wait", "duration_s": 5},
             {"operation": "select_vessel", "vessel": "reactor"},
         ]
@@ -244,12 +251,20 @@ def workflow(name):
                 "reflux_ratio": 1,
             },
             {"operation": "measure", "instrument": "phase_state"},
+            {
+                "operation": "distill",
+                "target_temperature_K": 430,
+                "duration_s": 10,
+                "full_reflux": 1,
+                "reflux_ratio": 1,
+            },
             {"operation": "collect_fraction", "transfer_fraction": 0.5},
             {
                 "operation": "distill",
                 "target_temperature_K": 430,
                 "duration_s": 10,
                 "reflux_ratio": 3,
+                "full_reflux": 0,
             },
         ]
     elif name == "crystal":
@@ -273,6 +288,8 @@ def workflow(name):
             {"operation": "resuspend_crystals", "volume_L": 0.01, "solvent": 0},
             {"operation": "heat", "target_temperature_K": 350, "duration_s": 60},
             {"operation": "wait", "duration_s": 60},
+            {"operation": "cool_crystallize", "target_temperature_K": 278.15, "duration_s": 300},
+            {"operation": "measure", "instrument": "phase_state"},
         ]
     elif name == "solid":
         from chemworld.world.solid_world import solid_world_spec
@@ -294,7 +311,7 @@ def workflow(name):
 WORKFLOWS = ("heater", "membrane", "mineral", "shared-clock", "distillation", "crystal", "solid")
 
 
-def run_workflow(name, output):
+def run_workflow(name, output, *, noise_mode="sequential"):
     """Export real actions/readouts plus a restorable snapshot; no fabricated score."""
     from chemworld.data.logging import TrajectoryLogger
     from chemworld.envs.spaces import to_observation
@@ -303,8 +320,24 @@ def run_workflow(name, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     spec, actions = workflow(name)
-    session = ChemWorldRuntime(composition=spec)
-    session.reset(seed=41)
+    (output / (name + "-recipe.json")).write_text(
+        json.dumps(
+            {
+                "composition": spec.to_dict(),
+                "actions": actions,
+                "world_seed": 7,
+                "observation_seed": 12,
+                "noise_mode": noise_mode,
+            },
+            indent=2,
+            allow_nan=False,
+        ),
+        encoding="utf-8",
+    )
+    session = ChemWorldRuntime(
+        composition=spec, observation_noise_mode=noise_mode, observation_seed_override=12
+    )
+    session.reset(seed=7)
     path = output / (name + ".jsonl")
     try:
         with TrajectoryLogger(path) as logger:
@@ -352,6 +385,7 @@ def run_workflow(name, output):
             raise RuntimeError(replay.mismatches)
         return {
             "name": name,
+            "noise_mode": noise_mode,
             "actions": len(actions),
             "replay_steps": replay.checked_steps,
             "time_s": session._state.ledger.time_s,
@@ -368,11 +402,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workflow", choices=WORKFLOWS, action="append")
+    parser.add_argument("--noise-mode", choices=("sequential", "keyed"), default="sequential")
     args = parser.parse_args()
     results = []
     for name in args.workflow or WORKFLOWS:
         print(f"Running native integration example: {name}", flush=True)
-        results.append(run_workflow(name, args.output))
+        results.append(run_workflow(name, args.output, noise_mode=args.noise_mode))
     print(json.dumps(results, indent=2, allow_nan=False))
 
 

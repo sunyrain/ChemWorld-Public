@@ -7,7 +7,7 @@ do not acquire permission to create material merely by reusing an action name.
 
 from __future__ import annotations
 
-from math import isclose
+from math import fsum, isclose
 from typing import TYPE_CHECKING, Any
 
 from chemworld.foundation import WorldState, equipment_settings
@@ -65,7 +65,7 @@ class ServiceMaterialBoundary:
                 unmodeled.append("fixed_temperature_feed_source_utility_heat_and_work")
             else:
                 exchange("supply:reagent", vessel, "in", amounts, "feed")
-            stocks["reagent_mol"] = sum(amounts.values())
+            stocks["reagent_mol"] = fsum(amounts.values())
             # The charge counter is a consumer of the same actual additions,
             # not a source from which to infer an arbitrary balancing receipt.
             old = {} if before.species is None else before.species.initial_amounts_mol

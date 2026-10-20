@@ -24,13 +24,16 @@ In a checkout, prefix Python commands with `uv run --no-sync`. The package examp
 run without model credentials. The biochemical checkout example is
 `uv run --no-sync python examples/native_biochemical.py`.
 
-## Remaining integration and scientific extensions
+## Integration scope and further scientific extensions
 
 Shared time is an explicit session configuration. All enabled vessels then age together,
 and snapshots retain queued jobs, pending SSA events and unpublished readings. Local
-time remains the default. Shared mode currently excludes open flow, alternate phase
-strategies and keyed detector noise; see the guide for its full scope. The final
-cross-domain combination and installation acceptance is in progress.
+time remains the default. Shared mode supports sequential and keyed detector noise,
+with explicitly authored subsecond wait ranges. It excludes open flow and alternate
+phase strategies; see the guide for its full scope. The [integrated examples](native_domains.md)
+exercise seven continuous histories across four interfaces, both noise modes and
+fresh-process continuation. Wheel/sdist checks run the default-noise examples and
+their replays outside the checkout.
 
 Further scientific extensions need their own finite equations, parameters and reference
 cases: electrolyte-resolved battery models, plating/cracking, nonideal concentrated

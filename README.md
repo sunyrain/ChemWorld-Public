@@ -136,11 +136,11 @@ over a sequence of operations.
 | Example | Follow the experiment |
 | --- | --- |
 | Shared heater | Move one calibrated heater from a surface reactor to an adsorption vessel and a thermal battery |
-| Membrane | Pump finite feed, collect permeate, rinse with finite water and run again with retained fouling |
+| Membrane | Complete three process/rinse cycles with finite feed and wash water, retaining the membrane's fouling history |
 | Minerals | Add acid, evolve carbonate/calcite chemistry, transfer a phase and sample for pH |
-| Shared clock | Advance separate stochastic and deterministic vessels while an offline analyzer produces delayed readings |
-| Distillation | Change reflux and collect a fraction from a column with finite inventories |
-| Crystallization | Cool, filter, resuspend and warm the retained material |
+| Shared clock | Advance separate stochastic and deterministic vessels while competing requests share one offline analyzer |
+| Distillation | Switch through full reflux and collect a fraction from a column with finite inventories |
+| Crystallization | Cool, filter, resuspend, warm and cool again while retaining material and samples |
 | Solid solution | Observe binary demixing through heating and cooling |
 
 Run the heater history and verify its recorded trajectory:
@@ -152,7 +152,8 @@ uv run --no-sync chemworld verify --submission runs/native-domains/heater.jsonl
 
 Select another workflow with `--workflow membrane`, `mineral`, `shared-clock`,
 `distillation`, `crystal` or `solid`. These are fixed, provider-free demonstrations;
-connect your own policy to make the experimental choices.
+connect your own policy to make the experimental choices. Use `--noise-mode keyed`
+for keyed detector noise; sequential noise is the default.
 
 ## One runtime, four ways to use it
 
@@ -250,10 +251,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development and packaging checks.
 bug, a proposed model or an interface improvement. For a new domain, include the intended
 experiment, governing equations and expected operating range.
 
-**Development status.** Current source is `0.5.0.dev0`. The initial seven integrated
-workflows and independent wheel/sdist installs have been checked; broader combination
-acceptance is still in progress. Supported combinations and model limits are documented
-in the guides above. The historical results below belong to their pinned runtime.
+**Development status.** Current source is `0.5.0.dev0`. Integration checks exercise
+seven workflows through four entry points, both detector-noise modes and continuation
+in a fresh process. Independent wheel/sdist checks run the examples and replay their
+trajectories outside the checkout. Supported combinations and model limits are
+documented in the guides above. The historical results below belong to their pinned runtime.
 
 <details>
 <summary>Earlier tutorials and frozen evidence</summary>

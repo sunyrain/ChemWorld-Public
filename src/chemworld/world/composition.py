@@ -1012,6 +1012,7 @@ def _bind_operation_bounds(
     if len(values) != 2:
         return
     targets = {
+        ("lab_schedule", "duration_range_s"): (("wait", "duration_s"),),
         ("thermal", "temperature_range_K"): (("heat", "target_temperature_K"),),
         ("thermal", "duration_range_s"): (
             ("heat", "duration_s"),

@@ -61,8 +61,17 @@ one nonterminal native offline analyzer. The default finite session admits at mo
 64 jobs (configurable to 256), preserving all completion records. Thermal and SSA
 may be separate vessels, never an implicit hybrid solver in one vessel. Only
 queue, select, wait and terminate actions are available in this initial shared
-mode. Partial entity reset, terminal/in-situ instruments, keyed detector noise,
+mode. Partial entity reset, terminal/in-situ instruments,
 inter-vessel/open flow and alternate phase strategies are rejected rather than
 silently mixing clocks. Chromatograph method configuration is authored before
 the shared session. These are synthetic development examples, not fitted
 laboratory chemistry or a claim of robot orchestration.
+
+Queued detector readouts support sequential and keyed noise. Keyed mode uses the
+existing observation-coordinate primitive with a laboratory namespace and the
+persistent queue sequence; polling does not change the key, physical sampling or
+SSA stream. The detector seed and coordinate inputs persist in private snapshots.
+The optional `lab_schedule.duration_range_s` declares the public wait range down
+to 1 microsecond; without it the ordinary one-second lower bound is unchanged.
+This allows stopping inside a short offline acquisition without altering the
+instrument's declared analysis time or the underlying physical rates.

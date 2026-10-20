@@ -5,7 +5,7 @@ against those amounts before a measurement, and never used as material stock.
 """
 
 from dataclasses import replace
-from math import isclose
+from math import fsum, isclose
 
 from chemworld.foundation import species_with_added_initial_amounts
 from chemworld.foundation.state_ledgers import PhaseLedger, PhaseRecord
@@ -114,8 +114,8 @@ def exchange_aqueous_packet(source, target, physics, amounts, *, fraction=0, fix
         raise ValueError("aqueous feed requires a distinct finite liquid vessel")
     if set(source.species_amounts) != set(FORMULAS) or source.species_amounts["Calcite"] > 0:
         raise ValueError("representative solution feed cannot include a separate mineral phase")
-    available = sum(source.species_amounts.values())
-    moved = sum(amounts.values())
+    available = fsum(source.species_amounts.values())
+    moved = fsum(amounts.values())
     fraction = moved / available
     if not 0 <= fraction < 1 or any(
         not isclose(amounts.get(k, 0), fraction * v, rel_tol=1e-10, abs_tol=1e-14)

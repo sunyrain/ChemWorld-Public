@@ -364,6 +364,68 @@ def test_selecting_another_vessel_does_not_resample_ssa_future():
     assert first._state.ledger.time_s == second._state.ledger.time_s == 10
 
 
-def test_keyed_detector_mode_is_rejected_instead_of_silently_ignored():
-    with pytest.raises(ValueError, match="persistent sequential"):
-        ChemWorldRuntime(composition=shared_lab_world(), observation_noise_mode="keyed")
+@pytest.mark.parametrize("noise", ("sequential", "keyed"))
+def test_detector_modes_keep_process_sampling_and_polling_independent(noise):
+    sessions = [ChemWorldRuntime(composition=hybrid_spec(), observation_noise_mode=noise,
+                                observation_seed_override=12) for _ in range(2)]
+    try:
+        for r in sessions:
+            r.reset(seed=7)
+            execute(r, "queue_lab_measure")
+            execute(r, "queue_lab_measure")
+            execute(r, "wait", duration_s=0.25)
+        untouched = sessions[1]._state.to_dict()
+        for _ in range(10):
+            sessions[1].observe()
+            assert "detector_noise" not in sessions[1].lab_status()
+            assert "observation" not in sessions[1].lab_status()["running"][0]
+        assert sessions[1]._state.to_dict() == untouched
+        for r in sessions:
+            execute(r, "wait", duration_s=0.75)
+            execute(r, "wait", duration_s=1)
+        assert sessions[0]._state.to_dict() == sessions[1]._state.to_dict()
+        jobs = sessions[0]._state.lab_clock.completed
+        assert [job["sequence"] for job in jobs] == [0, 1]
+        if noise == "keyed":
+            assert all(job["noise_provenance"]["mode"] == "keyed" for job in jobs)
+            assert len({job["noise_provenance"]["noise_key_sha256"] for job in jobs}) == 2
+    finally:
+        for r in sessions:
+            r.close()
+
+
+def test_keyed_queued_detection_does_not_change_ssa_or_sampling():
+    sessions = [ChemWorldRuntime(composition=hybrid_spec(), observation_noise_mode=mode,
+                                observation_seed_override=12)
+                for mode in ("sequential", "keyed")]
+    try:
+        for r in sessions:
+            r.reset(seed=7)
+            execute(r, "wait", duration_s=2)
+            execute(r, "queue_lab_measure")
+            execute(r, "wait", duration_s=1)
+        left, right = (r._state for r in sessions)
+        assert left.species_amounts == right.species_amounts
+        assert left.process.stochastic_continuation == right.process.stochastic_continuation
+        assert left.ledger == right.ledger
+        assert left.lab_clock.exchanges == right.lab_clock.exchanges
+    finally:
+        for r in sessions:
+            r.close()
+
+
+def test_subsecond_wait_requires_declared_lab_resolution_and_stays_positive():
+    declared, standard = make(hybrid_spec()), make()
+    try:
+        execute(declared, "wait", duration_s=0.25)
+        assert standard.execute({"operation": "wait", "duration_s": 0.25}).info[
+            "transaction_status"] == "validation_failed"
+        before = declared._state
+        for duration in (0.0, -1.0, 1e-8):
+            assert declared.execute({"operation": "wait", "duration_s": duration}).info[
+                "transaction_status"] == "validation_failed"
+            assert declared._state.species_amounts == before.species_amounts
+            assert declared._state.ledger.time_s == before.ledger.time_s
+    finally:
+        declared.close()
+        standard.close()

@@ -72,6 +72,8 @@ BUILTIN_MODULES = (
         ),),
         components=(("lab_schedule", ComponentCapability(
             operations=("queue_lab_heat", "queue_lab_measure", "wait"),
+            parameters=(("duration_range_s", ParameterRule(
+                value_kind="range", unit="s", minimum=1e-6, maximum=14400.0)),),
             interfaces=("time",), state_owners=("lab_clock",),
         )),),
         dependencies=("thermal", "observation"),

@@ -1962,9 +1962,13 @@ class ChemWorldRuntime:
         state = initialize_lab(
             state, None if self.compiled_composition is None else self.compiled_composition.spec,
             self._rng,
+            detector_noise={
+                "mode": self.observation_noise_mode,
+                "namespace": self.observation_noise_namespace,
+                "seed": self._observation_seed(self.seed),
+                "experiment_index": self._experiment_index,
+            },
         )
-        if state.lab_clock is not None and self.observation_noise_mode != "sequential":
-            raise ValueError("shared lab uses its persistent sequential detector stream")
         return initialize_solvents(state)
 
     def _observation_seed(self, world_seed: int) -> int:

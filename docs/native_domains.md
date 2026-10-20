@@ -22,11 +22,11 @@ actual action/readout trajectories and terminal snapshots, not invented scores.
 | Workflow | What it exercises |
 | --- | --- |
 | `heater` | One calibrated finite heater: gas surface reaction → liquid adsorption → thermal SPM battery. The same device moves, not copies. Each vessel retains its own material and elapsed local time. |
-| `membrane` | Finite feed/pump/RO/permeate and rinse/waste; fouling persists between runs. |
+| `membrane` | Three process/rinse cycles on finite feed/pump/RO/permeate and wash/waste inventories; fouling persists, with no refill/reset. |
 | `mineral` | Carbonate/calcite kinetics, finite acid input, phase-owned transfer, sampling and pH. |
-| `shared-clock` | Independent low-copy A/B SSA and deterministic A/B vessel, one offline molecular counter, delayed results and persistent RNG. |
-| `distillation` | Finite tray holdup, retained receiver, timed fraction collection and reflux change. |
-| `crystal` | Seeding, finite cooling/growth, filtration, resuspension and warm redissolution. |
+| `shared-clock` | Independent low-copy A/B SSA and deterministic A/B vessel, two competing requests to one offline molecular counter, delayed results and persistent RNG. |
+| `distillation` | Finite tray holdup, retained receiver, timed fraction collection, full reflux and reflux change. |
+| `crystal` | Seeding, finite cooling/growth, filtration, resuspension, warm redissolution and a second cooling interval. |
 | `solid` | Binary demixing → heating → cooling with local equilibrium and native phase readout. |
 
 ## Device and time boundaries
@@ -45,6 +45,13 @@ item 39's finite scheduler. It does **not** couple SSA and ODE inside one vessel
 and molecular capture is zero-carrier-volume Bernoulli sampling, not a liquid
 aliquot. Do not interpret repeated resets with the same seeds as independent runs.
 
+Use `--noise-mode keyed` to select the existing keyed detector primitive. Examples
+use world/process seed 7 and independent observation seed 12. Each output includes
+the parsed composition and literal action sequence in a `*-recipe.json` file.
+The shared-clock example explicitly declares subsecond waits so a snapshot can
+retain a busy one-second analyzer and an unexecuted SSA event; it does not shorten
+the analyzer's physical analysis time.
+
 ## Capability and validation scope
 
 See [the generated module table](native_capabilities.md). Its source is the
@@ -53,6 +60,17 @@ Actual numeric domains come from authored physics and device specifications and
 are narrowed by task permissions. Presence of two modules is not evidence that
 every coupling between them is supported. Small SPM, dilute 0D RO and finite
 binary equilibrium are not full PyBaMM, WaterTAP or CALPHAD replacements.
+
+Export the actual bound public action ranges, material connections and installed
+instrument declarations for a recipe (or a raw composition file):
+
+```bash
+uv run --no-sync python -m chemworld.examples.native_capabilities --composition /tmp/native-domains/heater-recipe.json
+```
+
+This reports the current task and active vessel at reset; future vessel choices
+or physical state changes may change availability. It reuses the runtime's public
+contracts, not a separate hand-maintained range table.
 
 Validation commands:
 

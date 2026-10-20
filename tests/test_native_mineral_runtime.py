@@ -32,6 +32,38 @@ def global_elements(state):
 
 
 @pytest.mark.parametrize("mode", ["sequential", "keyed"])
+def test_serialized_world_key_order_preserves_finite_feed_history(mode):
+    spec = mineral_world_spec()
+    reordered = json.loads(json.dumps(spec.to_dict(), sort_keys=True))
+    sessions = [
+        ChemWorldRuntime(
+            composition=world, observation_noise_mode=mode, observation_seed_override=12
+        )
+        for world in (spec, reordered)
+    ]
+    try:
+        for session in sessions:
+            session.reset(seed=7)
+        for action in (
+            {"operation": "wait", "duration_s": 100},
+            {"operation": "add_component", "component": "HCl-solution", "amount_mol": 0.01},
+            {"operation": "wait", "duration_s": 300},
+            {"operation": "measure", "instrument": "aqueous_ph"},
+        ):
+            left, right = (execute(session, **action) for session in sessions)
+            # Separately created sessions have distinct bookkeeping identities.
+            # All physical, measurement, accounting and solver fields must agree.
+            assert {k: v for k, v in left.info.items() if k != "campaign_id"} == {
+                k: v for k, v in right.info.items() if k != "campaign_id"
+            }
+            assert left.observation.native_record() == right.observation.native_record()
+            assert sessions[0]._state.to_dict() == sessions[1]._state.to_dict()
+    finally:
+        for session in sessions:
+            session.close()
+
+
+@pytest.mark.parametrize("mode", ["sequential", "keyed"])
 def test_native_phase_geometry_feed_kinetic_wait_measure_and_exact_snapshot(mode):
     session = ChemWorldRuntime(composition=mineral_world_spec(), observation_noise_mode=mode)
     session.reset(seed=33)

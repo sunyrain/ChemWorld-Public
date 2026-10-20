@@ -9,7 +9,7 @@ not a new frozen benchmark or a PyPI release.
 The native session and domain extensions are now available on top of these
 existing capabilities. See the [native guide](native_foundation.md) for execution,
 state ownership and model-specific examples, and the [extension scope](extension-roadmap.md)
-for the delivered slices and pending shared-clock integration.
+for the delivered models and shared-clock scope.
 
 | Capability | Current public behavior |
 | --- | --- |
@@ -64,15 +64,33 @@ failures among 721 cases: an inconsistent temperature fixture and single-phase
 inventory roundoff. Both were corrected without relaxing assertions; all 147
 affected flash, column, concentration, measurement and public-entry checks then
 passed. The unchanged checks and the follow-up overlap and are not added into a
-new denominator. Shared-clock and final cross-domain acceptance remain pending.
+new denominator.
+
+The latest integrated examples exercise seven continuous workflows through
+Python, Gym, CLI and Agent interfaces, with sequential and keyed detector noise
+and fresh-process snapshot continuation. Their scope includes a shared heater,
+three membrane process/rinse cycles, mineral chemistry, competing analyzer jobs,
+full-reflux distillation, repeated crystallization and binary solid phases.
+See the [workflow guide](native_domains.md) for commands and model limits.
+
+On Windows Python 3.11.15, the final public selection passed 81/81 checks, including
+56 cross-interface histories and replays and 14 fresh-process continuations.
+Shared-material regressions passed 71/71. This integration found and corrected
+order-sensitive finite-feed summation during JSON replay; the complete affected
+selection then ran again from its first case. Independent wheel and sdist checks
+both passed on Windows Python 3.12.10, each running all seven default-noise workflows
+and their new-process replays. These overlapping checks are reported separately.
 
 ## Model scope
 
 Spectra are calibrated synthetic reporter signals, not predictions of arbitrary
-molecular structures. Inactive vessels do not advance autonomously: operating a
-selected vessel advances its local time. The gas plenum does not dissolve or react
-with the liquid. The mixed-tank electrical channel is an idealized two-electron
-model, not a validated battery. World-noise shift modes can include a simultaneous
+molecular structures. Local time remains the default: operating a selected vessel
+does not advance other vessels. An explicitly configured shared laboratory clock
+advances all enabled vessels and schedules equipment queues and delayed readings;
+its supported combinations are listed in the [shared laboratory guide](native_shared_lab.md).
+The gas plenum does not dissolve or react with the liquid. The mixed-tank electrical
+channel is an idealized two-electron model; the separate native battery domain uses
+a bounded single-particle model. World-noise shift modes can include a simultaneous
 physical-parameter change; they should not be treated as pure noise interventions.
 
 ## Historical reproduction
@@ -96,4 +114,9 @@ Runtime source was selected from ChemWorld commit
 provider adapters, documentation and frozen-evidence consumers are retained;
 manuscripts, private evaluation inputs, study runners and provider payloads are
 not copied. Version metadata, type annotations and public CLI error handling are integrated here.
-The [extension roadmap](extension-roadmap.md) records proposed future work.
+The later native foundation updates include the domain implementations and
+cross-domain integration delivered on 20 October 2026. Finite feed normalization
+and accounting use stable summation so JSON key ordering does not change the
+material packet or its subsequent replay.
+The [extension roadmap](extension-roadmap.md) distinguishes delivered capabilities
+from further scientific extensions.
