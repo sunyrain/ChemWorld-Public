@@ -157,17 +157,12 @@ for keyed detector noise; sequential noise is the default.
 
 ## One runtime, four ways to use it
 
-```mermaid
-flowchart LR
-    W["Physical world<br/>materials · equipment · models"] --> R["ChemWorldRuntime<br/>execute · measure · record"]
-    T["Task<br/>goals · permissions · budgets"] --> R
-    A["Python · Gym · CLI · Agent"] <--> R
-    R --> H["Experimental history<br/>state · observations · resources · replay"]
-```
+![ChemWorld architecture: physical world and task definitions configure one runtime; Python, Gym, CLI and Agent exchange actions and observations with it; the runtime records experimental history.](docs/assets/chemworld-runtime-architecture.png)
 
 The world describes what can physically happen; the task describes what the researcher
-may do and what it is trying to achieve. Every interface uses the same experimental
-session and accounting.
+may do and what it is trying to achieve. Python, Gym, CLI and Agent send actions and
+receive observations through the same experimental session. That session records
+physical state, measurements and resource use for inspection and replay.
 
 ### Python
 
