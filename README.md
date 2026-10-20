@@ -1,56 +1,115 @@
-# ChemWorld
+<p align="center">
+  <img src="docs/assets/chemworld-readme-banner.png" alt="ChemWorld — Programmable worlds. Autonomous experiments. A conceptual modular laboratory with a reactor, membrane cell, battery and crystals." width="1200">
+</p>
 
-**Programmable chemical worlds for autonomous experimentation.**
+<p align="center">
+  <strong>A native simulation foundation for agents that experiment.</strong>
+</p>
 
-[Quick start](#quick-start) · [Native API](docs/native_foundation.md) ·
-[Model ranges](docs/extension-roadmap.md) · [Connect an agent](docs/agents.md) ·
-[中文基座说明](docs/extension-roadmap.zh.md)
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%7C%203.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11 and 3.12"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-167D8D?style=flat-square" alt="MIT license"></a>
+  <a href="pyproject.toml"><img src="https://img.shields.io/badge/Development-0.5.0.dev0-B16D39?style=flat-square" alt="Development version 0.5.0.dev0"></a>
+  <a href="docs/native_domains.md"><img src="https://img.shields.io/badge/Examples-No%20model%20key-34495E?style=flat-square" alt="Examples run without model credentials"></a>
+</p>
 
-ChemWorld is a simulation foundation for agents that choose and carry out experiments.
-Researchers define the physical world, available equipment and task; agents add material,
-heat, separate, measure and decide what to do next. Each operation changes persistent
-state, consumes resources and produces a record that can be inspected and replayed.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#experimental-domains">Capabilities</a> ·
+  <a href="docs/native_domains.md">Examples</a> ·
+  <a href="docs/native_foundation.md">Native API</a> ·
+  <a href="docs/agents.md">Connect an agent</a> ·
+  <a href="docs/extension-roadmap.zh.md">中文说明</a>
+</p>
 
-The current development branch (`0.5.0.dev0`) brings chemical reactions, phase processes,
-electrochemistry, membranes and stochastic biochemistry into one experimental runtime.
-Python, Gym, CLI and Agent entry points share the same execution and accounting.
+## Build a world. Let an agent explore it.
+
+ChemWorld gives autonomous agents a chemical world they can act on: add material,
+heat a reactor, separate a mixture, take a measurement and choose the next experiment.
+Results come from physical models and evolving state. Samples change, stocks run down,
+equipment retains its history, and earlier choices shape what can happen next.
+
+You define the chemistry, apparatus and task. ChemWorld handles physical evolution,
+native measurements, resource accounting and replay through one runtime shared by
+**Python, Gym, CLI and Agent interfaces**.
+
+Use it to develop experimental policies, study how agents use observations, or build
+reproducible simulation exercises. Change the world, available information or research
+budget while keeping the experimental process inspectable.
 
 ## Quick start
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
-Python 3.11 and 3.12 are supported; these examples run without model credentials or
-upstream chemistry solvers.
+Use Python 3.11 or 3.12. The native examples require neither model credentials nor
+optional upstream chemistry solvers.
 
 ```bash
 git clone https://github.com/sunyrain/ChemWorld-Public.git
 cd ChemWorld-Public
 uv sync --locked --extra dev
+
+# Run a complete surface + bulk reaction experiment.
 uv run --no-sync python -m chemworld.examples.native_surface_research --bulk --mobile --terminal-assay
 ```
 
-This complete experiment feeds finite stocks, couples bulk and surface reactions to a
-heater, measures gas composition, transfers material and finishes with an assay.
-Its output includes each operation's outcome, physical duration and native readings.
+The example performs **12 operations**: feed finite stocks, heat, measure, wait,
+transfer material, continue in the receiving vessel and finish with an assay.
+Its JSON output contains each action's outcome, actual physical duration and
+instrument readings with native units.
 
-For a browser workbench, run `uv run --no-sync chemworld lab`.
-[Student Lab](#student-lab-no-model-required) provides a local interface to the existing
-tutorial tasks.
+Prefer an interactive introduction? Start the local [Student Lab](#student-lab)
+with `uv run --no-sync chemworld lab`.
 
-## One foundation across experimental domains
+## What makes the foundation useful
 
-- **Compose worlds and tasks separately.** Declare materials, vessels, devices and
-  physical models, then bind goals, allowed operations, budgets and ending conditions.
-- **Reuse equipment and state.** A heater acts through a thermal connection; material
-  transfers follow declared phase and ownership rules. Calibration, catalyst sites,
-  membrane fouling and battery degradation persist with their owning entities.
-- **Advance coupled physics together.** Compatible processes share a solver and energy
-  balance. An optional [shared laboratory clock](docs/native_shared_lab.md) adds equipment
-  queues, simultaneous aging of independent vessels and delayed analyzer results.
-- **Measure physical quantities.** Native observations retain units, quality and sampling
-  times. Gym's fixed scalar view is a compatibility projection of those observations.
-- **Keep execution accountable.** Transactions check declared exchanges and conservation
-  before commit. Outcomes distinguish invalid requests, numerical failure and physical
-  stops; snapshots and trajectories support continuation and replay.
+<table>
+<tr>
+<td width="50%" valign="top">
+<strong>Compose worlds independently of tasks</strong><br>
+Declare materials, vessels, equipment and physical models. Bind goals, permissions,
+budgets and ending conditions separately, so the same apparatus can support different
+research questions.
+</td>
+<td width="50%" valign="top">
+<strong>Reuse equipment across domains</strong><br>
+A heater connects to a compatible vessel through the same thermal interface.
+Calibration stays with the device; material moves through declared ports.
+The integrated heater example carries one device across three domains.
+</td>
+</tr>
+<tr>
+<td valign="top">
+<strong>Keep the consequences of an experiment</strong><br>
+Catalyst coverage, membrane fouling, battery degradation and instrument history
+belong to persistent entities. Later operations use the state left by earlier ones.
+</td>
+<td valign="top">
+<strong>Advance compatible physics together</strong><br>
+Coupled processes share inventories, a solver and energy accounting.
+Optional shared laboratory time also advances independent vessels and schedules
+equipment queues and delayed results.
+</td>
+</tr>
+<tr>
+<td valign="top">
+<strong>Observe through explicit instruments</strong><br>
+Readings retain units, shape, quality and sampling time. Authored instrument contracts
+define noise, limits and sample consumption; hidden world state stays separate from
+the agent's observations.
+</td>
+<td valign="top">
+<strong>Inspect and replay what happened</strong><br>
+Transactions check declared exchanges and conservation before committing.
+Histories retain outcomes and resource use; snapshots support continuation and
+recorded trajectories can be verified by replay.
+</td>
+</tr>
+</table>
+
+## Experimental domains
+
+The development foundation includes the following native models. Each connects to the
+same state, operation, measurement and transaction contracts.
 
 | Domain | Available native models | Start here |
 | --- | --- | --- |
@@ -61,13 +120,55 @@ tutorial tasks.
 | Water and minerals | Dilute carbonate equilibrium, finite calcite dissolution/precipitation and phase-owned surface geometry | [Mineral example](src/chemworld/examples/native_mineral_research.py) |
 | Stochastic biochemistry | Gillespie events, reversible/enzyme networks, integer inventories and separate process/measurement randomness | [Biochemical worlds](docs/native_biochemical.md) |
 | Solid phases | Finite binary substitutional equilibrium and heating/cooling paths | [Solid-solution example](src/chemworld/examples/native_solid_solution.py) |
-| Instruments and scheduling | Programmed chromatography, persistent instrument history, shared heater/analyzer queues and timed readouts | [Shared laboratory example](examples/native_shared_lab.py) |
+| Instruments and scheduling | Programmed chromatography, persistent instrument history, shared heater/analyzer queues and timed readouts | [Shared laboratory guide](docs/native_shared_lab.md) |
 
-Each model has explicit equations and operating limits; combinations must satisfy the
-declared interfaces. See [model ranges and extension directions](docs/extension-roadmap.md)
-for the implemented scope and optional upstream references.
+These are bounded models with explicit equations, parameters and operating ranges.
+For example, the battery model is a single-particle model, the membrane model covers
+dilute isothermal reverse osmosis, and the solid model covers finite binary equilibrium.
+See [model ranges](docs/extension-roadmap.md) and the
+[module declarations](docs/native_capabilities.md) before composing a new system.
 
-## Use the native session
+## Try a connected experiment
+
+The [integrated examples](docs/native_domains.md) show how capabilities work together
+over a sequence of operations.
+
+| Example | Follow the experiment |
+| --- | --- |
+| Shared heater | Move one calibrated heater from a surface reactor to an adsorption vessel and a thermal battery |
+| Membrane | Pump finite feed, collect permeate, rinse with finite water and run again with retained fouling |
+| Minerals | Add acid, evolve carbonate/calcite chemistry, transfer a phase and sample for pH |
+| Shared clock | Advance separate stochastic and deterministic vessels while an offline analyzer produces delayed readings |
+| Distillation | Change reflux and collect a fraction from a column with finite inventories |
+| Crystallization | Cool, filter, resuspend and warm the retained material |
+| Solid solution | Observe binary demixing through heating and cooling |
+
+Run the heater history and verify its recorded trajectory:
+
+```bash
+uv run --no-sync python -m chemworld.examples.native_domains --workflow heater --output runs/native-domains
+uv run --no-sync chemworld verify --submission runs/native-domains/heater.jsonl
+```
+
+Select another workflow with `--workflow membrane`, `mineral`, `shared-clock`,
+`distillation`, `crystal` or `solid`. These are fixed, provider-free demonstrations;
+connect your own policy to make the experimental choices.
+
+## One runtime, four ways to use it
+
+```mermaid
+flowchart LR
+    W["Physical world<br/>materials · equipment · models"] --> R["ChemWorldRuntime<br/>execute · measure · record"]
+    T["Task<br/>goals · permissions · budgets"] --> R
+    A["Python · Gym · CLI · Agent"] <--> R
+    R --> H["Experimental history<br/>state · observations · resources · replay"]
+```
+
+The world describes what can physically happen; the task describes what the researcher
+may do and what it is trying to achieve. Every interface uses the same experimental
+session and accounting.
+
+### Python
 
 ```python
 from chemworld.runtime import ChemWorldRuntime
@@ -84,33 +185,59 @@ for channel in reading.observation.channels:
 session.close()
 ```
 
-Use `ChemWorldEnv(composition=spec)` for Gym, JSON actions through `chemworld render`
-for the CLI, or `run_agent(..., composition=spec.to_dict())` for a custom policy.
-The [native session guide](docs/native_foundation.md#use-the-same-session-through-other-entry-points)
-covers these paths, physical observations, snapshot continuation and trajectory replay.
-The [agent guide](docs/agents.md) covers offline policies and optional live-model adapters.
-The [seven integrated examples](docs/native_domains.md) demonstrate equipment reuse,
-finite process histories and replay across the implemented domains.
+### Gym, CLI and agents
 
-## Student Lab (no model required)
+| Entry point | Use it for | Interface |
+| --- | --- | --- |
+| Gym | Policy and reinforcement-learning integration | `ChemWorldEnv(composition=spec)` |
+| CLI | Execute JSON action sequences and inspect trajectories | `chemworld render`, `chemworld verify` |
+| Agent runner | Your planner or policy selecting typed operations | `run_agent(..., composition=spec.to_dict())` |
 
-Launch the animated browser workbench after installing the package:
+The [session guide](docs/native_foundation.md#use-the-same-session-through-other-entry-points)
+covers native observations, the Gym compatibility projection and snapshot continuation.
+The [agent guide](docs/agents.md) covers custom Python policies, offline baselines,
+captured-trace replay and optional live-model adapters. Examples run offline; external
+models are an explicit choice.
+
+### Student Lab
+
+Explore the tutorial tasks in an animated browser workbench:
 
 ```bash
 uv run --no-sync chemworld lab
 ```
 
-The animated workbench runs on `127.0.0.1` and uses the same session and action schemas.
-Its tutorial catalog exposes public action effects and observations without a model
-account or API key. The domain examples above provide the broader native API coverage.
+Student Lab runs locally on `127.0.0.1` and uses the same session and action schemas.
+Choose operations and inspect their visible effects without an API key. Its tutorial
+catalog is a starting point; the Python examples expose the broader native domains.
+
+## Documentation
+
+| I want to… | Read |
+| --- | --- |
+| Build and run a native world | [Native foundation guide](docs/native_foundation.md) |
+| Run complete examples | [Integrated workflows](docs/native_domains.md) |
+| Connect a planner, model or policy | [Agent integration](docs/agents.md) |
+| Check a model's assumptions and limits | [Model ranges and extensions](docs/extension-roadmap.md) |
+| Inspect registered operations and ownership | [Native capability declarations](docs/native_capabilities.md) |
+| Use queues and delayed measurements | [Shared laboratory time](docs/native_shared_lab.md) |
+| Read the foundation overview in Chinese | [中文基座与扩展说明](docs/extension-roadmap.zh.md) |
 
 ## Develop and extend
 
-New capabilities enter through ChemWorld's module declarations, state ownership,
-physical processes and instrument contracts. Reference tools inform equations and
-bounded comparisons; production simulation uses the native implementation.
-See the [extension guide](docs/extension-roadmap.md) and
-[contribution guide](CONTRIBUTING.md).
+Extensions should become native capabilities that other domains can reuse:
+
+1. **Specify the model.** Define equations, units, parameter ranges and a finite reference case.
+2. **Declare ownership and interfaces.** State what belongs to material, a vessel or a device,
+   and how it moves, persists and exchanges matter or energy.
+3. **Use the shared runtime.** Contribute processes, operations or instrument contracts
+   through module declarations.
+4. **Validate actual behavior.** Check physical limits and balances, then execute,
+   serialize and replay a complete experiment through the supported interfaces.
+
+Upstream scientific tools inform equations and bounded reference comparisons.
+Production execution uses ChemWorld's native implementations; optional reference
+dependencies stay separate. Reused code and data retain their licensing and provenance.
 
 Run the focused foundation checks:
 
@@ -118,9 +245,15 @@ Run the focused foundation checks:
 uv run --no-sync pytest tests/test_domain_modules.py tests/test_native_foundation_end_to_end.py tests/test_lab_clock.py -q
 ```
 
-Full cross-domain combination and installation acceptance is still in progress.
-Current development source and the fixed historical runtime below have separate
-validation records.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and packaging checks.
+[Open an issue](https://github.com/sunyrain/ChemWorld-Public/issues) for a reproducible
+bug, a proposed model or an interface improvement. For a new domain, include the intended
+experiment, governing equations and expected operating range.
+
+**Development status.** Current source is `0.5.0.dev0`. The initial seven integrated
+workflows and independent wheel/sdist installs have been checked; broader combination
+acceptance is still in progress. Supported combinations and model limits are documented
+in the guides above. The historical results below belong to their pinned runtime.
 
 <details>
 <summary>Earlier tutorials and frozen evidence</summary>
@@ -158,8 +291,12 @@ can be checked with `uv run --no-sync python scripts/build_readme_visuals.py --c
 
 </details>
 
-## Release boundary
+## Scope, citation and license
 
-This repository contains the current development runtime, public protocols, historical sanitized evidence, pinned tutorial outputs, documentation, examples and focused tests. It excludes manuscript files and assets, development matrices, draft/interim/pilot results, raw provider responses, provider session identifiers, private evaluator configuration, credentials and study-specific development artifacts.
+This public repository contains the simulation foundation, interfaces, examples,
+documentation, focused tests and retained historical public evidence. Manuscripts,
+private study configurations, credentials and raw provider responses remain outside
+this repository.
 
-See [CITATION.cff](CITATION.cff) for citation metadata. The software is available under the [MIT License](LICENSE).
+If you use ChemWorld, see [CITATION.cff](CITATION.cff) for citation metadata.
+ChemWorld is available under the [MIT License](LICENSE).
