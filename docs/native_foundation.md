@@ -946,3 +946,10 @@ and rate-constant kernels with independently solved steady equations; it does
 not exercise descriptor fitting or CatMAP's mapper. All attempts remain in
 `workstreams/world_foundation/NATIVE_MULTISITE_RESULTS.json`. This is a finite
 synthetic mean-field model, with no spatial kMC or real-catalyst prediction.
+
+## Cross-domain examples
+
+The installed [native domain workflows](native_domains.md) exercise shared
+equipment, finite process inventories, delayed stochastic readouts, and replay.
+The [capability table](native_capabilities.md) is generated from the installed
+module declarations; supported composition domains remain explicitly bounded.

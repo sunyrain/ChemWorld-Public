@@ -285,6 +285,7 @@ class CompositionPhysics:
                 if op
                 in {
                     "dry",
+                    "reconnect_heater",
                     "heat",
                     "wait",
                     "add_solvent",
@@ -667,8 +668,17 @@ class CompositionPhysics:
             if state.vessels.vessels[name].max_volume_L != vessels[name]["capacity_L"]:
                 raise ValueError("initial-state vessel capacity differs from the composition")
             bulk_species = {s.species_id for s in self.network.species if s.phase != "surface"}
-            if set(state.species_amounts) != bulk_species:
-                raise ValueError("initial-state bulk species must match the explicit network")
+            if not set(state.species_amounts) <= bulk_species:
+                raise ValueError("initial-state bulk species must belong to the explicit network")
+            if name in self.thermal_models:
+                required = set(self.thermal_models[name].thermodynamics.species) & bulk_species
+                if not required <= state.species_amounts.keys():
+                    raise ValueError("initial state omits a declared local thermal inventory")
+            # Disconnected apparatus may contain different declared species.
+            # Local strategy/process validation below still requires every
+            # inventory it actually evolves, plus its caloric data. Padding a
+            # gas vessel with fictitious zero-valued battery/liquid inventories
+            # would instead demand meaningless cross-phase property tables.
             expected_units = {
                 "amount": "mol",
                 "volume": "L",

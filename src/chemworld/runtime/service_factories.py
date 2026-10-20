@@ -36,7 +36,7 @@ def material_routing(context):
 def component_network(context):
     from chemworld.runtime.component_network import ComponentNetworkServices
 
-    return ComponentNetworkServices(context.services["material_routing"])
+    return ComponentNetworkServices(context.services["material_routing"], context.composition)
 
 
 def reaction_thermal(context):

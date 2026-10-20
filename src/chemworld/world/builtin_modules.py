@@ -49,6 +49,8 @@ def _instruments():
 BUILTIN_MODULES = (
     DomainModuleSpec(
         module_id="lab_schedule",
+        scope_notes=("Single process; one or two independent closed thermal/SSA vessels; "
+                     "one heater and one offline analyzer; no same-vessel hybrid or open flow.",),
         operations=(
             OperationSpec(
                 Operation("queue_lab_heat", "Queue the shared heater",
@@ -76,6 +78,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="solid_solution",
+        scope_notes=("Finite binary substitutional equilibrium; local thermal equilibrium, "
+                     "not nucleation kinetics, arbitrary TDB or a general CALPHAD backend.",),
         components=(("solid_solution", ComponentCapability(
             operations=("heat", "wait", "pause_control", "resume_control"),
             interfaces=("material", "temperature"), state_owners=("solid_phase_equilibrium",),
@@ -85,6 +89,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="mineral_kinetics",
+        scope_notes=("Finite calcite dissolution/precipitation with fast aqueous equilibrium; "
+                     "fixed 298.15 K, explicit surface geometry; no mineral nucleation.",),
         components=(("mineral_kinetics", ComponentCapability(
             operations=("add_component", "wait", "sample", "route_material"),
             interfaces=("material", "aqueous_equilibrium"),
@@ -96,6 +102,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="stochastic",
+        scope_notes=("Integer Gillespie direct; constant volume/temperature mass action; "
+                     "persistent event and RNG; not spatial kMC or automatic ODE/SSA switching.",),
         components=(("stochastic", ComponentCapability(
             operations=("wait",), interfaces=("material",), minimum_operations=1,
             state_owners=("phases", "stochastic_continuation"),
@@ -105,6 +113,9 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="ro_membrane",
+        scope_notes=("Finite ideal dilute NaCl RO at 298.15 K; synthetic deposited foulant "
+                     "and finite rinse; no reverse drive, membrane holdup "
+                     "or full WaterTAP flowsheet.",),
         components=(("ro_membrane", ComponentCapability(
             operations=("set_flow_rate", "run_flow", "wait"),
             interfaces=("material", "flow_rate", "temperature"),
@@ -115,6 +126,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="finite_transport",
+        scope_notes=("Finite pump, pipe, tanks and authored heat exchange; bounded working point; "
+                     "not arbitrary multiphase process-network simulation.",),
         components=(("finite_transport", ComponentCapability(
             operations=("set_flow_rate", "run_flow", "wait"),
             interfaces=("material", "flow_rate", "temperature"),
@@ -125,6 +138,9 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="aqueous_mineral",
+        scope_notes=("Authored finite aqueous acid/base/complexation and mineral equilibrium; "
+                     "explicit thermodynamic data and ionic-strength domain, "
+                     "not a geochemical database.",),
         components=(("aqueous_mineral", ComponentCapability(
             operations=("add_component", "wait", "sample"),
             interfaces=("material", "aqueous_equilibrium"), state_owners=("phases",),
@@ -134,6 +150,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="programmed_chromatography",
+        scope_notes=("Authored peak/retention response, finite sampling and persistent carryover; "
+                     "not a fitted universal chromatographic transport model.",),
         operations=(
             OperationSpec(
                 Operation(
@@ -188,6 +206,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="sorbent_contact",
+        scope_notes=("Competitive finite sorbent kinetics, owned carrier and finite wash; "
+                     "explicit condensed calorics and temperature domain.",),
         processes=(("sorbent_contact", factories.sorbent_processes),),
         components=(
             (
@@ -262,6 +282,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="battery_spm",
+        scope_notes=("Synthetic single-particle battery with calorics/SEI and explicit cycling; "
+                     "no electrolyte gradients or full porous-electrode/PyBaMM backend.",),
         components=(
             (
                 "battery_spm",
@@ -284,6 +306,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="vacuum_concentration",
+        scope_notes=("Finite variable-composition concentration with authored VLE/calorics; "
+                     "unsupported kinetic coupling is rejected.",),
         components=(
             (
                 "vacuum_concentration",
@@ -299,6 +323,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="dynamic_distillation",
+        scope_notes=("Finite tray/receiver inventories, heat and timed cuts; "
+                     "authored small dynamic column, not arbitrary plant design.",),
         components=(
             (
                 "dynamic_distillation",
@@ -314,6 +340,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="liquid_equilibrium",
+        scope_notes=("Strict finite liquid phase equilibrium using declared component properties "
+                     "and supported composition domain; no silent extrapolation.",),
         components=(
             (
                 "liquid_equilibrium",
@@ -329,6 +357,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="vapor_liquid_equilibrium",
+        scope_notes=("Finite TP/PH closure with explicit phase/caloric models; "
+                     "no simultaneous undeclared kinetic process.",),
         components=(
             (
                 "vapor_liquid_equilibrium",
@@ -344,6 +374,8 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="surface_kinetics",
+        scope_notes=("Finite owned sites; declared single/multisite mean-field mechanisms "
+                     "and symmetric interactions; not spatial kMC or a real catalyst fit.",),
         processes=(("surface_kinetics", factories.surface_processes),),
         components=(
             (
@@ -658,7 +690,16 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="thermal",
+        scope_notes=("Finite-power or explicitly isothermal device; shared energy accounting; "
+                     "manual reconnection requires one disabled heater in local-clock mode.",),
         operations=(
+            OperationSpec(
+                Operation("reconnect_heater", "Reconnect one disabled heater", ("vessel",),
+                          ("not_terminated",)),
+                "thermal", "component_network", "reconnect_heater",
+                fields=(ActionFieldSpec("vessel", "categorical", None, tuple(range(16))),),
+                affected_ledgers=("equipment", "inactive_vessels", "process"),
+            ),
             OperationSpec(
                 Operation(
                     "configure_control",
@@ -900,6 +941,10 @@ BUILTIN_MODULES = (
                     ),
                 ),
             ),
+            ("heater_connection", ComponentCapability(
+                operations=("reconnect_heater",), interfaces=("equipment",),
+                state_owners=("equipment",),
+            )),
         ),
     ),
     DomainModuleSpec(

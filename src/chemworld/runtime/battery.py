@@ -98,6 +98,11 @@ class BatteryRuntime:
     def supports(self, state):
         return battery_record(state) is not None
 
+    def temperature_bounds_k(self, state):
+        _, _, spec, _, _ = unpack_battery(state)
+        return None if spec.thermal is None else (
+            spec.thermal.minimum_temperature_K, spec.thermal.maximum_temperature_K)
+
     def validate_world(self):
         declared = {c.vessel for c in self.composition.components if c.kind == "battery_spm"}
         installed = {

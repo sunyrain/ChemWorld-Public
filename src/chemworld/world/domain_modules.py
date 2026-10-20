@@ -203,6 +203,7 @@ class DomainModuleSpec:
     dependencies: tuple[str, ...] = ()
     version: str = "1"
     advance_strategies: tuple[tuple[str, Callable], ...] = ()
+    scope_notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.version, str) or not self.version:
@@ -216,6 +217,7 @@ class DomainModuleSpec:
             "processes",
             "dependencies",
             "advance_strategies",
+            "scope_notes",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
 

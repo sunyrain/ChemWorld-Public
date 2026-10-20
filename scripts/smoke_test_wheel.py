@@ -68,7 +68,7 @@ print(json.dumps({'package': chemworld.__file__, 'version': chemworld.__version_
 """
 
 NATIVE_PROBE = """
-import importlib.util, json, platform, sys, tempfile
+import importlib.util, json, platform, subprocess, sys, tempfile
 from pathlib import Path
 import chemworld
 from chemworld.examples.native_surface_research import run_example
@@ -80,7 +80,9 @@ from chemworld.envs.spaces import to_observation
 from chemworld.eval.verify import verify_records
 
 assert Path(chemworld.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
-assert importlib.util.find_spec('cantera') is None
+upstreams = ('cantera', 'CoolProp', 'pybamm', 'watertap', 'idaes', 'phasepy',
+             'thermo', 'copasi', 'COPASI', 'catmap', 'pycalphad', 'phreeqpython')
+assert all(importlib.util.find_spec(name) is None for name in upstreams)
 cases = []
 for surface, bulk in ((False,False), (False,True), (True,False), (True,True)):
     for assay in (False, True):
@@ -129,11 +131,28 @@ with tempfile.TemporaryDirectory(prefix='native-replay-') as temporary:
     session.close()
     replay = verify_records(load_jsonl(trajectory), tolerance=1e-8)
     assert replay.verified and replay.checked_steps == 5
+from chemworld.examples.native_domains import WORKFLOWS, run_workflow
+from chemworld.examples.native_capabilities import capability_rows
+assert any(row['module'] == 'lab_schedule' for row in capability_rows())
+domain_cases = []
+with tempfile.TemporaryDirectory(prefix='native-domain-replay-') as temporary:
+    for name in WORKFLOWS:
+        row = run_workflow(name, temporary)
+        completed = subprocess.run(
+            [sys.executable, '-I', '-c', 'from chemworld.cli import main; main()',
+             'verify', '--submission', row['trajectory']],
+            text=True, capture_output=True, check=True)
+        assert json.loads(completed.stdout)['verified']
+        row.pop('trajectory')
+        row['new_process_replay'] = True
+        domain_cases.append(row)
 print(json.dumps({'package':chemworld.__file__, 'cantera_installed':False,
                   'platform':{'system':platform.system(), 'python':platform.python_version()},
                   'surface_cases':cases, 'reuse_configurations':4,
                   'task_binding':True, 'serialized_continuation':True,
-                  'trajectory_replay_steps':replay.checked_steps}))
+                  'trajectory_replay_steps':replay.checked_steps,
+                  'upstream_libraries_absent':list(upstreams),
+                  'domain_workflows':domain_cases}))
 """
 
 

@@ -518,13 +518,49 @@ def available_connections(state: WorldState, material_router=None) -> tuple[int,
 
 
 class ComponentNetworkServices:
-    def __init__(self, material_router):
+    def __init__(self, material_router, composition=None):
         self.material_router = material_router
+        self.composition = composition
 
     select_vessel = staticmethod(select_vessel)
 
     def route_material(self, state, action):
         return self.material_router.route_material(state, action)
+
+    def reconnect_heater(self, state, action):
+        """Move one disabled finite heater, never a material or process clock."""
+        from chemworld.runtime.coupled_thermal import reconnect_thermal_device
+        from chemworld.world.composition import physical_operations
+
+        if self.composition is None or self.composition.physics is None or state.lab_clock:
+            raise ValueError("manual heater connection requires native local-clock apparatus")
+        locals_ = {state.vessel_id: _local(state), **state.inactive_vessels}
+        devices = [record for local in locals_.values()
+                   for record in local.equipment.equipment.values()
+                   if record.equipment_type == "thermal_device"]
+        if len(devices) != 1 or devices[0].settings["thermal_device"]["enabled"]:
+            raise ValueError("reconnect exactly one disabled heater; pause control first")
+        # Reuse the existing finite vessel-address decoder without selecting it.
+        destination = select_vessel(state, action).vessel_id
+        physics = self.composition.physics
+        bounds = physics.declared_temperature_bounds_k(
+            locals_[destination], self.composition.modules)
+        if bounds is None:
+            raise ValueError("destination has no declared native thermal domain")
+        low, high = bounds
+        if not low <= devices[0].settings["thermal_device"]["setpoint_K"] <= high:
+            raise ValueError("retained heater setpoint exceeds destination thermal domain")
+        candidate = reconnect_thermal_device(state, devices[0].equipment_id, destination)
+        states = {candidate.vessel_id: _local(candidate), **candidate.inactive_vessels}
+        spec = replace(self.composition, physics=replace(physics, initial_states=states))
+        network = {**candidate.metadata["component_network"], "operations": {
+            name: list(physical_operations(spec, name)) for name in states}}
+        return candidate.replace(
+            metadata={**candidate.metadata, "component_network": network},
+            inactive_vessels={name: local.replace(metadata={
+                **local.metadata, "component_network": network})
+                for name, local in candidate.inactive_vessels.items()},
+        )
 
 
 def public_network(state: WorldState) -> dict[str, Any] | None:

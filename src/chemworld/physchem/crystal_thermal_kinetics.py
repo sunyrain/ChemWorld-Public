@@ -148,7 +148,9 @@ def _layout(model, population, thermodynamics, *, newborn=False):
         raise ValueError("finite liquid and dissolved seed must share the actual molecular stock")
     amounts, properties = {}, {}
     liquid_keys = {}
-    for key, n in liquid.items():
+    # JSON object order is not a physical parameter. Fix the solver coordinate
+    # order so a sorted-key trajectory replay takes the same numerical path.
+    for key, n in sorted(liquid.items()):
         if key == target:
             for name, value in (
                 ("seed", population.dissolved_seed_mol),

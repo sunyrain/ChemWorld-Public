@@ -215,58 +215,9 @@ def test_unsupported_component_and_direct_measurement_are_not_silent_clock_mixes
 
 
 def hybrid_spec():
-    from chemworld.foundation import WorldState
-    from chemworld.foundation.state_ledgers import EquipmentLedger, EquipmentRecord
-    from chemworld.physchem.coupled_system import ConstantCvThermodynamics, SpeciesInternalEnergy
-    from chemworld.physchem.heat_transfer_units import ThermalSystemSpec
-    from chemworld.world.biochemical_worlds import biochemical_world
-    from chemworld.world.composition import WorldCompositionSpec
+    from chemworld.examples.native_domains import mixed_clock_world
 
-    payload = biochemical_world("reversible", seed=31).to_dict()
-    physics = payload["physics"]
-    state = WorldState.from_dict(physics["initial_states"]["reactor"])
-    state = state.replace(
-        equipment=EquipmentLedger(
-            {
-                **state.equipment.equipment,
-                "instrument:molecule_capture": EquipmentRecord(
-                    "instrument:molecule_capture", "instrument", "reactor", batch_reset="preserve"
-                ),
-            }
-        )
-    )
-    physics["initial_states"]["reactor"] = state.to_dict()
-    continuous = WorldState(
-        {"A": 1e-5, "B": 0.0},
-        0.01,
-        350,
-        101325,
-        "liquid",
-        "continuous",
-        units=state.units,
-        equipment=EquipmentLedger({}),
-    )
-    physics["initial_states"]["continuous"] = continuous.to_dict()
-    physics.setdefault("thermal_models", {})["continuous"] = ThermalSystemSpec(
-        ConstantCvThermodynamics({key: SpeciesInternalEnergy(0, 30) for key in ("A", "B")}, 20),
-        pressure_law="fixed_pressure",
-    ).to_dict()
-    physics["lab_clock"] = LabClockSpec(analyzer="molecule_capture").to_dict()
-    payload["vessels"].append({"id": "continuous", "capacity_L": 0.1})
-    payload["components"] = [c for c in payload["components"] if c["kind"] != "material_input"]
-    payload["components"] += [
-        {"id": name + ":" + kind, "vessel": name, "kind": kind, "parameters": {}}
-        for name, kinds in (
-            ("reactor", ("lab_schedule",)),
-            ("continuous", ("thermal", "reaction", "lab_schedule")),
-        )
-        for kind in kinds
-    ]
-    payload["task"].update(
-        operations=["wait", "queue_lab_measure", "select_vessel", "terminate"],
-        instruments=["molecule_capture"],
-    )
-    return WorldCompositionSpec.from_dict(payload)
+    return mixed_clock_world()
 
 
 def test_independent_ssa_and_continuous_systems_share_clock_not_a_hybrid_solver():

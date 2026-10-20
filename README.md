@@ -89,6 +89,8 @@ for the CLI, or `run_agent(..., composition=spec.to_dict())` for a custom policy
 The [native session guide](docs/native_foundation.md#use-the-same-session-through-other-entry-points)
 covers these paths, physical observations, snapshot continuation and trajectory replay.
 The [agent guide](docs/agents.md) covers offline policies and optional live-model adapters.
+The [seven integrated examples](docs/native_domains.md) demonstrate equipment reuse,
+finite process histories and replay across the implemented domains.
 
 ## Student Lab (no model required)
 

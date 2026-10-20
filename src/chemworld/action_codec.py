@@ -114,6 +114,9 @@ class ActionCodec:
         ):
             spec = self.modules.operation_specs()[canonical["operation"]]
             for field in spec.fields:
+                if field.name in canonical and field.name in {"vessel", "connection"}:
+                    addresses = self.vessels if field.name == "vessel" else self.connections
+                    canonical[field.name] = self._index(canonical[field.name], addresses)
                 if field.name in canonical and field.choices:
                     values = np.asarray(canonical[field.name]).reshape(-1)
                     if values.size != 1 or values.dtype.kind == "b":
