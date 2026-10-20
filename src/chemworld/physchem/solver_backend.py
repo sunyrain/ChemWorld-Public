@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 from scipy.integrate import solve_ivp
+from scipy.sparse import csr_matrix
 
 ODEFunction = Callable[[float, np.ndarray], np.ndarray]
 ODEEvent = Callable[[float, np.ndarray], float]
@@ -151,6 +152,24 @@ class ODESolveReport:
     def message(self) -> str:
         return self.diagnostic.message
 
+    @property
+    def terminal_point(self) -> tuple[float, np.ndarray, int] | None:
+        """Actual terminal root, even when t_eval did not include that instant."""
+        if self.diagnostic.status != 1:
+            return None
+        candidates = [
+            (float(times[-1]), np.asarray(states[-1], dtype=float), index)
+            for index, (times, states) in enumerate(
+                zip(
+                    self.raw_result.t_events,
+                    self.raw_result.y_events,
+                    strict=True,
+                )
+            )
+            if len(times)
+        ]
+        return max(candidates, key=lambda item: item[0]) if candidates else None
+
     def raise_for_failure(self, context: str) -> None:
         if not self.success:
             raise RuntimeError(f"{context} failed: {self.message}")
@@ -193,6 +212,8 @@ def solve_ode(
     evaluation_times_s: Sequence[float] | np.ndarray | None = None,
     policy: ODESolverPolicy = DEFAULT_REACTION_ODE_POLICY,
     events: Sequence[ODEEvent] | None = None,
+    jac_sparsity: Any | None = None,
+    jac: Callable | None = None,
 ) -> ODESolveReport:
     """Solve an ODE using a declared ChemWorld solver policy."""
 
@@ -204,6 +225,19 @@ def solve_ode(
         end_s=end_s,
     )
     kwargs = policy.scipy_kwargs()
+    if jac is not None:
+        if policy.method not in {"BDF", "Radau"}:
+            raise ValueError("a declared Jacobian requires the BDF or Radau method")
+        kwargs["jac"] = jac
+    if jac_sparsity is not None:
+        if policy.method not in {"BDF", "Radau"}:
+            raise ValueError("Jacobian sparsity requires the BDF or Radau method")
+        sparsity = csr_matrix(jac_sparsity)
+        if sparsity.shape != (y0_array.size, y0_array.size) or not np.all(
+            np.isfinite(sparsity.data)
+        ):
+            raise ValueError("Jacobian sparsity must be finite and match the packed state")
+        kwargs["jac_sparsity"] = sparsity.astype(bool)
     if t_eval is not None:
         kwargs["t_eval"] = t_eval
     if events is not None:
@@ -277,6 +311,11 @@ def _diagnostic_from_result(
 ) -> ODESolverDiagnostic:
     t_values = np.asarray(getattr(result, "t", (start_s,)), dtype=float)
     final_time = float(t_values[-1]) if t_values.size else start_s
+    if int(getattr(result, "status", -999)) == 1:
+        final_time = max(
+            (float(times[-1]) for times in getattr(result, "t_events", ()) if len(times)),
+            default=final_time,
+        )
     event_count = sum(len(event_times) for event_times in getattr(result, "t_events", ()) or ())
     success = bool(getattr(result, "success", False))
     message = str(getattr(result, "message", ""))

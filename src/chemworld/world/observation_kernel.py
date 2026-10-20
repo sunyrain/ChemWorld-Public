@@ -113,7 +113,7 @@ def base_public_values(*, cost: float, safety_risk: float) -> dict[str, float | 
         "degradation_warning": None,
         "virtual_spectrum_summary": None,
         **dict.fromkeys(DOWNSTREAM_OBSERVATION_KEYS, None),
-        "cost": min(1.0, cost),
+        "cost": cost,
         "safety_risk": safety_risk,
         "score": 0.0,
     }

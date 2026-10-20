@@ -10,27 +10,8 @@ from chemworld.foundation import (
     WorldState,
     equipment_settings,
 )
-from chemworld.foundation.constitution import CheckResult
+from chemworld.foundation.balances import TransitionBalance
 from chemworld.world.operations import instrument_name
-
-MATERIAL_DELTA_ALLOWED_OPERATIONS = frozenset(
-    {
-        "add_reagent",
-        "add_component",
-        "add_catalyst",
-        "add_solvent",
-        "sample",
-        "measure",
-        "add_phase",
-        "add_extractant",
-        "seed_crystals",
-        "separate_phase",
-        "wash",
-        "dry",
-        "concentrate",
-        "transfer",
-    }
-)
 
 ELECTROCHEMICAL_SUMMARY_KEYS = (
     "equilibrium_potential_V",
@@ -48,14 +29,14 @@ ELECTROCHEMICAL_SUMMARY_KEYS = (
     "uncompensated_voltage_drop_V",
     "voltage_window_exceeded",
 )
-THERMAL_TRANSITION_OPERATIONS = frozenset({"quench", "cool_crystallize"})
 
 
 class ChemWorldOperationRecorder:
     """Build auditable operation records from pre/post transaction states."""
 
-    def __init__(self, constitution: PhysicalConstitution) -> None:
+    def __init__(self, constitution: PhysicalConstitution, *, modules=None) -> None:
         self.constitution = constitution
+        self.modules = modules
 
     def record(
         self,
@@ -64,64 +45,47 @@ class ChemWorldOperationRecorder:
         after: WorldState,
         preconditions: dict[str, bool],
         action: dict[str, Any] | None = None,
+        *,
+        constitution_checks: tuple[dict[str, object], ...] | None = None,
+        material_balance: TransitionBalance | None = None,
     ) -> OperationRecord:
         action = action or {}
-        checks = self._constitution_checks(operation, before, after)
+        # Transaction callers supply their exact candidate checks, including
+        # failures. Rechecking the rolled-back state would erase the reason.
+        checks = constitution_checks
+        if checks is None:
+            checks = tuple(
+                check.to_dict()
+                for check in (
+                    *self.constitution.check_state(after).checks,
+                    self.constitution.check_material_conservation(before, after),
+                )
+            )
         instrument = None
         measurement_cost = 0.0
         sample_consumed = after.ledger.sample_consumed_L - before.ledger.sample_consumed_L
         preconditions_passed = all(preconditions.values())
         if operation == "measure":
-            instrument = instrument_name(action.get("instrument", "hplc"))
+            instrument = instrument_name(action.get("instrument", "hplc"), modules=self.modules)
             if preconditions_passed:
                 measurement_cost = after.ledger.cost - before.ledger.cost
         return OperationRecord(
             operation_type=operation,
             preconditions=preconditions,
-            state_delta_summary=self._state_delta_summary(operation, before, after),
-            constitution_checks=[check.to_dict() for check in checks],
+            state_delta_summary=self.state_delta_summary(operation, before, after),
+            constitution_checks=list(checks),
             instrument=instrument,
+            terminal_assay=(
+                instrument in self.constitution.instruments
+                and self.constitution.instruments[instrument].requires_terminated
+            ),
             measurement_cost=measurement_cost,
             sample_consumed_L=sample_consumed,
+            material_balance=material_balance or TransitionBalance(),
         )
 
-    def _constitution_checks(
-        self,
-        operation: str,
-        before: WorldState,
-        after: WorldState,
-    ) -> list[CheckResult]:
-        report = self.constitution.check_state(after)
-        material_check = self.constitution.check_material_conservation(before, after)
-        if operation in MATERIAL_DELTA_ALLOWED_OPERATIONS:
-            material_check = CheckResult(
-                "material_conservation",
-                True,
-                "declared open-system material input/output operation",
-                value=0.0,
-                tolerance=self.constitution.tolerance,
-            )
-        checks = [*report.checks, material_check]
-        if operation in THERMAL_TRANSITION_OPERATIONS:
-            transition = after.metadata.get("last_energy_transition", {})
-            residual = (
-                float(transition.get("energy_balance_residual_J", float("inf")))
-                if isinstance(transition, dict) and transition.get("operation") == operation
-                else float("inf")
-            )
-            checks.append(
-                CheckResult(
-                    "operation_energy_conservation",
-                    abs(residual) <= 1.0e-8,
-                    "signed sensible, jacket, environmental, and phase-change heat close",
-                    value=residual,
-                    tolerance=1.0e-8,
-                )
-            )
-        return checks
-
     @staticmethod
-    def _state_delta_summary(
+    def state_delta_summary(
         operation: str,
         before: WorldState,
         after: WorldState,
@@ -151,7 +115,5 @@ class ChemWorldOperationRecorder:
 
 __all__ = [
     "ELECTROCHEMICAL_SUMMARY_KEYS",
-    "MATERIAL_DELTA_ALLOWED_OPERATIONS",
-    "THERMAL_TRANSITION_OPERATIONS",
     "ChemWorldOperationRecorder",
 ]

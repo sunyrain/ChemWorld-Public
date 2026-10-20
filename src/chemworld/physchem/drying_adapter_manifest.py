@@ -23,8 +23,10 @@ from chemworld.runtime.kernel_contracts import ModelProviderResult
 OWNER_WORKSTREAM = "wf-30-drying-sorbent"
 OWNED_PATHS = (
     "src/chemworld/physchem/drying_units.py",
+    "src/chemworld/physchem/sorbent_kinetics.py",
     "src/chemworld/physchem/drying_adapter_manifest.py",
     "tests/test_drying_units.py",
+    "tests/test_sorbent_regeneration.py",
 )
 
 

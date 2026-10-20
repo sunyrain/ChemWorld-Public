@@ -50,7 +50,7 @@ def material_totals(state):
         if sample.contents:
             for s, n in sample.contents.species.initial_amounts_mol.items():
                 initial[s] = initial.get(s, 0) + n
-            for n, d in equipment_settings(sample.contents.equipment, "crystallizer").get(
+            for n, d in sample.contents.properties.get("crystallizer", {}).get(
                 "population_cohorts", ()
             ):
                 number += n

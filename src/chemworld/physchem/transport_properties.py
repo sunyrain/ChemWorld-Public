@@ -21,6 +21,69 @@ from chemworld.physchem.property_reports import (
 from chemworld.physchem.specs import MixtureSpec, PropertyCorrelation
 
 
+def liquid_transport_state(packages, amounts, temperature_K, pressure_Pa, references):
+    """Declared ideal-volume, log-viscosity and DIPPR9H mixture closure.
+
+    Caloric and pure transport values come from the common property evaluator;
+    this helper selects mixing laws without adding a second property database.
+    """
+    from chemworld.physchem.property_packages import evaluate_property_state
+    from chemworld.physchem.transport import FluidState
+
+    report = evaluate_property_state(
+        packages,
+        amounts,
+        temperature_K=temperature_K,
+        pressure_Pa=pressure_Pa,
+        phase="liquid",
+        quantities=("cp", "enthalpy"),
+        references=references,
+    )
+    ids = tuple(p.component.identifier for p in packages)
+    weights = tuple(p.component.molecular_weight_g_mol for p in packages)
+    total, mass = (
+        sum(amounts.values()),
+        sum(amounts[k] * mw for k, mw in zip(ids, weights, strict=True)),
+    )
+    mixture = MixtureSpec(
+        ids,
+        weights,
+        tuple(amounts[k] / total for k in ids),
+        tuple(amounts[k] * mw / mass for k, mw in zip(ids, weights, strict=True)),
+        "liquid",
+        temperature_K,
+        pressure_Pa,
+    )
+    pure = [
+        p.evaluate_state(
+            temperature_K=temperature_K,
+            pressure_Pa=pressure_Pa,
+            phase="liquid",
+            quantities=("density", "viscosity", "thermal_conductivity"),
+        )
+        for p in packages
+    ]
+    mu = mixture_viscosity_log_rule(mixture, tuple(p.properties["viscosity"].value for p in pure))
+    conductivity = liquid_mixture_thermal_conductivity_dippr9h_ledger(
+        component_mass_fractions=dict(zip(ids, mixture.mass_fractions, strict=True)),
+        component_thermal_conductivities_W_m_K={
+            k: p.properties["thermal_conductivity"].value for k, p in zip(ids, pure, strict=True)
+        },
+    )
+    values = {key: value.value for key, value in report.properties.items()}
+    volume = sum(
+        amounts[k] * mw / 1000 / p.properties["density"].value
+        for k, mw, p in zip(ids, weights, pure, strict=True)
+    )
+    fluid = FluidState(
+        mass / 1000 / volume,
+        mu.value,
+        values["cp"] / (mass / total / 1000),
+        conductivity.mixture_value,
+    )
+    return fluid, values["enthalpy"], mass / 1000 / fluid.density_kg_m3
+
+
 @dataclass(frozen=True)
 class TransportPropertyReport:
     """Transport property value with validity and uncertainty metadata."""
@@ -171,9 +234,7 @@ def transport_property_report(
         "gas_viscosity",
         "thermal_conductivity",
     }:
-        raise ValueError(
-            "transport_property_report requires viscosity or thermal_conductivity"
-        )
+        raise ValueError("transport_property_report requires viscosity or thermal_conductivity")
     result = evaluate_correlation(
         correlation,
         temperature_K=temperature_K,
@@ -216,11 +277,7 @@ def gas_thermal_conductivity_dippr9b_report(
     if molecule_type == "monoatomic":
         conductivity = 2.5 * viscosity_Pa_s * cv_j_kmol_k / molecular_weight_g_mol
     elif molecule_type == "nonlinear":
-        conductivity = (
-            viscosity_Pa_s
-            / molecular_weight_g_mol
-            * (1.15 * cv_j_kmol_k + 16903.36)
-        )
+        conductivity = viscosity_Pa_s / molecular_weight_g_mol * (1.15 * cv_j_kmol_k + 16903.36)
     elif molecule_type == "linear":
         if critical_temperature_K is None or critical_temperature_K <= 0:
             raise ValueError("linear DIPPR9B gas conductivity requires positive Tc")
@@ -293,9 +350,8 @@ def wilke_gas_mixture_viscosity_ledger(
                 raise ValueError(f"viscosity must be positive for {j!r}")
             if mwj <= 0:
                 raise ValueError(f"molecular weight must be positive for {j!r}")
-            phi_ij = (
-                (1.0 + sqrt(mui / muj) * (mwj / mwi) ** 0.25) ** 2.0
-                / sqrt(8.0 * (1.0 + mwi / mwj))
+            phi_ij = (1.0 + sqrt(mui / muj) * (mwj / mwi) ** 0.25) ** 2.0 / sqrt(
+                8.0 * (1.0 + mwi / mwj)
             )
             denominator += fractions[j] * phi_ij
         partial = yi * mui / denominator
@@ -352,9 +408,7 @@ def liquid_mixture_thermal_conductivity_dippr9h_ledger(
         }
     warnings = ["DIPPR9H assumes nonaqueous liquid mixtures and can deviate up to 20%."]
     if max_k > 2.0 * min_k:
-        warnings.append(
-            "Component conductivities differ by more than 2x; DIPPR9H warning applies."
-        )
+        warnings.append("Component conductivities differ by more than 2x; DIPPR9H warning applies.")
     return MixtureTransportLedger(
         ledger_id=ledger_id,
         phase="liquid",
@@ -401,13 +455,11 @@ def binary_gas_diffusivity_fuller_report(
         * mass_factor
         / (
             pressure_atm
-            * (diffusion_volume_a ** (1.0 / 3.0) + diffusion_volume_b ** (1.0 / 3.0))
-            ** 2.0
+            * (diffusion_volume_a ** (1.0 / 3.0) + diffusion_volume_b ** (1.0 / 3.0)) ** 2.0
         )
     )
     warnings = [
-        "Fuller gas diffusivity is an empirical low-pressure estimate based on "
-        "diffusion volumes.",
+        "Fuller gas diffusivity is an empirical low-pressure estimate based on diffusion volumes.",
     ]
     if pressure_atm < 0.05 or pressure_atm > 20.0:
         warnings.append("pressure outside nominal Fuller low/moderate-pressure range")
@@ -528,4 +580,3 @@ def thermal_diffusivity_report(
         validity_status="valid",
         reference_reading=_TRANSPORT_REFERENCE_READING,
     )
-

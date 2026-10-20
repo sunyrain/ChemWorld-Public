@@ -15,6 +15,7 @@ from chemworld.world.control_contract import (
     CONTROL_NUMERIC,
     CONTROL_VECTOR_FIELDS,
 )
+from chemworld.world.domain_modules import DomainModuleRegistry
 from chemworld.world.operations import (
     CAMPAIGN_CONTROL_OPERATIONS,
     INSTRUMENTS,
@@ -78,6 +79,21 @@ class ActionCodec:
     electrolyte_profiles: tuple[str, ...] = ELECTROLYTE_PROFILES
     vessels: tuple[str, ...] = tuple(f"vessel-{i}" for i in range(16))
     connections: tuple[str, ...] = tuple(f"connection-{i}" for i in range(64))
+    modules: DomainModuleRegistry | None = None
+    feed_ids: tuple[str, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.modules is not None:
+            campaign = tuple(op for op in self.operation_types if op in CAMPAIGN_CONTROL_OPERATIONS)
+            object.__setattr__(
+                self, "operation_types", (*self.modules.operation_order(), *campaign)
+            )
+            object.__setattr__(self, "instruments", self.modules.instrument_order())
+
+    def contracts(self, *, include_campaign_controls: bool = False):
+        return operation_contracts(
+            include_campaign_controls=include_campaign_controls, modules=self.modules
+        )
 
     def canonicalize(self, action: dict[str, Any]) -> dict[str, Any]:
         """Normalize event-action JSON into canonical names and flat payload."""
@@ -91,6 +107,23 @@ class ActionCodec:
             payload.update({key: value for key, value in canonical.items() if key != "operation"})
             canonical = payload
         canonical["operation"] = self._operation_name(canonical["operation"])
+        if (
+            self.modules is not None
+            and canonical["operation"] not in OPERATION_TYPES
+            and canonical["operation"] in self.modules.operation_specs()
+        ):
+            spec = self.modules.operation_specs()[canonical["operation"]]
+            for field in spec.fields:
+                if field.name in canonical and field.choices:
+                    values = np.asarray(canonical[field.name]).reshape(-1)
+                    if values.size != 1 or values.dtype.kind == "b":
+                        raise ValueError(f"{field.name} must be one declared choice")
+                    canonical[field.name] = values[0].item()
+                if field.name in canonical and not field.choices:
+                    if np.asarray(canonical[field.name]).dtype.kind == "b":
+                        raise ValueError(f"{field.name} must be numeric, not boolean")
+                    canonical[field.name] = self._float(canonical, field.name, 0)
+            return canonical
         canonical = self._apply_aliases(canonical)
         for field, choices in CONTROL_CHOICES.items():
             if field in canonical:
@@ -112,7 +145,10 @@ class ActionCodec:
                     if abs(canonical[field] - boundary) <= abs(boundary) * 1e-7:
                         canonical[field] = boundary
         if "component" in canonical:
-            canonical["component"] = self._index(canonical["component"], FEED_IDS)
+            index = self._index(
+                canonical["component"], FEED_IDS if self.feed_ids is None else self.feed_ids
+            )
+            canonical["component"] = index if self.feed_ids is None else self.feed_ids[index]
         for field, choices in (("vessel", self.vessels), ("connection", self.connections)):
             if field in canonical:
                 canonical[field] = self._index(canonical[field], choices)
@@ -133,7 +169,7 @@ class ActionCodec:
                 self.catalysts,
             )
         if "instrument" in canonical:
-            canonical["instrument"] = instrument_name(canonical["instrument"])
+            canonical["instrument"] = instrument_name(canonical["instrument"], modules=self.modules)
         if "phase" in canonical:
             canonical["phase"] = self.phase_name(canonical["phase"])
         if "target_phase" in canonical:
@@ -151,9 +187,14 @@ class ActionCodec:
         if isinstance(value, str):
             if value not in self.operation_types:
                 raise ValueError(f"Unsupported operation: {value}")
-            return value
-        index = self._index(value, self.operation_types)
-        return self.operation_types[index]
+            name = value
+        else:
+            name = self.operation_types[self._index(value, self.operation_types)]
+        if name not in self.contracts(
+            include_campaign_controls=name in CAMPAIGN_CONTROL_OPERATIONS
+        ):
+            raise ValueError(f"Operation is not installed in this world: {name}")
+        return name
 
     def _apply_aliases(self, action: dict[str, Any]) -> dict[str, Any]:
         """Accept common user-facing names while preserving canonical output."""
@@ -220,6 +261,11 @@ class ActionCodec:
         """Encode canonical event JSON as a stable numeric vector."""
 
         action = self.canonicalize(action)
+        contract = self.contracts()[str(action["operation"])]
+        if (set(contract.required_fields) | set(action)) - set(GYM_ACTION_KEYS):
+            raise ValueError(
+                "This action uses native fields outside the fixed Gym vector; use event JSON"
+            )
         values = [
             self.operation_types.index(str(action["operation"])),
             self._float(action, "amount_mol", 0.0),
@@ -249,7 +295,9 @@ class ActionCodec:
             self._float(action, "destination_container", 1.0),
             self._float(action, "capacity_L", 0.1),
             self._float(action, "mixing", 0.0),
-            self._float(action, "component", 0.0),
+            self._index(action["component"], self.feed_ids)
+            if self.feed_ids is not None and "component" in action
+            else self._float(action, "component", 0.0),
             self._float(action, "vessel", 0.0),
             self._float(action, "connection", 0.0),
         ]
@@ -309,7 +357,7 @@ class ActionCodec:
                 np.clip(round(array[22]), 0, len(self.electrolyte_profiles) - 1)
             ),
         }
-        required = operation_contracts(
+        required = self.contracts(
             include_campaign_controls=operation in CAMPAIGN_CONTROL_OPERATIONS
         )[operation].required_fields
         for index, key in enumerate(("container", "source_container", "destination_container"), 23):

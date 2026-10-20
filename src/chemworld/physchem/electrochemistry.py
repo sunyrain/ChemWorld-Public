@@ -353,22 +353,40 @@ def butler_volmer_current(
     _positive(temperature_K, "temperature_K")
     equilibrium_potential = nernst_potential(spec, activities, temperature_K=temperature_K)
     overpotential = electrode_potential_V - equilibrium_potential
-    coefficient = spec.electrons_transferred * FARADAY_C_PER_MOL / (R_J_PER_MOL_K * temperature_K)
+    anodic, cathodic = butler_volmer_factors(
+        overpotential, temperature_K=temperature_K,
+        electrons_transferred=spec.electrons_transferred,
+        alpha_anodic=spec.alpha_anodic, alpha_cathodic=spec.alpha_cathodic)
+    return spec.exchange_current_a * (anodic - cathodic)
+
+
+def butler_volmer_factors(
+    overpotential_V: float, *, temperature_K: float = 298.15,
+    electrons_transferred: float = 1.0, alpha_anodic: float = 0.5,
+    alpha_cathodic: float = 0.5,
+) -> tuple[float, float]:
+    """Common signed BV activation factors; concentrations belong to the caller."""
+    _finite(overpotential_V, "overpotential_V")
+    for name, value in (("temperature_K", temperature_K),
+                        ("electrons_transferred", electrons_transferred),
+                        ("alpha_anodic", alpha_anodic), ("alpha_cathodic", alpha_cathodic)):
+        _positive(value, name)
+    coefficient = electrons_transferred * FARADAY_C_PER_MOL / (R_J_PER_MOL_K * temperature_K)
     anodic = exp(
         _clamp(
-            spec.alpha_anodic * coefficient * overpotential,
+            alpha_anodic * coefficient * overpotential_V,
             -_EXPONENT_LIMIT,
             _EXPONENT_LIMIT,
         )
     )
     cathodic = exp(
         _clamp(
-            -spec.alpha_cathodic * coefficient * overpotential,
+            -alpha_cathodic * coefficient * overpotential_V,
             -_EXPONENT_LIMIT,
             _EXPONENT_LIMIT,
         )
     )
-    return spec.exchange_current_a * (anodic - cathodic)
+    return anodic, cathodic
 
 
 def faradaic_extent_mol(

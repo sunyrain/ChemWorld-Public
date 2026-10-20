@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from chemworld.foundation.observations import Observation
 from chemworld.foundation.solvents import SolventInventory
 
 
@@ -56,6 +57,11 @@ class PhaseRecord:
     def __post_init__(self) -> None:
         object.__setattr__(self, "species_amounts_mol", deepcopy(self.species_amounts_mol))
         object.__setattr__(self, "metadata", deepcopy(self.metadata))
+        carrier = self.metadata.get("carrier_representation", "legacy_volume")
+        if carrier not in {"legacy_volume", "species_inventory"}:
+            raise ValueError("unsupported phase carrier representation")
+        if carrier == "species_inventory" and self.solvents.volume_L:
+            raise ValueError("registered species cannot also carry legacy solvent-volume inventory")
         if self.solvents.volume_L > 0 and abs(self.solvents.volume_L - self.volume_L) > 1e-14:
             object.__setattr__(self, "solvents", self.solvents.at_volume(self.volume_L))
 
@@ -133,8 +139,11 @@ class EquipmentRecord:
     attached_vessel_id: str
     status: str = "idle"
     settings: dict[str, Any] = field(default_factory=dict)
+    batch_reset: str = "initial"
 
     def __post_init__(self) -> None:
+        if self.batch_reset not in {"initial", "preserve"}:
+            raise ValueError("Equipment batch_reset must be initial or preserve")
         object.__setattr__(self, "settings", deepcopy(self.settings))
 
     def to_dict(self) -> dict[str, Any]:
@@ -144,6 +153,7 @@ class EquipmentRecord:
             "attached_vessel_id": self.attached_vessel_id,
             "status": self.status,
             "settings": deepcopy(self.settings),
+            "batch_reset": self.batch_reset,
         }
 
 
@@ -182,7 +192,7 @@ class ThermalLedger:
         return {vessel_id: record.to_dict() for vessel_id, record in self.vessels.items()}
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class ProcessLedger:
     time_s: float = 0.0
     cost: float = 0.0
@@ -190,34 +200,67 @@ class ProcessLedger:
     sample_consumed_L: float = 0.0
     waste_L: float = 0.0
     metrics: dict[str, float] = field(default_factory=dict)
-    last_observation: dict[str, float | None] = field(default_factory=dict)
-    last_observed_mask: dict[str, bool] = field(default_factory=dict)
+    last_observation_record: Observation | None = None
+    stochastic_continuation: dict | None = None
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "metrics",
-            {str(key): float(value) for key, value in self.metrics.items()},
-        )
-        object.__setattr__(
-            self,
-            "last_observation",
-            {
-                str(key): (None if value is None else float(value))
-                for key, value in self.last_observation.items()
-            },
-        )
-        object.__setattr__(
-            self,
-            "last_observed_mask",
-            {str(key): bool(value) for key, value in self.last_observed_mask.items()},
+    def __init__(
+        self,
+        time_s=0.0,
+        cost=0.0,
+        risk=0.0,
+        sample_consumed_L=0.0,
+        waste_L=0.0,
+        metrics=None,
+        last_observation_record=None,
+        last_observation=None,
+        last_observed_mask=None,
+        stochastic_continuation=None,
+    ):
+        # Old snapshots enter here once. New snapshots store only the native record.
+        if isinstance(last_observation_record, dict):
+            last_observation_record = Observation.from_native_record(last_observation_record)
+        if last_observation_record is None and last_observation:
+            last_observation_record = Observation(
+                values=last_observation,
+                units={},
+                observed_mask=last_observed_mask or {},
+            )
+        for name, value in {
+            "time_s": time_s,
+            "cost": cost,
+            "risk": risk,
+            "sample_consumed_L": sample_consumed_L,
+            "waste_L": waste_L,
+            "metrics": {str(k): float(v) for k, v in (metrics or {}).items()},
+            "last_observation_record": last_observation_record,
+            "stochastic_continuation": deepcopy(stochastic_continuation),
+        }.items():
+            object.__setattr__(self, name, value)
+
+    @property
+    def last_observation(self) -> dict[str, float | None]:
+        return {} if self.last_observation_record is None else self.last_observation_record.values
+
+    @property
+    def last_observed_mask(self) -> dict[str, bool]:
+        return (
+            {}
+            if self.last_observation_record is None
+            else self.last_observation_record.observed_mask
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_hidden: bool = True) -> dict[str, Any]:
         payload = self.__dict__.copy()
+        if self.stochastic_continuation is None or not include_hidden:
+            payload.pop("stochastic_continuation", None)
+        else:
+            payload["stochastic_continuation"] = deepcopy(self.stochastic_continuation)
         payload["metrics"] = deepcopy(self.metrics)
-        payload["last_observation"] = deepcopy(self.last_observation)
-        payload["last_observed_mask"] = deepcopy(self.last_observed_mask)
+        payload["last_observation_record"] = (
+            None
+            if self.last_observation_record is None
+            else self.last_observation_record.native_record()
+        )
         return payload
 
 
@@ -268,16 +311,14 @@ def scale_species_initial_amounts(
 
 def process_with_last_observation(
     process: ProcessLedger | None,
-    values: dict[str, float | None],
-    observed_mask: dict[str, bool],
+    observation: Observation,
 ) -> ProcessLedger:
     """Return a process ledger with updated public observation cache."""
 
     process = process or ProcessLedger()
     return replace(
         process,
-        last_observation=values.copy(),
-        last_observed_mask=observed_mask.copy(),
+        last_observation_record=observation,
     )
 
 

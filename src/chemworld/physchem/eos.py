@@ -31,10 +31,12 @@ class EOSComponentSpec:
     def __post_init__(self) -> None:
         if not self.component_id:
             raise ValueError("component_id cannot be empty")
-        if self.critical_temperature_K <= 0:
+        if not isfinite(self.critical_temperature_K) or self.critical_temperature_K <= 0:
             raise ValueError("critical_temperature_K must be positive")
-        if self.critical_pressure_Pa <= 0:
+        if not isfinite(self.critical_pressure_Pa) or self.critical_pressure_Pa <= 0:
             raise ValueError("critical_pressure_Pa must be positive")
+        if not isfinite(self.acentric_factor):
+            raise ValueError("acentric_factor must be finite")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -162,6 +164,17 @@ class CubicEOSSpec:
     @property
     def component_ids(self) -> tuple[str, ...]:
         return tuple(component.component_id for component in self.components)
+
+    @classmethod
+    def from_dict(cls, payload):
+        values = dict(payload)
+        values["components"] = tuple(EOSComponentSpec(**v) for v in values["components"])
+        values["binary_interaction_provenance"] = tuple(
+            BinaryInteractionProvenance(**{k: v for k, v in record.items() if k != "pair_key"})
+            for record in values.get("binary_interaction_provenance", ()))
+        values["volume_translation"] = tuple(VolumeTranslationSpec(**v)
+                                              for v in values.get("volume_translation", ()))
+        return cls(**values)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -1105,10 +1118,62 @@ def cubic_residual_properties(
     )
 
 
+def cubic_state_derivatives(
+    spec: CubicEOSSpec, composition: Mapping[str, float], *, temperature_K: float,
+    pressure_Pa: float, phase: PhaseRoot = "vapor",
+) -> dict[str, float | str]:
+    """Single-branch caloric/volume derivatives of the existing cubic EOS.
+
+    Mechanical derivatives are analytic. Departure Cp uses a five-point
+    constant-P derivative of the same governed H departure, without switching
+    to an independent equation or an upstream runtime.
+    """
+    state = evaluate_cubic_eos(spec, composition, temperature_K=temperature_K,
+                               pressure_Pa=pressure_Pa, phase=phase)
+    branch = phase
+    if phase == "stable":
+        branch = "vapor" if state.compressibility_factor == max(state.roots) else "liquid"
+    mixture = cubic_mixture_parameters(spec, composition, temperature_K=temperature_K)
+    volume, b = state.molar_volume_m3_mol, mixture.b_mix
+    s1, s2 = _cubic_shape_constants(spec.model)
+    denominator = (volume + s1 * b) * (volume + s2 * b)
+    if volume <= b or denominator <= 0:
+        raise ValueError("EOS derivative is outside the physical volume domain")
+    p_t = R_J_PER_MOL_K / (volume - b) - mixture.da_mix_dT / denominator
+    p_v = (-R_J_PER_MOL_K * temperature_K / (volume - b) ** 2
+           + mixture.a_mix * (2 * volume + (s1 + s2) * b) / denominator ** 2)
+    if not isfinite(p_v) or p_v >= 0:
+        raise ValueError("EOS derivative requires a mechanically stable single-phase root")
+    step = min(.01 * temperature_K, max(1e-3, 1e-4 * temperature_K))
+
+    def departure(temperature):
+        neighboring = evaluate_cubic_eos(spec, composition, temperature_K=temperature,
+                                         pressure_Pa=pressure_Pa, phase=branch)
+        if len(neighboring.roots) != len(state.roots):
+            raise ValueError("EOS derivative stencil crosses a root-topology boundary")
+        return neighboring.molar_residual_enthalpy_J_mol
+
+    cp_departure = (-departure(temperature_K + 2 * step)
+                    + 8 * departure(temperature_K + step)
+                    - 8 * departure(temperature_K - step)
+                    + departure(temperature_K - 2 * step)) / (12 * step)
+    values = {
+        "cp_departure_J_mol_K": cp_departure,
+        "cp_minus_cv_J_mol_K": -temperature_K * p_t ** 2 / p_v,
+        "d_molar_volume_dT_P": -p_t / p_v,
+        "d_molar_volume_dP_T": 1 / p_v,
+        "temperature_step_K": step,
+    }
+    if any(not isfinite(value) for value in values.values()):
+        raise ValueError("EOS derivatives must remain finite")
+    return {**values, "phase_root": branch,
+            "method": "analytic mechanical / five-point constant-P departure"}
+
+
 def _validate_tp(temperature_K: float, pressure_Pa: float) -> None:
-    if temperature_K <= 0:
+    if not isfinite(temperature_K) or temperature_K <= 0:
         raise ValueError("temperature_K must be positive")
-    if pressure_Pa <= 0:
+    if not isfinite(pressure_Pa) or pressure_Pa <= 0:
         raise ValueError("pressure_Pa must be positive")
 
 

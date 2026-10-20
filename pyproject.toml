@@ -79,9 +79,14 @@ Issues = "https://github.com/sunyrain/ChemWorld-Public/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chemworld"]
+exclude = ["**/*"]
+dev-mode-dirs = ["src"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"configs" = "chemworld/resources/configs"
+[tool.hatch.build.targets.sdist]
+only-include = ["pyproject.toml", "README.md", "LICENSE"]
+
+[tool.hatch.build.hooks.custom]
+path = "scripts/community_release_build.py"
 
 [tool.ruff]
 line-length = 100

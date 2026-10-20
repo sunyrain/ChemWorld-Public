@@ -14,6 +14,7 @@ def initial_chemworld_state(
     species_roles: Mapping[str, tuple[str, ...]] | None = None,
     initial_amounts_mol: Mapping[str, float] | None = None,
     initial_limiting_species: str | None = None,
+    liquid_heat_capacity_J_L_K: float = 4180.0,
 ) -> WorldState:
     """Return the canonical empty batch-reactor state for scenario generation.
 
@@ -33,6 +34,7 @@ def initial_chemworld_state(
         pressure_Pa=101_325.0,
         phase="liquid",
         vessel_id="batch_reactor",
+        liquid_heat_capacity_J_L_K=liquid_heat_capacity_J_L_K,
         units={
             "amount": "mol",
             "volume": "L",

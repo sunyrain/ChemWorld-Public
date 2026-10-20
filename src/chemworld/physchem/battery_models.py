@@ -1,0 +1,641 @@
+"""Native single-particle battery, using the common finite-volume solver.
+
+Equation reference: PyBaMM BasicSPM (BSD-3-Clause), commit
+a4ea370d9ff844e586907cea7109c38f36ce3660. This independent implementation uses
+ChemWorld inventories, diffusion, BV constants and event integration. Parameters
+are synthetic; optional caloric closure derives from the same OCV state function.
+"""
+
+from dataclasses import asdict, dataclass
+from functools import cached_property
+from math import asinh, isfinite, pi, sqrt
+
+import numpy as np
+from scipy.optimize import brentq
+
+from chemworld.physchem.battery_degradation import SEI_SPECIES, SEISpec
+from chemworld.physchem.coupled_system import (
+    CoupledCoordinate,
+    CoupledEvent,
+    CoupledProcess,
+    CoupledState,
+    CoupledSystem,
+    EnergyPort,
+    HeatFlux,
+    InternalTransfer,
+    ProcessContribution,
+)
+from chemworld.physchem.electrochemistry import FARADAY_C_PER_MOL, R_J_PER_MOL_K
+from chemworld.physchem.finite_volume import ConservativeDiffusion, DiffusionMesh
+
+F = FARADAY_C_PER_MOL
+R = R_J_PER_MOL_K
+BATTERY_COORDINATES = ("discharged_charge_C", "delivered_work_J")
+
+
+@dataclass(frozen=True)
+class BatteryThermalSpec:
+    heat_capacity_J_K: float = 100.0
+    environment_temperature_K: float = 298.15
+    loss_conductance_W_K: float = 0.0
+    minimum_temperature_K: float = 270.0
+    maximum_temperature_K: float = 360.0
+
+    def __post_init__(self):
+        if (
+            not isfinite(self.heat_capacity_J_K)
+            or self.heat_capacity_J_K <= 0
+            or not isfinite(self.loss_conductance_W_K)
+            or self.loss_conductance_W_K < 0
+            or not 0
+            < self.minimum_temperature_K
+            < self.environment_temperature_K
+            < self.maximum_temperature_K
+            or not isfinite(self.maximum_temperature_K)
+        ):
+            raise ValueError("invalid battery caloric or ambient domain")
+
+
+@dataclass(frozen=True)
+class ParticleSpec:
+    radius_m: float = 1e-5
+    diffusivity_m2_s: float = 1e-14
+    maximum_concentration_mol_m3: float = 30000.0
+    active_volume_m3: float = 1e-6
+    cells: int = 40
+    mesh_exponent: float = 2.0
+    exchange_current_scale_A_m2: float = 1.0
+
+    def __post_init__(self):
+        for key in (
+            "radius_m",
+            "diffusivity_m2_s",
+            "maximum_concentration_mol_m3",
+            "active_volume_m3",
+            "exchange_current_scale_A_m2",
+        ):
+            if not isfinite(getattr(self, key)) or getattr(self, key) <= 0:
+                raise ValueError(f"{key} must be positive and finite")
+        if not isfinite(self.mesh_exponent) or not 1 <= self.mesh_exponent <= 3:
+            raise ValueError("radial mesh exponent must be in [1, 3]")
+        _ = self.mesh
+
+    @cached_property
+    def mesh(self):
+        count = self.active_volume_m3 / (4 * pi / 3 * self.radius_m**3)
+        uniform = DiffusionMesh.spherical(self.radius_m, self.cells, particle_count=count)
+        faces = self.radius_m * (
+            1 - (1 - np.array(uniform.faces_m) / self.radius_m) ** self.mesh_exponent
+        )
+        return DiffusionMesh("spherical", tuple(faces), particle_count=count)
+
+    @property
+    def area_m2(self):
+        return 3 * self.active_volume_m3 / self.radius_m
+
+    @property
+    def capacity_mol(self):
+        return self.maximum_concentration_mol_m3 * self.active_volume_m3
+
+    def keys(self, electrode):
+        return tuple(f"{electrode}:Li:{i}" for i in range(self.cells))
+
+
+@dataclass(frozen=True)
+class BatterySPMSpec:
+    negative: ParticleSpec = ParticleSpec()
+    positive: ParticleSpec = ParticleSpec()
+    initial_negative_fraction: float = 0.7
+    initial_positive_fraction: float = 0.3
+    negative_ocv_intercept_V: float = 0.2
+    negative_ocv_slope_V: float = -0.1
+    positive_ocv_intercept_V: float = 4.2
+    positive_ocv_slope_V: float = -0.8
+    temperature_K: float = 298.15
+    surface_margin: float = 0.01
+    minimum_voltage_V: float = 2.5
+    maximum_voltage_V: float = 4.5
+    maximum_current_A: float = 2.0
+    series_resistance_ohm: float = 0.0
+    thermal: BatteryThermalSpec | None = None
+    sei: SEISpec | None = None
+    provenance: str = "synthetic-SPM-v1"
+
+    def __post_init__(self):
+        if isinstance(self.sei, dict):
+            object.__setattr__(self, "sei", SEISpec(**self.sei))
+        if isinstance(self.thermal, dict):
+            object.__setattr__(self, "thermal", BatteryThermalSpec(**self.thermal))
+        if not isfinite(self.series_resistance_ohm) or self.series_resistance_ohm < 0:
+            raise ValueError("series resistance must be finite and nonnegative")
+        for name in ("negative", "positive"):
+            if isinstance(getattr(self, name), dict):
+                object.__setattr__(self, name, ParticleSpec(**getattr(self, name)))
+        if not 0 < self.surface_margin < 0.5:
+            raise ValueError("surface margin must be strictly between zero and one half")
+        for value in (self.initial_negative_fraction, self.initial_positive_fraction):
+            if not self.surface_margin < value < 1 - self.surface_margin:
+                raise ValueError("initial stoichiometry must be inside the supported domain")
+        for name in (
+            "negative_ocv_intercept_V",
+            "negative_ocv_slope_V",
+            "positive_ocv_intercept_V",
+            "positive_ocv_slope_V",
+            "minimum_voltage_V",
+            "maximum_voltage_V",
+        ):
+            if not isfinite(getattr(self, name)):
+                raise ValueError("finite OCV and voltage bounds are required")
+        if (
+            not isfinite(self.temperature_K)
+            or self.temperature_K <= 0
+            or not isfinite(self.maximum_current_A)
+            or self.maximum_current_A <= 0
+            or self.minimum_voltage_V >= self.maximum_voltage_V
+            or not self.provenance
+        ):
+            raise ValueError("invalid battery operating domain")
+        if self.thermal is not None and (
+            not self.thermal.minimum_temperature_K
+            < self.temperature_K
+            < self.thermal.maximum_temperature_K
+            or self.negative_ocv_slope_V > 0
+            or self.positive_ocv_slope_V > 0
+        ):
+            raise ValueError(
+                "thermal SPM requires a valid initial temperature and convex chemical energy"
+            )
+
+    @property
+    def volume_l(self):
+        return (self.negative.active_volume_m3 + self.positive.active_volume_m3) * 1000
+
+    @property
+    def inventory_keys(self):
+        return tuple(self.inventory_species)
+
+    @property
+    def inventory_species(self):
+        return {
+            **dict.fromkeys(
+                (*self.negative.keys("negative"), *self.positive.keys("positive")), "Li"
+            ),
+            **({} if self.sei is None else SEI_SPECIES),
+        }
+
+    @property
+    def film_chemical_energy_j_mol(self):
+        return (
+            2
+            * -F
+            * (
+                self.negative_ocv_intercept_V
+                + self.negative_ocv_slope_V * self.initial_negative_fraction
+            )
+            - self.sei.reference_driving_energy_J_mol
+        )
+
+    @property
+    def usable_charge_c(self):
+        return F * min(
+            self.negative.capacity_mol * self.initial_negative_fraction,
+            self.positive.capacity_mol * (1 - self.initial_positive_fraction),
+        )
+
+    def current_at_c_rate(self, rate):
+        if not isfinite(rate):
+            raise ValueError("C-rate must be finite")
+        return rate * self.usable_charge_c / 3600
+
+    def to_dict(self):
+        return asdict(self)
+
+    def initial_state(self):
+        amounts = {}
+        for name, particle, theta in (
+            ("negative", self.negative, self.initial_negative_fraction),
+            ("positive", self.positive, self.initial_positive_fraction),
+        ):
+            amounts.update(
+                zip(
+                    particle.keys(name),
+                    particle.mesh.cell_volumes_m3 * particle.maximum_concentration_mol_m3 * theta,
+                    strict=True,
+                )
+            )
+        if self.sei is not None:
+            amounts.update(self.sei.initial_amounts(self.negative.area_m2))
+        return CoupledState(
+            amounts,
+            self.temperature_K,
+            self.volume_l,
+            coordinates=dict.fromkeys(BATTERY_COORDINATES, 0.0),
+        )
+
+
+@dataclass(frozen=True)
+class BatteryReadout:
+    voltage_V: float
+    current_A: float
+    negative_surface_fraction: float
+    positive_surface_fraction: float
+    negative_average_fraction: float
+    positive_average_fraction: float
+    negative_overpotential_V: float
+    positive_overpotential_V: float
+    negative_main_current_A: float
+    sei_current_A: float
+    film_resistance_ohm: float
+
+
+def particle_surface_fraction(particle, name, state, outward_mol_s):
+    cell = state.amounts_mol[particle.keys(name)[-1]] / particle.mesh.cell_volumes_m3[-1]
+    half_cell = particle.radius_m - particle.mesh.centers_m[-1]
+    surface = cell - outward_mol_s * half_cell / (particle.area_m2 * particle.diffusivity_m2_s)
+    return float(surface / particle.maximum_concentration_mol_m3)
+
+
+def battery_side_rate(spec, state):
+    return 0.0 if spec.sei is None else spec.sei.reaction_rate_mol_s(state, spec.negative.area_m2)
+
+
+def battery_particle_flux(spec, state, name, current_A):
+    return (
+        current_A / F + 2 * battery_side_rate(spec, state) if name == "negative" else -current_A / F
+    )
+
+
+def battery_readout(spec, state, current_A):
+    if not isfinite(current_A) or abs(current_A) > spec.maximum_current_A:
+        raise ValueError("current is outside battery capability")
+    values, eta, averages = {}, {}, {}
+    for name, particle in (("negative", spec.negative), ("positive", spec.positive)):
+        flux = battery_particle_flux(spec, state, name, current_A)
+        theta = particle_surface_fraction(particle, name, state, flux)
+        values[name] = theta
+        # Smooth finite trial extension beyond the stopping surfaces. Accepted
+        # states/events use the actual, unclipped theta; no missing Li is repaired.
+        trial_theta = float(np.clip(theta, spec.surface_margin / 2, 1 - spec.surface_margin / 2))
+        j0 = particle.exchange_current_scale_A_m2 * sqrt(trial_theta * (1 - trial_theta))
+        eta[name] = 2 * R * state.temperature_K / F * asinh(F * flux / particle.area_m2 / (2 * j0))
+        averages[name] = (
+            sum(state.amounts_mol[k] for k in particle.keys(name)) / particle.capacity_mol
+        )
+    un = spec.negative_ocv_intercept_V + spec.negative_ocv_slope_V * values["negative"]
+    up = spec.positive_ocv_intercept_V + spec.positive_ocv_slope_V * values["positive"]
+    side_current = -2 * F * battery_side_rate(spec, state)
+    film_resistance = (
+        0.0 if spec.sei is None else spec.sei.resistance_ohm(state, spec.negative.area_m2)
+    )
+    return BatteryReadout(
+        up
+        - un
+        + eta["positive"]
+        - eta["negative"]
+        - current_A * (spec.series_resistance_ohm + film_resistance),
+        current_A,
+        values["negative"],
+        values["positive"],
+        averages["negative"],
+        averages["positive"],
+        eta["negative"],
+        eta["positive"],
+        current_A - side_current,
+        side_current,
+        film_resistance,
+    )
+
+
+def battery_control_current(spec, state, program):
+    target = program.value_at(state.time_s)
+    if program.unit == "A":
+        return target
+    if program.unit != "V":
+        raise ValueError("battery control uses A or V")
+    low, high = -spec.maximum_current_A, spec.maximum_current_A
+
+    def residual(current):
+        return battery_readout(spec, state, current).voltage_V - target
+
+    # A finite source remains at its declared current limit when the requested
+    # voltage cannot yet be reached. The measured voltage remains the actual V.
+    if residual(low) < 0:
+        return low
+    if residual(high) > 0:
+        return high
+    return float(brentq(residual, low, high, xtol=1e-12))
+
+
+def battery_chemical_potentials(spec, state):
+    result = {}
+    for name, particle in (("negative", spec.negative), ("positive", spec.positive)):
+        a, b = getattr(spec, f"{name}_ocv_intercept_V"), getattr(spec, f"{name}_ocv_slope_V")
+        for key, volume in zip(particle.keys(name), particle.mesh.cell_volumes_m3, strict=True):
+            theta = state.amounts_mol[key] / (volume * particle.maximum_concentration_mol_m3)
+            result[key] = -F * (a + b * theta)
+    if spec.sei is not None:
+        result.update(
+            {"sei:EC": 0.0, "sei:carbonate": spec.film_chemical_energy_j_mol, "sei:ethylene": 0.0}
+        )
+    return result
+
+
+def battery_chemical_energy_j(spec, state):
+    energy = 0.0
+    for name, particle in (("negative", spec.negative), ("positive", spec.positive)):
+        a, b = getattr(spec, f"{name}_ocv_intercept_V"), getattr(spec, f"{name}_ocv_slope_V")
+        for key, volume in zip(particle.keys(name), particle.mesh.cell_volumes_m3, strict=True):
+            n = state.amounts_mol[key]
+            energy -= F * (a * n + b * n * n / (2 * volume * particle.maximum_concentration_mol_m3))
+    if spec.sei is not None:
+        energy += state.amounts_mol["sei:carbonate"] * spec.film_chemical_energy_j_mol
+    return energy
+
+
+def battery_dissipation_w(spec, state, current):
+    """Derive four dissipative contributions independently of endpoint residuals."""
+    potentials = battery_chemical_potentials(spec, state)
+    reading = battery_readout(spec, state, current)
+    interior = boundary = 0.0
+    for name, particle in (("negative", spec.negative), ("positive", spec.positive)):
+        keys = particle.keys(name)
+        rates = ConservativeDiffusion(particle.mesh, particle.diffusivity_m2_s).evaluate(
+            [state.amounts_mol[key] for key in keys]
+        )
+        interior += sum(
+            float(rate) * (potentials[left] - potentials[right])
+            for rate, left, right in zip(
+                rates.face_rates_mol_s[1:-1], keys[:-1], keys[1:], strict=True
+            )
+        )
+        flux = battery_particle_flux(spec, state, name, current)
+        theta = particle_surface_fraction(particle, name, state, flux)
+        surface_mu = -F * (
+            getattr(spec, f"{name}_ocv_intercept_V") + getattr(spec, f"{name}_ocv_slope_V") * theta
+        )
+        boundary += flux * (potentials[keys[-1]] - surface_mu)
+    sei_heat = 0.0
+    if spec.sei is not None:
+        sei_heat = battery_side_rate(spec, state) * battery_sei_affinity_j_mol(spec, state, current)
+    return {
+        "kinetic_W": reading.negative_main_current_A * reading.negative_overpotential_V
+        - current * reading.positive_overpotential_V,
+        "ohmic_W": current**2 * (spec.series_resistance_ohm + reading.film_resistance_ohm),
+        "interior_diffusion_W": interior,
+        "surface_diffusion_W": boundary,
+        "sei_reaction_W": sei_heat,
+    }
+
+
+def battery_sei_affinity_j_mol(spec, state, current):
+    """Electrochemical driving force for the declared irreversible side process."""
+    reading = battery_readout(spec, state, current)
+    mu = -F * (
+        spec.negative_ocv_intercept_V
+        + spec.negative_ocv_slope_V * reading.negative_surface_fraction
+    )
+    return 2 * mu - spec.film_chemical_energy_j_mol - 2 * F * reading.negative_overpotential_V
+
+
+class BatteryThermodynamics:
+    def __init__(self, spec):
+        self.spec = spec
+        self.inventory_keys = spec.inventory_keys
+
+    def heat_capacity_j_k(self, state):
+        return self.spec.thermal.heat_capacity_J_K if self.spec.thermal else 1.0
+
+    def internal_energy_j(self, state):
+        if self.spec.thermal is None:
+            return None
+        return battery_chemical_energy_j(self.spec, state) + self.spec.thermal.heat_capacity_J_K * (
+            state.temperature_K - self.spec.temperature_K
+        )
+
+    def chemical_energy_rate_w(self, state, amount_rates, contributions):
+        if self.spec.thermal is None:
+            return 0.0
+        if any(c.legacy_reaction_energy_W is not None for c in contributions):
+            raise ValueError("battery chemical energy cannot also receive legacy reaction heat")
+        mu = battery_chemical_potentials(self.spec, state)
+        return sum(mu[key] * rate for key, rate in amount_rates.items())
+
+
+def battery_system(spec, program, *, thermal_device=None, control_events=()):
+    if program.unit not in {"A", "V"} or any(
+        (
+            abs(value) > spec.maximum_current_A
+            if program.unit == "A"
+            else not spec.minimum_voltage_V <= value <= spec.maximum_voltage_V
+        )
+        for _, value in program.setpoints
+    ):
+        raise ValueError(
+            "SPM requires a current programme or voltage programme inside the device domain"
+        )
+    if spec.thermal is None and thermal_device is not None:
+        raise ValueError("a thermal device requires the explicit battery energy model")
+    processes = [
+        ConservativeDiffusion(particle.mesh, particle.diffusivity_m2_s)
+        .couple(particle.keys(name), process_id=f"battery:{name}", owner_id=name)
+        .process
+        for name, particle in (("negative", spec.negative), ("positive", spec.positive))
+    ]
+    nk, pk = spec.negative.keys("negative"), spec.positive.keys("positive")
+
+    def transfer(state):
+        current = battery_control_current(spec, state, program)
+        reading = battery_readout(spec, state, current)
+        source, target = (nk[-1], pk[-1]) if current >= 0 else (pk[-1], nk[-1])
+        return ProcessContribution(
+            internal_transfers=(InternalTransfer("battery:Li", source, target, abs(current) / F),),
+            coordinate_rates={
+                "discharged_charge_C": current,
+                "delivered_work_J": current * reading.voltage_V,
+            },
+            energy_port_rates_W={"battery:terminal": -current * reading.voltage_V}
+            if spec.thermal
+            else {},
+        )
+
+    def validate(state):
+        if (spec.thermal is None and abs(state.temperature_K - spec.temperature_K) > 1e-8) or abs(
+            state.volume_L - spec.volume_l
+        ) > 1e-12:
+            raise ValueError("SPM requires its declared isothermal volume")
+        if (
+            spec.thermal
+            and not spec.thermal.minimum_temperature_K - 1e-8
+            <= state.temperature_K
+            <= spec.thermal.maximum_temperature_K + 1e-8
+        ):
+            raise ValueError("battery temperature is outside the caloric domain")
+        for name, particle in (("negative", spec.negative), ("positive", spec.positive)):
+            for key, volume in zip(particle.keys(name), particle.mesh.cell_volumes_m3, strict=True):
+                if state.amounts_mol[key] > volume * particle.maximum_concentration_mol_m3 * (
+                    1 + 1e-8
+                ):
+                    raise ValueError("particle inventory exceeds its finite capacity")
+
+    processes.append(CoupledProcess("battery:intercalation", transfer, validate_state=validate))
+    if spec.sei is not None:
+
+        def grow_sei(state):
+            rate = battery_side_rate(spec, state)
+            return ProcessContribution(
+                amount_rates_mol_s={
+                    nk[-1]: -2 * rate,
+                    "sei:EC": -rate,
+                    "sei:carbonate": rate,
+                    "sei:ethylene": rate,
+                }
+            )
+
+        processes.append(CoupledProcess("battery:solvent-limited-sei", grow_sei))
+    events = []
+    if spec.sei is not None:
+        events.append(
+            CoupledEvent(
+                "battery:sei:affinity-limit",
+                lambda state: battery_sei_affinity_j_mol(
+                    spec, state, battery_control_current(spec, state, program)
+                ),
+            )
+        )
+    for name, particle in (("negative", spec.negative), ("positive", spec.positive)):
+
+        def surface(state, p=particle, n=name):
+            return particle_surface_fraction(
+                p,
+                n,
+                state,
+                battery_particle_flux(
+                    spec, state, n, battery_control_current(spec, state, program)
+                ),
+            )
+
+        events.extend(
+            (
+                CoupledEvent(
+                    f"battery:{name}:depleted",
+                    lambda s, read=surface: read(s) - spec.surface_margin,
+                ),
+                CoupledEvent(
+                    f"battery:{name}:saturated",
+                    lambda s, read=surface: 1 - spec.surface_margin - read(s),
+                ),
+            )
+        )
+    events.extend(
+        (
+            CoupledEvent(
+                "battery:minimum-voltage",
+                lambda s: (
+                    battery_readout(spec, s, battery_control_current(spec, s, program)).voltage_V
+                    - spec.minimum_voltage_V
+                ),
+            ),
+            CoupledEvent(
+                "battery:maximum-voltage",
+                lambda s: (
+                    spec.maximum_voltage_V
+                    - battery_readout(spec, s, battery_control_current(spec, s, program)).voltage_V
+                ),
+            ),
+        )
+    )
+    isothermal = spec.thermal is None or (
+        thermal_device is not None
+        and thermal_device.enabled
+        and thermal_device.mode == "isothermal"
+    )
+    if spec.thermal:
+        events.extend(
+            (
+                CoupledEvent(
+                    "battery:minimum-temperature",
+                    lambda s: s.temperature_K - spec.thermal.minimum_temperature_K,
+                ),
+                CoupledEvent(
+                    "battery:maximum-temperature",
+                    lambda s: spec.thermal.maximum_temperature_K - s.temperature_K,
+                ),
+            )
+        )
+
+    def heat(state):
+        return HeatFlux(
+            0 if thermal_device is None else thermal_device.delivered_power_w(state.temperature_K),
+            0
+            if spec.thermal is None
+            else spec.thermal.loss_conductance_W_K
+            * (state.temperature_K - spec.thermal.environment_temperature_K),
+        )
+
+    laws = {
+        "lithium_mol": dict.fromkeys((*nk, *pk), 1),
+        "negative_faradaic_C": {**dict.fromkeys(nk, F), "discharged_charge_C": 1},
+        "positive_faradaic_C": {**dict.fromkeys(pk, F), "discharged_charge_C": -1},
+    }
+    scales = {
+        key: particle.capacity_mol / particle.cells
+        for name, particle in (("negative", spec.negative), ("positive", spec.positive))
+        for key in particle.keys(name)
+    }
+    if spec.sei is not None:
+        laws["lithium_mol"]["sei:carbonate"] = 2
+        laws["negative_faradaic_C"]["sei:carbonate"] = 2 * F
+        laws.update(
+            {
+                "carbon_mol": {"sei:EC": 3, "sei:carbonate": 1, "sei:ethylene": 2},
+                "hydrogen_mol": {"sei:EC": 4, "sei:ethylene": 4},
+                "oxygen_mol": {"sei:EC": 3, "sei:carbonate": 3},
+            }
+        )
+        scales.update(
+            dict.fromkeys(
+                SEI_SPECIES,
+                max(
+                    1e-10,
+                    spec.sei.solvent_volume_m3 * spec.sei.initial_solvent_concentration_mol_m3,
+                ),
+            )
+        )
+    return CoupledSystem(
+        BatteryThermodynamics(spec),
+        tuple(processes),
+        isothermal=isothermal,
+        events=(*events, *control_events),
+        heat_flux=heat,
+        energy_ports=(EnergyPort("battery:terminal", "external_source", "battery", "in"),)
+        if spec.thermal
+        else (),
+        coordinates=(
+            CoupledCoordinate("discharged_charge_C", "C", spec.usable_charge_c),
+            CoupledCoordinate("delivered_work_J", "J", spec.usable_charge_c * 4),
+        ),
+        inventory_scales_mol=scales,
+        conservation_laws=laws,
+    )
+
+
+def advance_battery(
+    spec,
+    state,
+    program,
+    duration_s,
+    *,
+    evaluation_times_s=None,
+    thermal_device=None,
+    control_events=(),
+):
+    if (
+        thermal_device is not None
+        and thermal_device.enabled
+        and thermal_device.mode == "isothermal"
+        and abs(state.temperature_K - thermal_device.setpoint_K) > 1e-8
+    ):
+        raise ValueError("isothermal bath cannot jump battery temperature")
+    return battery_system(
+        spec, program, thermal_device=thermal_device, control_events=control_events
+    ).advance(state, duration_s, evaluation_times_s=evaluation_times_s)

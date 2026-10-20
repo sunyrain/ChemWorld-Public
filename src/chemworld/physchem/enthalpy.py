@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
 
+import numpy as np
+
 from chemworld.physchem.property_cards import _HEAT_ENTHALPY_REFERENCE_READING
 from chemworld.physchem.property_equations import (
     _convert_input,
@@ -197,6 +199,8 @@ def sensible_enthalpy_change(
 ) -> PropertyEvaluation:
     """Integrate a supported molar heat-capacity correlation in J/mol."""
 
+    if heat_capacity_correlation.property_id == "isochoric_heat_capacity":
+        raise ValueError("Cv integrates internal energy; use caloric_polynomial_change")
     if heat_capacity_correlation.equation_id != "cp_polynomial":
         raise ValueError("Only cp_polynomial supports analytic enthalpy integration")
     T0 = _convert_input(initial_temperature_K, "K", heat_capacity_correlation, "temperature")
@@ -458,6 +462,66 @@ def _cp_polynomial_integral(T: float, coeffs: dict[str, float]) -> float:
     )
 
 
+def caloric_polynomial_change(
+    correlation: PropertyCorrelation, *, initial_temperature_K: float,
+    final_temperature_K: float, entropy: bool = False,
+    validity_policy: ValidityPolicy = "raise",
+) -> PropertyEvaluation:
+    """Integrate a declared Cp or Cv polynomial, in SI, on its valid interval.
+
+    The energy basis stays explicit: Cp integrates H, Cv integrates U. Entropy
+    integration uses Cp/T; a caller holding Cv needs its phase/EOS conversion.
+    """
+    from chemworld.foundation.units import convert_value
+
+    if correlation.input_units.get("temperature", "K") != "K":
+        raise ValueError("caloric integration requires an absolute-Kelvin correlation")
+    if entropy and correlation.property_id == "isochoric_heat_capacity":
+        raise ValueError("entropy needs Cp or a declared phase/EOS conversion from Cv")
+    factor = convert_value(1.0, correlation.output_unit, "J/(mol*K)")
+    normalized = correlation if factor == 1.0 else PropertyCorrelation(
+        correlation_id=correlation.correlation_id, property_id=correlation.property_id,
+        equation_id=correlation.equation_id,
+        coefficients={key: value * factor for key, value in correlation.coefficients.items()},
+        input_units=correlation.input_units, output_unit="J/(mol*K)",
+        validity_ranges=correlation.validity_ranges, source_note=correlation.source_note,
+        metadata=correlation.metadata,
+    )
+    _ensure_positive_heat_capacity_interval(normalized, initial_temperature_K, final_temperature_K)
+    warnings = tuple(dict.fromkeys(
+        (*_validity_warnings(normalized, {"temperature": initial_temperature_K}),
+         *_validity_warnings(normalized, {"temperature": final_temperature_K}))))
+    if warnings and validity_policy == "raise":
+        raise ValueError("; ".join(warnings))
+    if entropy:
+        from math import log
+
+        def primitive(temperature):
+            coefficients = normalized.coefficients
+            return coefficients.get("a", 0.0) * log(temperature) + sum(
+                coefficients.get(key, 0.0) * temperature ** power / power
+                for power, key in enumerate(("b", "c", "d", "e"), 1))
+    else:
+        def primitive(temperature):
+            return _cp_polynomial_integral(temperature, normalized.coefficients)
+    if not entropy and not any(normalized.coefficients.get(key, 0) for key in ("b", "c", "d", "e")):
+        value = normalized.coefficients.get("a", 0.0) * (
+            final_temperature_K - initial_temperature_K)
+    else:
+        value = primitive(final_temperature_K) - primitive(initial_temperature_K)
+    if not isfinite(value):
+        raise ValueError("caloric integration exceeds the finite numerical domain")
+    basis = ("internal_energy" if correlation.property_id == "isochoric_heat_capacity"
+             else "enthalpy")
+    return PropertyEvaluation(
+        "entropy_change" if entropy else f"{basis}_change", correlation.correlation_id,
+        "cp_over_T_integral" if entropy else "caloric_polynomial_integral", value,
+        "J/(mol*K)" if entropy else "J/mol",
+        {"initial_temperature": initial_temperature_K, "final_temperature": final_temperature_K},
+        warnings,
+    )
+
+
 def _validate_heat_capacity_correlation(correlation: PropertyCorrelation) -> None:
     if correlation.equation_id != "cp_polynomial":
         raise ValueError("Only cp_polynomial supports analytic heat-capacity reports")
@@ -466,6 +530,7 @@ def _validate_heat_capacity_correlation(correlation: PropertyCorrelation) -> Non
         "ideal_gas_heat_capacity",
         "liquid_heat_capacity",
         "solid_heat_capacity",
+        "isochoric_heat_capacity",
     }:
         raise ValueError(
             "heat-capacity report requires heat_capacity, ideal_gas_heat_capacity, "
@@ -502,16 +567,15 @@ def _ensure_positive_heat_capacity_interval(
         raise ValueError("Heat-capacity integration temperatures must be positive")
     lower = min(initial_temperature, final_temperature)
     upper = max(initial_temperature, final_temperature)
-    sample_temperatures = (
-        lower,
-        lower + 0.25 * (upper - lower),
-        lower + 0.50 * (upper - lower),
-        lower + 0.75 * (upper - lower),
-        upper,
-    )
+    coefficients = [correlation.coefficients.get(key, 0.0) for key in ("a", "b", "c", "d", "e")]
+    critical = (np.polynomial.Polynomial(coefficients).deriv().roots()
+                if any(coefficients[1:]) else ())
+    sample_temperatures = (lower, upper, *(float(root.real) for root in critical
+                                           if abs(root.imag) < 1e-10 and lower < root.real < upper))
     for temperature in sample_temperatures:
         cp = _cp_polynomial(temperature, correlation.coefficients)
-        if cp <= 0 or not isfinite(cp):
+        if (cp < 0 or not isfinite(cp)
+                or (cp == 0 and correlation.property_id != "isochoric_heat_capacity")):
             raise ValueError(
                 f"Heat capacity must stay positive over integration interval: "
                 f"{correlation.correlation_id}"

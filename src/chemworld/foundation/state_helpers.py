@@ -13,6 +13,15 @@ from chemworld.foundation.state_ledgers import (
 )
 
 
+def attached_device_record(state, equipment_type):
+    """Find one device of the requested kind attached to this local vessel."""
+    records = [r for r in state.equipment.equipment.values()
+               if r.equipment_type == equipment_type and r.attached_vessel_id == state.vessel_id]
+    if len(records) > 1:
+        raise ValueError("a local system has one device of each declared kind")
+    return records[0] if records else None
+
+
 def has_phase_system(phases: PhaseLedger | None) -> bool:
     """Return whether a state has an explicit downstream phase system."""
 
@@ -140,6 +149,7 @@ def upsert_equipment_record(
     attached_vessel_id: str,
     status: str = "configured",
     settings: dict[str, Any] | None = None,
+    batch_reset: str | None = None,
 ) -> EquipmentLedger:
     """Insert or update a typed equipment record with merged settings."""
 
@@ -154,11 +164,13 @@ def upsert_equipment_record(
         attached_vessel_id=attached_vessel_id,
         status=status,
         settings=merged_settings,
+        batch_reset=batch_reset or (previous.batch_reset if previous else "initial"),
     )
     return EquipmentLedger(records)
 
 
 __all__ = [
+    "attached_device_record",
     "equipment_settings",
     "equipment_status",
     "has_phase_system",

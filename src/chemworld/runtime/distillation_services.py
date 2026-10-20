@@ -205,11 +205,19 @@ class ChemWorldDistillationServices:
         self,
         world: ChemWorldParameters,
         species_view: MechanismSpeciesView,
+        *, thermal=None,
     ) -> None:
         self.world = world
         self.species_view = species_view
+        self.thermal = thermal
 
     def distill(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        if self.thermal is not None and self.thermal.column.supports(state):
+            return self.thermal.advancer.batch(state,action,heat=True)
+        if action.get("full_reflux",0):
+            from chemworld.runtime.kernel_contracts import ModelProviderResult
+            return ModelProviderResult({},success=False,outcome="rejected",
+                failure_reason="shortcut_full_reflux_unsupported")
         duration = float(np.clip(_action_float(action, "duration_s", 1200.0), 0.0, 14_400.0))
         target_temperature = float(
             np.clip(_action_float(action, "target_temperature_K", 345.15), 298.15, 430.0)
@@ -311,6 +319,8 @@ class ChemWorldDistillationServices:
             status="distilled",
             settings={
                 "distillation_model": executed_model_id,
+                "distillation_mode": "shortcut_estimate",
+                "stage_histories_available": False,
                 "distillation_provider_path": (
                     "chemworld.physchem.distillation_adapter_manifest."
                     "DutyLimitedDistillationProvider"
@@ -396,6 +406,8 @@ class ChemWorldDistillationServices:
         )
 
     def collect_fraction(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        if self.thermal is not None and self.thermal.column.supports(state):
+            return self.thermal.column.collect_fraction(state,action)
         fraction = float(np.clip(_action_float(action, "transfer_fraction", 0.90), 0.0, 1.0))
         target_species = self.species_view.target_species_for_state(state)
         impurity_species = self.species_view.impurity_species_for_state(state)

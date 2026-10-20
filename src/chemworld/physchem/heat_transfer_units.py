@@ -2,12 +2,204 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from math import exp, isfinite, log, pi
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from chemworld.physchem.gas_mechanism_batch import NASA7GasThermodynamics
+
+from chemworld.physchem.coupled_system import ConstantCvThermodynamics, SpeciesInternalEnergy
+from chemworld.physchem.property_packages import PropertyPackageThermodynamics
 
 HeatTransferSurface = Literal["jacket", "coil", "shell"]
 PhaseChangeMode = Literal["none", "boiling", "condensation"]
+
+
+@dataclass(frozen=True)
+class ThermalDeviceSpec:
+    """Reusable heater boundary; the connected material owns its temperature.
+
+    The device is an ideal utility with a finite delivered-power limit, not an
+    independently integrated heater body. Calibration and control belong to
+    the device and remain unchanged when its thermal port is reconnected.
+    """
+
+    conductance_W_K: float = 0.2
+    maximum_power_W: float = 5.0
+    setpoint_K: float = 350.0
+    calibration_factor: float = 1.0
+    enabled: bool = True
+    mode: Literal["finite_power", "isothermal"] = "finite_power"
+    minimum_setpoint_K: float = 300.0
+    maximum_setpoint_K: float = 430.0
+    maximum_cooling_power_W: float = 0.0
+
+    def __post_init__(self) -> None:
+        for name in ("conductance_W_K", "maximum_power_W", "maximum_cooling_power_W"):
+            _nonnegative(getattr(self, name), name)
+        _positive(self.setpoint_K, "setpoint_K")
+        _positive(self.calibration_factor, "calibration_factor")
+        if not (
+            0 < self.minimum_setpoint_K <= self.setpoint_K <= self.maximum_setpoint_K
+            and isfinite(self.maximum_setpoint_K)
+        ):
+            raise ValueError("setpoint must lie within the device's finite operating range")
+        if not isinstance(self.enabled, bool) or self.mode not in {"finite_power", "isothermal"}:
+            raise ValueError("thermal device requires boolean enable and a supported mode")
+
+    @property
+    def supported_operations(self) -> tuple[str, ...]:
+        return ("heat", "wait", "pause_control", "resume_control")
+
+    def delivered_power_w(self, sample_temperature_K: float) -> float:
+        _positive(sample_temperature_K, "sample_temperature_K")
+        if not self.enabled or self.mode == "isothermal":
+            # Isothermal compensation is computed by the common energy balance.
+            return 0.0
+        return min(
+            self.maximum_power_W,
+            max(
+                -self.maximum_cooling_power_W,
+                self.conductance_W_K
+                * self.calibration_factor
+                * (self.setpoint_K - sample_temperature_K),
+            ),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, payload) -> ThermalDeviceSpec:
+        return cls(**payload)
+
+
+@dataclass(frozen=True)
+class CondensedBackgroundSpec:
+    """Declared volume carrier, without an invented molecular composition.
+
+    The authored volumetric Cv defines U(T). Condensed PV/Poynting work is
+    neglected and port H is approximated by U, without a Cp-to-Cv conversion.
+    Volume remains an explicit L stock.
+    """
+
+    volumetric_cv_J_L_K: float
+    feed_temperature_K: float = 298.15
+    solvent_index: int = 0
+    source_vessel_id: str | None = None
+
+    def __post_init__(self):
+        _positive(self.volumetric_cv_J_L_K, "background heat capacity")
+        _positive(self.feed_temperature_K, "background feed temperature")
+        if self.source_vessel_id is not None and (
+            not isinstance(self.source_vessel_id, str) or not self.source_vessel_id
+        ):
+            raise ValueError("carrier source must name an explicitly declared vessel")
+        if (
+            isinstance(self.solvent_index, bool)
+            or not isinstance(self.solvent_index, int)
+            or self.solvent_index not in range(4)
+        ):
+            raise ValueError("background carrier requires one declared solvent stock")
+
+
+@dataclass(frozen=True)
+class ThermalSystemSpec:
+    """Constitutive data for one local system; owns no evolving inventory."""
+
+    thermodynamics: (
+        ConstantCvThermodynamics | PropertyPackageThermodynamics | NASA7GasThermodynamics
+    )
+    pressure_law: Literal["ideal_gas", "fixed_pressure"] = "ideal_gas"
+    environment_temperature_K: float = 300.0
+    loss_conductance_W_K: float = 0.01
+    minimum_temperature_K: float = 300.0
+    maximum_temperature_K: float = 450.0
+    stop_temperature_K: float = 440.0
+    maximum_pressure_Pa: float = 500000.0
+    condensed_background: CondensedBackgroundSpec | None = None
+
+    def __post_init__(self) -> None:
+        from chemworld.physchem.gas_mechanism_batch import NASA7GasThermodynamics
+
+        if (isinstance(self.thermodynamics, NASA7GasThermodynamics)
+                and self.pressure_law != "ideal_gas"):
+            raise ValueError("NASA7 gas caloric data require ideal-gas pressure closure")
+        _positive(self.environment_temperature_K, "environment_temperature_K")
+        _positive(self.maximum_pressure_Pa, "maximum_pressure_Pa")
+        _nonnegative(self.loss_conductance_W_K, "loss_conductance_W_K")
+        if not (
+            0 < self.minimum_temperature_K < self.stop_temperature_K < self.maximum_temperature_K
+        ) or not isfinite(self.maximum_temperature_K):
+            raise ValueError("thermal limits must be finite, positive and ordered")
+        if self.pressure_law not in {"ideal_gas", "fixed_pressure"}:
+            raise ValueError("unsupported local pressure law")
+        if self.condensed_background is not None and (
+            not isinstance(self.condensed_background, CondensedBackgroundSpec)
+            or self.pressure_law != "fixed_pressure"
+        ):
+            raise ValueError("a condensed background requires an explicit fixed-pressure model")
+        validate = getattr(self.thermodynamics, "validate_temperature_interval", None)
+        if validate is not None:
+            validate(self.minimum_temperature_K, self.maximum_temperature_K)
+        if (
+            isinstance(self.thermodynamics, PropertyPackageThermodynamics)
+            and any(
+                value.reference.phase == "gas" for value in self.thermodynamics.species.values()
+            )
+            and self.pressure_law != "ideal_gas"
+        ):
+            raise ValueError("native gas caloric data require the ideal-gas pressure closure")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "thermodynamics": self.thermodynamics.to_dict()
+            if hasattr(self.thermodynamics, "to_dict")
+            else {
+                "species": {
+                    key: asdict(value) for key, value in self.thermodynamics.species.items()
+                },
+                "support_heat_capacity_J_K": self.thermodynamics.support_heat_capacity_J_K,
+                "reference_temperature_K": self.thermodynamics.reference_temperature_K,
+            },
+            **{
+                key: getattr(self, key)
+                for key in (
+                    "pressure_law",
+                    "environment_temperature_K",
+                    "loss_conductance_W_K",
+                    "minimum_temperature_K",
+                    "maximum_temperature_K",
+                    "stop_temperature_K",
+                    "maximum_pressure_Pa",
+                )
+            },
+            **(
+                {"condensed_background": asdict(self.condensed_background)}
+                if self.condensed_background is not None
+                else {}
+            ),
+        }
+
+    @classmethod
+    def from_dict(cls, payload) -> ThermalSystemSpec:
+        values = dict(payload)
+        if values.get("condensed_background") is not None:
+            values["condensed_background"] = CondensedBackgroundSpec(
+                **values["condensed_background"]
+            )
+        thermal = dict(values.pop("thermodynamics"))
+        if thermal.get("model") == "nasa7-ideal-gas-v1":
+            from chemworld.physchem.gas_mechanism_batch import NASA7GasThermodynamics
+
+            return cls(NASA7GasThermodynamics.from_dict(thermal), **values)
+        if "model" in thermal:
+            return cls(PropertyPackageThermodynamics.from_dict(thermal), **values)
+        thermal["species"] = {
+            key: SpeciesInternalEnergy(**value) for key, value in thermal["species"].items()
+        }
+        return cls(ConstantCvThermodynamics(**thermal), **values)
 
 
 @dataclass(frozen=True)
@@ -28,9 +220,7 @@ class TubularHeatTransferBoundarySpec:
         _positive(self.inner_diameter_m, "inner_diameter_m")
         _positive(self.overall_u_W_m2_K, "overall_u_W_m2_K")
         _positive(self.boundary_temperature_K, "boundary_temperature_K")
-        if not 0.0 < self.effectiveness_factor <= 1.0 or not isfinite(
-            self.effectiveness_factor
-        ):
+        if not 0.0 < self.effectiveness_factor <= 1.0 or not isfinite(self.effectiveness_factor):
             raise ValueError("effectiveness_factor must be finite and in (0, 1]")
         if not self.provenance_id.strip():
             raise ValueError("provenance_id cannot be empty")
@@ -41,11 +231,7 @@ class TubularHeatTransferBoundarySpec:
 
     @property
     def conductance_per_length_W_m_K(self) -> float:  # noqa: N802 - unit suffix
-        return (
-            self.overall_u_W_m2_K
-            * self.wetted_perimeter_m
-            * self.effectiveness_factor
-        )
+        return self.overall_u_W_m2_K * self.wetted_perimeter_m * self.effectiveness_factor
 
     def to_dict(self) -> dict[str, float | str]:
         return {
@@ -222,17 +408,24 @@ def equipment_heat_transfer(
     *,
     process_temperature_K: float,
     utility_temperature_K: float,
-    process_heat_capacity_J_K: float,
+    process_heat_capacity_J_K: float | None = None,
     duration_s: float,
     elapsed_fouling_time_s: float = 0.0,
     fouling: FoulingEvolutionSpec | None = None,
     phase_change: PhaseChangeBoundarySpec | None = None,
+    caloric_model: PropertyPackageThermodynamics | ConstantCvThermodynamics | None = None,
+    caloric_state=None,
 ) -> EquipmentHeatTransferResult:
     """Integrate lumped equipment heat transfer with optional phase plateau."""
 
     _positive(process_temperature_K, "process_temperature_K")
     _positive(utility_temperature_K, "utility_temperature_K")
-    _positive(process_heat_capacity_J_K, "process_heat_capacity_J_K")
+    if caloric_model is None:
+        if caloric_state is not None or process_heat_capacity_J_K is None:
+            raise ValueError("select a declared capacity or a caloric model/state pair")
+        _positive(process_heat_capacity_J_K, "process_heat_capacity_J_K")
+    elif caloric_state is None or process_heat_capacity_J_K is not None:
+        raise ValueError("caloric equipment requires one model/state pair and one energy basis")
     _positive(duration_s, "duration_s")
     _nonnegative(elapsed_fouling_time_s, "elapsed_fouling_time_s")
     fouling_resistance = 0.0 if fouling is None else fouling.resistance_at(elapsed_fouling_time_s)
@@ -246,7 +439,31 @@ def equipment_heat_transfer(
         provenance_id="no-phase-change-boundary",
     )
     warnings: list[str] = []
-    if boundary.mode == "boiling":
+    caloric_result = None
+    if caloric_model is not None:
+        from chemworld.physchem.coupled_system import CoupledState, CoupledSystem, HeatFlux
+
+        if (
+            not isinstance(caloric_state, CoupledState)
+            or caloric_state.temperature_K != process_temperature_K
+        ):
+            raise ValueError("equipment temperature must match its owned caloric inventory")
+        if boundary.mode != "none":
+            raise ValueError("variable-caloric phase change needs an explicit flash/latent model")
+        system = CoupledSystem(
+            caloric_model,
+            heat_flux=lambda state: HeatFlux(
+                heater_W=conductance * (utility_temperature_K - state.temperature_K)
+            ),
+        )
+        caloric_result = system.advance(caloric_state, duration_s)
+        final_temperature = caloric_result.final_state.temperature_K
+        sensible = caloric_model.internal_energy_j(
+            caloric_result.final_state
+        ) - caloric_model.internal_energy_j(caloric_state)
+        latent, phase_changed = 0.0, 0.0
+        warnings.extend(caloric_result.solver_diagnostic.get("property_trial_warnings", ()))
+    elif boundary.mode == "boiling":
         final_temperature, sensible, latent, phase_changed = _boiling_path(
             initial_temperature_K=process_temperature_K,
             utility_temperature_K=utility_temperature_K,
@@ -288,14 +505,22 @@ def equipment_heat_transfer(
             and utility_temperature_K < saturation
         ):
             warnings.append("condensation_possible_but_phase_change_not_enabled")
-    heat_energy = sensible + latent
+    heat_energy = (
+        sensible + latent
+        if caloric_result is None
+        else caloric_result.final_state.boundary_heat_J - caloric_state.boundary_heat_J
+    )
     phase_fraction = (
         0.0
         if boundary.available_phase_change_mol <= 0.0
         else phase_changed / boundary.available_phase_change_mol
     )
     return EquipmentHeatTransferResult(
-        model_id="equipment_phase_change_heat_transfer_v1",
+        model_id=(
+            "equipment_phase_change_heat_transfer_v1"
+            if caloric_result is None
+            else "equipment_caloric_heat_transfer_v1"
+        ),
         equipment_id=equipment.equipment_id,
         surface_type=equipment.surface_type,
         initial_temperature_K=process_temperature_K,

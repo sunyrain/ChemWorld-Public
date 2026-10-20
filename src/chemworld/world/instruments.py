@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
 
 from chemworld.foundation import Instrument
@@ -31,7 +32,18 @@ INSTRUMENT_RUNTIME_PROVENANCE = (
 )
 
 
-def chemworld_instruments(*, include_particle_size: bool = False) -> dict[str, Instrument]:
+def public_native_observation(record, constitution, *, debug_truth=False):
+    """Apply the runtime's public channel checks at the tool boundary too."""
+    from chemworld.foundation.observations import Observation
+
+    observation = Observation.from_native_record(record)
+    report = constitution.check_observation(observation, debug_truth=debug_truth)
+    if not report.passed:
+        raise ValueError("Invalid public native observation")
+    return observation.native_record()
+
+
+def _builtin_chemworld_instruments(*, include_particle_size: bool = False) -> dict[str, Instrument]:
     """Return instrument definitions used by the shared observation law."""
 
     instruments = {
@@ -254,6 +266,39 @@ class InstrumentContract:
     requires_terminated: bool
     calibration_profile: str
     synthetic_boundary: str
+    clock_semantics: str = "instantaneous_snapshot"
+    analysis_time_s: float = 0.0
+    host_evolves_during_analysis: bool = False
+
+    def __post_init__(self) -> None:
+        if self.clock_semantics not in {
+            "instantaneous_snapshot", "in_situ_end", "offline_snapshot"
+        }:
+            raise ValueError("Unknown measurement clock policy")
+        if not all(isfinite(x) and x >= 0 for x in (self.latency_s, self.analysis_time_s)):
+            raise ValueError("Measurement durations must be finite and nonnegative")
+        if self.clock_semantics == "instantaneous_snapshot" and (
+            self.latency_s or self.analysis_time_s or self.host_evolves_during_analysis
+        ):
+            raise ValueError("Instantaneous instruments cannot request physical latency")
+        if self.clock_semantics == "in_situ_end" and (
+            self.analysis_time_s or self.host_evolves_during_analysis
+        ):
+            raise ValueError("In-situ readout is available at acquisition end")
+        if self.clock_semantics == "offline_snapshot" and self.latency_s:
+            raise ValueError("Offline instruments sample immediately, then analyse the snapshot")
+        if self.requires_terminated and (
+            self.latency_s or self.host_evolves_during_analysis
+        ):
+            raise ValueError("Terminal assays must preserve the frozen specimen")
+        if self.sample_consumption_L and (
+            self.clock_semantics == "in_situ_end" or self.host_evolves_during_analysis
+        ):
+            raise ValueError("Timed destructive sampling requires immediate offline withdrawal")
+
+    @property
+    def physical_duration_s(self) -> float:
+        return self.latency_s + (self.analysis_time_s if self.host_evolves_during_analysis else 0.0)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -272,7 +317,9 @@ class InstrumentContract:
             "missingness_contract": self.missingness_contract,
             "cost": self.cost,
             "latency_s": self.latency_s,
-            "clock_semantics": "instantaneous_snapshot",
+            "clock_semantics": self.clock_semantics,
+            "analysis_time_s": self.analysis_time_s,
+            "host_evolves_during_analysis": self.host_evolves_during_analysis,
             "sample_consumption_L": self.sample_consumption_L,
             "destructive": self.destructive,
             "requires_terminated": self.requires_terminated,
@@ -281,7 +328,9 @@ class InstrumentContract:
         }
 
 
-def instrument_contracts(*, include_particle_size: bool = False) -> dict[str, InstrumentContract]:
+def _builtin_instrument_contracts(
+    *, include_particle_size: bool = False
+) -> dict[str, InstrumentContract]:
     """Return formal contracts for every instrument available in ChemWorld."""
 
     calibration = {
@@ -322,7 +371,7 @@ def instrument_contracts(*, include_particle_size: bool = False) -> dict[str, In
     }
     lod = {"uvvis": 0.0025, "gc": 0.0012, "hplc": 0.0008}
     contracts: dict[str, InstrumentContract] = {}
-    for instrument_id, instrument in chemworld_instruments(
+    for instrument_id, instrument in _builtin_chemworld_instruments(
         include_particle_size=include_particle_size
     ).items():
         processed_schema = {
@@ -437,7 +486,7 @@ def instrument_contracts(*, include_particle_size: bool = False) -> dict[str, In
     return contracts
 
 
-def instrument_runtime_contract_hash(*, include_particle_size: bool = False) -> str:
+def instrument_runtime_contract_hash(*, include_particle_size: bool = False, modules=None) -> str:
     """Return a stable fingerprint of the exact runtime instrument contract."""
 
     payload = {
@@ -447,7 +496,9 @@ def instrument_runtime_contract_hash(*, include_particle_size: bool = False) -> 
         "instruments": {
             instrument_id: contract.to_dict()
             for instrument_id, contract in sorted(
-                instrument_contracts(include_particle_size=include_particle_size).items()
+                instrument_contracts(
+                    include_particle_size=include_particle_size, modules=modules
+                ).items()
             )
         },
     }
@@ -464,3 +515,28 @@ __all__ = [
     "instrument_contracts",
     "instrument_runtime_contract_hash",
 ]
+
+
+def chemworld_instruments(*, include_particle_size=False, modules=None):
+    """Construct instrument definitions from the effective module declarations."""
+    from copy import deepcopy
+
+    from chemworld.world.domain_modules import DomainModuleRegistry
+
+    registry = modules or DomainModuleRegistry.default()
+    return {
+        key: deepcopy(spec.definition)
+        for key, spec in registry.instrument_specs(include_optional=include_particle_size).items()
+    }
+
+
+def instrument_contracts(*, include_particle_size=False, modules=None):
+    from copy import deepcopy
+
+    from chemworld.world.domain_modules import DomainModuleRegistry
+
+    registry = modules or DomainModuleRegistry.default()
+    return {
+        key: deepcopy(spec.contract)
+        for key, spec in registry.instrument_specs(include_optional=include_particle_size).items()
+    }

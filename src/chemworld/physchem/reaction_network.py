@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from math import isfinite
 from pathlib import Path
 from typing import Any, Literal
@@ -164,6 +165,7 @@ class ReactionNetworkSpec:
     reactions: tuple[ReactionSpec, ...]
     units: dict[str, str] = field(default_factory=lambda: {"amount": "mol", "volume": "L"})
     metadata: dict[str, object] = field(default_factory=dict)
+    stochastic: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         if not self.network_id:
@@ -190,6 +192,20 @@ class ReactionNetworkSpec:
                     f"Reaction {reaction.reaction_id} references unknown species: {missing}"
                 )
         self.check_conservation(raise_on_error=True)
+        if self.stochastic is not None:
+            from chemworld.physchem.stochastic_kinetics import StochasticSpec, compile_channels
+
+            spec = StochasticSpec(**self.stochastic)
+            object.__setattr__(self, "stochastic", spec.to_dict())
+            compile_channels(self, spec)
+
+    @cached_property
+    def stochastic_channels(self):
+        from chemworld.physchem.stochastic_kinetics import StochasticSpec, compile_channels
+
+        if self.stochastic is None:
+            raise ValueError("network has no declared stochastic strategy")
+        return compile_channels(self, StochasticSpec(**self.stochastic))
 
     @property
     def species_ids(self) -> tuple[str, ...]:
@@ -345,6 +361,8 @@ class ReactionNetworkSpec:
         activity_coefficients: Mapping[str, float] | None = None,
     ) -> dict[str, float]:
         concentrations = self._concentrations(amounts_mol, volume_L=volume_L)
+        if species_thermo is None and "gas_thermochemistry" in self.metadata:
+            species_thermo = self.imported_gas_thermochemistry
         return {
             reaction.reaction_id: evaluate_rate_law(
                 reaction,
@@ -354,6 +372,16 @@ class ReactionNetworkSpec:
                 activity_coefficients=activity_coefficients,
             )
             for reaction in self.reactions
+        }
+
+    @cached_property
+    def imported_gas_thermochemistry(self) -> dict[str, Any]:
+        """Rebuild declared NASA7 data once, including after native JSON replay."""
+        from chemworld.physchem.thermochemistry import NASA7SpeciesThermo
+
+        return {
+            key: NASA7SpeciesThermo.from_cantera_yaml_thermo(species_id=key, **node)
+            for key, node in self.metadata.get("gas_thermochemistry", {}).items()
         }
 
     def amount_derivatives(
@@ -372,6 +400,15 @@ class ReactionNetworkSpec:
             species_thermo=species_thermo,
             activity_coefficients=activity_coefficients,
         )
+        return self.amount_derivatives_from_rates(rates, volume_L=volume_L)
+
+    def amount_derivatives_from_rates(
+        self,
+        rates: Mapping[str, float],
+        *,
+        volume_L: float,
+    ) -> dict[str, float]:
+        """Apply the same stoichiometry to already evaluated progress rates."""
         derivatives = dict.fromkeys(self.species_ids, 0.0)
         for reaction in self.reactions:
             rate_mol_L_s = rates[reaction.reaction_id]
@@ -392,6 +429,10 @@ class ReactionNetworkSpec:
         solver_options: BatchSolverOptions | None = None,
         termination_events: Sequence[BatchTerminationEvent] = (),
     ) -> BatchIntegrationResult:
+        if self.stochastic is not None:
+            raise ValueError(
+                "discrete network requires advance_stochastic, not implicit ODE switching"
+            )
         if duration_s < 0 or not isfinite(duration_s):
             raise ValueError("duration_s cannot be negative")
         if volume_L <= 0 or not isfinite(volume_L):
@@ -601,11 +642,13 @@ class ReactionNetworkSpec:
             reactions=reactions,
             units=dict(payload.get("units", {"amount": "mol", "volume": "L"})),
             metadata=dict(payload.get("metadata", {})),
+            stochastic=payload.get("stochastic"),
         )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "network_id": self.network_id,
+            **({"stochastic": dict(self.stochastic)} if self.stochastic is not None else {}),
             "species": [species.to_dict() for species in self.species],
             "reactions": [reaction.to_dict() for reaction in self.reactions],
             "stoichiometric_matrix": [list(row) for row in self.stoichiometric_matrix()],

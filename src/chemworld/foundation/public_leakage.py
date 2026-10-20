@@ -129,6 +129,16 @@ def _check_string_value(
     hidden_species: frozenset[str],
     findings: list[PublicLeakageFinding],
 ) -> None:
+    if parent_key in {"channel_id", "derived_from", "sample_id", "clock_id"}:
+        if (value.lower() in SENSITIVE_KEY_NAMES
+                or value.lower().startswith(("true_", "internal_", "solver_", "diagnostic"))):
+            findings.append(PublicLeakageFinding(
+                path, "private_channel_identity", parent_key, _preview(value),
+            ))
+        if value in hidden_species:
+            findings.append(PublicLeakageFinding(
+                path, "hidden_species_id", parent_key, _preview(value),
+            ))
     if parent_key == "species_id" and not value.endswith(PUBLIC_SPECIES_SUFFIX):
         findings.append(
             PublicLeakageFinding(

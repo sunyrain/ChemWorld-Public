@@ -7,7 +7,9 @@ from dataclasses import asdict, dataclass, field
 from math import isfinite
 from typing import Any
 
-from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, SpeciesLedger
+from chemworld.foundation.material_properties import MATERIAL_FIELDS
+from chemworld.foundation.state_ledgers import PhaseLedger, SpeciesLedger
+from chemworld.foundation.state_ownership import StateSlots
 
 # A finite, public address space also has a lossless numeric Gym encoding.
 # Filtrate addresses refer to samples collected by resuspend_crystals.
@@ -24,21 +26,34 @@ class MaterialContents:
 
     phases: PhaseLedger
     species: SpeciesLedger
-    equipment: EquipmentLedger
+    properties: dict[str, dict[str, Any]]
     metrics: dict[str, float] = field(default_factory=dict)
     reference_sources: dict[str, dict[str, float]] = field(default_factory=dict)
     reference_shares: dict[str, float] = field(default_factory=dict)
+    state_slots: StateSlots = field(default_factory=StateSlots)
+    liquid_heat_capacity_J_L_K: float = 4180.0
+    mechanism_id: str = ""
 
     def __post_init__(self) -> None:
         for key in (
             "phases",
             "species",
-            "equipment",
+            "properties",
             "metrics",
             "reference_sources",
             "reference_shares",
+            "state_slots",
         ):
             object.__setattr__(self, key, deepcopy(getattr(self, key)))
+        if any(
+            name not in MATERIAL_FIELDS or not set(values) <= MATERIAL_FIELDS[name].keys()
+            for name, values in self.properties.items()
+        ):
+            raise ValueError("Undeclared material properties cannot travel with a sample")
+        if self.state_slots.stationary().slots:
+            raise ValueError("Stored material cannot contain vessel or equipment state")
+        if not isfinite(self.liquid_heat_capacity_J_L_K) or self.liquid_heat_capacity_J_L_K <= 0:
+            raise ValueError("Material heat capacity must be finite and positive")
 
 
 @dataclass(frozen=True)
@@ -76,6 +91,8 @@ class StoredSample:
         if self.retired and (self.volume_L > 0 or any(self.species_amounts_mol.values())):
             raise ValueError("Only empty containers can be retired")
         if self.contents is not None:
+            if self.retired and self.contents.state_slots.has_inventory():
+                raise ValueError("Retired containers cannot retain material-owned inventory")
             phases = self.contents.phases.phases.values()
             values = [x for p in phases for x in (p.volume_L, *p.species_amounts_mol.values())]
             if not all(isfinite(x) and x >= 0 for x in values):
@@ -93,7 +110,26 @@ class StoredSample:
                 raise ValueError("Sample phase and aggregate inventories disagree")
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if self.contents:
+            payload["contents"] = {
+                "phases": self.contents.phases.to_dict(),
+                "species": self.contents.species.to_dict(),
+                "properties": deepcopy(self.contents.properties),
+                "metrics": dict(self.contents.metrics),
+                "reference_sources": deepcopy(self.contents.reference_sources),
+                "reference_shares": dict(self.contents.reference_shares),
+                "state_slots": self.contents.state_slots.to_dict(),
+                "liquid_heat_capacity_J_L_K": self.contents.liquid_heat_capacity_J_L_K,
+                "mechanism_id": self.contents.mechanism_id,
+            }
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> StoredSample:
+        from chemworld.foundation.state_serialization import restore_sample
+
+        return restore_sample(payload)
 
     def public_summary(self) -> dict[str, Any]:
         return {
@@ -143,6 +179,9 @@ class SampleLedger:
         for sample in self.samples.values():
             for species, amount in sample.species_amounts_mol.items():
                 totals[species] = totals.get(species, 0.0) + amount
+            if sample.contents:
+                for species, amount in sample.contents.state_slots.species_amounts().items():
+                    totals[species] = totals.get(species, 0.0) + amount
         return totals
 
     def to_dict(self) -> dict[str, Any]:

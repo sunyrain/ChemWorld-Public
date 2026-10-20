@@ -18,7 +18,7 @@ from chemworld.physchem.maturity import (
     ValidationEvidence,
 )
 from chemworld.physchem.reaction_network_specs import ReactionSpec
-from chemworld.physchem.reaction_rate_laws import prefixed_arrhenius_params
+from chemworld.physchem.reaction_rate_laws import prefixed_arrhenius_params, validate_pressure_rate
 
 ARRHENIUS_FAMILY = frozenset(
     {
@@ -28,6 +28,8 @@ ARRHENIUS_FAMILY = frozenset(
         "third_body_arrhenius",
         "lindemann_falloff",
         "troe_falloff",
+        "pressure_log",
+        "chebyshev",
     }
 )
 CONCENTRATION_BASIS = "mol/L"
@@ -142,6 +144,18 @@ def audit_reaction_rate_contract(reaction: ReactionSpec) -> ReactionRateContract
 
     if equation_id not in ARRHENIUS_FAMILY:
         violations.append(f"unsupported Arrhenius-family equation_id: {equation_id}")
+    elif equation_id in {"pressure_log", "chebyshev"}:
+        try:
+            validate_pressure_rate(params, equation_id)
+        except (ValueError, TypeError, KeyError, OverflowError) as error:
+            violations.append(str(error))
+        if params.get("pressure_basis") != "ideal_gas":
+            violations.append("pressure kinetics require ideal_gas pressure basis")
+        if uses_activities:
+            violations.append("pressure kinetics use concentrations, not activities")
+        diagnostics.append(
+            "pressure coefficient uses finite T/P domain and mol/L; no extrapolation"
+        )
     elif equation_id in {"lindemann_falloff", "troe_falloff"}:
         low = _falloff_group(params, "low", violations)
         high = _falloff_group(params, "high", violations)
@@ -167,6 +181,7 @@ def audit_reaction_rate_contract(reaction: ReactionSpec) -> ReactionRateContract
         diagnostics.append("falloff low-pressure order includes one effective third body")
         if equation_id == "troe_falloff":
             _validate_troe(params, violations)
+        _validate_third_body(params, violations)
     else:
         forward_b = _finite_parameter(params, "b", default=0.0, violations=violations)
         _positive_parameter(params, "A", violations)
@@ -185,6 +200,32 @@ def audit_reaction_rate_contract(reaction: ReactionSpec) -> ReactionRateContract
                 forward_temperature_exponent=forward_b,
                 violations=violations,
             )
+
+    if params.get("reverse_basis") == "ideal_gas_nasa7":
+        if not reaction.reversible or uses_activities:
+            violations.append("NASA7 gas reverse basis requires reversible concentration kinetics")
+        _positive_parameter(params, "reference_pressure_Pa", violations)
+        for key in set(reaction.kinetic_forward_orders) | set(reaction.kinetic_reverse_orders):
+            if (
+                abs(
+                    reaction.kinetic_reverse_orders.get(key, 0)
+                    - reaction.kinetic_forward_orders.get(key, 0)
+                    - reaction.stoichiometry.get(key, 0)
+                )
+                > 1e-12
+            ):
+                violations.append(
+                    "gas reverse orders must obey stoichiometry, including collision partners"
+                )
+        reverse_unit = rate_coefficient_unit(
+            (reverse_order or 1) + (equation_id == "third_body_arrhenius")
+        )
+        equilibrium_unit = concentration_equilibrium_constant_unit(
+            sum(reaction.stoichiometry.values())
+        )
+        diagnostics.append(
+            "ideal-gas NASA7 Kc uses reference_pressure/(R*T*1000), not fixed 1 mol/L"
+        )
 
     forward_unit = _kinetic_rate_coefficient_unit(
         effective_forward_order,

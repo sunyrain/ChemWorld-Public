@@ -314,7 +314,7 @@ def audit_ledger_single_source_of_truth(
 
     if state.equipment is not None and state.vessels is not None:
         vessel_ids = set(state.vessels.vessels)
-        for equipment_id, equipment in state.equipment.equipment.items():
+        for equipment_id, equipment in sorted(state.equipment.equipment.items()):
             findings.append(
                 LedgerAuditFinding(
                     f"equipment_attached_vessel_exists:{equipment_id}",

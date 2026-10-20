@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from math import isfinite
 from typing import Any
 
+from chemworld.foundation.balances import TransitionBalance
+from chemworld.foundation.observations import Observation
 from chemworld.foundation.samples import SampleLedger
 from chemworld.foundation.solvents import SolventAccounting, SolventInventory
 from chemworld.foundation.state_helpers import (
@@ -35,6 +38,7 @@ from chemworld.foundation.state_ledgers import (
     scale_species_initial_amounts,
     species_with_added_initial_amounts,
 )
+from chemworld.foundation.state_ownership import StateSlots
 
 
 @dataclass(frozen=True)
@@ -82,8 +86,12 @@ class WorldState:
     solvent_accounting: SolventAccounting = field(default_factory=SolventAccounting)
     inactive_vessels: dict[str, WorldState] = field(default_factory=dict)
     vessel_elapsed_s: dict[str, float] = field(default_factory=dict)
+    state_slots: StateSlots = field(default_factory=StateSlots)
+    liquid_heat_capacity_J_L_K: float = 4180.0
 
     def __post_init__(self) -> None:
+        if not isfinite(self.liquid_heat_capacity_J_L_K) or self.liquid_heat_capacity_J_L_K <= 0:
+            raise ValueError("Liquid heat capacity must be finite and positive")
         if self.vessel_id in self.inactive_vessels or any(
             key != value.vessel_id or value.inactive_vessels
             for key, value in self.inactive_vessels.items()
@@ -94,6 +102,7 @@ class WorldState:
         object.__setattr__(self, "species_amounts", deepcopy(self.species_amounts))
         object.__setattr__(self, "units", deepcopy(self.units))
         object.__setattr__(self, "metadata", deepcopy(self.metadata))
+        object.__setattr__(self, "state_slots", deepcopy(self.state_slots))
         species = self.species or SpeciesLedger(
             initial_amounts_mol={
                 key: float(value)
@@ -188,8 +197,12 @@ class WorldState:
             sample_consumed_L=self.ledger.sample_consumed_L,
             waste_L=0.0 if self.process is None else self.process.waste_L,
             metrics={} if self.process is None else self.process.metrics,
-            last_observation=({} if self.process is None else self.process.last_observation),
-            last_observed_mask=({} if self.process is None else self.process.last_observed_mask),
+            last_observation_record=(
+                None if self.process is None else self.process.last_observation_record
+            ),
+            stochastic_continuation=(
+                None if self.process is None else self.process.stochastic_continuation
+            ),
         )
         object.__setattr__(self, "species", species)
         object.__setattr__(self, "phases", phases)
@@ -197,6 +210,18 @@ class WorldState:
         object.__setattr__(self, "equipment", equipment)
         object.__setattr__(self, "thermal", thermal)
         object.__setattr__(self, "process", process)
+        for slot in self.state_slots.slots:
+            if slot.location_id != self.vessel_id:
+                raise ValueError("State slot location must match its local vessel")
+            if (
+                slot.spec.owner_kind == "equipment"
+                and slot.spec.owner_id not in equipment.equipment
+            ):
+                raise ValueError("State slot equipment owner is absent")
+            if slot.spec.owner_kind == "vessel" and slot.spec.owner_id != self.vessel_id:
+                raise ValueError("State slot vessel owner is absent")
+            if slot.spec.phase_id is not None and slot.spec.phase_id not in phases.phases:
+                raise ValueError("Material state refers to an absent phase")
 
     def to_dict(self, *, include_hidden: bool = True) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -220,12 +245,16 @@ class WorldState:
             "vessels": None if self.vessels is None else self.vessels.to_dict(),
             "equipment": None if self.equipment is None else self.equipment.to_dict(),
             "thermal": None if self.thermal is None else self.thermal.to_dict(),
-            "process": None if self.process is None else self.process.to_dict(),
+            "process": None
+            if self.process is None
+            else self.process.to_dict(include_hidden=include_hidden),
             "samples": self.samples.to_dict() if include_hidden else self.samples.public_summary(),
             "material_routing": self.samples.routing_summary(),
             "solvent_accounting": self.solvent_accounting.to_dict(),
+            "state_slots": self.state_slots.to_dict(include_hidden=include_hidden),
         }
         if include_hidden:
+            payload["liquid_heat_capacity_J_L_K"] = self.liquid_heat_capacity_J_L_K
             payload["species_amounts"] = deepcopy(self.species_amounts)
             payload["active_reference_sources"] = deepcopy(self.samples.active_reference_sources)
             payload["active_reference_shares"] = deepcopy(self.samples.active_reference_shares)
@@ -234,32 +263,12 @@ class WorldState:
     def replace(self, **updates: Any) -> WorldState:
         return replace(self, **updates)
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> WorldState:
+        """Restore a full physical snapshot, not a public observation."""
+        from chemworld.foundation.state_serialization import restore_state
 
-@dataclass(frozen=True)
-class Observation:
-    values: dict[str, float | None]
-    units: dict[str, str]
-    observed_mask: dict[str, bool] = field(default_factory=dict)
-    raw_signal: dict[str, Any] = field(default_factory=dict)
-    processed_estimate: dict[str, float | None] = field(default_factory=dict)
-    uncertainty: dict[str, float] = field(default_factory=dict)
-    instrument_id: str | None = None
-    cost: float = 0.0
-    sample_consumed_L: float = 0.0
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "values": self.values.copy(),
-            "units": self.units.copy(),
-            "observed_mask": self.observed_mask.copy(),
-            "observed_keys": [key for key, observed in self.observed_mask.items() if observed],
-            "raw_signal": self.raw_signal.copy(),
-            "processed_estimate": self.processed_estimate.copy(),
-            "uncertainty": self.uncertainty.copy(),
-            "instrument_id": self.instrument_id,
-            "cost": self.cost,
-            "sample_consumed_L": self.sample_consumed_L,
-        }
+        return restore_state(payload)
 
 
 @dataclass(frozen=True)
@@ -271,6 +280,8 @@ class OperationRecord:
     instrument: str | None = None
     measurement_cost: float = 0.0
     sample_consumed_L: float = 0.0
+    material_balance: TransitionBalance = field(default_factory=TransitionBalance)
+    terminal_assay: bool | None = None
 
     @property
     def is_instrument_measurement(self) -> bool:
@@ -278,17 +289,21 @@ class OperationRecord:
 
     @property
     def is_final_assay(self) -> bool:
-        return self.instrument == "final_assay"
+        return (
+            self.instrument == "final_assay" if self.terminal_assay is None else self.terminal_assay
+        )
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self, *, include_hidden: bool = False) -> dict[str, object]:
         return {
             "operation_type": self.operation_type,
             "preconditions": self.preconditions,
             "state_delta_summary": self.state_delta_summary,
             "constitution_checks": self.constitution_checks,
             "instrument": self.instrument,
+            "terminal_assay": self.is_final_assay,
             "measurement_cost": self.measurement_cost,
             "sample_consumed": self.sample_consumed_L,
+            "material_balance": self.material_balance.to_dict(include_hidden=include_hidden),
         }
 
 

@@ -47,6 +47,14 @@ class TaskObservationContract:
         requested_instruments = tuple(
             instrument_id for instrument_id in allowed_instruments if instrument_id in instruments
         )
+        if scoring_contract.score_family == "unscored":
+            required_keys = tuple(
+                dict.fromkeys(
+                    key
+                    for name in requested_instruments
+                    for key in instruments[name].observable_keys
+                )
+            )
         instrument_keys = {
             instrument_id: tuple(
                 key for key in instruments[instrument_id].observable_keys if key in required_keys

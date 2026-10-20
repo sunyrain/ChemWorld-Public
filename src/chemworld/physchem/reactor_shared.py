@@ -3,12 +3,52 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import pairwise
 from math import isfinite
 from typing import Literal
 
 SteadyStateStability = Literal["stable", "unstable", "marginal"]
 JacketInterpolationMode = Literal["step", "linear"]
 PressureBoundaryMode = Literal["fixed_liquid"]
+
+
+def _program_value(setpoints, mode, time_s):
+    if not isfinite(time_s) or time_s < 0:
+        raise ValueError("control time must be finite and nonnegative")
+    if time_s <= setpoints[0][0]:
+        return float(setpoints[0][1])
+    for (left_time, left), (right_time, right) in pairwise(setpoints):
+        if left_time <= time_s <= right_time:
+            if mode == "step" or right_time == left_time:
+                return float(left)
+            return float(left + (time_s - left_time) / (right_time - left_time) * (right - left))
+    return float(setpoints[-1][1])
+
+
+@dataclass(frozen=True)
+class ScalarControlProgram:
+    """Native-unit scalar setpoints shared by thermal and electrical controls."""
+
+    setpoints: tuple[tuple[float, float], ...]
+    unit: str
+    mode: str = "linear"
+
+    def __post_init__(self):
+        object.__setattr__(self, "setpoints", tuple(tuple(p) for p in self.setpoints))
+        if not self.setpoints or not self.unit or self.mode not in {"step", "linear"}:
+            raise ValueError("control requires setpoints, units and step/linear interpolation")
+        previous = -1.0
+        for time, value in self.setpoints:
+            if not isfinite(time) or time < 0 or time < previous or not isfinite(value):
+                raise ValueError("control setpoints require ordered times and finite values")
+            previous = time
+
+    def value_at(self, time_s):
+        return _program_value(self.setpoints, self.mode, time_s)
+
+    def to_dict(self):
+        return {"setpoints": [list(p) for p in self.setpoints],
+                "unit": self.unit, "mode": self.mode}
 
 
 @dataclass(frozen=True)
@@ -76,21 +116,7 @@ class JacketTemperatureProgram:
             raise ValueError("jacket program mode must be 'step' or 'linear'")
 
     def temperature_at(self, time_s: float) -> float:
-        if time_s <= self.setpoints[0][0]:
-            return float(self.setpoints[0][1])
-        for (left_time, left_temperature), (
-            right_time,
-            right_temperature,
-        ) in zip(self.setpoints, self.setpoints[1:], strict=False):
-            if left_time <= time_s <= right_time:
-                if self.mode == "step" or right_time == left_time:
-                    return float(left_temperature)
-                fraction = (time_s - left_time) / (right_time - left_time)
-                return float(
-                    left_temperature
-                    + fraction * (right_temperature - left_temperature)
-                )
-        return float(self.setpoints[-1][1])
+        return _program_value(self.setpoints, self.mode, time_s)
 
     def to_dict(self) -> dict[str, object]:
         return {

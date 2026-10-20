@@ -9,7 +9,7 @@ from typing import Any
 
 from chemworld.runtime.domain_service_registry import DomainServiceRegistry
 from chemworld.tasks import TaskSpec
-from chemworld.world.operations import OPERATION_TYPES, operation_contracts
+from chemworld.world.domain_modules import DomainModuleRegistry
 from chemworld.world.parameters import WORLD_FAMILY_VERSION
 
 
@@ -24,15 +24,27 @@ class TaskRuntimeProfile:
     allowed_instruments: frozenset[str]
 
     @classmethod
-    def from_task(cls, task: TaskSpec | None) -> TaskRuntimeProfile:
+    def from_task(
+        cls,
+        task: TaskSpec | None,
+        *,
+        modules: DomainModuleRegistry | None = None,
+        service_registry: DomainServiceRegistry | None = None,
+    ) -> TaskRuntimeProfile:
+        modules = (
+            modules
+            or (service_registry.modules if service_registry else None)
+            or DomainModuleRegistry.default()
+        )
+        operation_types = tuple(modules.operation_specs())
         if task is None:
-            allowed = frozenset(OPERATION_TYPES)
+            allowed = frozenset(operation_types)
             instruments: frozenset[str] = frozenset()
         else:
             allowed = frozenset(task.allowed_operations)
             instruments = frozenset(task.allowed_instruments)
-        contracts = operation_contracts()
-        service_registry = DomainServiceRegistry.default()
+        contracts = modules.contracts()
+        service_registry = service_registry or DomainServiceRegistry.from_modules(modules)
         required_domain_services = service_registry.service_ids_for_operations(allowed)
         capabilities = frozenset(
             contracts[operation].module for operation in allowed if operation in contracts
@@ -41,7 +53,7 @@ class TaskRuntimeProfile:
             world_law_id=(WORLD_FAMILY_VERSION if task is None else task.world_law_id),
             allowed_operations=allowed,
             required_kernels=allowed,
-            optional_kernels=frozenset(OPERATION_TYPES) - allowed,
+            optional_kernels=frozenset(operation_types) - allowed,
             required_domain_services=required_domain_services,
             required_capabilities=capabilities,
             allowed_instruments=instruments,

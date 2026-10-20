@@ -110,12 +110,12 @@ class RuntimeAdjustedReactionNetwork:
             temperature_K=temperature_K,
             species_thermo=species_thermo,
         )
-        derivatives = dict.fromkeys(self.species_ids, 0.0)
-        for reaction in self.reactions:
-            rate_mol_s = rates[reaction.reaction_id] * volume_L
-            for species_id, coefficient in reaction.stoichiometry.items():
-                derivatives[species_id] += coefficient * rate_mol_s
-        return derivatives
+        return self.amount_derivatives_from_rates(rates, volume_L=volume_L)
+
+    def amount_derivatives_from_rates(
+        self, rates: Mapping[str, float], *, volume_L: float,
+    ) -> dict[str, float]:
+        return self.base.amount_derivatives_from_rates(rates, volume_L=volume_L)
 
 
 def integrate_compiled_reaction_ode(
@@ -217,6 +217,13 @@ def integrate_compiled_reaction_ode(
         evaluation_times_s=tuple(np.linspace(0.0, duration, 17)),
     )
     _raise_for_failed_reactor_contract(reactor_result)
+    actual_duration = reactor_result.final_state.time_s - reactor_result.initial_state.time_s
+    if not np.isfinite(actual_duration) or not 0.0 <= actual_duration <= duration + 1e-8:
+        raise RuntimeError("reactor returned invalid actual elapsed time")
+    termination_reason = str(reactor_result.metadata.get(
+        "termination_reason",
+        "duration_reached" if np.isclose(actual_duration, duration) else "reactor_stopped",
+    ))
     maximum_conservation_drift = _maximum_invariant_drift(network, reactor_result)
     if maximum_conservation_drift > 1.0e-7:
         raise RuntimeError(
@@ -258,7 +265,7 @@ def integrate_compiled_reaction_ode(
             "success": True,
             "nonnegative_passed": reactor_result.diagnostics.nonnegative_species,
             "maximum_conservation_drift_mol": maximum_conservation_drift,
-            "termination_reason": "duration_reached",
+            "termination_reason": termination_reason,
             "evaluation_count": len(reactor_result.times_s),
         }
     )
@@ -281,8 +288,8 @@ def integrate_compiled_reaction_ode(
     return ReactionIntegrationResult(
         species_amounts=species_amounts,
         temperature_K=reactor_result.final_state.temperature_K,
-        duration_s=duration,
-        cost_delta=duration / 3600.0 * (0.03 if heat else 0.01),
+        duration_s=actual_duration,
+        cost_delta=actual_duration / 3600.0 * (0.03 if heat else 0.01),
         energy_jacket_J=reactor_result.final_state.energy_jacket_J,
         heat_reaction_J=reactor_result.final_state.heat_reaction_J,
         heat_loss_J=reactor_result.final_state.heat_loss_J,
@@ -296,6 +303,7 @@ def integrate_compiled_reaction_ode(
         energy_balance_residual_J=energy_residual,
         provenance=provenance,
         trajectory_digest=digest,
+        termination_reason=termination_reason,
     )
 
 

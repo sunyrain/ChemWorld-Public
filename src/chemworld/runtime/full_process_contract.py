@@ -43,12 +43,15 @@ def active(state: WorldState) -> bool:
 
 
 def population_active(state: WorldState) -> bool:
-    return state.metadata.get("full_process_contract_id") in {
-        FULL_PROCESS_POPULATION_CONTRACT,
-        FULL_PROCESS_THERMAL_CONTRACT,
-        FULL_PROCESS_SEED_CONTRACT,
-        FULL_PROCESS_FREE_RESEARCH_CONTRACT,
-    }
+    return "population_cohorts" in equipment_settings(state.equipment, "crystallizer") or (
+        state.metadata.get("full_process_contract_id")
+        in {
+            FULL_PROCESS_POPULATION_CONTRACT,
+            FULL_PROCESS_THERMAL_CONTRACT,
+            FULL_PROCESS_SEED_CONTRACT,
+            FULL_PROCESS_FREE_RESEARCH_CONTRACT,
+        }
+    )
 
 
 def seed_provenance_active(state: WorldState) -> bool:
@@ -190,6 +193,16 @@ def withdraw_sample(state: WorldState, volume_L: float) -> WorldState:
                         )
                     )
                     if population_active(state)
+                    else {}
+                ),
+                **(
+                    {
+                        "population_constituents": [
+                            [v * (1 - fraction) for v in row]
+                            for row in settings["population_constituents"]
+                        ]
+                    }
+                    if "population_constituents" in settings
                     else {}
                 ),
             },

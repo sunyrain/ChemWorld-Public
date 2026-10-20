@@ -6,15 +6,18 @@ the selected vessel; the global ledger records total executed resource use.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from math import isfinite
 from typing import Any
 
 from chemworld.foundation import WorldState
+from chemworld.foundation.material_properties import install_material_properties
 from chemworld.foundation.samples import SampleLedger, StoredSample
 from chemworld.foundation.solvents import SolventAccounting
 from chemworld.foundation.state import Ledger
 from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, VesselLedger
+from chemworld.foundation.state_ownership import StateSlots
 from chemworld.runtime.material_routing import (
     _active,
     _contents,
@@ -68,13 +71,23 @@ def _activate(
 
 
 def initialize_network(state: WorldState, compiled: Any) -> WorldState:
+    from chemworld.world.composition import physical_instruments, physical_operations
+
     spec = compiled.spec
     components = {c.id: c for c in spec.components}
     network = {
         "vessels": [v["id"] for v in spec.vessels],
+        "thermal_systems": [] if spec.physics is None else sorted(
+            set(spec.physics.thermal_models) | set(spec.physics.flash_models)
+            | set(spec.physics.liquid_models)),
         "operations": {
             v["id"]: list(
-                component_operations(tuple(c.kind for c in spec.components if c.vessel == v["id"]))
+                physical_operations(spec, v["id"])
+                if spec.physics is not None
+                else component_operations(
+                    tuple(c.kind for c in spec.components if c.vessel == v["id"]),
+                    modules=spec.modules,
+                )
             )
             for v in spec.vessels
         },
@@ -84,7 +97,9 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
         },
         "instruments": {
             v["id"]: list(
-                dict.fromkeys(
+                physical_instruments(spec, v["id"])
+                if spec.physics is not None
+                else dict.fromkeys(
                     instrument
                     for c in spec.components
                     if c.vessel == v["id"] and c.kind == "observation"
@@ -110,6 +125,12 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
     template_vessel = state.vessels.vessels[state.vessel_id]
     for index, vessel in enumerate(spec.vessels):
         name = vessel["id"]
+        if spec.physics is not None:
+            # Native entities are authored separately. Never clone the first
+            # reactor's material, equipment, phase, or state slots into another.
+            local = deepcopy(spec.physics.initial_states[name])
+            locals_[name] = local.replace(metadata={**local.metadata, "component_network": network})
+            continue
         # Only the first vessel receives the scenario's initial charge. Other
         # vessels start empty; constructing a graph never duplicates inventory.
         amounts = state.species_amounts if index == 0 else dict.fromkeys(state.species_amounts, 0.0)
@@ -126,6 +147,14 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
                 for key, phase in state.phases.phases.items()
             }
         )
+        equipment = EquipmentLedger(
+            {
+                key: replace(value, attached_vessel_id=name)
+                for key, value in state.equipment.equipment.items()
+            }
+        )
+        if index:
+            equipment = install_material_properties(equipment, {}, name)
         locals_[name] = state.replace(
             vessel_id=name,
             species_amounts=amounts,
@@ -135,12 +164,21 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
             vessels=VesselLedger(
                 {name: replace(template_vessel, vessel_id=name, max_volume_L=vessel["capacity_L"])}
             ),
-            equipment=EquipmentLedger(
-                {
-                    key: replace(value, attached_vessel_id=name)
-                    for key, value in state.equipment.equipment.items()
-                }
-            ),
+            equipment=equipment,
+            state_slots=StateSlots(
+                tuple(
+                    replace(
+                        slot,
+                        location_id=name,
+                        spec=replace(slot.spec, owner_id=name)
+                        if slot.spec.owner_kind == "vessel"
+                        else slot.spec,
+                    )
+                    for slot in state.state_slots.slots
+                )
+            )
+            if index == 0
+            else StateSlots(),
             thermal=None,
             metadata={**state.metadata, "component_network": network},
             samples=replace(
@@ -240,13 +278,24 @@ def _withdraw(
         contents = replace(
             contents,
             phases=PhaseLedger({"reactor_liquid": incoming_phase}),
-            equipment=_outlet_equipment(
-                EquipmentLedger(
-                    {k: v for k, v in contents.equipment.equipment.items() if k == "batch_reactor"}
-                ),
-                incoming_phase.species_amounts_mol,
-                state.species.species_roles,
-                incoming_phase.volume_L,
+            properties={
+                "batch_reactor": {
+                    **contents.properties.get("batch_reactor", {}),
+                    "catalyst_amount_mol": sum(
+                        n
+                        for k, n in incoming_phase.species_amounts_mol.items()
+                        if "catalyst" in state.species.species_roles.get(k, ())
+                    ),
+                    "solvent_volume_L": incoming_phase.volume_L,
+                }
+            },
+            state_slots=StateSlots(
+                tuple(
+                    replace(slot, spec=replace(slot.spec, phase_id="reactor_liquid"))
+                    for slot in state.state_slots.material(phase_id=port)
+                    .portion(fraction, target)
+                    .slots
+                )
             ),
             metrics={},
         )
@@ -269,6 +318,14 @@ def _withdraw(
         retained = _portion(whole, 1 - share * fraction, state.vessel_id)
         selected = next((p for p in phases.values() if p.selected), None)
         after = state.replace(
+            state_slots=StateSlots(
+                tuple(
+                    slot.portion(1 - fraction, state.vessel_id)
+                    if slot.spec.owner_kind == "material" and slot.spec.phase_id == port
+                    else slot
+                    for slot in state.state_slots.slots
+                )
+            ),
             phases=PhaseLedger(phases),
             species_amounts=PhaseLedger(phases).total_amounts_mol(),
             volume_L=selected.volume_L
@@ -284,8 +341,7 @@ def _withdraw(
             process=replace(
                 state.process,
                 metrics=_contents(retained).metrics,
-                last_observation={},
-                last_observed_mask={},
+                last_observation_record=None,
             )
             if state.process
             else None,
@@ -358,26 +414,46 @@ def route_material(state: WorldState, action: dict[str, Any]) -> WorldState:
     )
 
 
-def network_error(state: WorldState, operation: str, action: dict[str, Any]) -> str | None:
+def network_error(
+    state: WorldState, operation: str, action: dict[str, Any], material_router=None
+) -> str | None:
     try:
         if state.terminated:
             raise ValueError("Network operations require an open episode")
         if operation == "select_vessel":
             select_vessel(state, action)
         elif operation == "route_material":
-            route_material(state, action)
-    except (KeyError, ValueError, TypeError, IndexError) as exc:
+            (route_material if material_router is None else material_router.route_material)(
+                state, action
+            )
+    except (ArithmeticError, RuntimeError, KeyError, ValueError, TypeError, IndexError) as exc:
         return str(exc)
     return None
 
 
-def available_connections(state: WorldState) -> tuple[int, ...]:
+def available_connections(state: WorldState, material_router=None) -> tuple[int, ...]:
     network = state.metadata.get("component_network", {})
     result = []
     for index, edge in enumerate(network.get("connections", [])):
         if edge["source_vessel"] != state.vessel_id:
             continue
         target = state.inactive_vessels[edge["target_vessel"]]
+        if material_router is not None and material_router.uses_native_packets(state):
+            if (
+                network_error(
+                    state,
+                    "route_material",
+                    {
+                        "connection": index,
+                        "transfer_fraction": 0.01,
+                        "mixing": 1,
+                    },
+                    material_router,
+                )
+                is None
+            ):
+                result.append(index)
+            continue
         assert state.phases is not None and target.phases is not None and target.vessels is not None
         port = edge["source"]["port"]
         source_volume = (
@@ -400,11 +476,22 @@ def available_connections(state: WorldState) -> tuple[int, ...]:
                     "transfer_fraction": fraction,
                     "mixing": 1,
                 },
+                material_router,
             )
             is None
         ):
             result.append(index)
     return tuple(result)
+
+
+class ComponentNetworkServices:
+    def __init__(self, material_router):
+        self.material_router = material_router
+
+    select_vessel = staticmethod(select_vessel)
+
+    def route_material(self, state, action):
+        return self.material_router.route_material(state, action)
 
 
 def public_network(state: WorldState) -> dict[str, Any] | None:

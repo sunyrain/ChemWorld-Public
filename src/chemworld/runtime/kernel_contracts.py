@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, Protocol
+from dataclasses import dataclass, field
+from math import isfinite
+from typing import TYPE_CHECKING, Any, Protocol
 
 from chemworld.foundation import OperationRecord, WorldState
+from chemworld.foundation.balances import TransitionBalance
 from chemworld.operation_validator import OperationValidation
 from chemworld.physchem.maturity import ModelProviderContract
-from chemworld.runtime.domain_services import ChemWorldDomainServices
 from chemworld.runtime.mechanisms import CompiledMechanism
 from chemworld.runtime.profiles import TaskRuntimeProfile
 from chemworld.runtime.transactions import StatePatch, TransactionManager, WorldEvent
 from chemworld.tasks import TaskSpec
+
+if TYPE_CHECKING:
+    from chemworld.runtime.domain_services import ChemWorldDomainServices
+
+OPERATION_OUTCOMES = frozenset({
+    "success", "rejected", "numerical_failure", "process_failure", "stopped",
+})
 
 
 @dataclass(frozen=True)
@@ -57,6 +65,39 @@ class KernelResult:
     kernel_version: str
     transaction_status: str
     rollback_reason: str | None
+    outcome: str | None = None
+    actual_duration_s: float = 0.0
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    measurement_status: str | None = None
+    # Transient evaluator-side specimen; never serialized into public diagnostics.
+    measurement_state: WorldState | None = None
+
+    def __post_init__(self) -> None:
+        outcome = self.outcome
+        if outcome is None:
+            outcome = "success" if self.transaction_status == "committed" else (
+                "numerical_failure" if self.rollback_reason == "constitution_failed" else "rejected"
+            )
+        if outcome not in OPERATION_OUTCOMES:
+            raise ValueError(f"unknown operation outcome: {outcome}")
+        if not isfinite(self.actual_duration_s) or self.actual_duration_s < 0.0:
+            raise ValueError("actual_duration_s must be finite and nonnegative")
+        if outcome in {"rejected", "numerical_failure"} and self.actual_duration_s != 0.0:
+            raise ValueError("rolled back operation cannot report elapsed physical time")
+        object.__setattr__(self, "outcome", outcome)
+
+    @property
+    def material_balance(self) -> TransitionBalance:
+        """The transaction's single exchange record, without copying receipts."""
+        return self.operation_record.material_balance
+
+    @property
+    def actual_consumption(self) -> dict[str, float]:
+        return {
+            "cost": self.cost_delta,
+            "sample_consumed_L": self.sample_delta,
+            "physical_time_s": self.actual_duration_s,
+        }
 
 
 @dataclass(frozen=True)
@@ -69,8 +110,22 @@ class ModelProviderResult:
     success: bool = True
     failure_reason: str | None = None
     provenance: tuple[str, ...] = ()
+    outcome: str | None = None
+    state: WorldState | None = None
+    actual_duration_s: float = 0.0
+    measurement_state: WorldState | None = None
 
     def __post_init__(self) -> None:
+        outcome = self.outcome or ("success" if self.success else "numerical_failure")
+        if outcome not in OPERATION_OUTCOMES:
+            raise ValueError(f"unknown operation outcome: {outcome}")
+        object.__setattr__(self, "outcome", outcome)
+        if not isfinite(self.actual_duration_s) or self.actual_duration_s < 0.0:
+            raise ValueError("actual_duration_s must be finite and nonnegative")
+        if outcome in {"rejected", "numerical_failure"} and self.actual_duration_s != 0.0:
+            raise ValueError("unexecuted provider result cannot report elapsed physical time")
+        if self.success != (outcome in {"success", "stopped"}):
+            raise ValueError("provider success flag and outcome disagree")
         if self.success and self.failure_reason is not None:
             raise ValueError("successful provider result cannot include failure_reason")
         if not self.success and not str(self.failure_reason or "").strip():
@@ -84,6 +139,8 @@ class ModelProviderResult:
             "success": self.success,
             "failure_reason": self.failure_reason,
             "provenance": list(self.provenance),
+            "outcome": self.outcome,
+            "actual_duration_s": self.actual_duration_s,
         }
 
 

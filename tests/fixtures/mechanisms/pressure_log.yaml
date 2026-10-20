@@ -1,0 +1,20 @@
+description: Synthetic balanced isomerization; not a measured chemical mechanism.
+units: {length: m, quantity: kmol, time: s, activation-energy: J/kmol}
+phases:
+- {name: synthetic-plog, thermo: ideal-gas, kinetics: gas, species: [A, B], elements: [H]}
+species:
+- name: A
+  composition: {H: 2}
+  thermo: {model: NASA7, temperature-ranges: [200, 3000], data: [[3.5, 0, 0, 0, 0, 0, 0]]}
+- name: B
+  composition: {H: 2}
+  thermo: {model: NASA7, temperature-ranges: [200, 3000], data: [[3.5, 0, 0, 0, 0, -200, 0]]}
+reactions:
+- equation: A => B
+  type: pressure-dependent-Arrhenius
+  temperature-range: [600, 1800]
+  rate-constants:
+  - {P: 10000, A: 1, b: 0.1, Ea: 1000000}
+  - {P: 10000, A: 2, b: 0.2, Ea: 2000000}
+  - {P: 100000, A: 5, b: 0.1, Ea: 1500000}
+  - {P: 1000000, A: 10, b: 0.2, Ea: 1000000}

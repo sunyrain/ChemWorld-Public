@@ -1,63 +1,57 @@
-# Extension to-do list
+# Native extensions and model ranges
 
-These are proposed extensions, not implemented capabilities. References were
-reviewed on 19 October 2026. Estimates cover a bounded independent model,
-ChemWorld operations/observations, examples and reference comparisons by one
-developer familiar with the project. They exclude real-laboratory validation,
-large agent campaigns and wholesale reimplementation of the upstream packages.
+Current development source includes the bounded models below. Each uses ChemWorld's
+native state, operation, observation and transaction contracts. Upstream packages
+provide equation references or optional numerical comparisons; they are not required
+to execute these models. These synthetic examples do not replace the full upstream
+packages or establish fidelity to a particular laboratory material.
 
-| Priority | Work item and reference | First deliverable | Estimate |
-| --- | --- | --- | --- |
-| P0 | Surface microkinetics: [Cantera](https://github.com/Cantera/cantera) | One site-balanced adsorption/desorption/reaction network with dynamic coverages and coverage-dependent rates; compare temperature/feed perturbations with Cantera. | 8–12 person-days |
-| P1 | Battery cycling and ageing: [PyBaMM](https://github.com/pybamm-team/PyBaMM) | A bounded single-particle model with lumped thermal dynamics and one SEI-growth mechanism; charge, discharge, rest and diagnostic pulses share persistent cell state. | 15–25 person-days |
-| P1 | Aqueous/mineral chemistry: [Reaktoro](https://github.com/reaktoro/reaktoro) | One carbonate–water–gas system with activities, phase appearance and kinetic mineral dissolution/precipitation. | 10–15 person-days |
-| P1 | Membrane separation: [WaterTAP](https://github.com/watertap-org/watertap), [IDAES](https://github.com/IDAES/idaes-pse) | One reverse-osmosis unit with finite feed, pressure/flux/salt rejection and concentration polarization; explicit material and energy accounting. | 8–12 person-days |
-| P2 | Biochemical stochastic dynamics: [COPASI](https://github.com/copasi/COPASI) | One enzyme network with inhibition and feedback, deterministic and Gillespie reference paths, and intrinsic noise separated from observation noise. | 8–12 person-days |
-| P2 | Richer reaction networks: [RMG-Py](https://github.com/ReactionMechanismGenerator/RMG-Py) | Import a small, curated generated mechanism into a supported reaction-network subset, check species/units and compare trajectories; record omitted rate laws explicitly. | 6–10 person-days |
-| P2 | Coupled battery degradation: PyBaMM | Add lithium plating and active-material loss after the first battery slice is verified; compare diagnostic identifiability under matched capacity loss. | 10–15 additional person-days |
-| P2 | More faithful catalysis: Cantera; [CatMAP](https://github.com/SUNCAT-Center/catmap) as a scientific reference | Multiple site types, coverage interactions and mechanism competition after the first surface network. | 8–12 additional person-days |
+| Area | Implemented native slice | Example or guide |
+| --- | --- | --- |
+| Shared foundation | One session behind Gym, CLI and Agent; declared modules, owned material/equipment state, pre-commit balances, native units and serialized continuation | [Native sessions](native_foundation.md) |
+| Surface chemistry | Finite CO/O2 adsorption and oxidation, optional bulk reaction, shared thermal dynamics; reversible two-site model with coverage interactions and site exchange | `python -m chemworld.examples.native_multisite_surface` |
+| Thermal and phase processes | State-dependent properties, TP/PH flash, binary/ternary two-liquid stability, finite dynamic columns, concentration, adsorption/regeneration and crystal growth/redissolution | `python -m chemworld.examples.native_distillation_research`; `python -m chemworld.examples.native_crystal_research` |
+| Transport and electrodes | Finite tanks, pressure/power-limited pumping and heat exchange; conservative 1D planar/spherical diffusion and a finite diffusion/BV electrode | `python -m chemworld.examples.native_liquid_transport`; `python -m chemworld.examples.native_electrode_research` |
+| Batteries | Spherical single-particle diffusion, CC/CV/rest control, lumped synthetic thermodynamics and finite-solvent SEI/lithium loss | `python -m chemworld.examples.native_battery_degradation` |
+| Aqueous and mineral chemistry | Dilute carbonate/water equilibrium and finite calcite, with seeded dissolution/precipitation and phase-owned surface geometry at 298.15 K | `python -m chemworld.examples.native_mineral_research` |
+| Membranes | Finite feed/collection tanks, isothermal dilute-NaCl reverse osmosis, concentration polarization, persistent synthetic fouling and finite-water rinsing | `python -m chemworld.examples.native_membrane_fouling` |
+| Stochastic biochemistry | Constant-volume/temperature Gillespie events, reversible and explicit enzyme networks; integer additions, molecular capture and separate process/detector randomness | [Biochemical worlds](native_biochemical.md), [SSA](native_stochastic.md) |
+| Mechanisms and instruments | Bounded YAML/JSON import with P-log/Chebyshev and NASA7 gas thermodynamics; programmed chromatography with retained instrument state | [Mechanisms](native_mechanisms.md); `python -m chemworld.examples.programmed_chromatography --output chromatography-run` |
+| Binary solids | One/two substitutional phases, ideal mixing and L0/L1 Redlich–Kister terms; global supporting-line checks and thermal local-equilibrium paths | `python -m chemworld.examples.native_solid_solution` |
 
-## Reference details
+In a checkout, prefix Python commands with `uv run --no-sync`. The package examples
+run without model credentials. The biochemical checkout example is
+`uv run --no-sync python examples/native_biochemical.py`.
 
-- Cantera documents [surface reactions and coverage dependencies](https://www.cantera.org/stable/yaml/reactions.html).
-  ChemWorld already has Arrhenius-family and lumped catalytic laws; explicit
-  surface-site state and coverage-dependent kinetics are the intended increment.
-- PyBaMM demonstrates [coupled degradation](https://docs.pybamm.org/en/v25.6.0/source/examples/notebooks/models/coupled-degradation.html),
-  including SEI growth, lithium plating, cracking and active-material loss. Only
-  the bounded first slice is proposed initially; a full DFN multiphysics model
-  is outside that estimate.
-- Reaktoro documents [mineral kinetics](https://reaktoro.org/tutorials/kinetics/kinetics-minerals-using-palandri-kharaka-model.html)
-  and coupled equilibrium/kinetics. Parameter and thermodynamic database rights
-  must be recorded separately from solver code.
-- WaterTAP's [unit catalogue](https://watertap.readthedocs.io/en/stable/technical_reference/unit_models/index.html)
-  includes reverse osmosis, ion exchange and electrodialysis. The first task is
-  one membrane unit; fouling and ageing require additional specified models.
-- COPASI supports [deterministic, stochastic and hybrid time courses](https://copasi.org/Support/User_Manual/Tasks/Time_Course_Simulation/).
-  Existing Michaelis–Menten kinetics alone do not provide stochastic biochemical
-  networks or a distinction between process and detector noise.
-- RMG generates reaction mechanisms and thermochemical/kinetic inputs. It is a
-  reference/source of bounded mechanism assets, not a proposed replacement for
-  ChemWorld's interaction runtime or a general reaction-prediction claim.
+## Remaining integration and scientific extensions
 
-## Independent implementation workflow
+Shared laboratory time, finite equipment queues and asynchronous analyzer publication
+are still in development in this snapshot. The current examples use explicit local
+time semantics; unselected vessels do not all age automatically. The final cross-domain
+integration acceptance remains pending that delivery.
 
-- [ ] Select one finite phenomenon, operating range and observable task.
-- [ ] Pin the reference release, equations, public interface, parameter sources
-      and numerical tolerances before implementation.
-- [ ] Write an equation/interface specification and implement the selected slice
-      independently in ChemWorld's state, operation and ledger contracts.
-- [ ] Run analytical limits, conservation and numerical-convergence checks, then
-      compare with the pinned reference across declared conditions, including failures.
-- [ ] Add measurement/resource choices and a provider-free research example.
-- [ ] Publish the supported range, reference results and unresolved differences.
+Further scientific extensions need their own finite equations, parameters and reference
+cases: electrolyte-resolved battery models, plating/cracking, nonideal concentrated
+aqueous chemistry, membrane backflow and chemical cleaning, spatial surface kinetics,
+crystal breakage/agglomeration, non-isothermal hybrid SSA/ODE, and multi-sublattice solids.
+The implemented SPM, membrane and binary-solid slices are not complete
+PyBaMM, WaterTAP or CALPHAD equivalents.
 
-No upstream solver code has been copied as part of this synchronization. PyBaMM
-uses BSD-3-Clause; Cantera has a three-clause BSD-style license; IDAES and WaterTAP
-have BSD-style terms with additional enhancement provisions; RMG-Py uses MIT;
-Reaktoro uses LGPL-2.1, COPASI Artistic-2.0 and CatMAP GPL-3.0. Consult each pinned
-license and data terms for any actual reuse. Independent implementation is not
-a claim of legal clean-room certification or a way to remove obligations on
-copied code/data.
+## Reference and reuse practice
 
-Suggested order: surface microkinetics for the next enhancement to existing
-chemistry; battery cycling for the first distinct new simulation domain.
+Relevant scientific references include [Cantera](https://github.com/Cantera/cantera),
+[PyBaMM](https://github.com/pybamm-team/PyBaMM),
+[Reaktoro](https://github.com/reaktoro/reaktoro),
+[WaterTAP](https://github.com/watertap-org/watertap),
+[IDAES](https://github.com/IDAES/idaes-pse),
+[COPASI](https://github.com/copasi/COPASI),
+[RMG-Py](https://github.com/ReactionMechanismGenerator/RMG-Py),
+[CatMAP](https://github.com/SUNCAT-Center/catmap) and
+[pycalphad](https://github.com/pycalphad/pycalphad).
+
+New models start with explicit equations, operating ranges, ownership and exchange
+rules. Native implementations share the existing solver/session and are checked against
+analytical limits, conservation and finite reference cases. A copied data fixture keeps
+its source and license, such as the Cantera 3.1.0 mechanism under
+`tests/fixtures/mechanisms/`. Upstream solver dependencies remain optional.
+Independent implementation does not remove license obligations on reused code or data.

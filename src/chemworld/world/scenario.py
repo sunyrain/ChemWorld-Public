@@ -202,6 +202,7 @@ class DefaultScenarioGenerator:
             species_roles=compiled_mechanism.species_roles,
             initial_amounts_mol=compiled_mechanism.initial_amount_policy,
             initial_limiting_species=compiled_mechanism.score_spec.initial_limiting_species,
+            liquid_heat_capacity_J_L_K=parameters.rho_cp_J_per_L_K,
         )
         if spec.family == "partition":
             feed_rng = Random(parameter_seed ^ 0x8A17_2D41)

@@ -21,6 +21,12 @@ from chemworld.foundation.ledger_audit import (
     LedgerAuditFinding,
     audit_ledger_single_source_of_truth,
 )
+from chemworld.foundation.observations import (
+    ChannelAxis,
+    ObservationChannel,
+    ObservationTime,
+    ScalarProjection,
+)
 from chemworld.foundation.ontology import (
     Instrument,
     Operation,
@@ -59,6 +65,7 @@ from chemworld.foundation.world_law import WorldLawSpec
 
 __all__ = [
     "PUBLIC_SPECIES_SUFFIX",
+    "ChannelAxis",
     "CheckResult",
     "ConstitutionReport",
     "DimensionCheckReport",
@@ -69,7 +76,9 @@ __all__ = [
     "Ledger",
     "LedgerAuditFinding",
     "Observation",
+    "ObservationChannel",
     "ObservationKernel",
+    "ObservationTime",
     "Operation",
     "OperationRecord",
     "Phase",
@@ -77,6 +86,7 @@ __all__ = [
     "PublicLeakageFinding",
     "Quantity",
     "Reaction",
+    "ScalarProjection",
     "StateVariable",
     "Substance",
     "TransitionKernel",

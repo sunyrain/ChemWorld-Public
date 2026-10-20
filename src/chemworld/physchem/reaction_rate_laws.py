@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from math import exp, isfinite, log10
+from itertools import pairwise
+from math import exp, isfinite, log10, ulp
 from typing import Any, Protocol, TypeVar, cast
 
 from chemworld.physchem.reaction_network_specs import ReactionSpec
@@ -48,6 +49,36 @@ def evaluate_rate_law(
         concentrations_mol_L,
         activity_coefficients=activity_coefficients,
     )
+    if (
+        equation_id in {"pressure_log", "chebyshev"}
+        or params.get("reverse_basis") == "ideal_gas_nasa7"
+    ):
+        # Only explicitly imported ideal-gas laws infer pressure from inventory.
+        # Liquid concentration kinetics retain their existing standard-state contract.
+        k = gas_forward_rate_constant(reaction, concentrations_mol_L, temperature_K)
+        forward = mass_action_rate(reaction.kinetic_forward_orders, driving_quantities, k)
+        if not reaction.reversible:
+            return forward
+        if params.get("reverse_basis") != "ideal_gas_nasa7" or species_thermo is None:
+            raise ValueError("reversible gas kinetics require declared NASA7 thermochemistry")
+        from chemworld.physchem.reaction_network import (
+            thermochemical_concentration_equilibrium_constant,
+        )
+
+        standard_pressure = float(params["reference_pressure_Pa"])
+        if any(
+            value.reference_pressure_Pa != standard_pressure for value in species_thermo.values()
+        ):
+            raise ValueError("gas thermochemistry reference pressures must agree")
+        kc, _, _ = thermochemical_concentration_equilibrium_constant(
+            reaction,
+            species_thermo=species_thermo,
+            temperature_K=temperature_K,
+            standard_concentration_mol_L=standard_pressure / (1000 * R_J_PER_MOL_K * temperature_K),
+        )
+        return forward - mass_action_rate(
+            reaction.kinetic_reverse_orders, driving_quantities, k / kc
+        )
     forward_enabled = all(
         concentrations_mol_L.get(species_id, 0.0) > 0.0 for species_id in reaction.reactants
     )
@@ -160,6 +191,128 @@ def evaluate_rate_law(
         concentration = max(concentrations_mol_L.get(substrate, 0.0), 0.0)
         return float(params["vmax"]) * concentration / (float(params["Km"]) + concentration)
     raise ValueError(f"Unsupported rate law: {equation_id}")
+
+
+def validate_pressure_rate(parameters: Mapping[str, Any], equation_id: str) -> None:
+    """Strict finite-domain contract shared by import and evaluation."""
+    for key in ("temperature_range_K", "pressure_range_Pa"):
+        values = parameters.get(key, ())
+        if (
+            not isinstance(values, (list, tuple))
+            or len(values) != 2
+            or any(not isfinite(float(v)) or float(v) <= 0 for v in values)
+            or float(values[0]) >= float(values[1])
+        ):
+            raise ValueError(f"{key} requires two ordered positive finite endpoints")
+    if equation_id == "pressure_log":
+        terms = parameters.get("rate_constants", ())
+        if not isinstance(terms, (list, tuple)) or not terms:
+            raise ValueError("P-log requires rate_constants")
+        pressures = []
+        for term in terms:
+            if not isinstance(term, Mapping) or set(term) != {
+                "pressure_Pa",
+                "A",
+                "b",
+                "Ea_J_per_mol",
+            }:
+                raise ValueError("P-log term must declare pressure_Pa, A, b, Ea_J_per_mol")
+            pressure = float(term["pressure_Pa"])
+            if not isfinite(pressure) or pressure <= 0 or float(term["A"]) <= 0:
+                raise ValueError("finite P-log slice requires positive pressure and A")
+            arrhenius_k(term, float(parameters["temperature_range_K"][0]))
+            pressures.append(pressure)
+        if [min(pressures), max(pressures)] != list(parameters["pressure_range_Pa"]):
+            raise ValueError("P-log pressure domain must match its tabulated endpoints")
+    elif equation_id == "chebyshev":
+        rows = parameters.get("coefficients", ())
+        if (
+            not isinstance(rows, (list, tuple))
+            or not rows
+            or any(not isinstance(row, (list, tuple)) or not row for row in rows)
+            or len({len(row) for row in rows}) != 1
+            or any(not isfinite(float(x)) for row in rows for x in row)
+        ):
+            raise ValueError("Chebyshev coefficients must be a finite rectangular matrix")
+    else:
+        raise ValueError("unsupported pressure rate law")
+
+
+def pressure_rate_constant(
+    parameters: Mapping[str, Any], equation_id: str, temperature_K: float, pressure_Pa: float
+) -> float:
+    """P-log / Chebyshev in native mol/L, s, K, Pa; never extrapolate."""
+    validate_pressure_rate(parameters, equation_id)
+    resolved = []
+    for value, key in ((temperature_K, "temperature_range_K"), (pressure_Pa, "pressure_range_Pa")):
+        lower, upper = parameters[key]
+        # nRT/V reconstructed from a declared endpoint can differ by a few ULPs.
+        # This is arithmetic boundary normalization, not physical extrapolation.
+        if isfinite(value) and lower - 8 * ulp(float(lower)) <= value < lower:
+            value = lower
+        if isfinite(value) and upper < value <= upper + 8 * ulp(float(upper)):
+            value = upper
+        if not isfinite(value) or not lower <= value <= upper:
+            raise ValueError(f"{key}: state outside declared validity domain")
+        resolved.append(value)
+    temperature_K, pressure_Pa = resolved
+    if equation_id == "pressure_log":
+        grouped: dict[float, float] = {}
+        for term in parameters["rate_constants"]:
+            pressure = float(term["pressure_Pa"])
+            grouped[pressure] = grouped.get(pressure, 0.0) + arrhenius_k(term, temperature_K)
+        if pressure_Pa in grouped:
+            return grouped[pressure_Pa]
+        pressures = sorted(grouped)
+        for low, high in pairwise(pressures):
+            if low < pressure_Pa < high:
+                weight = (log10(pressure_Pa) - log10(low)) / (log10(high) - log10(low))
+                return 10 ** ((1 - weight) * log10(grouped[low]) + weight * log10(grouped[high]))
+        raise ValueError("P-log pressure cannot be bracketed")
+    t_min, t_max = parameters["temperature_range_K"]
+    p_min, p_max = parameters["pressure_range_Pa"]
+    t_red = (2 / temperature_K - 1 / t_min - 1 / t_max) / (1 / t_max - 1 / t_min)
+    p_red = (2 * log10(pressure_Pa) - log10(p_min) - log10(p_max)) / (log10(p_max) - log10(p_min))
+
+    def polynomials(x, count):
+        values = [1.0, x]
+        for _ in range(2, count):
+            values.append(2 * x * values[-1] - values[-2])
+        return values[:count]
+
+    rows = parameters["coefficients"]
+    ts, ps = polynomials(t_red, len(rows)), polynomials(p_red, len(rows[0]))
+    value = 10 ** sum(
+        float(a) * ts[i] * ps[j] for i, row in enumerate(rows) for j, a in enumerate(row)
+    )
+    if not isfinite(value) or value <= 0:
+        raise ValueError("Chebyshev rate must be finite and positive")
+    return value
+
+
+def gas_forward_rate_constant(
+    reaction: ReactionSpec, concentrations: Mapping[str, float], temperature_K: float
+) -> float:
+    params, law = reaction.rate_law.parameters, reaction.rate_law.equation_id
+    if law in {"pressure_log", "chebyshev"}:
+        if params.get("pressure_basis") != "ideal_gas":
+            raise ValueError("network pressure kinetics require explicit ideal_gas pressure basis")
+        pressure = sum(concentrations.values()) * 1000 * R_J_PER_MOL_K * temperature_K
+        return pressure_rate_constant(params, law, temperature_K, pressure)
+    if law == "troe_falloff":
+        return troe_falloff_rate_constant(params, concentrations, temperature_K)
+    if law == "lindemann_falloff":
+        return lindemann_falloff_rate_constant(params, concentrations, temperature_K)
+    if law not in {"arrhenius", "modified_arrhenius", "third_body_arrhenius"}:
+        raise ValueError("unsupported ideal-gas forward law")
+    k = arrhenius_k(params, temperature_K)
+    if law == "third_body_arrhenius":
+        k *= effective_third_body_concentration(
+            concentrations,
+            efficiencies=third_body_efficiencies(params),
+            default_efficiency=float(params.get("default_efficiency", 1)),
+        )
+    return k
 
 
 def mass_action_rate(

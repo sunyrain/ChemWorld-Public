@@ -73,6 +73,8 @@ class TaskScoringContract:
         contract_id: str = TASK_DERIVED_SCORING_CONTRACT,
     ) -> TaskScoringContract:
         metrics = frozenset(success_metrics)
+        if metrics and metrics <= {"trajectory_validity"}:
+            return cls(objective, success_metrics, "unscored", {})
         if contract_id == DISTILLATION_S0_BALANCED_AUDIT_SAFETY_V2:
             required = {
                 "distillate_purity",
@@ -410,6 +412,9 @@ def task_score_observation(
     values: dict[str, float | None],
 ) -> float:
     """Compute the task-specific scalar score in [0, 1]."""
+
+    if contract.score_family == "unscored":
+        return 0.0
 
     reaction_component = score_observation(
         objective=contract.objective,

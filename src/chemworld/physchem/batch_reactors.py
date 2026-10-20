@@ -20,14 +20,12 @@ from chemworld.physchem.reactor_shared import (
 )
 from chemworld.physchem.reactor_solvers import (
     _amount_vector,
-    _amounts_from_vector,
     _integrate_result,
-    _jacket_heat_w,
     _material_balance_error,
-    _reaction_heat_w,
     _segment_evaluation_times,
     _solve_interval,
     _validated_amount,
+    make_batch_rhs,
 )
 from chemworld.physchem.solver_backend import ODESolveReport
 from chemworld.physchem.thermochemistry import NASA7SpeciesThermo
@@ -251,34 +249,7 @@ class BatchReactorModel:
             dtype=float,
         )
 
-        def rhs(_time_s: float, y: np.ndarray) -> np.ndarray:
-            amounts = _amounts_from_vector(self.network, y[: len(self.network.species_ids)])
-            temperature = max(float(y[len(self.network.species_ids)]), 1.0)
-            derivatives = self.network.amount_derivatives(
-                amounts,
-                volume_L=volume_L,
-                temperature_K=temperature,
-            )
-            heat_reaction_W = _reaction_heat_w(
-                self.network,
-                amounts,
-                volume_L=volume_L,
-                temperature_K=temperature,
-            )
-            q_jacket_W = thermal.jacket_heat_w(temperature)
-            q_loss_W = thermal.heat_loss_w(temperature)
-            heat_capacity = thermal.rho_cp_J_per_L_K * volume_L
-            dtemperature = (q_jacket_W - q_loss_W - heat_reaction_W) / heat_capacity
-            return np.array(
-                [
-                    *(derivatives[species_id] for species_id in self.network.species_ids),
-                    dtemperature,
-                    q_jacket_W,
-                    heat_reaction_W,
-                    q_loss_W,
-                ],
-                dtype=float,
-            )
+        rhs = make_batch_rhs(self.network, volume_getter=lambda: volume_L, thermal=thermal)
 
         return _integrate_result(
             model_id="batch",
@@ -375,45 +346,11 @@ class DynamicBatchReactorModel:
                     states.append(np.array(segment.y[:, idx], dtype=float))
                     volumes.append(current_volume)
 
-        def rhs(time_s: float, y: np.ndarray) -> np.ndarray:
-            amounts = _amounts_from_vector(self.network, y[:n_species])
-            temperature = max(float(y[n_species]), 1.0)
-            derivatives = self.network.amount_derivatives(
-                amounts,
-                volume_L=current_volume,
-                temperature_K=temperature,
-                species_thermo=species_thermo,
-            )
-            heat_reaction_W = _reaction_heat_w(
-                self.network,
-                amounts,
-                volume_L=current_volume,
-                temperature_K=temperature,
-                species_thermo=species_thermo,
-            )
-            jacket_setpoint = (
-                jacket_program.temperature_at(time_s)
-                if jacket_program is not None
-                else thermal.jacket_temperature_K
-            )
-            q_jacket_W = _jacket_heat_w(
-                thermal,
-                temperature_K=temperature,
-                jacket_temperature_K=jacket_setpoint,
-            )
-            q_loss_W = thermal.heat_loss_w(temperature)
-            heat_capacity = thermal.rho_cp_J_per_L_K * current_volume
-            dtemperature = (q_jacket_W - q_loss_W - heat_reaction_W) / heat_capacity
-            return np.array(
-                [
-                    *(derivatives[species_id] for species_id in self.network.species_ids),
-                    dtemperature,
-                    q_jacket_W,
-                    heat_reaction_W,
-                    q_loss_W,
-                ],
-                dtype=float,
-            )
+        rhs = make_batch_rhs(
+            self.network, volume_getter=lambda: current_volume, thermal=thermal,
+            species_thermo=species_thermo,
+            jacket_program=jacket_program.temperature_at if jacket_program is not None else None,
+        )
 
         transition_times = sorted({event.time_s for event in events} | {duration_s})
         for next_time in transition_times:
@@ -534,6 +471,8 @@ class DynamicBatchReactorModel:
                     jacket_program.to_dict() if jacket_program is not None else None
                 ),
                 "reference_contract": "cantera_idaes_zero_d_energy_balance_slice",
+                "coupled_derivative_assembly": "assemble_coupled_rates",
+                "general_internal_energy_covered": False,
                 "pressure_boundary": (
                     {
                         "mode": pressure_boundary.mode,

@@ -20,6 +20,8 @@ SUPPORTED_RATE_LAW_EQUATION_IDS = (
     "third_body_arrhenius",
     "lindemann_falloff",
     "troe_falloff",
+    "pressure_log",
+    "chebyshev",
     "catalytic_activity",
     "catalyst_deactivation",
     "langmuir_hinshelwood",

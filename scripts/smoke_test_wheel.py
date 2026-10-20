@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 PROBE = """
@@ -66,51 +67,140 @@ print(json.dumps({'package': chemworld.__file__, 'version': chemworld.__version_
                   'runtime_semantics_id': RUNTIME_SEMANTICS_ID}))
 """
 
+NATIVE_PROBE = """
+import importlib.util, json, platform, sys, tempfile
+from pathlib import Path
+import chemworld
+from chemworld.examples.native_surface_research import run_example
+from chemworld.examples.reuse_native_equipment import run_example as reuse_example
+from chemworld.runtime import ChemWorldRuntime
+from chemworld.world.surface_world import surface_world_spec
+from chemworld.data.logging import TrajectoryLogger, load_jsonl
+from chemworld.envs.spaces import to_observation
+from chemworld.eval.verify import verify_records
+
+assert Path(chemworld.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+assert importlib.util.find_spec('cantera') is None
+cases = []
+for surface, bulk in ((False,False), (False,True), (True,False), (True,True)):
+    for assay in (False, True):
+        result = run_example(include_surface=surface, include_bulk=bulk,
+                             mobile=surface and assay, terminal_assay=assay)
+        assert result['ended']
+        assert all(row['transaction'] == 'committed' for row in result['steps'])
+        cases.append({'surface':surface, 'bulk':bulk, 'assay':assay,
+                      'physical_time_s':result['physical_time_s']})
+reuse = reuse_example()
+assert len(reuse['configurations']) == 4
+assert all(row['same_heater_after_material_initialization'] for row in reuse['configurations'])
+assert all(value for key,value in reuse['task_binding'].items() if key != 'assay_readings')
+session = ChemWorldRuntime(composition=surface_world_spec(), observation_noise_mode='keyed')
+session.reset(seed=12)
+session.execute({'operation':'add_component', 'component':'CO-feed', 'amount_mol':2e-5})
+snapshot = json.loads(json.dumps(session.snapshot().to_dict(), allow_nan=False))
+restored = ChemWorldRuntime.from_snapshot(snapshot)
+action = {'operation':'measure', 'instrument':'gas_pressure'}
+expected, actual = session.execute(action), restored.execute(action)
+assert actual == expected
+assert restored._state.to_dict() == session._state.to_dict()
+session.close()
+restored.close()
+with tempfile.TemporaryDirectory(prefix='native-replay-') as temporary:
+    trajectory = Path(temporary) / 'history.jsonl'
+    session = ChemWorldRuntime(composition=surface_world_spec(), observation_noise_mode='keyed')
+    session.reset(seed=12)
+    actions = [
+        {'operation':'add_component', 'component':'CO-feed', 'amount_mol':2e-5},
+        {'operation':'add_component', 'component':'O2-feed', 'amount_mol':1e-5},
+        {'operation':'heat', 'target_temperature_K':380, 'duration_s':2,
+         'stirring_speed_rpm':600},
+        {'operation':'measure', 'instrument':'gas_pressure'},
+        {'operation':'terminate'},
+    ]
+    with TrajectoryLogger(trajectory) as logger:
+        for step, action in enumerate(actions, 1):
+            result = session.execute(action)
+            logger.log(task_info={**session.task_info(), **session.evaluator_provenance()},
+                       step=step, action=action,
+                       observation=to_observation(result.observation.values),
+                       reward=result.reward, terminated=result.terminated,
+                       truncated=result.truncated, info=result.info,
+                       agent_metadata={'agent_id':'installed-native-probe'})
+    session.close()
+    replay = verify_records(load_jsonl(trajectory), tolerance=1e-8)
+    assert replay.verified and replay.checked_steps == 5
+print(json.dumps({'package':chemworld.__file__, 'cantera_installed':False,
+                  'platform':{'system':platform.system(), 'python':platform.python_version()},
+                  'surface_cases':cases, 'reuse_configurations':4,
+                  'task_binding':True, 'serialized_continuation':True,
+                  'trajectory_replay_steps':replay.checked_steps}))
+"""
+
 
 def clean_environment() -> dict[str, str]:
     env = os.environ.copy()
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         env.pop(key, None)
+    for key in tuple(env):
+        if key.upper().endswith("_API_KEY") or key.upper() in {
+            "OPENAI_KEY", "ANTHROPIC_KEY", "DEEPSEEK_KEY",
+        }:
+            env.pop(key)
     env["PYTHONNOUSERSITE"] = "1"
     return env
 
 
 def captured_run(command, **kwargs):
-    result = subprocess.run(command, text=True, capture_output=True, **kwargs)
-    if result.returncode:
-        raise RuntimeError(
-            f"Installed command failed ({result.returncode}): {result.stdout}\n{result.stderr}"
-        )
-    return result
+    started = time.monotonic()
+    with subprocess.Popen(command, text=True, encoding="utf-8", errors="replace",
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, **kwargs) as process:
+        while True:
+            try:
+                stdout, stderr = process.communicate(timeout=30)
+                break
+            except subprocess.TimeoutExpired:
+                print(f"Install check alive: pid={process.pid}, "
+                      f"elapsed={time.monotonic() - started:.0f}s", flush=True)
+        if process.returncode:
+            raise RuntimeError(
+                f"Installed command failed ({process.returncode}): {stdout}\n{stderr}"
+            )
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
-def check_install(archive: Path, *, python: str, root: Path) -> dict:
+def check_install(archive: Path, *, python: str, root: Path, native_only: bool = False) -> dict:
     with tempfile.TemporaryDirectory(prefix="chemworld-installed-") as temporary:
         work = Path(temporary)
         environment = work / "venv"
         child_env = clean_environment()
         print(f"Installing {archive.name} on {python}", flush=True)
-        subprocess.run(["uv", "venv", "--python", python, str(environment)], check=True)
+        captured_run(["uv", "venv", "--python", python, str(environment)])
         interpreter = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        requirements = subprocess.check_output(
+        requirements = captured_run(
             ["uv", "export", "--frozen", "--no-dev", "--no-emit-project", "--no-hashes"],
             cwd=root,
-            text=True,
-        )
+        ).stdout
         lock = work / "requirements.txt"
         lock.write_text(requirements, encoding="utf-8")
-        subprocess.run(
+        captured_run(
             ["uv", "pip", "sync", "--python", str(interpreter), str(lock)],
             cwd=work,
             env=child_env,
-            check=True,
         )
-        subprocess.run(
+        captured_run(
             ["uv", "pip", "install", "--python", str(interpreter), "--no-deps", str(archive)],
             cwd=work,
             env=child_env,
-            check=True,
         )
+        if native_only:
+            print("Checking native examples, retained equipment and serialized continuation",
+                  flush=True)
+            probe = captured_run(
+                [str(interpreter), "-I", "-c", NATIVE_PROBE], cwd=work, env=child_env,
+            )
+            return {"archive": archive.name, "requested_python": python,
+                    "installed_check": "passed", **json.loads(probe.stdout)}
         probe = captured_run(
             [str(interpreter), "-I", "-c", PROBE],
             cwd=work,
@@ -191,6 +281,8 @@ def main() -> int:
         "--archive", type=Path, help="Existing wheel or sdist; otherwise build both"
     )
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--native-foundation-only", action="store_true",
+                        help="Check native examples and continuation without optional libraries.")
     parser.add_argument("--output", type=Path, help="Optional JSON result, outside the repository")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -198,9 +290,11 @@ def main() -> int:
         if args.archive:
             archives = [args.archive.resolve()]
         else:
-            subprocess.run(["uv", "build", "--out-dir", temporary], cwd=root, check=True)
+            print("Building wheel and sdist", flush=True)
+            captured_run(["uv", "build", "--out-dir", temporary], cwd=root)
             archives = sorted([*Path(temporary).glob("*.whl"), *Path(temporary).glob("*.tar.gz")])
-        rows = [check_install(archive, python=args.python, root=root) for archive in archives]
+        rows = [check_install(archive, python=args.python, root=root,
+                              native_only=args.native_foundation_only) for archive in archives]
     report = json.dumps(rows, indent=2) + "\n"
     if args.output:
         args.output.write_text(report, encoding="utf-8")

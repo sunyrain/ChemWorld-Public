@@ -144,24 +144,47 @@ class ChemWorldCrystallizationServices:
         self,
         world: ChemWorldParameters,
         species_view: MechanismSpeciesView,
+        *,
+        thermal=None,
     ) -> None:
         self.world = world
         self.species_view = species_view
+        self.thermal = thermal
         self.runtime_provider: Any | None = None
         self.last_provider_execution: dict[str, Any] = {}
 
-    def _target_molecular_weight_kg_mol(self) -> float:
+    def target_species(self, state):
+        if self.thermal is not None and self.thermal.crystal.supports(state):
+            return self.thermal.crystal.model(state).target_component
+        return self.species_view.primary_target_species
+
+    def impurity_species(self, state):
+        if self.thermal is not None and self.thermal.crystal.supports(state):
+            return self.thermal.crystal.model(state).impurity_component
+        return self.species_view.primary_impurity_species
+
+    def target_amount(self, state):
+        if self.thermal is not None and self.thermal.crystal.supports(state):
+            return state.species_amounts[self.target_species(state)]
+        return self.species_view.target_amount(state)
+
+    def _target_molecular_weight_kg_mol(self, state=None) -> float:
+        if state is not None and self.thermal is not None and self.thermal.crystal.supports(state):
+            return self.thermal.crystal.model(state).kinetics.target_molecular_weight_kg_mol
         target = self.species_view.primary_target_species
         species = self.species_view.mechanism.network.species[
             self.species_view.mechanism.network.species_index[target]
         ]
         return molecular_weight(species.composition) / 1000.0
 
-    def seed_crystals(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+    def seed_charge(self, action: dict[str, Any], state=None) -> tuple[float, float]:
         seed_mass = float(np.clip(_action_float(action, "seed_mass_g", 0.005), 0.0, 0.050))
-        target_species = self.species_view.primary_target_species
-        impurity_species = self.species_view.primary_impurity_species
-        seed_target_mol = seed_mass / 1000.0 / self._target_molecular_weight_kg_mol()
+        return seed_mass, seed_mass / 1000.0 / self._target_molecular_weight_kg_mol(state)
+
+    def seed_crystals(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        seed_mass, seed_target_mol = self.seed_charge(action, state)
+        target_species = self.target_species(state)
+        impurity_species = self.impurity_species(state)
         previous_settings = equipment_settings(state.equipment, "crystallizer")
         cumulative_seed_mass = float(previous_settings.get("crystal_seed_mass_g", 0.0)) + seed_mass
         cumulative_seed_target = (
@@ -199,11 +222,15 @@ class ChemWorldCrystallizationServices:
             },
         )
         process_metrics = {} if state.process is None else state.process.metrics
+        reference_target = self.target_amount(state)
+        if self.thermal is not None and self.thermal.crystal.is_native(state):
+            reference_target -= float(previous_settings.get("seed_target_mol", 0.0))
+            reference_target -= float(previous_settings.get("dissolved_seed_target_mol", 0.0))
         initial_target = max(
             float(
                 process_metrics.get(
                     "pre_separation_product_mol",
-                    self.species_view.target_amount(state),
+                    reference_target,
                 )
             ),
             1.0e-12,
@@ -229,21 +256,59 @@ class ChemWorldCrystallizationServices:
                 attached_vessel_id=state.vessel_id,
                 settings=population_settings(cohorts),
             )
-        return augmented_state.replace(
+        candidate = augmented_state.replace(
             ledger=ledger,
             equipment=equipment,
             phases=phases,
             process=process,
         )
+        if self.thermal is not None and (
+            self.thermal.crystal.is_native(state) or self.thermal.crystal.legacy_available()
+        ):
+            candidate = self.thermal.crystal.seed_population(state, candidate, seed_target_mol)
+        return candidate
 
     def cool_crystallize(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        if self.thermal is not None and (
+            self.thermal.crystal.is_native(state) or self.thermal.crystal.legacy_available()
+        ):
+            working = (
+                state
+                if self.thermal.crystal.is_native(state)
+                else self.thermal.crystal.legacy.prepare(state)
+            )
+            result = self.thermal.advancer.batch(working, action, heat=True)
+            final = result.state
+            settings = {} if final is None else equipment_settings(final.equipment, "crystallizer")
+            self.last_provider_execution = {
+                "model_id": "finite-crystal-cohorts-temperature-v1",
+                "success": result.success,
+                "failure_reason": result.failure_reason,
+                "diagnostics": {
+                    **result.diagnostics,
+                    "crystal_population_formed": settings.get("csd_total_particle_count", 0) > 0,
+                    "meaningful_transfer": (
+                        final is not None
+                        and abs(
+                            final.phases.phases["solid"].species_amounts_mol[
+                                self.target_species(working)
+                            ]
+                            - working.phases.phases["solid"].species_amounts_mol[
+                                self.target_species(working)
+                            ]
+                        )
+                        > 1e-12
+                    ),
+                },
+            }
+            return result
         duration = float(np.clip(_action_float(action, "duration_s", 1200.0), 0.0, 14_400.0))
         target_temperature = float(
             np.clip(_action_float(action, "target_temperature_K", 278.15), 250.0, 330.0)
         )
         crystallizer_settings = equipment_settings(state.equipment, "crystallizer")
-        target_species = self.species_view.primary_target_species
-        impurity_species = self.species_view.primary_impurity_species
+        target_species = self.target_species(state)
+        impurity_species = self.impurity_species(state)
         explicit_seed_mass_g = float(crystallizer_settings.get("crystal_seed_mass_g", 0.0))
         explicit_seed_target_mol = float(crystallizer_settings.get("seed_target_mol", 0.0))
         phase_records = {} if state.phases is None else state.phases.phases
@@ -262,7 +327,7 @@ class ChemWorldCrystallizationServices:
             0.0,
         )
         impurity_mol = max(float(feed_amounts.get(impurity_species, 0.0)), 0.0)
-        target_molecular_weight = self._target_molecular_weight_kg_mol()
+        target_molecular_weight = self._target_molecular_weight_kg_mol(state)
         # Every crystal already present in the slurry participates in the next
         # population-balance step.  Passing only the originally charged seed
         # would recreate material and discard the physical crystal population
@@ -396,7 +461,7 @@ class ChemWorldCrystallizationServices:
                 process_metrics.get(
                     "pre_separation_product_mol",
                     max(
-                        self.species_view.target_amount(state) - explicit_seed_target_mol,
+                        self.target_amount(state) - explicit_seed_target_mol,
                         0.0,
                     ),
                 )
@@ -600,6 +665,11 @@ class ChemWorldCrystallizationServices:
         )
 
     def resuspend_crystals(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        if self.thermal is not None and self.thermal.crystal.is_native(state):
+            return self.thermal.crystal.resuspend(state, action, self._resuspend_existing)
+        return self._resuspend_existing(state, action)
+
+    def _resuspend_existing(self, state: WorldState, action: dict[str, Any]) -> WorldState:
         """Retain the separated filtrate and put wet cake in fresh, isothermal solvent.
 
         This operation does not force dissolution. Subsequent heating uses the
@@ -656,6 +726,8 @@ class ChemWorldCrystallizationServices:
                 ),
                 reference_sources=source_contents.reference_sources,
                 reference_shares=source_contents.reference_shares,
+                liquid_heat_capacity_J_L_K=source_contents.liquid_heat_capacity_J_L_K,
+                mechanism_id=source_contents.mechanism_id,
             ),
         )
         liquid_volume = volume + cake_liquor.volume_L
@@ -713,8 +785,10 @@ class ChemWorldCrystallizationServices:
         )
 
     def filter_crystals(self, state: WorldState) -> WorldState:
-        target_species = self.species_view.primary_target_species
-        impurity_species = self.species_view.primary_impurity_species
+        if self.thermal is not None and self.thermal.crystal.is_native(state):
+            return self.thermal.crystal.filter(state)
+        target_species = self.target_species(state)
+        impurity_species = self.impurity_species(state)
         solid_product, solid_impurity = _solid_phase_amounts(
             state,
             target_species=target_species,
@@ -728,7 +802,7 @@ class ChemWorldCrystallizationServices:
         seed_target_mol = float(crystallizer_settings.get("seed_target_mol", 0.0))
         retained_seed_mol = min(seed_target_mol, solid_product) * 0.96
         product_from_solution = max(product - retained_seed_mol, 0.0)
-        target_amount = max(self.species_view.target_amount(state) - seed_target_mol, 0.0)
+        target_amount = max(self.target_amount(state) - seed_target_mol, 0.0)
         initial_p = max(
             float(process_metrics.get("pre_separation_product_mol", target_amount)),
             1.0e-12,
@@ -830,6 +904,18 @@ class ChemWorldCrystallizationServices:
                         )
                     ),
                     "seed_target_mol": retained_seed_mol,
+                    **(
+                        {
+                            "population_constituents": [
+                                [seed * 0.96, occluded * 0.92, target * 0.96]
+                                for seed, occluded, target in crystallizer_settings[
+                                    "population_constituents"
+                                ]
+                            ]
+                        }
+                        if "population_constituents" in crystallizer_settings
+                        else {}
+                    ),
                     **(
                         {
                             "dissolved_seed_target_mol": float(

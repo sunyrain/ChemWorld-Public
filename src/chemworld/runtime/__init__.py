@@ -29,12 +29,15 @@ __all__ = [
     "MechanismManifest",
     "MechanismSpeciesView",
     "MechanismValidationReport",
+    "OperationExecutor",
     "OperationKernel",
     "OperationKernelRegistry",
     "RuntimeContext",
     "RuntimeStepResult",
     "ScoreSpec",
     "ServiceOperationKernel",
+    "SessionResult",
+    "SessionSnapshot",
     "StatePatch",
     "TaskRuntimeProfile",
     "TransactionManager",
@@ -139,10 +142,14 @@ def __getattr__(name: str) -> Any:
         from chemworld.runtime import profiles
 
         return getattr(profiles, name)
-    if name in {"ChemWorldRuntime", "RuntimeStepResult"}:
+    if name in {"ChemWorldRuntime", "SessionResult", "SessionSnapshot"}:
         from chemworld.runtime import engine
 
         return getattr(engine, name)
+    if name in {"OperationExecutor", "RuntimeStepResult"}:
+        from chemworld.runtime import executor
+
+        return getattr(executor, name)
     if name == "ChemWorldObservationKernel":
         from chemworld.runtime import observation_services
 

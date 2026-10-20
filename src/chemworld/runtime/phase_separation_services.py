@@ -34,6 +34,7 @@ from chemworld.runtime.vnext_downstream import (
     run_bounded_transfer,
     run_sorbent_drying,
     run_vacuum_concentration,
+    runtime_sorbent_bed,
 )
 from chemworld.world.actions import SOLVENTS
 from chemworld.world.parameters import ChemWorldParameters
@@ -53,6 +54,8 @@ class ChemWorldPhaseSeparationServices:
         species_view: MechanismSpeciesView,
         *,
         nominal_pair_contract: str | None = None,
+        liquid_runtime=None,
+        thermal=None,
     ) -> None:
         if nominal_pair_contract not in {
             None,
@@ -64,6 +67,8 @@ class ChemWorldPhaseSeparationServices:
         self.world = world
         self.species_view = species_view
         self.nominal_pair_contract = nominal_pair_contract
+        self.liquid_runtime = liquid_runtime
+        self.thermal = thermal
         self.phase_ledgers = ChemWorldPhaseLedgerServices(species_view)
 
     def _removed_inventory_summary(
@@ -88,6 +93,17 @@ class ChemWorldPhaseSeparationServices:
             impurity = float(values.get("impurity_mol", 0.0)) + sum(
                 float(amounts.get(species_id, 0.0)) for species_id in impurity_species
             )
+            # Preserve the provider's actual outlet, with the same species map
+            # used to reconstruct the retained phase. Never infer an outlet by
+            # subtracting the candidate inventory from its prestate.
+            source_phase = selected_phase_id(state.phases) or "organic"
+            for species_id, quantity in (
+                (self.phase_ledgers.product_species_for_phase(source_phase, state),
+                 float(values.get("product_mol", 0.0))),
+                (self.phase_ledgers.impurity_species_for_phase(source_phase, state),
+                 float(values.get("impurity_mol", 0.0))),
+            ):
+                amounts[species_id] = amounts.get(species_id, 0.0) + quantity
             volume = max(float(values.get("volume_L", 0.0)), 0.0)
             removed_volume += volume
             removed_product += product
@@ -101,6 +117,9 @@ class ChemWorldPhaseSeparationServices:
                     for species_id, amount in amounts.items()
                     if float(amount) > 0.0
                 },
+                "unit": "mol",
+                **({"carrier_volumes_L": list(values["carrier_volumes_L"])}
+                   if "carrier_volumes_L" in values else {}),
             }
         history = list(state.metadata.get("removed_phase_inventory_history", ()))
         history.append(
@@ -197,6 +216,8 @@ class ChemWorldPhaseSeparationServices:
         )
 
     def mix_phases(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        if self.liquid_runtime is not None and self.liquid_runtime.supports(state):
+            return self.liquid_runtime.advance(state, action, mixing=True)
         duration = float(np.clip(action_float(action, "duration_s", 180.0), 0.0, 1800.0))
         stirring = float(np.clip(action_float(action, "stirring_speed_rpm", 700.0), 100.0, 1200.0))
         process_metrics = {} if state.process is None else state.process.metrics
@@ -314,6 +335,13 @@ class ChemWorldPhaseSeparationServices:
         )
 
     def settle_phases(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        if self.liquid_runtime is not None and self.liquid_runtime.supports(state):
+            from chemworld.runtime.advance_paths import advance_ledger
+
+            return state.replace(
+                phases=PhaseLedger({k: replace(p, settled=True)
+                                    for k, p in state.phases.phases.items()}),
+                ledger=advance_ledger(state.ledger, float(action["duration_s"])))
         duration = float(np.clip(action_float(action, "duration_s", 300.0), 0.0, 3600.0))
         phase_ledger = self.phase_ledgers.phase_ledger(state)
         ledger = state.ledger.with_updates(
@@ -403,6 +431,18 @@ class ChemWorldPhaseSeparationServices:
         )
 
     def wash_phase(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        if self.liquid_runtime is not None and self.liquid_runtime.supports(state):
+            from chemworld.runtime.kernel_contracts import ModelProviderResult
+
+            try:
+                candidate = self.liquid_runtime.wash(state, action)
+                return ModelProviderResult({}, state=candidate, diagnostics={
+                    "liquid_wash": candidate.metadata["last_liquid_wash"],
+                    "not_covered": ["mixing_heat", "PV_work"]})
+            except (ArithmeticError, RuntimeError) as exc:
+                return ModelProviderResult({}, success=False, outcome="numerical_failure",
+                                           failure_reason="liquid_wash_equilibrium_failed",
+                                           diagnostics={"solver_error": str(exc)})
         volume = float(np.clip(action_float(action, "wash_volume_L", 0.010), 0.0, 0.040))
         phase_ledger = self.phase_ledgers.phase_ledger(state)
         target = selected_phase_id(state.phases) or "organic"
@@ -510,7 +550,13 @@ class ChemWorldPhaseSeparationServices:
             removed_impurity_mol=removed_impurity,
         )
 
-    def dry_phase(self, state: WorldState) -> WorldState:
+    def dry_phase(self, state: WorldState):
+        from chemworld.physchem.sorbent_kinetics import SORBENT_STATE_TYPE
+
+        if (self.thermal is not None and self.thermal.coupled.supports(state)
+                and any(s.spec.state_type == SORBENT_STATE_TYPE for s in state.state_slots.slots)):
+            return self.thermal.advancer.batch(state,
+                {"operation":"dry", "duration_s":300.}, heat=False)
         phase_ledger = self.phase_ledgers.phase_ledger(state)
         target = selected_phase_id(state.phases) or "organic"
         phase = phase_ledger.setdefault(
@@ -532,6 +578,7 @@ class ChemWorldPhaseSeparationServices:
             "drying_model_id": "chemworld_sorbent_drying_vnext",
             "drying_skipped_empty_phase": not phase_slice.has_material,
         }
+        removed_metadata: dict[str, Any] = {}
         removed_volume = 0.0
         removed_product = 0.0
         removed_impurity = 0.0
@@ -539,7 +586,11 @@ class ChemWorldPhaseSeparationServices:
         water_mol = medium.volumes_L[0] / 0.018
         metadata_updates["drying_skipped_no_water"] = water_mol <= 0
         if phase_slice.has_material and water_mol > 0:
-            result = run_sorbent_drying(phase_slice, water_mol=water_mol)
+            from chemworld.runtime.disposable_sorbent import debit_media
+
+            bed = runtime_sorbent_bed(phase_slice)
+            state, media_packet = debit_media(state,bed.sorbent_mass_kg)
+            result = run_sorbent_drying(phase_slice, water_mol=water_mol,sorbent=bed)
             phase[PHASE_PRODUCT_AMOUNT_KEY] = result.dried_liquid_amounts_mol.get("product", 0.0)
             phase["impurity_mol"] = result.dried_liquid_amounts_mol.get("impurity", 0.0)
             removed_water_L = result.spent_sorbent_inventory_mol.get("residual_water", 0.0) * 0.018
@@ -561,6 +612,7 @@ class ChemWorldPhaseSeparationServices:
                     },
                 )
             )
+            removed_metadata["removed_phase_inventory_history"][-1]["media_packet"] = media_packet
             metadata_updates.update(
                 {
                     "drying_endpoint_met": result.endpoint_met,
@@ -594,6 +646,7 @@ class ChemWorldPhaseSeparationServices:
             ledger=ledger,
             volume_L=phase["volume_L"],
             equipment=equipment,
+            metadata_updates=removed_metadata,
         )
         if next_state.phases is not None:
             phases = next_state.phases.phases.copy()
@@ -606,7 +659,9 @@ class ChemWorldPhaseSeparationServices:
             removed_impurity_mol=removed_impurity,
         )
 
-    def concentrate_phase(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+    def concentrate_phase(self, state: WorldState, action: dict[str, Any]):
+        if self.thermal is not None and self.thermal.concentration.supports(state):
+            return self.thermal.advancer.batch(state, action, heat=False)
         duration = float(np.clip(action_float(action, "duration_s", 300.0), 0.0, 3600.0))
         phase_ledger = self.phase_ledgers.phase_ledger(state)
         target = selected_phase_id(state.phases) or "organic"
@@ -629,8 +684,10 @@ class ChemWorldPhaseSeparationServices:
             "concentration_model_id": "chemworld_vacuum_concentration_vnext",
             "concentration_skipped_empty_phase": not phase_slice.has_material,
         }
+        removed_metadata: dict[str, Any] = {}
         concentration_extent = 0.0
         heat_duty_J = 0.0
+        actual_duration = 0.0
         removed_volume = 0.0
         removed_product = 0.0
         removed_impurity = 0.0
@@ -654,11 +711,19 @@ class ChemWorldPhaseSeparationServices:
                             "product_mol": result.condensate_amounts_mol.get("product", 0.0),
                             "impurity_mol": result.condensate_amounts_mol.get("impurity", 0.0),
                             "volume_L": result.condensate_equivalent_liquid_volume_L,
+                            "carrier_volumes_L": [
+                                result.condensate_amounts_mol.get(f"carrier-{i}", 0.0) * .018
+                                for i in range(4)
+                            ],
                         },
                         "concentrate_vent": {
                             "product_mol": result.vent_amounts_mol.get("product", 0.0),
                             "impurity_mol": result.vent_amounts_mol.get("impurity", 0.0),
                             "volume_L": result.vent_equivalent_liquid_volume_L,
+                            "carrier_volumes_L": [
+                                result.vent_amounts_mol.get(f"carrier-{i}", 0.0) * .018
+                                for i in range(4)
+                            ],
                         },
                     },
                 )
@@ -666,9 +731,11 @@ class ChemWorldPhaseSeparationServices:
             concentration_extent = 1.0 - result.solvent_remaining_fraction
             phase["solvent_loss"] += concentration_extent
             heat_duty_J = result.heat_duty_J
+            actual_duration = result.elapsed_time_s
             metadata_updates.update(
                 {
                     "concentration_endpoint_met": result.endpoint_met,
+                    "concentration_elapsed_time_s": result.elapsed_time_s,
                     "remaining_carriers_L": [
                         result.liquid_amounts_mol.get(f"carrier-{i}", 0.0) * 0.018 for i in range(4)
                     ],
@@ -687,8 +754,8 @@ class ChemWorldPhaseSeparationServices:
                 }
             )
         ledger = state.ledger.with_updates(
-            time_s=state.ledger.time_s + duration,
-            cost=state.ledger.cost + duration / 3600.0 * 0.035,
+            time_s=state.ledger.time_s + actual_duration,
+            cost=state.ledger.cost + actual_duration / 3600.0 * 0.035,
             risk=min(1.0, state.ledger.risk + 0.015 * concentration_extent),
             energy_jacket_J=state.ledger.energy_jacket_J + heat_duty_J,
         )
@@ -707,6 +774,7 @@ class ChemWorldPhaseSeparationServices:
             ledger=ledger,
             volume_L=phase["volume_L"],
             equipment=equipment,
+            metadata_updates=removed_metadata,
         )
         if "remaining_carriers_L" in metadata_updates and next_state.phases is not None:
             phases = next_state.phases.phases.copy()
@@ -747,6 +815,7 @@ class ChemWorldPhaseSeparationServices:
             "transfer_model_id": "chemworld_transfer_holdup_vnext",
             "transfer_skipped_empty_phase": not phase_slice.has_material,
         }
+        removed_metadata: dict[str, Any] = {}
         delivered_fraction = 0.0
         removed_volume = 0.0
         removed_product = 0.0
@@ -811,6 +880,7 @@ class ChemWorldPhaseSeparationServices:
             ledger=ledger,
             volume_L=phase["volume_L"],
             equipment=equipment,
+            metadata_updates=removed_metadata,
         )
         return self._account_removed_inventory(
             next_state,

@@ -15,11 +15,12 @@ ChemWorld gives experimental agents a typed laboratory interface rather than an 
 
 [Explore every action and observation in the interactive documentation →](https://sunyrain.github.io/ChemWorld-Public/one-experiment/)
 
-Current main is the October 2026 foundation snapshot (`0.5.0.dev0`): multi-vessel
-material routing, repeated crystallization, process controls, finite streams,
-configurable NMR/IR/MS and coupled-equilibrium worlds are now public.
-See [what changed and model scope](docs/current-foundation.md) and the
-[open-source extension roadmap](docs/extension-roadmap.md).
+Current main (`0.5.0.dev0`) includes the October 2026 native foundation: shared
+experimental sessions, owned material/equipment state, coupled thermal dynamics,
+battery cycling and SEI, aqueous/mineral chemistry, membranes, stochastic
+biochemistry, multisite catalysis and binary solid equilibrium.
+Start with the [native session guide](docs/native_foundation.md), then see the
+[implemented model ranges and remaining extensions](docs/extension-roadmap.md).
 
 ## Start in five minutes
 
@@ -50,8 +51,8 @@ Launch the animated browser workbench after installing the package:
 chemworld lab
 ```
 
-The Lab runs locally on `127.0.0.1`, uses the same typed action schemas and transactional Gym
-runtime as normal experiments, and requires no model, provider account or API key. It visualizes
+The Lab runs locally on `127.0.0.1`, uses the same typed action schemas and native
+experimental session as the Gym, CLI and Agent interfaces, and requires no model, provider account or API key. It visualizes
 only public action effects and observations; the animation does not infer hidden composition.
 
 ## Bring your own agent

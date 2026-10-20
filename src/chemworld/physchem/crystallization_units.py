@@ -130,9 +130,7 @@ class CrystallizationKineticsSpec:
             "impurity_occlusion_mol_per_mol": self.impurity_occlusion_mol_per_mol,
             "supersaturation_occlusion_factor": (self.supersaturation_occlusion_factor),
             "impurity_occlusion_law_id": self.impurity_occlusion_law_id,
-            "impurity_surface_half_saturation_mol_L": (
-                self.impurity_surface_half_saturation_mol_L
-            ),
+            "impurity_surface_half_saturation_mol_L": (self.impurity_surface_half_saturation_mol_L),
             "fines_threshold_m": self.fines_threshold_m,
             "provenance_id": self.provenance_id,
         }
@@ -662,6 +660,18 @@ def _occlude_impurity(
     solvent_volume_L: float,
     kinetics: CrystallizationKineticsSpec,
 ) -> float:
+    ratio = _occlusion_loading_ratio(
+        relative_supersaturation=relative_supersaturation,
+        dissolved_impurity=dissolved_impurity,
+        solvent_volume_L=solvent_volume_L,
+        kinetics=kinetics,
+    )
+    return min(dissolved_impurity, max(0.0, target_transfer_mol * ratio))
+
+
+def _occlusion_loading_ratio(
+    *, relative_supersaturation, dissolved_impurity, solvent_volume_L, kinetics
+):
     if kinetics.impurity_occlusion_law_id == "linear_supersaturation_transfer_v1":
         ratio = kinetics.impurity_occlusion_mol_per_mol * (
             1.0 + kinetics.supersaturation_occlusion_factor * relative_supersaturation
@@ -677,7 +687,7 @@ def _occlude_impurity(
             * surface_coverage
             * (1.0 + kinetics.supersaturation_occlusion_factor * relative_supersaturation**2)
         )
-    return min(dissolved_impurity, max(0.0, target_transfer_mol * ratio))
+    return ratio
 
 
 def _crystal_size_distribution(

@@ -65,7 +65,23 @@ class PhaseSlice:
         return self.volume_L > 1.0e-12 and self.product_mol + self.impurity_mol > 1.0e-12
 
 
-def run_sorbent_drying(phase: PhaseSlice, *, water_mol: float | None = None) -> SorbentDryingResult:
+def runtime_sorbent_bed(phase: PhaseSlice) -> SorbentBedSpec:
+    return SorbentBedSpec(
+        sorbent_id="molecular_sieve_runtime_vnext",
+        sorbent_mass_kg=max(0.002, 0.12 * phase.volume_L),
+        site_capacity_mol_per_kg=12.0,
+        affinity_L_per_mol={
+            _PRODUCT_ID: 0.02,
+            _IMPURITY_ID: 0.10,
+            _DRYING_COMPONENT_ID: 240.0,
+        },
+        mass_transfer_rate_per_s=0.018,
+        max_liquid_volume_L=max(phase.volume_L, 1.0e-6),
+    )
+
+
+def run_sorbent_drying(phase: PhaseSlice, *, water_mol: float | None = None,
+                       sorbent: SorbentBedSpec | None = None) -> SorbentDryingResult:
     """Map a selected phase to the finite-capacity sorbent provider."""
 
     wetting_inventory = max(
@@ -79,18 +95,7 @@ def run_sorbent_drying(phase: PhaseSlice, *, water_mol: float | None = None) -> 
         _IMPURITY_ID: max(phase.impurity_mol, 0.0),
         _DRYING_COMPONENT_ID: wetting_inventory,
     }
-    sorbent = SorbentBedSpec(
-        sorbent_id="molecular_sieve_runtime_vnext",
-        sorbent_mass_kg=max(0.002, 0.12 * phase.volume_L),
-        site_capacity_mol_per_kg=12.0,
-        affinity_L_per_mol={
-            _PRODUCT_ID: 0.02,
-            _IMPURITY_ID: 0.10,
-            _DRYING_COMPONENT_ID: 240.0,
-        },
-        mass_transfer_rate_per_s=0.018,
-        max_liquid_volume_L=max(phase.volume_L, 1.0e-6),
-    )
+    sorbent = runtime_sorbent_bed(phase) if sorbent is None else sorbent
     request = SorbentDryingRequest(
         wet_liquid_amounts_mol=feed,
         liquid_volume_L=phase.volume_L,

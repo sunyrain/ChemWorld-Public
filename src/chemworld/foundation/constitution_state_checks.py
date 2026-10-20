@@ -244,7 +244,7 @@ def check_typed_ledgers(constitution: Any, state: WorldState) -> list[CheckResul
                 )
             )
     if state.equipment is not None and state.vessels is not None:
-        for equipment_id, equipment in state.equipment.equipment.items():
+        for equipment_id, equipment in sorted(state.equipment.equipment.items()):
             checks.append(
                 CheckResult(
                     f"equipment_attached_vessel_exists:{equipment_id}",

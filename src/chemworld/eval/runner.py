@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 import gymnasium as gym
 
-import chemworld  # noqa: F401
+import chemworld
 from chemworld.agent_interface import agent_view_bundle
 from chemworld.agents import (
     CodexSubagentReplayAgent,
@@ -42,6 +42,7 @@ from chemworld.agents.interaction import (
 from chemworld.campaign_resources import CampaignResourceCard
 from chemworld.data.logging import TrajectoryLogger, action_payload, observation_to_json
 from chemworld.data.submission import git_commit
+from chemworld.envs.spaces import to_observation
 from chemworld.eval.observation_identifiability import (
     ObservationIdentifiabilityError,
     PublicSpectrumArchive,
@@ -57,6 +58,7 @@ from chemworld.eval.risk_policy import (
     RiskCostTaskPolicy,
     load_risk_cost_protocol,
 )
+from chemworld.runtime import ChemWorldRuntime
 
 EvaluationPolicy = Literal["task_contract", "vnext_risk_cost"]
 
@@ -205,16 +207,18 @@ def run_agent(
     if episode_mode_override is not None:
         env_kwargs["episode_mode_override"] = episode_mode_override
     effective_budget = budget_override if budget_override is not None else budget
-    env = gym.make(
-        env_id,
-        **env_kwargs,
-    )
+    # Wrappers retain their Gym boundary. Ordinary Agent/CLI execution uses
+    # the native session directly; the published scalar log view stays v1.
+    native_session = env_id == chemworld.ENV_ID and env_wrapper is None
+    env = ChemWorldRuntime(**env_kwargs) if native_session else gym.make(env_id, **env_kwargs)
     if env_wrapper is not None:
         env = env_wrapper(env)
     initial_obs, task_info = env.reset(seed=seed)
-    if not hasattr(env.unwrapped, "task_info"):
+    if native_session:
+        initial_obs = to_observation(initial_obs.values)
+    base_env: Any = env if native_session else env.unwrapped
+    if not hasattr(base_env, "task_info"):
         raise RuntimeError(f"{env_id} does not expose task_info()")
-    base_env: Any = env.unwrapped
     task_info = base_env.task_info()
     evaluator_provenance = base_env.evaluator_provenance()
     if risk_policy is not None:
@@ -406,7 +410,14 @@ def run_agent(
                 if step_callback is not None:
                     step_callback(record, agent_trace)
                 raise
-            observation, reward, terminated, truncated, info = env.step(action)
+            if native_session:
+                result = env.execute(action)
+                observation = to_observation(result.observation.values)
+                reward, terminated, truncated, info = (
+                    result.reward, result.terminated, result.truncated, result.info
+                )
+            else:
+                observation, reward, terminated, truncated, info = env.step(action)
             obs_json = observation_to_json(observation)
             update_started = perf_counter()
             agent.update(action, obs_json, float(reward), info)

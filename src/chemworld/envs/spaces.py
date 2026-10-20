@@ -9,17 +9,38 @@ import numpy as np
 from gymnasium import spaces
 
 from chemworld.foundation.samples import CONTAINER_IDS
+from chemworld.runtime.observation_values import empty_reading, value_or_default
 from chemworld.world.actions import CATALYSTS, ELECTROLYTE_PROFILES, SOLVENTS
 from chemworld.world.control_contract import CONTROL_CHOICES, CONTROL_NUMERIC
+from chemworld.world.domain_modules import DomainModuleRegistry
 from chemworld.world.operations import (
-    INSTRUMENTS,
     OPERATION_TYPES,
     PUBLIC_OBSERVATION_KEYS,
-    operation_contracts,
 )
 from chemworld.world.spectral_contract import SPECTRAL_BOUNDS
 
 OBSERVATION_KEYS = PUBLIC_OBSERVATION_KEYS
+
+
+class DeclaredChoices(spaces.Space):
+    """Finite semantic choices; numeric vector adapters remain separate."""
+
+    def __init__(self, choices):
+        super().__init__(shape=(), dtype=None)
+        self.choices = tuple(choices)
+
+    def sample(self, mask=None):
+        return self.choices[int(self.np_random.integers(len(self.choices)))]
+
+    def contains(self, value):
+        return not isinstance(value, (bool, np.bool_)) and value in self.choices
+
+
+def _native_field_space(field):
+    if field.choices:
+        return DeclaredChoices(field.choices)
+    low, high = field.bounds or (-np.inf, np.inf)
+    return spaces.Box(low, high, shape=(1,), dtype=np.float32)
 
 
 class NullableScalarBox(spaces.Box):
@@ -55,11 +76,38 @@ class ConditionalActionDict(spaces.Dict):
     contract.
     """
 
+    def __init__(self, fields, *, modules):
+        super().__init__(fields)
+        self.modules = modules
+        self.operation_types = modules.operation_order()
+        self.contracts = modules.contracts()
+        self.native_spaces = {
+            name: {f.name: _native_field_space(f) for f in spec.fields}
+            for name, spec in modules.operation_specs().items()
+            if name not in OPERATION_TYPES
+        }
+
     def sample(self, mask: Mapping[str, Any] | None = None) -> dict[str, Any]:
-        carrier = super().sample(mask=dict(mask) if mask is not None else None)
+        masks = dict(mask) if mask is not None else dict.fromkeys(self.spaces)
+        available = np.array(
+            [name in self.contracts for name in self.operation_types], dtype=np.int8
+        )
+        if masks.get("operation") is not None:
+            available &= masks["operation"]
+        if not available.any():
+            raise ValueError("No installed operation is allowed by the action mask")
+        masks["operation"] = available
+        carrier = super().sample(mask=masks)
         operation_index = int(carrier["operation"])
-        operation = OPERATION_TYPES[operation_index]
-        required = operation_contracts()[operation].required_fields
+        operation = self.operation_types[operation_index]
+        required = self.contracts[operation].required_fields
+        if operation in self.native_spaces:
+            values = {}
+            for key in required:
+                space = self.native_spaces[operation][key]
+                space.seed(int(self.np_random.integers(2**31)))
+                values[key] = space.sample()
+            return {"operation": operation_index, **values}
         return {"operation": operation_index, **{key: carrier[key] for key in required}}
 
     def contains(self, x: object) -> bool:
@@ -72,26 +120,42 @@ class ConditionalActionDict(spaces.Dict):
             operation_index = int(operation_value)
         except (TypeError, ValueError, OverflowError):
             return False
-        if not 0 <= operation_index < len(OPERATION_TYPES):
+        if not 0 <= operation_index < len(self.operation_types):
             return False
-        required = operation_contracts()[OPERATION_TYPES[operation_index]].required_fields
-        if set(x) != {"operation", *required}:
+        operation = self.operation_types[operation_index]
+        if operation not in self.contracts:
+            return False
+        required = set(self.contracts[operation].required_fields)
+        fields = self.native_spaces.get(operation)
+        allowed = set(fields) if fields is not None else required
+        if not required <= x.keys() or not set(x) <= {"operation", *allowed}:
             return False
         if not self.spaces["operation"].contains(operation_value):
             return False
-        return all(self.spaces[key].contains(x[key]) for key in required)
+        field_spaces = self.spaces if fields is None else fields
+        return all(
+            field_spaces[key].contains(value) for key, value in x.items() if key != "operation"
+        )
 
 
-def make_action_space() -> spaces.Dict:
+def make_action_space(*, modules: DomainModuleRegistry | None = None) -> spaces.Dict:
     """Build the public ChemWorld action space."""
 
+    modules = modules or DomainModuleRegistry.default()
+    native_fields = {}
+    for name, spec in modules.operation_specs().items():
+        if name in OPERATION_TYPES:
+            continue
+        for field in spec.fields:
+            native_fields[field.name] = _native_field_space(field)
     return ConditionalActionDict(
         {
+            **native_fields,
             **{
                 key: spaces.Box(bounds[0], bounds[1], shape=(1,), dtype=np.float32)
                 for key, bounds in SPECTRAL_BOUNDS.items()
             },
-            "operation": spaces.Discrete(len(OPERATION_TYPES)),
+            "operation": spaces.Discrete(len(modules.operation_order())),
             "container": spaces.Discrete(len(CONTAINER_IDS)),
             "source_container": spaces.Discrete(len(CONTAINER_IDS)),
             "destination_container": spaces.Discrete(len(CONTAINER_IDS)),
@@ -112,7 +176,7 @@ def make_action_space() -> spaces.Dict:
             "duration_s": spaces.Box(0.0, 14_400.0, shape=(1,), dtype=np.float32),
             "stirring_speed_rpm": spaces.Box(100.0, 1200.0, shape=(1,), dtype=np.float32),
             "sample_volume_L": spaces.Box(0.0, 0.002, shape=(1,), dtype=np.float32),
-            "instrument": spaces.Discrete(len(INSTRUMENTS)),
+            "instrument": spaces.Discrete(len(modules.instrument_order())),
             "catalyst": spaces.Discrete(len(CATALYSTS)),
             "solvent": spaces.Discrete(len(SOLVENTS)),
             "phase": spaces.Discrete(3),
@@ -127,7 +191,8 @@ def make_action_space() -> spaces.Dict:
             "potential_V": spaces.Box(-3.0, 3.0, shape=(1,), dtype=np.float32),
             "current_mA": spaces.Box(0.0, 500.0, shape=(1,), dtype=np.float32),
             "electrolyte_profile": spaces.Discrete(len(ELECTROLYTE_PROFILES)),
-        }
+        },
+        modules=modules,
     )
 
 
@@ -142,12 +207,8 @@ def make_observation_space() -> spaces.Dict:
     )
 
 
-def value_or_default(values: dict[str, float | None], key: str, default: float = 0.0) -> float:
-    value = values.get(key)
-    return default if value is None else float(value)
-
-
 def to_observation(values: dict[str, float | None]) -> dict[str, np.ndarray]:
+    """Fixed v1 Gym scalar boundary; native physical readings live in channels."""
     def scalar_value(key: str) -> float:
         value = values.get(key)
         if value is None:
@@ -169,13 +230,7 @@ def to_observation(values: dict[str, float | None]) -> dict[str, np.ndarray]:
 
 
 def empty_observation() -> dict[str, np.ndarray]:
-    return {
-        key: np.array(
-            [0.0 if key in {"cost", "safety_risk", "score"} else np.nan],
-            dtype=np.float32,
-        )
-        for key in OBSERVATION_KEYS
-    }
+    return to_observation(empty_reading().values)
 
 
 __all__ = [

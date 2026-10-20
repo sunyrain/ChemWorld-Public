@@ -12,6 +12,9 @@ from importlib import import_module
 from typing import Any
 
 _MODULE_EXPORTS: dict[str, list[str]] = {
+    "finite_volume": (
+        'ConservativeDiffusion DiffusionBoundary DiffusionCoupling DiffusionMesh DiffusionRates'
+    ).split(),
     "component_registry": (
         'COMPONENT_REGISTRY_SCHEMA_VERSION ComponentIdentityRegistry '
         'curated_component_registry'
@@ -49,6 +52,8 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'third_body_efficiencies troe_broadening_factor troe_falloff_rate_constant'
     ).split(),
     "properties": (
+        'CaloricReference PropertyPackageThermodynamics SpeciesCaloricModel StatePropertyReport '
+        'caloric_polynomial_change evaluate_caloric_correlation evaluate_property_state '
         'STANDARD_PRESSURE_PA ComponentPropertyPackage MixtureEnthalpyLedger '
         'MixtureTransportLedger MixtureVolumeLedger MolarVolumeReport PhaseEnthalpyReport '
         'PhaseTransitionSpec PropertyEvaluation PureSaturationReport '
@@ -82,19 +87,38 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     "equilibrium": (
         'ActivityModelSpec AzeotropeScanPoint AzeotropeScanStatus '
         'BinaryAzeotropeDiagnosticReport FlashResult GammaPhiKValueReport '
-        'LLEPhaseStabilityDiagnostic LLEStageResult RachfordRiceDiagnosticReport '
+        'LLEPhaseStabilityDiagnostic LLEStageResult LiquidEquilibriumResult LiquidStabilityReport '
+        'RachfordRiceDiagnosticReport '
         'UNIQUACActivityReport VLETemperatureReport activity_coefficients '
         'binary_azeotrope_diagnostic_report bubble_pressure_pa bubble_temperature_report '
-        'dew_pressure_pa dew_temperature_report flash_isothermal gamma_phi_k_value_report '
+        'dew_pressure_pa dew_temperature_report entrain_liquid_amounts equilibrate_liquids '
+        'flash_isothermal gamma_phi_k_value_report liquid_tpd_minimum '
         'liquid_liquid_split lle_phase_stability_diagnostic rachford_rice_diagnostic_report '
         'rachford_rice_vapor_fraction raoult_k_values uniquac_activity_report'
     ).split(),
+    "phase_equilibrium_units": ['StrictLiquidSystemSpec'],
     "reactors": (
         'BatchReactorModel CSTRFlowProgram CSTRModel CSTRMultiplicityResult '
         'CSTRMultiplicitySpec CSTRSteadyStatePoint DynamicBatchReactorModel FeedStreamSpec '
         'HeatTransferSpec JacketTemperatureProgram PFRGeometrySpec PFRModel ReactorResult '
         'ReactorState SamplingEventSpec SemiBatchFeedSpec SemiBatchReactorModel '
         'cstr_multiple_steady_state_reference_case solve_cstr_multiple_steady_states'
+    ).split(),
+    "coupled_system": (
+        'ConstantCvThermodynamics CoupledAdvanceResult CoupledEvent CoupledProcess '
+        'CoupledRates CoupledState CoupledStateView CoupledSystem CoupledThermodynamics '
+        'EnergyPort HeatFlux InternalTransfer MaterialPort ProcessContribution '
+        'SpeciesInternalEnergy '
+        'assemble_coupled_rates'
+    ).split(),
+    "surface_specs": (
+        'DEFAULT_SURFACE_MECHANISM SurfaceMechanismSpec bulk_co_oxidation_network '
+        'make_surface_slot surface_species surface_species_energies'
+    ).split(),
+    "surface_rates": (
+        'SurfaceRates adsorbate_key gas_amounts_from_pressure make_surface_system '
+        'simulate_surface surface_conservation_laws surface_inventory surface_process '
+        'evaluate_surface_rates surface_state surface_thermodynamics updated_surface_slot'
     ).split(),
     "spectroscopy": (
         'BeerLambertBandSpec BeerLambertCalibrationResult CalibrationCurve '
@@ -118,6 +142,7 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'cubic_residual_properties cubic_root_governance_report cubic_root_selection_policy '
         'evaluate_cubic_eos evaluate_volume_translated_cubic_eos ideal_gas_molar_volume '
         'ideal_gas_pressure ideal_gas_state mixture_volume_translation select_cubic_root '
+        'cubic_state_derivatives '
         'translated_cubic_compressibility_roots validate_binary_interaction_provenance'
     ).split(),
     "chromatography_methods": (
@@ -230,7 +255,8 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'arrhenius_heat_generation_slope assess_safety_envelope'
     ).split(),
     "flash_units": (
-        'TPFlashUnitResult tp_flash_with_energy_balance'
+        'FlashSystemSpec TPFlashUnitResult VLEPropertyPackage ph_flash tp_flash '
+        'tp_flash_with_energy_balance'
     ).split(),
     "equilibrium_cards": (
         'activity_model_cards'

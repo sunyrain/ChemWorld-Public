@@ -84,6 +84,66 @@ class PipeSpec:
 
 
 @dataclass(frozen=True)
+class PumpSpec:
+    """An adjustable pump limited by pressure rise and actual shaft power.
+
+    The load is supplied by the connected pipe, bed or membrane. This is a
+    bounded ideal controller, not an empirical centrifugal-pump curve.
+    """
+
+    maximum_pressure_rise_Pa: float = 20000.0
+    maximum_shaft_power_W: float = 0.005
+    efficiency: float = 0.7
+
+    def __post_init__(self):
+        _nonnegative(self.maximum_pressure_rise_Pa, "maximum_pressure_rise_Pa")
+        _nonnegative(self.maximum_shaft_power_W, "maximum_shaft_power_W")
+        if not isfinite(self.efficiency) or not 0 < self.efficiency <= 1:
+            raise ValueError("pump efficiency must be in (0, 1]")
+
+    def to_dict(self):
+        return {"maximum_pressure_rise_Pa": self.maximum_pressure_rise_Pa,
+                "maximum_shaft_power_W": self.maximum_shaft_power_W,
+                "efficiency": self.efficiency}
+
+
+def pump_operating_point(pump, requested_flow_m3_s, pressure_load):
+    """Largest requested flow within both limits for a monotone load law."""
+    from scipy.optimize import brentq
+
+    _nonnegative(requested_flow_m3_s, "requested flow")
+
+    def at(fraction):
+        flow = requested_flow_m3_s * fraction
+        pressure = float(pressure_load(flow))
+        _nonnegative(pressure, "connected pressure load")
+        shaft = pump_work(pressure_drop_Pa=pressure, volumetric_flow_m3_s=flow,
+                          efficiency=pump.efficiency)
+        return flow, pressure, shaft
+
+    def margin(fraction):
+        _, pressure, shaft = at(fraction)
+        return min((pump.maximum_pressure_rise_Pa-pressure)
+                   / max(pump.maximum_pressure_rise_Pa, 1),
+                   (pump.maximum_shaft_power_W-shaft)
+                   / max(pump.maximum_shaft_power_W, 1e-12))
+
+    if requested_flow_m3_s == 0 or min(pump.maximum_pressure_rise_Pa,
+                                      pump.maximum_shaft_power_W) == 0 or margin(0) <= 0:
+        flow, pressure, shaft = at(0)
+    else:
+        flow, pressure, shaft = at(1 if margin(1) >= 0 else brentq(margin, 0, 1, xtol=1e-14))
+    if flow == 0:
+        # A blocked drive cannot deliver the larger head demanded by the load.
+        # No displaced volume means zero hydraulic/shaft work in this ideal law.
+        pressure = min(pressure, pump.maximum_pressure_rise_Pa)
+    return {"actual_flow_m3_s": flow, "pressure_rise_Pa": pressure,
+            "shaft_power_W": shaft, "hydraulic_power_W": pressure*flow,
+            "external_loss_W": shaft-pressure*flow,
+            "flow_limited": flow < requested_flow_m3_s}
+
+
+@dataclass(frozen=True)
 class FlowResult:
     """Pipe-flow calculation with pressure drop and pump-work ledger."""
 

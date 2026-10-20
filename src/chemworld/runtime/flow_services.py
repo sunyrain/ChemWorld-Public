@@ -21,6 +21,8 @@ from chemworld.foundation.state_ledgers import EquipmentLedger, EquipmentRecord
 from chemworld.physchem.heat_transfer_units import TubularHeatTransferBoundarySpec
 from chemworld.physchem.pfr_reactors import PFRGeometrySpec, PFRModel
 from chemworld.physchem.reactor_shared import HeatTransferSpec
+from chemworld.runtime.advance_paths import advance_ledger
+from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.runtime.reaction_thermal_services import ChemWorldReactionThermalServices
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.world.continuous_flow import (
@@ -89,6 +91,13 @@ class ChemWorldFlowServices:
         self.world = reaction_thermal.world
 
     def set_flow_rate(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        selected = self.reaction_thermal.advancer.strategy(state)
+        if selected is not None and "set_flow_rate" in getattr(
+            selected[1], "supported_operations", ()
+        ):
+            return selected[1].configure_flow(state, action)
+        if action.get("flow_path", "process") != "process":
+            raise ValueError("flow path is not supported by the installed apparatus")
         flow_rate = _bounded_action_float(
             action,
             "flow_rate_mL_min",
@@ -150,24 +159,41 @@ class ChemWorldFlowServices:
         ledger = state.ledger.with_updates(cost=state.ledger.cost + 0.012)
         return state.replace(ledger=ledger, equipment=equipment)
 
-    def run_flow(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+    def run_flow(
+        self,
+        state: WorldState,
+        action: dict[str, Any],
+    ) -> WorldState | ModelProviderResult:
+        selected = self.reaction_thermal.advancer.strategy(state)
+        if selected is not None and "run_flow" in getattr(selected[1], "supported_operations", ()):
+            return self.reaction_thermal.advancer.batch(state, action, heat=False)
+        configuration = equipment_settings(state.equipment, "flow_reactor:configuration")
+        if (
+            equipment_status(state.equipment, "flow_reactor") != "configured"
+            or equipment_status(state.equipment, "flow_reactor:configuration") != "configured"
+            or configuration.get("configured_feed_signature") != _feed_signature(state)
+        ):
+            return ModelProviderResult(
+                outputs={},
+                diagnostics={"configuration_current": False},
+                outcome="rejected",
+                success=False,
+                failure_reason="flow_configuration_required",
+            )
         try:
             return self._run_flow(state, action)
-        except (RuntimeError, ValueError, KeyError, TypeError):
-            maximum_temperature = 470.0
-            if state.vessels is not None and state.vessel_id in state.vessels.vessels:
-                maximum_temperature = state.vessels.vessels[state.vessel_id].max_temperature_K
-            return state.replace(temperature_K=maximum_temperature + 1.0)
+        except (ArithmeticError, RuntimeError, ValueError) as exc:
+            return ModelProviderResult(
+                outputs={},
+                diagnostics={"solver_error": str(exc), "error_type": type(exc).__name__},
+                outcome="numerical_failure",
+                success=False,
+                failure_reason="flow_solver_failed",
+            )
 
     def _run_flow(self, state: WorldState, action: dict[str, Any]) -> WorldState:
-        if equipment_status(state.equipment, "flow_reactor") != "configured":
-            raise RuntimeError("run_flow requires a fresh configured flow experiment")
         flow_settings = equipment_settings(state.equipment, "flow_reactor")
         configuration = equipment_settings(state.equipment, "flow_reactor:configuration")
-        if equipment_status(state.equipment, "flow_reactor:configuration") != "configured":
-            raise RuntimeError("flow configuration record is not active")
-        if configuration.get("configured_feed_signature") != _feed_signature(state):
-            raise RuntimeError("flow feed changed after configuration; configure a new experiment")
         configured_residence = float(flow_settings["residence_time_s"])
         configured_flow_rate = float(flow_settings["flow_rate_mL_min"])
         if (
@@ -231,7 +257,8 @@ class ChemWorldFlowServices:
             species_id: float(state.species_amounts.get(species_id, 0.0)) / state.volume_L
             for species_id in model.network.species_ids
         }
-        result = model.simulate(
+        result = self.reaction_thermal.advancer.plug_flow(
+            model,
             inlet_concentrations,
             temperature_K=state.temperature_K,
             heat_transfer=HeatTransferSpec(
@@ -289,20 +316,19 @@ class ChemWorldFlowServices:
             flow_throughput_mL=(
                 float(previous_metrics.get("flow_throughput_mL", 0.0)) + throughput_mL
             ),
-            flow_hydraulic_energy_J=(
-                float(previous_metrics.get("flow_hydraulic_energy_J", 0.0)) + hydraulic_energy_J
-            ),
+            flow_hydraulic_energy_J=(state.ledger.flow_pump_work_J + hydraulic_energy_J),
         )
-        ledger = state.ledger.with_updates(
-            time_s=state.ledger.time_s + duration,
-            cost=state.ledger.cost + duration / 3600.0 * 0.030,
-            energy_jacket_J=(
-                state.ledger.energy_jacket_J + result.final_state.energy_jacket_J * state_scale
-            ),
-            heat_reaction_J=(
-                state.ledger.heat_reaction_J + result.final_state.heat_reaction_J * state_scale
-            ),
-            heat_loss_J=(state.ledger.heat_loss_J + result.final_state.heat_loss_J * state_scale),
+        ledger = advance_ledger(
+            state.ledger,
+            duration,
+            cost_delta=duration / 3600.0 * 0.030,
+            energy_deltas={
+                "energy_jacket_J": result.final_state.energy_jacket_J * state_scale,
+                "heat_reaction_J": result.final_state.heat_reaction_J * state_scale,
+                "heat_loss_J": result.final_state.heat_loss_J * state_scale,
+                "flow_pump_work_J": hydraulic_energy_J,
+            },
+        ).with_updates(
             risk=min(1.0, state.ledger.risk + 0.015 * (target_temperature > 390.0)),
         )
         pressure_payload = result.pressures_Pa
@@ -322,6 +348,9 @@ class ChemWorldFlowServices:
             status="completed",
             settings={
                 "flow_model_id": "pfr",
+                "advance_strategy": "geometry-resolved-steady-pfr",
+                "physical_duration_s": duration,
+                "spatial_residence_time_s": configured_residence,
                 "runtime_adapter_id": "chemworld_geometry_resolved_pfr_v1",
                 "runtime_provider_id": "chemworld_geometry_resolved_pfr_v2",
                 "runtime_model_ids": [

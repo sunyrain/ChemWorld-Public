@@ -220,7 +220,7 @@ TASK_SCHEMA: dict[str, Any] = {
         },
         "allowed_instruments": {
             "type": "array",
-            "minItems": 1,
+            "minItems": 0,
             "uniqueItems": True,
             "items": {"type": "string", "enum": list(INSTRUMENTS)},
         },
@@ -345,6 +345,8 @@ def validate_action_schema(
     action: object,
     *,
     operation_types: tuple[str, ...] = OPERATION_TYPES,
+    instruments: tuple[str, ...] = INSTRUMENTS,
+    modules=None,
 ) -> SchemaValidationResult:
     errors: list[str] = []
     if not isinstance(action, dict):
@@ -366,18 +368,27 @@ def validate_action_schema(
         errors.append("reason must be a non-empty string of at most 256 characters")
     if "payload" in action and not isinstance(action["payload"], dict):
         errors.append("payload must be an object when provided")
+    if modules is not None:
+        name = operation
+        if isinstance(operation, int) and 0 <= operation < len(operation_types):
+            name = operation_types[operation]
+        if (
+            isinstance(name, str)
+            and name in modules.operation_specs()
+            and name not in OPERATION_TYPES
+        ):
+            return SchemaValidationResult(not errors, tuple(errors))
     instrument = action.get("instrument")
     if instrument is not None and not isinstance(instrument, str | int):
         errors.append("instrument must be a string name or integer index")
-    if isinstance(instrument, str) and instrument not in INSTRUMENTS:
+    if isinstance(instrument, str) and instrument not in instruments:
         errors.append(f"unknown instrument: {instrument}")
-    if isinstance(instrument, int) and not 0 <= instrument < len(INSTRUMENTS):
+    if isinstance(instrument, int) and not 0 <= instrument < len(instruments):
         errors.append(f"instrument index outside valid range: {instrument}")
     electrolyte_profile = action.get("electrolyte_profile")
     if electrolyte_profile is not None:
         valid_profile = (
-            isinstance(electrolyte_profile, str)
-            and electrolyte_profile in ELECTROLYTE_PROFILES
+            isinstance(electrolyte_profile, str) and electrolyte_profile in ELECTROLYTE_PROFILES
         ) or (
             isinstance(electrolyte_profile, int)
             and not isinstance(electrolyte_profile, bool)
@@ -443,16 +454,18 @@ def validate_manifest_schema(manifest: dict[str, Any]) -> SchemaValidationResult
     return SchemaValidationResult(not errors, tuple(errors))
 
 
-def validate_task_schema(task: object) -> SchemaValidationResult:
+def validate_task_schema(task: object, *, modules=None) -> SchemaValidationResult:
     """Validate the executable fields required by a benchmark task contract."""
 
     if not isinstance(task, dict):
         return SchemaValidationResult(False, ("task must be an object",))
     payload = cast(dict[str, Any], task)
+    operation_types = OPERATION_TYPES if modules is None else modules.operation_specs()
+    instrument_ids = (
+        INSTRUMENTS if modules is None else modules.instrument_specs(include_optional=True)
+    )
     errors = [
-        f"missing required field: {key}"
-        for key in TASK_SCHEMA["required"]
-        if key not in payload
+        f"missing required field: {key}" for key in TASK_SCHEMA["required"] if key not in payload
     ]
     budget = payload.get("budget")
     if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
@@ -467,9 +480,7 @@ def validate_task_schema(task: object) -> SchemaValidationResult:
         errors.append("seeds must be a non-empty unique list of nonnegative integers")
     for key in ("threshold", "safety_limit"):
         value = payload.get(key)
-        in_unit_interval = _is_number(value) and 0.0 <= float(
-            cast(int | float, value)
-        ) <= 1.0
+        in_unit_interval = _is_number(value) and 0.0 <= float(cast(int | float, value)) <= 1.0
         if not in_unit_interval:
             errors.append(f"{key} must be a number in [0, 1]")
     if payload.get("episode_mode") not in {"single_experiment", "campaign"}:
@@ -479,15 +490,14 @@ def validate_task_schema(task: object) -> SchemaValidationResult:
         not isinstance(operations, list)
         or not operations
         or len(operations) != len(set(operations))
-        or any(operation not in OPERATION_TYPES for operation in operations)
+        or any(operation not in operation_types for operation in operations)
     ):
         errors.append("allowed_operations must be unique registered operations")
     instruments = payload.get("allowed_instruments")
     if (
         not isinstance(instruments, list)
-        or not instruments
         or len(instruments) != len(set(instruments))
-        or any(instrument not in INSTRUMENTS for instrument in instruments)
+        or any(instrument not in instrument_ids for instrument in instruments)
     ):
         errors.append("allowed_instruments must be unique registered instruments")
     success_metrics = payload.get("success_metrics")
@@ -569,9 +579,7 @@ def validate_mechanism_schema(mechanism: object) -> SchemaValidationResult:
             else:
                 reaction_ids.append(reaction_id)
             if "equation" not in reaction and "stoichiometry" not in reaction:
-                errors.append(
-                    f"reactions[{index}] must declare either equation or stoichiometry"
-                )
+                errors.append(f"reactions[{index}] must declare either equation or stoichiometry")
             rate_law = reaction.get("rate_law")
             if not isinstance(rate_law, dict):
                 errors.append(f"reactions[{index}].rate_law must be an object")
@@ -579,17 +587,13 @@ def validate_mechanism_schema(mechanism: object) -> SchemaValidationResult:
             equation_id = rate_law.get("equation_id")
             rate_law_id = rate_law.get("rate_law_id")
             if not isinstance(rate_law_id, str) or not rate_law_id:
-                errors.append(
-                    f"reactions[{index}].rate_law.rate_law_id must be a non-empty string"
-                )
+                errors.append(f"reactions[{index}].rate_law.rate_law_id must be a non-empty string")
             if equation_id not in SUPPORTED_RATE_LAW_EQUATION_IDS:
                 errors.append(
                     f"reactions[{index}].rate_law.equation_id is unsupported: {equation_id!r}"
                 )
             if isinstance(equation_id, str) and equation_id.lower() in {"eval", "python"}:
-                errors.append(
-                    f"reactions[{index}].rate_law.equation_id cannot execute code"
-                )
+                errors.append(f"reactions[{index}].rate_law.equation_id cannot execute code")
             parameters = rate_law.get("parameters", {})
             if parameters is not None and not isinstance(parameters, dict):
                 errors.append(f"reactions[{index}].rate_law.parameters must be an object")

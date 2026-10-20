@@ -211,6 +211,10 @@ _DIMENSIONS = (
     ),
     _definition("molecular_weight", "g/mol", M / N, "physical", "Mass per amount."),
     _definition("molar_volume", "m^3/mol", L**3 / N, "physical", "Volume per amount."),
+    _definition("molar_volume_per_temperature", "m^3/(mol*K)", L**3 / N / THETA,
+                "physical", "Temperature derivative of molar volume."),
+    _definition("molar_volume_per_pressure", "m^3/(mol*Pa)", L**4 * T**2 / M / N,
+                "physical", "Pressure derivative of molar volume."),
     _definition("mass_density", "kg/m^3", M / L**3, "physical", "Mass per volume."),
     _definition("dynamic_viscosity", "Pa*s", M / L / T, "transport", "Dynamic viscosity."),
     _definition(
@@ -253,6 +257,10 @@ _DIMENSIONS = (
         "Electrical capacitance.",
     ),
     _definition("frequency", "Hz", T**-1, "instrument", "Frequency."),
+    _definition("length", "nm", L, "instrument", "Spectral wavelength."),
+    _definition("wavenumber", "cm^-1", L**-1, "instrument", "Infrared coordinate."),
+    _definition("relative_signal", "relative_signal", DimensionVector(), "instrument",
+                "Relative spectral detector signal."),
     _definition("chemical_shift", "ppm", DimensionVector(), "instrument", "NMR chemical shift."),
     _definition(
         "mass_to_charge",

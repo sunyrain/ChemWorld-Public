@@ -5,16 +5,24 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite, log
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from scipy.integrate import solve_ivp
 
+from chemworld.physchem.flash_units import phase_advection_rate
 from chemworld.physchem.maturity import (
     MaturityLevel,
     ModelCard,
     ValidationEvidence,
 )
+from chemworld.physchem.solver_backend import ODESolverPolicy, solve_ode
+
+if TYPE_CHECKING:
+    from chemworld.physchem.coupled_concentration import (
+        CoupledConcentrationRequest,
+        CoupledConcentrationResult,
+    )
+
 
 CONCENTRATION_MODEL_ID = "chemworld_vacuum_concentration_vnext"
 IDAES_COMMIT = "4275c45bfa76cd5b05926beaa8eee58f7b0b05e8"
@@ -383,6 +391,7 @@ class VacuumConcentrationResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "model_id": self.model_id,
+            "physical_mode": "declared_fixed_operating_profile",
             "equipment_id": self.equipment_id,
             "feed_amounts_mol": dict(self.feed_amounts_mol),
             "liquid_amounts_mol": dict(self.liquid_amounts_mol),
@@ -432,9 +441,16 @@ class VacuumConcentrationResult:
 
 
 def simulate_vacuum_concentration(
-    request: VacuumConcentrationRequest,
-) -> VacuumConcentrationResult:
-    """Run a controlled differential batch evaporation at fixed pressure and target T."""
+    request: VacuumConcentrationRequest | CoupledConcentrationRequest,
+) -> VacuumConcentrationResult | CoupledConcentrationResult:
+    """Select a declared fixed-profile or state-coupled concentration request."""
+    from chemworld.physchem.coupled_concentration import (
+        CoupledConcentrationRequest,
+        simulate_coupled_concentration,
+    )
+
+    if isinstance(request, CoupledConcentrationRequest):
+        return simulate_coupled_concentration(request)
 
     component_ids = tuple(request.feed_amounts_mol)
     specs = request.component_specs
@@ -538,10 +554,12 @@ def simulate_vacuum_concentration(
                         request.heater_power_W / state.mixture_latent_heat_J_mol,
                         equipment.max_evaporation_rate_mol_s,
                     )
-                    return np.array(
-                        [-rate * state.vapor_composition[key] for key in component_ids],
-                        dtype=float,
+                    # This declared differential profile has zero retained vapor:
+                    # one mol is a computational composition basis, not stock.
+                    flux, _ = phase_advection_rate(
+                        state.vapor_composition, state.mixture_latent_heat_J_mol, rate
                     )
+                    return np.array([-flux[key] for key in component_ids], dtype=float)
 
                 event_names: list[str] = []
                 events: list[Any] = []
@@ -592,15 +610,19 @@ def simulate_vacuum_concentration(
                     )
 
                 add_event("equilibrium_pressure", pressure_event)
-                solution = solve_ivp(
+                solution = solve_ode(
                     derivative,
-                    (0.0, available_boiling_time),
                     initial_vector,
-                    method="RK45",
+                    time_span_s=(0.0, available_boiling_time),
                     events=events,
-                    rtol=_SOLVER_RTOL,
-                    atol=_SOLVER_ATOL,
-                    max_step=max(available_boiling_time / 128.0, 1.0e-6),
+                    policy=ODESolverPolicy(
+                        "fixed_profile_concentration_rk45_v1",
+                        method="RK45",
+                        rtol=_SOLVER_RTOL,
+                        atol=_SOLVER_ATOL,
+                        max_step_s=max(available_boiling_time / 128.0, 1e-6),
+                        event_names=tuple(event_names),
+                    ),
                 )
                 solver_success = bool(solution.success)
                 solver_steps = len(solution.t)
@@ -610,7 +632,9 @@ def simulate_vacuum_concentration(
                 boiling_time = float(solution.t[-1])
                 elapsed_time = heating_time + boiling_time
                 termination_reason = "duration_exhausted"
-                for name, event_times in zip(event_names, solution.t_events, strict=True):
+                for name, event_times in zip(
+                    event_names, solution.raw_result.t_events, strict=True
+                ):
                     if len(event_times):
                         termination_reason = name
                         break

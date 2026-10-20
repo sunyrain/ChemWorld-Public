@@ -11,21 +11,19 @@ from typing import Any
 from chemworld.foundation.units import convert_value, unit_spec
 from chemworld.tasks import TaskSpec, default_kernel_maturity, get_task
 from chemworld.world.component_registry import (
-    COMPONENT_CAPABILITIES,
     MAX_CONNECTIONS,
     MAX_VESSELS,
     NETWORK_OPERATIONS,
     component_operations,
 )
+from chemworld.world.domain_modules import DomainModuleRegistry
+from chemworld.world.domain_modules import ParameterRule as _ParameterRule
 from chemworld.world.instruments import instrument_contracts
 from chemworld.world.operations import (
-    CRYSTALLIZATION_OPERATIONS,
-    ELECTROCHEMISTRY_OPERATIONS,
-    FLOW_OPERATIONS,
-    INSTRUMENTS,
     SEPARATION_OPERATIONS,
 )
 from chemworld.world.parameters import SUPPORTED_SPLITS
+from chemworld.world.physical_world import CompositionPhysics
 from chemworld.world.process_time_budget import ProcessTimeBudgetPolicy
 from chemworld.world.scenario import ScenarioSpec, get_scenario
 
@@ -52,6 +50,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "task",
         "vessels",
         "connections",
+        "physics",
     }
 )
 _COMPONENT_KEYS = frozenset({"id", "vessel", "kind", "role", "parameters"})
@@ -84,110 +83,6 @@ _RESOURCE_KEYS = frozenset(
         "process_time_policy",
     }
 )
-
-_INTERFACES_BY_COMPONENT = {
-    "reaction": ("material", "reaction_event"),
-    "thermal": ("temperature", "time", "energy", "safety"),
-    "phase": ("phase", "volume", "composition", "state_identity"),
-    "separation": ("material", "phase", "volume", "sample_identity"),
-    "crystallization": ("temperature", "phase", "crystal_state", "sample"),
-    "distillation": ("temperature", "phase", "volatility", "fraction"),
-    "continuous_flow": ("flow_rate", "residence_time", "temperature", "material"),
-    "electrochemistry": ("potential", "current", "charge", "energy", "material"),
-    "observation": ("public_measurement", "missingness", "cost", "latency", "sample"),
-}
-
-_COMPONENT_DEPENDENCIES = {
-    "separation": frozenset({"phase"}),
-    "crystallization": frozenset({"reaction", "thermal"}),
-    "distillation": frozenset({"reaction", "thermal"}),
-    "continuous_flow": frozenset({"reaction", "thermal"}),
-    "electrochemistry": frozenset({"reaction"}),
-}
-_STATE_OWNERS_BY_COMPONENT = {
-    "reaction": ("material_transformation", "reaction_event"),
-    "thermal": ("temperature_control",),
-    "phase": ("phase_transition",),
-    "separation": ("sample_routing",),
-    "crystallization": ("phase_transition", "crystal_state"),
-    "distillation": ("phase_transition", "fraction_state"),
-    "continuous_flow": ("flow_residence_state",),
-    "electrochemistry": ("electrical_state",),
-    "observation": ("public_measurement",),
-}
-_REQUIRED_ALL_OPERATIONS = {
-    "reaction": frozenset({"add_solvent", "add_reagent"}),
-    "crystallization": frozenset(CRYSTALLIZATION_OPERATIONS),
-    "distillation": frozenset({"distill", "collect_fraction"}),
-    "continuous_flow": frozenset(FLOW_OPERATIONS),
-    "electrochemistry": frozenset(ELECTROCHEMISTRY_OPERATIONS),
-    "observation": frozenset({"measure"}),
-}
-_REQUIRED_ANY_OPERATIONS = {
-    "thermal": frozenset({"heat", "wait", "cool_crystallize", "distill", "run_flow"}),
-    "separation": frozenset(SEPARATION_OPERATIONS),
-}
-
-
-@dataclass(frozen=True)
-class _ParameterRule:
-    value_kind: str
-    unit: str | None = None
-    minimum: float | None = None
-    maximum: float | None = None
-    choices: tuple[str, ...] = ()
-
-
-_COMPONENT_PARAMETER_RULES: dict[str, dict[str, _ParameterRule]] = {
-    "reaction": {
-        "family": _ParameterRule("string"),
-        "controls": _ParameterRule(
-            "choices",
-            choices=("reagent", "catalyst", "solvent", "temperature", "time"),
-        ),
-    },
-    "thermal": {
-        "temperature_range_K": _ParameterRule("range", "K", 250.0, 430.0),
-        "duration_range_s": _ParameterRule("range", "s", 1.0, 14_400.0),
-    },
-    "phase": {
-        "phases": _ParameterRule(
-            "choices",
-            choices=("reactor_liquid", "aqueous", "organic", "solid"),
-        ),
-    },
-    "separation": {
-        "operations": _ParameterRule("choices", choices=SEPARATION_OPERATIONS),
-    },
-    "crystallization": {
-        "temperature_range_K": _ParameterRule("range", "K", 250.0, 330.0),
-        "seed_mass_range_g": _ParameterRule("range", "g", 1.0e-6, 0.050),
-    },
-    "distillation": {
-        "temperature_range_K": _ParameterRule("range", "K", 298.15, 430.0),
-        "reflux_ratio_range": _ParameterRule("range", "dimensionless", 0.0, 10.0),
-        "fraction_count": _ParameterRule("integer", minimum=1.0, maximum=24.0),
-    },
-    "continuous_flow": {
-        "flow_rate_range_mL_min": _ParameterRule("range", "mL/min", 0.01, 20.0),
-        "residence_time_range_s": _ParameterRule("range", "s", 1.0, 7200.0),
-        "temperature_range_K": _ParameterRule("range", "K", 298.15, 430.0),
-    },
-    "electrochemistry": {
-        "potential_range_V": _ParameterRule("range", "V", -2.5, 2.5),
-        "current_range_mA": _ParameterRule("range", "mA", 1.0e-3, 500.0),
-        "duration_range_s": _ParameterRule("range", "s", 1.0, 14_400.0),
-    },
-    "observation": {
-        "instruments": _ParameterRule("choices", choices=INSTRUMENTS),
-    },
-}
-
-_CUSTOM_UNIT_TABLE = {
-    "mL/min": ("flow_rate", 1.0),
-    "L/s": ("flow_rate", 60_000.0),
-}
-
 
 @dataclass(frozen=True)
 class WorldCompositionDiagnostic:
@@ -279,10 +174,12 @@ class WorldComponentRequest:
     vessel: str = "reactor"
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> WorldComponentRequest:
+    def from_dict(
+        cls, payload: Mapping[str, Any], *, modules: DomainModuleRegistry | None = None
+    ) -> WorldComponentRequest:
         _require_exact_keys(payload, _COMPONENT_KEYS, "component")
         kind = str(payload.get("kind", "")).strip()
-        if kind not in SUPPORTED_COMPONENT_KINDS:
+        if kind not in (modules or DomainModuleRegistry.default()).components():
             raise WorldCompositionError(f"unsupported component kind: {kind!r}")
         role = str(payload.get("role", kind)).strip()
         if not role:
@@ -333,7 +230,7 @@ class CompositionTaskRequest:
     tags: tuple[str, ...]
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> CompositionTaskRequest:
+    def from_dict(cls, payload: Mapping[str, Any], *, modules=None) -> CompositionTaskRequest:
         _require_exact_keys(payload, _TASK_KEYS, "task")
         budget_value = payload.get("budget")
         budget = None if budget_value is None else int(budget_value)
@@ -347,10 +244,15 @@ class CompositionTaskRequest:
         instruments = (
             None
             if instruments_value is None
+            else ()
+            if instruments_value == []
             else _string_tuple(instruments_value, "task instruments")
         )
         if instruments is not None:
-            unknown_instruments = sorted(set(instruments) - set(INSTRUMENTS))
+            unknown_instruments = sorted(
+                set(instruments)
+                - set((modules or DomainModuleRegistry.default()).instrument_specs())
+            )
             if unknown_instruments:
                 raise WorldCompositionError(
                     f"task instruments are unsupported: {unknown_instruments}"
@@ -474,9 +376,16 @@ class WorldCompositionSpec:
     task: CompositionTaskRequest
     vessels: tuple[dict[str, Any], ...] = ()
     connections: tuple[dict[str, Any], ...] = ()
+    physics: CompositionPhysics | None = None
+    modules: DomainModuleRegistry = field(
+        default_factory=DomainModuleRegistry.default, repr=False, compare=False
+    )
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> WorldCompositionSpec:
+    def from_dict(
+        cls, payload: Mapping[str, Any], *, modules: DomainModuleRegistry | None = None
+    ) -> WorldCompositionSpec:
+        modules = modules or DomainModuleRegistry.default()
         _require_exact_keys(payload, _TOP_LEVEL_KEYS, "world composition")
         schema_version = str(payload.get("schema_version", ""))
         if schema_version != WORLD_COMPOSITION_SCHEMA_VERSION:
@@ -491,7 +400,7 @@ class WorldCompositionSpec:
         if not isinstance(components_value, list) or not components_value:
             raise WorldCompositionError("components must be a non-empty list")
         components = tuple(
-            WorldComponentRequest.from_dict(component)
+            WorldComponentRequest.from_dict(component, modules=modules)
             for component in components_value
             if isinstance(component, Mapping)
         )
@@ -510,7 +419,14 @@ class WorldCompositionSpec:
                 ),
             )
         components = tuple(
-            sorted(components, key=lambda item: (_COMPONENT_ORDER[item.kind], item.id))
+            sorted(
+                components,
+                key=lambda item: (
+                    _COMPONENT_ORDER.get(item.kind, len(_COMPONENT_ORDER)),
+                    item.kind,
+                    item.id,
+                ),
+            )
         )
         vessel_value = payload.get(
             "vessels",
@@ -529,8 +445,10 @@ class WorldCompositionSpec:
             if (
                 isinstance(capacity, bool)
                 or not isinstance(capacity, (int, float))
-                or not 0.0001 <= capacity <= 0.1
+                or not 0 < capacity < float("inf")
             ):
+                raise WorldCompositionError("vessel capacity_L must be finite and positive")
+            if payload.get("physics") is None and not 0.0001 <= capacity <= 0.1:
                 raise WorldCompositionError("vessel capacity_L must be in [0.0001, 0.1]")
             vessels.append({"id": name, "capacity_L": float(capacity)})
         if len({v["id"] for v in vessels}) != len(vessels):
@@ -548,9 +466,15 @@ class WorldCompositionSpec:
             composition_id=composition_id,
             world_split=world_split,
             components=components,
-            task=CompositionTaskRequest.from_dict(task_value),
+            task=CompositionTaskRequest.from_dict(task_value, modules=modules),
             vessels=tuple(vessels),
             connections=tuple(deepcopy(dict(c)) for c in connections),
+            modules=modules,
+            physics=(
+                None
+                if payload.get("physics") is None
+                else CompositionPhysics.from_dict(payload["physics"])
+            ),
         )
 
     @property
@@ -566,6 +490,7 @@ class WorldCompositionSpec:
             "task": self.task.to_dict(),
             "vessels": deepcopy(list(self.vessels)),
             "connections": deepcopy(list(self.connections)),
+            **({"physics": self.physics.to_dict()} if self.physics is not None else {}),
         }
 
 
@@ -587,7 +512,7 @@ class CompiledWorldComposition:
     task_spec: TaskSpec
     scenario_spec: ScenarioSpec
     public_surface: dict[str, Any]
-    runtime_task_profile_id: str
+    runtime_task_profile_id: str | None
     compatibility: WorldCompatibilityReport
 
     def to_public_dict(self) -> dict[str, Any]:
@@ -599,9 +524,22 @@ class CompiledWorldComposition:
             "seed": self.task_spec.seeds[0] if seed is None else int(seed),
         }
 
+    def bind_task(
+        self, request: Mapping[str, Any] | CompositionTaskRequest
+    ) -> CompiledWorldComposition:
+        """Rebind policy without replacing physical entities, laws or initial state."""
+        task = (
+            request
+            if isinstance(request, CompositionTaskRequest)
+            else CompositionTaskRequest.from_dict(request, modules=self.spec.modules)
+        )
+        return compile_world_composition(replace(self.spec, task=task))
+
 
 def _resolve_pattern(spec: WorldCompositionSpec) -> _CompositionPattern:
-    capabilities = [COMPONENT_CAPABILITIES[kind] for kind in spec.component_kinds]
+    # Old compositions are boundary presets. Explicit physics never selects a
+    # legacy scenario by component priority.
+    capabilities = [spec.modules.components()[kind] for kind in spec.component_kinds]
     selected = max(capabilities, key=lambda c: c.priority)
     template = (
         selected.reactive_template
@@ -620,21 +558,22 @@ def _resolve_pattern(spec: WorldCompositionSpec) -> _CompositionPattern:
 
 def _surface_template(spec: WorldCompositionSpec, pattern: _CompositionPattern) -> TaskSpec:
     template = get_task(pattern.template_task_id)
-    operations = component_operations(spec.component_kinds)
+    operations = component_operations(spec.component_kinds, modules=spec.modules)
     if len(spec.vessels) > 1 or spec.connections:
         operations = (*operations, *NETWORK_OPERATIONS)
     instruments = tuple(
         dict.fromkeys(
             instrument
             for kind in spec.component_kinds
-            if COMPONENT_CAPABILITIES[kind].template is not None
+            if spec.modules.components()[kind].template is not None
             for instrument in get_task(
-                COMPONENT_CAPABILITIES[kind].template or pattern.template_task_id
+                spec.modules.components()[kind].template or pattern.template_task_id
             ).allowed_instruments
         )
     )
     return replace(
         template,
+        domain_modules=spec.modules,
         allowed_operations=operations,
         allowed_instruments=instruments,
         episode_mode="single_experiment" if len(spec.vessels) > 1 else template.episode_mode,
@@ -642,6 +581,224 @@ def _surface_template(spec: WorldCompositionSpec, pattern: _CompositionPattern) 
         if len(spec.vessels) > 1
         else template.termination_policy,
     )
+
+
+def physical_operations(spec: WorldCompositionSpec, vessel: str | None = None) -> tuple[str, ...]:
+    if spec.physics is not None and vessel is None:
+        return tuple(
+            dict.fromkeys(
+                [
+                    op
+                    for local in spec.physics.initial_states
+                    for op in physical_operations(spec, local)
+                ]
+                + (list(NETWORK_OPERATIONS) if len(spec.vessels) > 1 or spec.connections else [])
+            )
+        )
+    kinds = tuple(c.kind for c in spec.components if vessel is None or c.vessel == vessel)
+    operations = component_operations(
+        kinds, modules=spec.modules, include_common=spec.physics is None
+    )
+    if spec.physics is not None:
+        operations = (
+            *spec.physics.available_operations(operations, spec.modules, vessel),
+            "terminate",
+        )
+    if vessel is None and (len(spec.vessels) > 1 or spec.connections):
+        operations = (*operations, *NETWORK_OPERATIONS)
+    return tuple(dict.fromkeys(operations))
+
+
+def physical_instruments(spec: WorldCompositionSpec, vessel: str | None = None) -> tuple[str, ...]:
+    """Installed instruments, independent of the task's permission subset."""
+    return tuple(
+        dict.fromkeys(
+            name
+            for component in spec.components
+            if (vessel is None or component.vessel == vessel) and component.kind == "observation"
+            for name in component.parameters.get("instruments", ())
+        )
+    )
+
+
+def _native_task_defaults(spec: WorldCompositionSpec) -> TaskSpec:
+    operations = physical_operations(spec)
+    instruments = physical_instruments(spec)
+    scenario = spec.physics.scenario_spec(spec.composition_id, spec.world_split)
+    return TaskSpec(
+        task_id=spec.composition_id,
+        env_id="ChemWorld",
+        world_law_id=scenario.world_law_id,
+        scenario_id=scenario.scenario_id,
+        initial_state_id=scenario.initial_state_id,
+        world_split=spec.world_split,
+        objective="collect observations",
+        budget=32,
+        seeds=(0,),
+        threshold=0.0,
+        episode_mode="single_experiment",
+        allowed_operations=operations,
+        allowed_instruments=instruments,
+        observation_policy="instrument-only",
+        termination_policy="explicit-stop-or-budget",
+        success_metrics=("trajectory_validity",),
+        safety_limit=0.65,
+        difficulty="authored",
+        description="Explicit physical world.",
+        tags=("composed-world",),
+        domain_modules=spec.modules,
+        kernel_maturity=default_kernel_maturity(operations, allowed_instruments=instruments),
+    )
+
+
+def _check_native_task(
+    spec: WorldCompositionSpec,
+    template: TaskSpec,
+    diagnostics: list[WorldCompositionDiagnostic],
+) -> dict[str, float | int]:
+    request = spec.task
+    operations = request.operations or template.allowed_operations
+    instruments = (
+        template.allowed_instruments if request.instruments is None else request.instruments
+    )
+    for field_name, requested, provided in (
+        ("operations", operations, template.allowed_operations),
+        ("instruments", instruments, template.allowed_instruments),
+    ):
+        missing = set(requested) - set(provided)
+        if missing:
+            diagnostics.append(
+                _diagnostic(
+                    "missing_capability",
+                    f"task.{field_name}",
+                    f"world does not provide {sorted(missing)}",
+                )
+            )
+    termination = request.termination or template.termination_policy
+    if termination not in {"explicit-stop-or-budget", "final-assay-or-budget"}:
+        diagnostics.append(
+            _diagnostic("lifecycle_hole", "task.termination", "unsupported termination policy")
+        )
+    if "terminate" not in operations:
+        diagnostics.append(
+            _diagnostic(
+                "lifecycle_hole", "task.operations", "explicit termination requires terminate"
+            )
+        )
+    assay = termination == "final-assay-or-budget"
+    terminal_instruments = tuple(
+        name for name in instruments
+        if spec.modules.instrument_specs()[name].definition.requires_terminated
+    )
+    if assay and (not terminal_instruments or "measure" not in operations):
+        diagnostics.append(
+            _diagnostic(
+                "lifecycle_hole",
+                "task.termination",
+                "final assay requires its instrument and measure",
+            )
+        )
+    if instruments and "measure" not in operations:
+        diagnostics.append(
+            _diagnostic("missing_capability", "task.operations", "instruments require measure")
+        )
+    for vessel in spec.physics.initial_states:
+        for name in set(physical_instruments(spec, vessel)) & set(instruments):
+            contract = spec.modules.instrument_specs()[name].contract
+            required_phase = contract.input_state_schema.get("required_phase")
+            if (
+                required_phase is not None
+                and spec.physics.initial_states[vessel].phase != required_phase
+            ):
+                diagnostics.append(_diagnostic(
+                    "missing_capability", "task.instruments",
+                    f"{name} in {vessel} requires phase {required_phase}",
+                ))
+            if (contract.physical_duration_s and vessel not in spec.physics.thermal_models
+                    and vessel not in spec.physics.flash_models
+                    and vessel not in spec.physics.liquid_models
+                    and vessel not in spec.physics.column_models
+                    and vessel not in spec.physics.concentration_models
+                    and not any(factory(spec).supports(spec.physics.initial_states[vessel])
+                                for factory in spec.modules.advance_factories().values())):
+                diagnostics.append(_diagnostic(
+                    "missing_capability", "task.instruments",
+                    f"{name} in {vessel} requires a supported physical clock",
+                ))
+    metrics = request.evaluation_metrics or template.success_metrics
+    supported = {"trajectory_validity", "final_assay_score"}
+    supported.update(
+        key
+        for name in instruments
+        for key in spec.modules.instrument_specs()[name].definition.observable_keys
+    )
+    if set(metrics) - supported:
+        diagnostics.append(
+            _diagnostic(
+                "missing_capability",
+                "task.evaluation.metrics",
+                "metrics need an installed observation channel",
+            )
+        )
+    if "final_assay_score" in metrics:
+        roles = {role for s in spec.physics.network.species for role in s.observable_aliases}
+        if "final_assay" not in instruments or not {"reactant", "target"} <= roles:
+            diagnostics.append(
+                _diagnostic(
+                    "missing_capability",
+                    "task.evaluation",
+                    "assay scoring requires instrument and declared reactant/target roles",
+                )
+            )
+    if set(metrics) - {"trajectory_validity"}:
+        from chemworld.world.scoring import OBJECTIVES
+
+        if request.objective not in OBJECTIVES:
+            diagnostics.append(
+                _diagnostic(
+                    "invalid_parameter",
+                    "task.objective",
+                    "scored metrics require an explicit supported objective",
+                )
+            )
+    minimum = {
+        "operation_budget": 2 if assay else 1,
+        "time_s": 0.0,
+        "instrument_uses": int(assay),
+        "final_assays": int(assay),
+        "sample_volume_L": min((
+            instrument_contracts(modules=spec.modules)[name].sample_consumption_L
+            for name in terminal_instruments
+        ), default=0.0) if assay
+        else 0.0,
+    }
+    budget = request.budget or template.budget
+    if budget < minimum["operation_budget"]:
+        diagnostics.append(
+            _diagnostic(
+                "resource_impossibility",
+                "task.budget",
+                "budget cannot complete the declared ending",
+            )
+        )
+    for name, lower in minimum.items():
+        amount = _resource_number(
+            request.resources,
+            name,
+            diagnostics,
+            integer=name in {"operation_budget", "instrument_uses", "final_assays"},
+        )
+        if amount is not None and (
+            amount < lower or (name == "operation_budget" and amount != budget)
+        ):
+            diagnostics.append(
+                _diagnostic(
+                    "resource_impossibility",
+                    f"task.resources.{name}",
+                    "resource conflicts with task budget or ending",
+                )
+            )
+    return minimum
 
 
 def _diagnostic(
@@ -682,10 +839,6 @@ def _validate_connections(
                     "connection requires exactly id, source, target, unit",
                 )
             )
-        if connection.get("unit") != "mol":
-            diagnostics.append(
-                _diagnostic("unit_mismatch", path, "material ports use mol; carrier volume is L")
-            )
         endpoints = []
         for direction in ("source", "target"):
             endpoint = connection.get(direction)
@@ -700,7 +853,9 @@ def _validate_connections(
                 continue
             endpoints.append(component)
             allowed = (
-                COMPONENT_CAPABILITIES[component.kind].outputs if direction == "source" else ("in",)
+                spec.modules.components()[component.kind].outputs
+                if direction == "source"
+                else spec.modules.components()[component.kind].input_ports
             )
             if component.kind == "observation" or endpoint["port"] not in allowed:
                 diagnostics.append(
@@ -709,6 +864,21 @@ def _validate_connections(
                         path,
                         "port direction or material capability mismatch",
                         component.id,
+                    )
+                )
+        if len(endpoints) == 2:
+            try:
+                spec.modules.validate_connection(
+                    endpoints[0].kind,
+                    connection["source"]["port"],
+                    endpoints[1].kind,
+                    connection["target"]["port"],
+                    connection.get("unit"),
+                )
+            except ValueError as exc:
+                diagnostics.append(
+                    _diagnostic(
+                        "unit_mismatch" if "units" in str(exc) else "invalid_port", path, str(exc)
                     )
                 )
         if len(endpoints) == 2 and endpoints[0].vessel == endpoints[1].vessel:
@@ -720,15 +890,6 @@ def _validate_connections(
 
 
 def _convert_authored_value(value: float, source_unit: str, target_unit: str) -> float:
-    if source_unit in _CUSTOM_UNIT_TABLE or target_unit in _CUSTOM_UNIT_TABLE:
-        try:
-            source_dimension, source_scale = _CUSTOM_UNIT_TABLE[source_unit]
-            target_dimension, target_scale = _CUSTOM_UNIT_TABLE[target_unit]
-        except KeyError as exc:
-            raise ValueError(f"cannot convert {source_unit!r} to {target_unit!r}") from exc
-        if source_dimension != target_dimension:
-            raise ValueError(f"cannot convert {source_unit!r} to {target_unit!r}")
-        return value * source_scale / target_scale
     source = unit_spec(source_unit)
     target = unit_spec(target_unit)
     if source.dimension != target.dimension:
@@ -880,7 +1041,7 @@ def _validate_component_parameters(
 ) -> dict[tuple[str, str], tuple[float, float]]:
     operation_field_bounds: dict[tuple[str, str], tuple[float, float]] = {}
     for component in spec.components:
-        rules = _COMPONENT_PARAMETER_RULES[component.kind]
+        rules = dict(spec.modules.components()[component.kind].parameters)
         for parameter_name in sorted(set(component.parameters) - set(rules)):
             diagnostics.append(
                 _diagnostic(
@@ -894,6 +1055,14 @@ def _validate_component_parameters(
             rule = rules.get(parameter_name)
             if rule is None:
                 continue
+            # Native thermal laws declare their own validity (e.g. NASA7 gas
+            # kinetics). The historical liquid range is not a universal limit.
+            if (component.kind == "thermal" and spec.physics is not None
+                    and parameter_name == "temperature_range_K"):
+                bounds = spec.physics.declared_temperature_bounds_k(
+                    spec.physics.initial_states[component.vessel], spec.modules)
+                if bounds is not None:
+                    rule = replace(rule, minimum=bounds[0], maximum=bounds[1])
             path = f"components.{component.kind}.parameters.{parameter_name}"
             if rule.value_kind == "string":
                 if not isinstance(value, str) or not value.strip():
@@ -906,7 +1075,7 @@ def _validate_component_parameters(
                         )
                     )
                 continue
-            if rule.value_kind == "choices":
+            if rule.value_kind in {"choices", "instrument_ids"}:
                 if not isinstance(value, (list, tuple)) or not value:
                     diagnostics.append(
                         _diagnostic(
@@ -918,7 +1087,12 @@ def _validate_component_parameters(
                     )
                     continue
                 choices = tuple(str(item) for item in value)
-                invalid = sorted(set(choices) - set(rule.choices))
+                allowed = (
+                    spec.modules.instrument_specs().keys()
+                    if rule.value_kind == "instrument_ids"
+                    else rule.choices
+                )
+                invalid = sorted(set(choices) - set(allowed))
                 if invalid or len(set(choices)) != len(choices):
                     diagnostics.append(
                         _diagnostic(
@@ -1012,17 +1186,21 @@ def _resource_number(
 
 def check_world_composition_compatibility(
     value: Mapping[str, Any] | WorldCompositionSpec | CompiledWorldComposition,
+    *,
+    modules: DomainModuleRegistry | None = None,
 ) -> WorldCompatibilityReport:
     """Return all deterministic compatibility diagnostics without starting an environment."""
 
     if isinstance(value, CompiledWorldComposition):
         return value.compatibility
     spec = (
-        value if isinstance(value, WorldCompositionSpec) else WorldCompositionSpec.from_dict(value)
+        value
+        if isinstance(value, WorldCompositionSpec)
+        else WorldCompositionSpec.from_dict(value, modules=modules)
     )
     diagnostics: list[WorldCompositionDiagnostic] = []
     component_set = frozenset(spec.component_kinds)
-    if "observation" not in component_set:
+    if spec.physics is None and "observation" not in component_set:
         diagnostics.append(
             _diagnostic(
                 "missing_dependency",
@@ -1041,7 +1219,8 @@ def check_world_composition_compatibility(
                 "reaction",
             )
         )
-    for component_kind, required in _COMPONENT_DEPENDENCIES.items():
+    for component_kind, capability in spec.modules.components().items():
+        required = set(capability.dependencies)
         if component_kind not in component_set:
             continue
         for missing in sorted(required - component_set):
@@ -1059,14 +1238,18 @@ def check_world_composition_compatibility(
     # reactor is not a second owner of the first reactor's material state.
     state_owners: dict[str, str] = {}
     reaction_families = {
-        str(c.parameters["family"]) for c in spec.components
+        str(c.parameters["family"])
+        for c in spec.components
         if c.kind == "reaction" and "family" in c.parameters
     }
     if len(reaction_families) > 1:
-        diagnostics.append(_diagnostic(
-            "interface_mismatch", "components",
-            "connected vessels require one shared reaction family and species mechanism",
-        ))
+        diagnostics.append(
+            _diagnostic(
+                "interface_mismatch",
+                "components",
+                "connected vessels require one shared reaction family and species mechanism",
+            )
+        )
     vessel_bounds: dict[str, dict[tuple[str, str], tuple[float, float]]] = {}
     declared_vessels = {v["id"] for v in spec.vessels}
     for component in spec.components:
@@ -1074,7 +1257,7 @@ def check_world_composition_compatibility(
             diagnostics.append(
                 _diagnostic("unknown_vessel", "components", component.vessel, component.id)
             )
-        for state_id in _STATE_OWNERS_BY_COMPONENT[component.kind]:
+        for state_id in spec.modules.components()[component.kind].state_owners:
             key = f"{component.vessel}:{state_id}"
             previous = state_owners.get(key)
             if previous is not None:
@@ -1096,7 +1279,7 @@ def check_world_composition_compatibility(
                 _diagnostic("missing_dependency", "vessels", f"vessel {vessel!r} has no components")
             )
         for c in local:
-            for missing in sorted(_COMPONENT_DEPENDENCIES.get(c.kind, frozenset()) - kinds):
+            for missing in sorted(set(spec.modules.components()[c.kind].dependencies) - kinds):
                 diagnostics.append(
                     _diagnostic(
                         "missing_dependency",
@@ -1120,6 +1303,20 @@ def check_world_composition_compatibility(
     operation_field_bounds = (
         next(iter(vessel_bounds.values()), {}) if len(vessel_bounds) == 1 else {}
     )
+    if spec.physics is not None:
+        try:
+            spec.physics.validate(spec)
+        except (ValueError, KeyError, TypeError) as exc:
+            diagnostics.append(_diagnostic("invalid_physics", "physics", str(exc)))
+        minimum = _check_native_task(spec, _native_task_defaults(spec), diagnostics)
+        return WorldCompatibilityReport(
+            "native-components",
+            tuple(diagnostics),
+            state_owners,
+            minimum,
+            operation_field_bounds,
+            vessel_bounds,
+        )
     pattern = _resolve_pattern(spec)
     minimum_resources: dict[str, float | int] = {}
     template = _surface_template(spec, pattern)
@@ -1135,7 +1332,7 @@ def check_world_composition_compatibility(
                 f"operations are outside the compiled component surface: {invalid_operations}",
             )
         )
-    invalid_instruments = sorted(set(instruments) - set(template.allowed_instruments))
+    invalid_instruments = sorted(set(instruments) - set(spec.modules.instrument_specs()))
     if invalid_instruments:
         diagnostics.append(
             _diagnostic(
@@ -1146,7 +1343,7 @@ def check_world_composition_compatibility(
         )
     for component_kind in spec.component_kinds:
         missing_operations = sorted(
-            _REQUIRED_ALL_OPERATIONS.get(component_kind, frozenset()) - set(operations)
+            set(spec.modules.components()[component_kind].required_all) - set(operations)
         )
         if missing_operations:
             diagnostics.append(
@@ -1158,7 +1355,7 @@ def check_world_composition_compatibility(
                     component_kind,
                 )
             )
-        required_any = _REQUIRED_ANY_OPERATIONS.get(component_kind)
+        required_any = set(spec.modules.components()[component_kind].required_any)
         if required_any and not set(operations).intersection(required_any):
             diagnostics.append(
                 _diagnostic(
@@ -1292,7 +1489,7 @@ def check_world_composition_compatibility(
         "final_assays": 1,
         "time_s": pattern.minimum_process_time_s,
     }
-    contracts = instrument_contracts()
+    contracts = instrument_contracts(modules=spec.modules)
     minimum_sample_volume = contracts["final_assay"].sample_consumption_L
     if pattern.minimum_nonfinal_measurements and nonfinal_instruments:
         minimum_nonfinal_sample = min(
@@ -1357,13 +1554,17 @@ def check_world_composition_compatibility(
 
 def compile_world_composition(
     value: Mapping[str, Any] | WorldCompositionSpec | CompiledWorldComposition,
+    *,
+    modules: DomainModuleRegistry | None = None,
 ) -> CompiledWorldComposition:
     """Compile one declarative request into a runtime-ready public contract."""
 
     if isinstance(value, CompiledWorldComposition):
         return value
     spec = (
-        value if isinstance(value, WorldCompositionSpec) else WorldCompositionSpec.from_dict(value)
+        value
+        if isinstance(value, WorldCompositionSpec)
+        else WorldCompositionSpec.from_dict(value, modules=modules)
     )
     compatibility = check_world_composition_compatibility(spec)
     if not compatibility.compatible:
@@ -1374,27 +1575,15 @@ def compile_world_composition(
             f"world composition compatibility failed: {details}",
             diagnostics=compatibility.diagnostics,
         )
-    pattern = _resolve_pattern(spec)
-    template = _surface_template(spec, pattern)
+    pattern = _resolve_pattern(spec) if spec.physics is None else None
+    template = (
+        _surface_template(spec, pattern) if pattern is not None else _native_task_defaults(spec)
+    )
     request = spec.task
     operations = request.operations or template.allowed_operations
-    invalid_operations = sorted(set(operations) - set(template.allowed_operations))
-    if invalid_operations:
-        raise WorldCompositionError(
-            f"task operations are outside the compiled component surface: {invalid_operations}"
-        )
-    if not {"terminate", "measure"}.issubset(operations):
-        raise WorldCompositionError(
-            "task operations must include terminate and measure for lifecycle closure"
-        )
-    instruments = request.instruments or template.allowed_instruments
-    invalid_instruments = sorted(set(instruments) - set(template.allowed_instruments))
-    if invalid_instruments:
-        raise WorldCompositionError(
-            f"task instruments are outside the compiled component surface: {invalid_instruments}"
-        )
-    if "final_assay" not in instruments:
-        raise WorldCompositionError("task instruments must include final_assay")
+    instruments = (
+        template.allowed_instruments if request.instruments is None else request.instruments
+    )
     budget = request.budget or template.budget
     resources = {
         "operation_budget": budget,
@@ -1409,8 +1598,13 @@ def compile_world_composition(
     threshold = (
         template.threshold if request.evaluation_threshold is None else request.evaluation_threshold
     )
-    scenario_spec = get_scenario(template.scenario_id, split=spec.world_split)
+    scenario_spec = (
+        get_scenario(template.scenario_id, split=spec.world_split)
+        if spec.physics is None
+        else spec.physics.scenario_spec(spec.composition_id, spec.world_split)
+    )
     task_spec = TaskSpec(
+        domain_modules=spec.modules,
         task_id=spec.composition_id,
         env_id=template.env_id,
         world_law_id=template.world_law_id,
@@ -1445,7 +1639,7 @@ def compile_world_composition(
             {
                 interface
                 for component in spec.components
-                for interface in _INTERFACES_BY_COMPONENT[component.kind]
+                for interface in spec.modules.components()[component.kind].interfaces
             }
         )
     )
@@ -1491,7 +1685,7 @@ def compile_world_composition(
         task_spec=task_spec,
         scenario_spec=scenario_spec,
         public_surface=public_surface,
-        runtime_task_profile_id=pattern.template_task_id,
+        runtime_task_profile_id=pattern.template_task_id if pattern is not None else None,
         compatibility=compatibility,
     )
 

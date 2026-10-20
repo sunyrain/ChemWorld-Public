@@ -13,6 +13,8 @@ def validate_action(
     action: dict[str, Any],
     task_info: dict[str, Any],
     state_summary: dict[str, Any] | None = None,
+    *,
+    modules=None,
 ) -> SchemaValidationResult:
     """Validate an action against schema and task policy.
 
@@ -22,10 +24,16 @@ def validate_action(
     """
 
     del state_summary
-    schema_result = validate_action_schema(action)
+    codec = ActionCodec(modules=modules)
+    schema_result = validate_action_schema(
+        action,
+        operation_types=codec.operation_types,
+        instruments=codec.instruments,
+        modules=modules,
+    )
     if not schema_result.valid:
         return schema_result
-    canonical = ActionCodec().canonicalize(action)
+    canonical = codec.canonicalize(action)
     errors: list[str] = []
     allowed_operations = set(task_info.get("allowed_operations", []))
     if allowed_operations and canonical["operation"] not in allowed_operations:

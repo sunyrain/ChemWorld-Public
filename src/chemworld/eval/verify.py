@@ -205,8 +205,6 @@ def verify_records(
             "electrochemical_material_family_id": ("electrochemical_material_family_id"),
             "crystallization_material_family_id": ("crystallization_material_family_id"),
             "scoring_contract_id": "scoring_contract_id",
-            "observation_noise_mode": "observation_noise_mode",
-            "observation_noise_namespace": "observation_noise_namespace",
         }
         for record_key, env_key in optional_string_kwargs.items():
             value = first.get(record_key)
@@ -236,6 +234,10 @@ def verify_records(
         }
     # Observation streams can be overridden for composed worlds as well as
     # benchmark tasks. Reconstruct the recorded stream independently of seed.
+    for key in ("observation_noise_mode", "observation_noise_namespace"):
+        value = first.get(key)
+        if isinstance(value, str) and value:
+            env_kwargs[key] = value
     observation_seed = first.get("observation_seed")
     if isinstance(observation_seed, int) and not isinstance(observation_seed, bool):
         env_kwargs["observation_seed_override"] = observation_seed
@@ -463,14 +465,29 @@ def verify_records(
                 "state_patches_summary",
                 "transaction_status",
                 "rollback_reason",
+                "operation_outcome",
+                "actual_duration_s",
+                "outcome_diagnostics",
+                "measurement_status",
+                "terminal_assay",
                 "state_delta_summary",
                 "observed_mask",
                 "raw_signal",
+                "native_observation",
                 "processed_estimate",
                 "uncertainty",
                 "measurement_cost",
                 "sample_consumed",
             )
+            if record.get("material_balance"):
+                recorded_balance = record["material_balance"]
+                replayed_balance = replay_env._last_operation_record.material_balance.to_dict(
+                    include_hidden="exchanges" in recorded_balance
+                )
+                mismatches.extend(_jsonish_mismatches(
+                    step=int(record["step"]), field="material_balance",
+                    recorded=recorded_balance, replayed=replayed_balance, tolerance=tolerance,
+                ))
             for field in replay_metadata_fields:
                 if field not in record:
                     continue
@@ -488,8 +505,13 @@ def verify_records(
                     if abs_error is not None:
                         max_abs_error = max(max_abs_error, float(abs_error))
             if record.get("constitution_checks"):
-                recorded_checks = record["constitution_checks"]
-                replay_checks = info.get("constitution_checks", [])
+                # JSON maps can reorder compartments without changing physics.
+                # Compare the full multiset, retaining duplicates and failures.
+                def check_order(check):
+                    return str(check.get("name")), str(check.get("passed"))
+
+                recorded_checks = sorted(record["constitution_checks"], key=check_order)
+                replay_checks = sorted(info.get("constitution_checks", []), key=check_order)
                 if len(recorded_checks) != len(replay_checks):
                     mismatches.append(
                         {

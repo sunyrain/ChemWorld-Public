@@ -30,60 +30,200 @@
     "contract_hash"
   ],
   "properties": {
-    "task_contract_version": {"type": "string"},
-    "task_id": {"type": "string", "minLength": 1},
-    "env_id": {"type": "string", "const": "ChemWorld"},
-    "world_law_id": {"type": "string", "minLength": 1},
-    "scenario_id": {"type": "string", "minLength": 1},
-    "initial_state_id": {"type": "string", "minLength": 1},
-    "world_split": {"type": "string", "enum": ["public-dev", "public-test", "private-eval"]},
-    "objective": {"type": "string", "minLength": 1},
-    "budget": {"type": "integer", "minimum": 1},
+    "task_contract_version": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "env_id": {
+      "type": "string",
+      "const": "ChemWorld"
+    },
+    "world_law_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scenario_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "initial_state_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "world_split": {
+      "type": "string",
+      "enum": [
+        "public-dev",
+        "public-test",
+        "private-eval"
+      ]
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "budget": {
+      "type": "integer",
+      "minimum": 1
+    },
     "seeds": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"type": "integer", "minimum": 0}
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      }
     },
-    "threshold": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-    "episode_mode": {"type": "string", "enum": ["single_experiment", "campaign"]},
+    "threshold": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "episode_mode": {
+      "type": "string",
+      "enum": [
+        "single_experiment",
+        "campaign"
+      ]
+    },
     "allowed_operations": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "enum": ["add_reagent", "add_component", "add_solvent", "add_catalyst", "heat", "wait", "sample", "quench", "create_container", "transfer_material", "select_vessel", "route_material", "configure_instrument", "configure_control", "queue_control_stage", "set_control_feedback", "advance_control", "pause_control", "resume_control", "add_phase", "add_extractant", "mix", "settle", "separate_phase", "wash", "dry", "concentrate", "transfer", "seed_crystals", "cool_crystallize", "filter_crystals", "resuspend_crystals", "evaporate", "distill", "collect_fraction", "set_flow_rate", "run_flow", "set_flow_stream", "advance_flow", "set_potential", "electrolyze", "terminate", "measure"]
+        "enum": [
+          "select_vessel",
+          "route_material",
+          "add_reagent",
+          "add_component",
+          "add_solvent",
+          "add_catalyst",
+          "heat",
+          "wait",
+          "sample",
+          "quench",
+          "create_container",
+          "transfer_material",
+          "configure_instrument",
+          "configure_control",
+          "queue_control_stage",
+          "set_control_feedback",
+          "advance_control",
+          "pause_control",
+          "resume_control",
+          "add_phase",
+          "add_extractant",
+          "mix",
+          "settle",
+          "separate_phase",
+          "wash",
+          "dry",
+          "concentrate",
+          "transfer",
+          "seed_crystals",
+          "cool_crystallize",
+          "filter_crystals",
+          "resuspend_crystals",
+          "evaporate",
+          "distill",
+          "collect_fraction",
+          "set_flow_rate",
+          "run_flow",
+          "set_flow_stream",
+          "advance_flow",
+          "set_potential",
+          "electrolyze",
+          "terminate",
+          "measure"
+        ]
       }
     },
     "allowed_instruments": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "uniqueItems": true,
-      "items": {"type": "string", "enum": ["hplc", "gc", "uvvis", "ph_meter", "final_assay", "nmr", "ir", "ms"]}
+      "items": {
+        "type": "string",
+        "enum": [
+          "hplc",
+          "gc",
+          "uvvis",
+          "ph_meter",
+          "final_assay",
+          "nmr",
+          "ir",
+          "ms",
+          "particle_size"
+        ]
+      }
     },
-    "observation_policy": {"type": "string", "minLength": 1},
-    "termination_policy": {"type": "string", "minLength": 1},
+    "observation_policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "termination_policy": {
+      "type": "string",
+      "minLength": 1
+    },
     "success_metrics": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1}
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
-    "safety_limit": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-    "difficulty": {"type": "string", "minLength": 1},
-    "description": {"type": "string", "minLength": 1},
-    "tags": {"type": "array", "items": {"type": "string"}},
+    "safety_limit": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "difficulty": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "kernel_maturity": {
       "type": "object",
-      "required": ["modules", "lowest_level", "proxy_allowed", "notes"]
+      "required": [
+        "modules",
+        "lowest_level",
+        "proxy_allowed",
+        "notes"
+      ]
     },
     "physics_maturity": {
       "type": "string",
-      "enum": ["proxy", "lite", "reference_validated", "professional_candidate", "professional"]
+      "enum": [
+        "proxy",
+        "lite",
+        "reference_validated",
+        "professional_candidate",
+        "professional"
+      ]
     },
-    "proxy_allowed": {"type": "boolean"},
-    "contract_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    "proxy_allowed": {
+      "type": "boolean"
+    },
+    "contract_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
   },
   "additionalProperties": false
 }

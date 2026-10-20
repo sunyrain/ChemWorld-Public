@@ -12,19 +12,25 @@ from math import isfinite
 from typing import Any
 
 from chemworld.foundation import WorldState, equipment_settings
+from chemworld.foundation.material_properties import (
+    MATERIAL_FIELDS,
+    MATERIAL_METRICS,
+    extract_material_properties,
+    install_material_properties,
+    merge_fields,
+    scale_fields,
+)
 from chemworld.foundation.samples import CONTAINER_IDS, MaterialContents, StoredSample
 from chemworld.foundation.solvents import HEAT_CAPACITY_RATIOS, SolventInventory
 from chemworld.foundation.state_ledgers import (
-    EquipmentLedger,
-    EquipmentRecord,
     PhaseLedger,
     PhaseRecord,
     ProcessLedger,
     SpeciesLedger,
 )
+from chemworld.foundation.state_ownership import StateSlots
 from chemworld.runtime.full_process_contract import population_settings
 
-MATERIAL_EQUIPMENT = frozenset({"batch_reactor", "crystallizer", "crystal_filter"})
 ROUTING_OPERATIONS = ("create_container", "transfer_material")
 
 
@@ -36,11 +42,16 @@ def container_id(value: Any) -> str:
     return CONTAINER_IDS[value]
 
 
-def _extensive(key: str) -> bool:
-    return key.endswith(("_mol", "_g", "_L"))
+def _population(properties: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    crystal = properties.get("crystallizer", {})
+    if "population_cohorts" in crystal:
+        crystal.update(population_settings(tuple(tuple(c) for c in crystal["population_cohorts"])))
+    return properties
 
 
 def _scale(contents: MaterialContents, fraction: float, vessel_id: str) -> MaterialContents:
+    if not isfinite(fraction) or not 0 <= fraction <= 1:
+        raise ValueError("Material fraction must be in [0, 1]")
     phases = PhaseLedger(
         {
             key: replace(
@@ -52,19 +63,6 @@ def _scale(contents: MaterialContents, fraction: float, vessel_id: str) -> Mater
             for key, p in contents.phases.phases.items()
         }
     )
-    records = {}
-    for key, record in contents.equipment.equipment.items():
-        settings = {
-            k: v * fraction if _extensive(k) and isinstance(v, (int, float)) else v
-            for k, v in record.settings.items()
-        }
-        if "population_cohorts" in settings:
-            settings.update(
-                population_settings(
-                    tuple((n * fraction, d) for n, d in record.settings["population_cohorts"])
-                )
-            )
-        records[key] = replace(record, attached_vessel_id=vessel_id, settings=settings)
     return MaterialContents(
         phases,
         replace(
@@ -73,10 +71,18 @@ def _scale(contents: MaterialContents, fraction: float, vessel_id: str) -> Mater
                 s: n * fraction for s, n in contents.species.initial_amounts_mol.items()
             },
         ),
-        EquipmentLedger(records),
-        {k: v * fraction if _extensive(k) else v for k, v in contents.metrics.items()},
+        _population(
+            {
+                name: scale_fields(values, MATERIAL_FIELDS[name], fraction)
+                for name, values in contents.properties.items()
+            }
+        ),
+        scale_fields(contents.metrics, MATERIAL_METRICS, fraction),
         contents.reference_sources,
         {k: v * fraction for k, v in contents.reference_shares.items()},
+        contents.state_slots.portion(fraction, vessel_id),
+        contents.liquid_heat_capacity_J_L_K,
+        contents.mechanism_id,
     )
 
 
@@ -118,16 +124,15 @@ def _active(state: WorldState) -> StoredSample:
         contents=MaterialContents(
             state.phases,
             state.species,
-            EquipmentLedger(
-                {
-                    k: v
-                    for k, v in (state.equipment or EquipmentLedger()).equipment.items()
-                    if k in MATERIAL_EQUIPMENT
-                }
-            ),
-            {} if state.process is None else state.process.metrics,
+            extract_material_properties(state.equipment),
+            {}
+            if state.process is None
+            else {k: v for k, v in state.process.metrics.items() if k in MATERIAL_METRICS},
             sources,
             shares,
+            state.state_slots.material(),
+            state.liquid_heat_capacity_J_L_K,
+            str(state.metadata.get("mechanism_hash", state.metadata.get("mechanism_id", ""))),
         ),
     )
 
@@ -150,26 +155,14 @@ def _contents(sample: StoredSample) -> MaterialContents:
             }
         ),
         SpeciesLedger(),
-        EquipmentLedger(
-            {
-                "batch_reactor": EquipmentRecord(
-                    "batch_reactor",
-                    "batch_reactor",
-                    sample.sample_id,
-                    settings={
-                        "solvent": sample.solvent,
-                        "solvent_volume_L": sample.volume_L,
-                        "reaction_stopped": True,
-                    },
-                ),
-                "crystallizer": EquipmentRecord(
-                    "crystallizer",
-                    "crystallizer",
-                    sample.sample_id,
-                    settings={"dissolved_seed_target_mol": sample.seed_target_mol},
-                ),
-            }
-        ),
+        {
+            "batch_reactor": {
+                "solvent": sample.solvent,
+                "solvent_volume_L": sample.volume_L,
+                "reaction_stopped": True,
+            },
+            "crystallizer": {"dissolved_seed_target_mol": sample.seed_target_mol},
+        },
         {"reaction_chemistry_stopped": 1.0},
     )
 
@@ -201,7 +194,11 @@ def _reference_amounts(
 
 
 def _occupied(sample: StoredSample) -> bool:
-    return sample.volume_L > 0 or any(sample.species_amounts_mol.values())
+    return (
+        sample.volume_L > 0
+        or any(sample.species_amounts_mol.values())
+        or (sample.contents is not None and sample.contents.state_slots.has_inventory())
+    )
 
 
 def _merge(destination: StoredSample, incoming: StoredSample) -> StoredSample:
@@ -211,21 +208,37 @@ def _merge(destination: StoredSample, incoming: StoredSample) -> StoredSample:
             capacity_L=destination.capacity_L,
             collection_operation="transfer_material",
         )
-    left, right = _contents(destination), _contents(incoming)
+    left = _scale(_contents(destination), 1.0, destination.sample_id)
+    right = _scale(_contents(incoming), 1.0, destination.sample_id)
+    if left.mechanism_id and right.mechanism_id and left.mechanism_id != right.mechanism_id:
+        raise ValueError("Material mechanisms are incompatible")
     if set(left.phases.phases) != set(right.phases.phases):
         raise ValueError("Mixing requires matching phase topology; resuspend before mixing")
-    # Liquid and slurry heat capacities are solvent dominated in this domain.
+    if left.liquid_heat_capacity_J_L_K != right.liquid_heat_capacity_J_L_K:
+        raise ValueError("Mixing requires a common liquid heat-capacity model")
+    # U = C*T for the declared constant-C material model. Supports contribute
+    # their own J/K; device heat capacity stays outside the transferred material.
     volume = destination.volume_L + incoming.volume_L
     left_capacity = sum(
-        p.solvents.volume_L * p.solvents.linear_property(HEAT_CAPACITY_RATIOS)
+        p.solvents.volume_L
+        * p.solvents.linear_property(HEAT_CAPACITY_RATIOS)
+        * left.liquid_heat_capacity_J_L_K
         for p in left.phases.phases.values()
     )
-    right_capacity = sum(
-        p.solvents.volume_L * p.solvents.linear_property(HEAT_CAPACITY_RATIOS)
-        for p in right.phases.phases.values()
+    left_capacity += left.state_slots.heat_capacity()
+    right_capacity = (
+        sum(
+            p.solvents.volume_L
+            * p.solvents.linear_property(HEAT_CAPACITY_RATIOS)
+            * right.liquid_heat_capacity_J_L_K
+            for p in right.phases.phases.values()
+        )
+        + right.state_slots.heat_capacity()
     )
+    if not left_capacity + right_capacity and destination.temperature_K != incoming.temperature_K:
+        raise ValueError("Thermal mixing requires a declared heat capacity")
     weight = (
-        right_capacity / (left_capacity + right_capacity) if left_capacity + right_capacity else 0.5
+        right_capacity / (left_capacity + right_capacity) if left_capacity + right_capacity else 0
     )
     phases = {}
     for key, a in left.phases.phases.items():
@@ -238,53 +251,16 @@ def _merge(destination: StoredSample, incoming: StoredSample) -> StoredSample:
             species_amounts_mol=_sum(a.species_amounts_mol, b.species_amounts_mol),
             solvents=a.solvents + b.solvents,
         )
-    equipment: dict[str, EquipmentRecord] = {}
-    for key in left.equipment.equipment.keys() | right.equipment.equipment.keys():
-        left_record = left.equipment.equipment.get(key)
-        right_record = right.equipment.equipment.get(key)
-        if left_record is None or right_record is None:
-            record = left_record or right_record
-            assert record is not None
-            equipment[key] = record
-            continue
-        both_catalyzed = all(
-            float(record.settings.get("catalyst_amount_mol", 0)) > 0
-            for record in (left_record, right_record)
-        )
-        checked_settings = (
-            ("catalyst", "crystals_filtered") if both_catalyzed else ("crystals_filtered",)
-        )
-        for setting in checked_settings:
-            if left_record.settings.get(setting) != right_record.settings.get(setting):
-                raise ValueError(f"Mixing requires matching {setting}")
-        settings = dict(left_record.settings)
-        if (
-            float(right_record.settings.get("catalyst_amount_mol", 0)) > 0
-            and "catalyst" in right_record.settings
-        ):
-            settings["catalyst"] = right_record.settings["catalyst"]
-        for k, value in right_record.settings.items():
-            if _extensive(k) and isinstance(value, (float, int)):
-                settings[k] = float(settings.get(k, 0)) + value
-            elif k not in settings:
-                settings[k] = value
-        cohorts = (
-            *left_record.settings.get("population_cohorts", ()),
-            *right_record.settings.get("population_cohorts", ()),
-        )
-        if cohorts:
-            settings.update(population_settings(tuple(tuple(c) for c in cohorts)))
-        equipment[key] = replace(left_record, settings=settings)
-    # Different processed-material metrics must be remeasured, not averaged as truth.
-    # Extensive reference amounts add. Equal intensive state survives splitting/reunion.
-    metrics = {
-        k: left.metrics.get(k, 0) + right.metrics.get(k, 0)
-        for k in left.metrics.keys() | right.metrics.keys()
-        if _extensive(k)
-    }
-    metrics.update(
-        {k: v for k, v in left.metrics.items() if not _extensive(k) and right.metrics.get(k) == v}
+    properties = _population(
+        {
+            name: merge_fields(
+                left.properties.get(name, {}), right.properties.get(name, {}), MATERIAL_FIELDS[name]
+            )
+            for name in left.properties.keys() | right.properties.keys()
+        }
     )
+    metrics = merge_fields(left.metrics, right.metrics, MATERIAL_METRICS)
+    slots = left.state_slots.merge(right.state_slots)
     sources = {**left.reference_sources, **right.reference_sources}
     shares = {
         k: min(1.0, left.reference_shares.get(k, 0) + right.reference_shares.get(k, 0))
@@ -303,10 +279,13 @@ def _merge(destination: StoredSample, incoming: StoredSample) -> StoredSample:
             {**left.species.species_roles, **right.species.species_roles},
             reference_amounts,
         ),
-        EquipmentLedger(equipment),
+        properties,
         metrics,
         sources,
         shares,
+        slots,
+        left.liquid_heat_capacity_J_L_K,
+        left.mechanism_id or right.mechanism_id,
     )
     return replace(
         destination,
@@ -321,25 +300,34 @@ def _merge(destination: StoredSample, incoming: StoredSample) -> StoredSample:
 
 def _install(state: WorldState, sample: StoredSample) -> WorldState:
     contents = _scale(_contents(sample), 1.0, state.vessel_id)
-    equipment = {
-        k: replace(v, status="stale") if k.startswith("instrument:") else v
-        for k, v in (state.equipment or EquipmentLedger()).equipment.items()
-        if k not in MATERIAL_EQUIPMENT
-    }
-    equipment.update(contents.equipment.equipment)
+    equipment = install_material_properties(state.equipment, contents.properties, state.vessel_id)
+    slots = StateSlots((*state.state_slots.stationary().slots, *contents.state_slots.slots))
+    stationary_capacity = state.state_slots.stationary().heat_capacity()
+    material_capacity = contents.state_slots.heat_capacity() + sum(
+        p.solvents.volume_L
+        * p.solvents.linear_property(HEAT_CAPACITY_RATIOS)
+        * contents.liquid_heat_capacity_J_L_K
+        for p in contents.phases.phases.values()
+    )
+    temperature = sample.temperature_K
+    if stationary_capacity:
+        temperature = (
+            stationary_capacity * state.temperature_K + material_capacity * temperature
+        ) / (stationary_capacity + material_capacity)
     return state.replace(
         volume_L=sample.volume_L,
         species_amounts=sample.species_amounts_mol,
         phases=contents.phases,
         species=contents.species,
-        temperature_K=sample.temperature_K,
+        temperature_K=temperature,
         quenched=sample.quenched,
-        equipment=EquipmentLedger(equipment),
+        equipment=equipment,
+        state_slots=slots,
+        liquid_heat_capacity_J_L_K=contents.liquid_heat_capacity_J_L_K,
         process=replace(
             state.process or ProcessLedger(),
             metrics=contents.metrics,
-            last_observation={},
-            last_observed_mask={},
+            last_observation_record=None,
         ),
     )
 
@@ -465,6 +453,58 @@ def material_routes(state: WorldState, *, first_only: bool = False) -> list[dict
 
 
 class ChemWorldMaterialRoutingServices:
+    def __init__(self, physics=None):
+        self.physics = physics
+
+    def uses_native_packets(self, state):
+        from chemworld.runtime.aqueous_mineral import aqueous_record
+        from chemworld.runtime.condensed_material_routing import background_model
+
+        return self.physics is not None and (
+            state.phase == "gas"
+            or aqueous_record(state) is not None
+            or state.vessel_id in self.physics.flash_models
+            or state.vessel_id in self.physics.liquid_models
+            or background_model(state, self.physics) is not None
+        )
+
+    def feed_additions(self, state, action):
+        from chemworld.runtime.thermal_material_routing import feed_packet
+
+        return feed_packet(state, self.physics, action)[1]
+
+    def add_finite_feed(self, state, action):
+        from chemworld.runtime.kernel_contracts import ModelProviderResult
+        from chemworld.runtime.thermal_material_routing import add_finite_feed
+
+        candidate = add_finite_feed(state, self.physics, action)
+        return ModelProviderResult(
+            outputs={},
+            state=candidate,
+            diagnostics={"material_packet": candidate.metadata["last_material_packet"]},
+        )
+
+    def route_material(self, state, action):
+        from chemworld.runtime.component_network import route_material
+        from chemworld.runtime.kernel_contracts import ModelProviderResult
+        from chemworld.runtime.thermal_material_routing import route_gas_packet
+
+        if self.uses_native_packets(state):
+            candidate = route_gas_packet(state, self.physics, action)
+            return ModelProviderResult(
+                outputs={},
+                state=candidate,
+                diagnostics={"material_packet": candidate.metadata["last_material_packet"]},
+            )
+        return route_material(state, action)
+
+    def feed_error(self, state, action):
+        try:
+            self.add_finite_feed(state, action)
+        except (ArithmeticError, RuntimeError, KeyError, ValueError, TypeError) as exc:
+            return str(exc)
+        return None
+
     def create_container(self, state: WorldState, action: dict[str, Any]) -> WorldState:
         error = routing_error(state, "create_container", action)
         if error:
@@ -498,6 +538,13 @@ class ChemWorldMaterialRoutingServices:
         fraction = float(action["transfer_fraction"])
         samples = _available_samples(state)
         a, b = samples[source], samples[target]
+        if (
+            self.physics is not None
+            and state.vessel_id in self.physics.crystal_models
+            and (_occupied(b) or target == "active")
+            and abs(a.temperature_K - b.temperature_K) > 1e-9
+        ):
+            raise ValueError("crystal container routing currently requires equal temperatures")
         incoming = _portion(a, fraction, target)
         incoming = replace(
             incoming,

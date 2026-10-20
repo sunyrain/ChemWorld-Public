@@ -285,6 +285,7 @@ def _ensure_finite_positive(value: float, correlation: PropertyCorrelation) -> N
         "ideal_gas_heat_capacity",
         "liquid_heat_capacity",
         "solid_heat_capacity",
+        "isochoric_heat_capacity",
         "heat_of_vaporization",
         "heat_of_fusion",
         "liquid_molar_volume",

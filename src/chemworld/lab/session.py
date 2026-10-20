@@ -9,16 +9,15 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, cast
-
-import gymnasium as gym
+from typing import Any
 
 import chemworld  # noqa: F401
 from chemworld.data.logging import TrajectoryLogger, load_jsonl, observation_to_json, to_builtin
-from chemworld.envs.chemworld_env import ChemWorldEnv
+from chemworld.envs.spaces import to_observation
 from chemworld.eval.verify import verify_records
 from chemworld.lab.http_security import RequestRejected
 from chemworld.materials import action_material_display
+from chemworld.runtime import ChemWorldRuntime
 from chemworld.tasks import get_task, list_tasks
 
 _TASK_COPY: dict[str, tuple[str, str, str]] = {
@@ -177,7 +176,7 @@ def _state_effects(action: dict[str, Any], info: dict[str, Any]) -> dict[str, An
 
 @dataclass
 class LabSession:
-    """One manual browser session backed by the normal public Gym environment."""
+    """One manual browser session backed by the native experimental session."""
 
     task_id: str
     seed: int
@@ -185,9 +184,9 @@ class LabSession:
 
     def __post_init__(self) -> None:
         task = get_task(self.task_id)
-        self._env = gym.make("ChemWorld", **task.env_kwargs(seed=self.seed))
+        self._env = ChemWorldRuntime(**task.env_kwargs(seed=self.seed))
         self._env.reset(seed=self.seed)
-        base = cast(ChemWorldEnv, self._env.unwrapped)
+        base = self._env
         self._task_info = {**base.task_info(), **base.evaluator_provenance()}
         self._history: list[dict[str, Any]] = []
         self._lock = threading.RLock()
@@ -229,7 +228,7 @@ class LabSession:
         with self._lock:
             if self._closed:
                 raise ValueError("Session is closed")
-            base: Any = self._env.unwrapped
+            base: Any = self._env
             campaign = to_builtin(base.campaign_state())
             report = to_builtin(base.observation_view("lab_report"))
             experiment_index = int(campaign.get("experiment_index", 0))
@@ -270,7 +269,7 @@ class LabSession:
                 raise ValueError("Session is closed")
             if len(self._history) >= 1000:
                 raise ValueError("Session action limit reached; export and close this session")
-            base: Any = self._env.unwrapped
+            base: Any = self._env
             validation = dict(base.validate_action(action))
             if not validation.get("valid", False):
                 available = [item["operation"] for item in base.available_actions()]
@@ -284,7 +283,11 @@ class LabSession:
                     "state": self.state(),
                 }
             campaign_before = base.campaign_state()
-            observation, reward, terminated, truncated, info = self._env.step(action)
+            result = self._env.execute(action)
+            observation = to_observation(result.observation.values)
+            reward, terminated, truncated, info = (
+                result.reward, result.terminated, result.truncated, result.info
+            )
             self._replay = None
             self._logger.log(
                 task_info=self._task_info,

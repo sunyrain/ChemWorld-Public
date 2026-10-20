@@ -331,9 +331,11 @@ def _load_json_file(path: str | Path) -> dict[str, Any]:
 
 
 def _validate_action(args: argparse.Namespace) -> None:
+    from chemworld.runtime import ChemWorldRuntime
+
     task = get_task(args.task)
     action = _load_json_file(args.action)
-    env = gym.make(task.env_id, task_id=task.task_id, seed=args.seed)
+    env = ChemWorldRuntime(task_id=task.task_id, seed=args.seed)
     try:
         env.reset(seed=args.seed)
         result = validate_event_action(action, env)
@@ -372,15 +374,52 @@ def _datasets_card(args: argparse.Namespace) -> None:
 
 
 def _render(args: argparse.Namespace) -> None:
-    env = gym.make("ChemWorld", task_id=args.task, seed=args.seed, render_mode="ansi")
+    from chemworld.data.logging import TrajectoryLogger, to_builtin
+    from chemworld.envs.spaces import to_observation
+    from chemworld.runtime import ChemWorldRuntime
+
+    outputs = [Path(output).resolve() for output in (args.trajectory, args.snapshot) if output]
+    if len(outputs) != len(set(outputs)):
+        raise ValueError("Trajectory and snapshot outputs must be different files")
+    for output in outputs:
+        if output is not None and Path(output).exists():
+            raise ValueError(f"Output already exists: {output}")
+    kwargs = {"task_id": args.task} if args.composition is None else {
+        "composition": _load_json_file(args.composition),
+    }
+    env = ChemWorldRuntime(**kwargs, seed=args.seed, render_mode="ansi",
+                           observation_noise_mode=args.noise_mode)
+    logger = None
+    history = []
     try:
         env.reset(seed=args.seed)
-        for action_path in args.actions:
+        task_info = {**env.task_info(), **env.evaluator_provenance()}
+        logger = TrajectoryLogger(args.trajectory) if args.trajectory else None
+        for step, action_path in enumerate(args.actions, start=1):
             action = _load_json_file(action_path)
-            env.step(action)
-        rendered: Any = env.render()
-        print(rendered)
+            result = env.execute(action)
+            if logger is not None:
+                logger.log(
+                    task_info=task_info, step=step, action=action,
+                    observation=to_observation(result.observation.values), reward=result.reward,
+                    terminated=result.terminated, truncated=result.truncated, info=result.info,
+                    agent_metadata={"agent_id": "cli-event-sequence"},
+                )
+            history.append({"action": action, "outcome": result.info["operation_outcome"],
+                            "transaction": result.info["transaction_status"],
+                            "actual_duration_s": result.info["actual_duration_s"],
+                            "measurement_status": result.info["measurement_status"],
+                            "terminated": result.terminated, "truncated": result.truncated})
+        if args.snapshot is not None:
+            env.snapshot().save(args.snapshot)
+        if args.format == "json":
+            print(json.dumps(to_builtin({"steps": history,
+                                         "observation": env.observe().to_dict()}), indent=2))
+        else:
+            print(env.render())
     finally:
+        if logger is not None:
+            logger.close()
         env.close()
 
 
@@ -432,18 +471,21 @@ def _seeds_show(args: argparse.Namespace) -> None:
 
 
 def _inspect_constitution(args: argparse.Namespace) -> None:
+    from chemworld.runtime import ChemWorldRuntime
+
     kwargs: dict[str, Any] = {
         "world_split": args.world_split,
         "budget": args.budget,
         "objective": args.objective,
         "seed": args.seed,
     }
-    env = gym.make(args.env, **kwargs)
+    env = ChemWorldRuntime(**kwargs) if args.env == ENV_ID else gym.make(args.env, **kwargs)
     try:
         env.reset(seed=args.seed)
-        if not hasattr(env.unwrapped, "constitution_summary"):
+        base = getattr(env, "unwrapped", env)
+        if not hasattr(base, "constitution_summary"):
             raise SystemExit(f"{args.env} does not expose a foundation constitution")
-        print(json.dumps(env.unwrapped.constitution_summary(), indent=2, sort_keys=True))
+        print(json.dumps(base.constitution_summary(), indent=2, sort_keys=True))
     finally:
         env.close()
 
@@ -629,9 +671,16 @@ def build_parser() -> argparse.ArgumentParser:
     datasets_card_parser.set_defaults(func=_datasets_card)
 
     render_parser = subparsers.add_parser("render", help="Render an ANSI environment summary.")
-    render_parser.add_argument("--task", required=True)
+    render_world = render_parser.add_mutually_exclusive_group(required=True)
+    render_world.add_argument("--task")
+    render_world.add_argument("--composition", help="Explicit world/task composition JSON.")
     render_parser.add_argument("--seed", type=int, default=0)
     render_parser.add_argument("--actions", nargs="*", default=[])
+    render_parser.add_argument("--noise-mode", choices=("sequential", "keyed"),
+                               default="sequential")
+    render_parser.add_argument("--format", choices=("ansi", "json"), default="ansi")
+    render_parser.add_argument("--trajectory", help="Write a replayable JSONL event history.")
+    render_parser.add_argument("--snapshot", help="Save private simulator state for continuation.")
     render_parser.set_defaults(func=_render)
 
     submission_parser = subparsers.add_parser("submission", help="Manage submission bundles.")

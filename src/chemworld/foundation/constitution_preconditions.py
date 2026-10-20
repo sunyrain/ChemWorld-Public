@@ -40,7 +40,12 @@ def check_operation_preconditions(
     payload: dict[str, Any],
 ) -> dict[str, bool]:
     has_volume = state.volume_L > constitution.tolerance
-    has_material = sum(state.species_amounts.values()) > constitution.tolerance
+    # A tolerance on balance residuals is not a minimum experiment size.
+    has_material = any(amount > 0 for amount in (
+        *state.species_amounts.values(), *state.state_slots.species_amounts().values()))
+    thermal_body = state.vessel_id in state.metadata.get("component_network", {}).get(
+        "thermal_systems", ()
+    )
     is_terminated = state.terminated
     instrument_id = str(payload.get("instrument", "hplc"))
     instrument = constitution.instruments.get(instrument_id)
@@ -48,10 +53,10 @@ def check_operation_preconditions(
         instruments = list(constitution.instruments.values())
         instrument = instruments[int(instrument_id) % len(instruments)]
     requires_terminated = bool(instrument.requires_terminated) if instrument is not None else False
-    final_assay_done = instrument_completed(state.equipment, "final_assay")
-    is_final_assay = (
-        operation_type == "measure" and instrument is not None and instrument.id == "final_assay"
+    final_assay_done = instrument is not None and instrument_completed(
+        state.equipment, instrument.id
     )
+    is_final_assay = operation_type == "measure" and requires_terminated
     measurement_sample_available = operation_type != "measure" or (
         instrument is not None
         and state.volume_L + constitution.tolerance >= instrument.sample_volume_L
@@ -82,6 +87,9 @@ def check_operation_preconditions(
         state.equipment, "crystallizer", fields=("seed_target_mol", "crystal_seed_mass_g")
     )
     flow_ready = {"flow_rate_mL_min", "residence_time_s"} <= set(flow_settings)
+    flow_ready |= any(r.settings.get("flow_control", {}).get("configured", False)
+                      for r in state.equipment.equipment.values()
+                      if r.attached_vessel_id == state.vessel_id)
     potential_ready = {"potential_V", "current_mA"} <= set(potential_settings)
     crystallization_ready = (
         int(reactor_settings.get("reaction_advance_index", 0)) > 0
@@ -199,7 +207,9 @@ def check_operation_preconditions(
     return {
         "instrument_available": operation_type != "measure" or instrument is not None,
         "has_volume": not needs_volume or has_volume,
-        "has_material": not needs_material or has_material,
+        "has_material": not needs_material
+        or has_material
+        or (thermal_body and operation_type in {"heat", "wait", "terminate"}),
         "not_terminated": not needs_not_terminated or not state.terminated,
         "has_phase_system": operation_type not in phase_operations or phase_system,
         "phase_settled": operation_type != "separate_phase" or phase_settled,
@@ -211,7 +221,9 @@ def check_operation_preconditions(
         or is_final_assay,
         "measurement_sample_available": measurement_sample_available,
         "measure_final_not_repeated": not is_final_assay or not final_assay_done,
-        "terminate_requires_material": operation_type != "terminate" or has_material,
+        "terminate_requires_material": operation_type != "terminate"
+        or has_material
+        or thermal_body,
         "filter_requires_crystallization": operation_type != "filter_crystals" or crystallized,
         "resuspend_requires_filtered_crystals": operation_type != "resuspend_crystals"
         or (

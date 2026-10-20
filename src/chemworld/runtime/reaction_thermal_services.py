@@ -15,17 +15,12 @@ from chemworld.foundation import (
     upsert_equipment_record,
 )
 from chemworld.foundation.state import PhaseLedger, PhaseRecord
-from chemworld.physchem.crystallization_units import SolubilityCurveSpec
 from chemworld.physchem.reactor_shared import JacketTemperatureProgram
+from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.full_process_contract import (
-    FULL_PROCESS_FREE_RESEARCH_CONTRACT,
-    FULL_PROCESS_SEED_CONTRACT,
-    FULL_PROCESS_THERMAL_CONTRACT,
-    population_active,
-    population_settings,
     seed_provenance_active,
-    shrink_population,
 )
+from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.world.parameters import ChemWorldParameters
 from chemworld.world.reaction_kernel import integrate_compiled_reaction_ode
@@ -58,140 +53,35 @@ class ChemWorldReactionThermalServices:
         self,
         world: ChemWorldParameters,
         species_view: MechanismSpeciesView,
+        *,
+        composition=None,
+        modules=None,
     ) -> None:
         self.world = world
         self.species_view = species_view
+        from chemworld.runtime.coupled_thermal import CoupledThermalRuntime
 
-    def _redissolve_crystals_for_heating(
-        self,
-        state: WorldState,
-        target_temperature_K: float,
-    ) -> tuple[WorldState, float]:
-        """Equilibrate a slurry toward the hotter solubility boundary."""
+        self.coupled = CoupledThermalRuntime(composition, modules)
+        from chemworld.runtime.flash_thermal import FlashThermalRuntime
 
-        if (
-            target_temperature_K <= state.temperature_K
-            or state.phases is None
-            or "mother_liquor" not in state.phases.phases
-            or "solid" not in state.phases.phases
-        ):
-            return state, 0.0
-        phases = state.phases.phases.copy()
-        liquor = phases["mother_liquor"]
-        solid = phases["solid"]
-        target_species = self.species_view.primary_target_species
-        impurity_species = self.species_view.primary_impurity_species
-        solid_target = max(
-            float(solid.species_amounts_mol.get(target_species, 0.0)),
-            0.0,
-        )
-        if solid_target <= 1.0e-12:
-            return state, 0.0
-        from chemworld.world.mixtures import crystallization_medium_modifier
+        self.flash = FlashThermalRuntime(composition)
+        from chemworld.runtime.liquid_equilibrium import LiquidEquilibriumRuntime
 
-        solubility_multiplier = crystallization_medium_modifier(state, self.world, "solubility")
-        curve = SolubilityCurveSpec(
-            model_id="runtime_vanthoff_material_solubility_v2",
-            reference_solubility_mol_L=(
-                self.world.crystallization_reference_solubility_mol_L
-                * self.world.domain_parameter("crystallization_solubility_multiplier")
-                * solubility_multiplier
-            ),
-            reference_temperature_K=298.15,
-            dissolution_enthalpy_J_mol=20_000.0,
-            minimum_temperature_K=250.0,
-            maximum_temperature_K=430.0,
-            provenance_id="chemworld-world-law-v0.2-solubility-policy",
+        self.liquid = LiquidEquilibriumRuntime(composition)
+        from chemworld.runtime.dynamic_column import DynamicColumnRuntime
+
+        self.column = DynamicColumnRuntime(composition)
+        from chemworld.runtime.concentration import ConcentrationRuntime
+
+        self.concentration = ConcentrationRuntime(composition)
+        from chemworld.runtime.crystal_thermal import CrystalThermalRuntime
+
+        self.crystal = CrystalThermalRuntime(
+            composition, legacy_world=world, species_view=species_view
         )
-        equilibrium_capacity = (
-            curve.solubility_mol_per_l(min(target_temperature_K, 430.0)) * liquor.volume_L
-        )
-        dissolved_target = max(
-            float(liquor.species_amounts_mol.get(target_species, 0.0)),
-            0.0,
-        )
-        redissolved_target = min(
-            solid_target,
-            max(equilibrium_capacity - dissolved_target, 0.0),
-        )
-        if redissolved_target <= 1.0e-12:
-            return state, 0.0
-        solid_impurity = max(
-            float(solid.species_amounts_mol.get(impurity_species, 0.0)),
-            0.0,
-        )
-        redissolved_impurity = solid_impurity * redissolved_target / solid_target
-        liquor_amounts = liquor.species_amounts_mol.copy()
-        solid_amounts = solid.species_amounts_mol.copy()
-        liquor_amounts[target_species] = dissolved_target + redissolved_target
-        solid_amounts[target_species] = solid_target - redissolved_target
-        liquor_amounts[impurity_species] = (
-            float(liquor_amounts.get(impurity_species, 0.0)) + redissolved_impurity
-        )
-        solid_amounts[impurity_species] = solid_impurity - redissolved_impurity
-        phases["mother_liquor"] = replace(liquor, species_amounts_mol=liquor_amounts)
-        phases["solid"] = replace(solid, species_amounts_mol=solid_amounts)
-        process_metrics = {} if state.process is None else state.process.metrics
-        process = process_with_metrics(
-            state.process,
-            crystal_redissolved_target_mol=(
-                float(process_metrics.get("crystal_redissolved_target_mol", 0.0))
-                + redissolved_target
-            ),
-        )
-        crystallizer_settings = equipment_settings(state.equipment, "crystallizer")
-        dissolution_history = list(crystallizer_settings.get("dissolution_history", ()))
-        dissolution_history.append(
-            {
-                "initial_temperature_K": state.temperature_K,
-                "target_temperature_K": target_temperature_K,
-                "redissolved_target_mol": redissolved_target,
-                "redissolved_impurity_mol": redissolved_impurity,
-            }
-        )
-        equipment = upsert_equipment_record(
-            state.equipment,
-            equipment_id="crystallizer",
-            equipment_type="crystallizer",
-            attached_vessel_id=state.vessel_id,
-            status="partially_redissolved",
-            settings={"dissolution_history": dissolution_history},
-        )
-        if population_active(state):
-            remaining = (solid_target - redissolved_target) / solid_target
-            cohorts = shrink_population(
-                crystallizer_settings.get("population_cohorts", ()), remaining
-            )
-            equipment = upsert_equipment_record(
-                equipment,
-                equipment_id="crystallizer",
-                equipment_type="crystallizer",
-                attached_vessel_id=state.vessel_id,
-                settings={
-                    **population_settings(cohorts),
-                    "seed_target_mol": float(crystallizer_settings.get("seed_target_mol", 0.0))
-                    * remaining,
-                    **(
-                        {
-                            "dissolved_seed_target_mol": float(
-                                crystallizer_settings.get("dissolved_seed_target_mol", 0.0)
-                            )
-                            + float(crystallizer_settings.get("seed_target_mol", 0.0))
-                            * (1 - remaining)
-                        }
-                        if seed_provenance_active(state)
-                        else {}
-                    ),
-                },
-            )
-        return (
-            state.replace(
-                phases=PhaseLedger(phases),
-                process=process,
-                equipment=equipment,
-            ),
-            redissolved_target,
-        )
+        from chemworld.runtime.advance_paths import PhysicalAdvanceCoordinator
+
+        self.advancer = PhysicalAdvanceCoordinator(self, modules=modules, composition=composition)
 
     def _quenched_thermal_hold(
         self,
@@ -211,17 +101,17 @@ class ChemWorldReactionThermalServices:
             duration_s=duration_s,
             phase_change_heat_J=phase_change_heat_J,
         )
-        ledger = state.ledger.with_updates(
-            time_s=state.ledger.time_s + duration_s,
-            cost=(
-                state.ledger.cost
-                + 0.01
-                + duration_s / 3600.0 * 0.015
-                + abs(thermal.jacket_energy_J) / 250_000.0
+        ledger = advance_ledger(
+            state.ledger,
+            duration_s,
+            cost_delta=(
+                0.01 + duration_s / 3600.0 * 0.015 + abs(thermal.jacket_energy_J) / 250_000.0
             ),
-            energy_jacket_J=state.ledger.energy_jacket_J + thermal.jacket_energy_J,
-            heat_reaction_J=state.ledger.heat_reaction_J + thermal.phase_change_heat_J,
-            heat_loss_J=state.ledger.heat_loss_J + thermal.heat_loss_J,
+            energy_deltas={
+                "energy_jacket_J": thermal.jacket_energy_J,
+                "heat_reaction_J": thermal.phase_change_heat_J,
+                "heat_loss_J": thermal.heat_loss_J,
+            },
         )
         reactor_settings = equipment_settings(state.equipment, "batch_reactor")
         equipment = upsert_equipment_record(
@@ -268,7 +158,17 @@ class ChemWorldReactionThermalServices:
         *,
         heat: bool,
         jacket_program: JacketTemperatureProgram | None = None,
-    ) -> WorldState:
+    ) -> ModelProviderResult:
+        return self.advancer.batch(state, action, heat=heat, jacket_program=jacket_program)
+
+    def _integrate_legacy(
+        self,
+        state: WorldState,
+        action: dict[str, Any],
+        *,
+        heat: bool,
+        jacket_program: JacketTemperatureProgram | None = None,
+    ) -> ModelProviderResult:
         duration = _bounded_action_float(
             action,
             "duration_s",
@@ -292,17 +192,7 @@ class ChemWorldReactionThermalServices:
             maximum=1200.0,
         )
         if state.quenched and jacket_program is None:
-            working_state, dissolved = (
-                self._redissolve_crystals_for_heating(state, target_temperature)
-                if heat
-                and state.metadata.get("full_process_contract_id")
-                in {
-                    FULL_PROCESS_THERMAL_CONTRACT,
-                    FULL_PROCESS_SEED_CONTRACT,
-                    FULL_PROCESS_FREE_RESEARCH_CONTRACT,
-                }
-                else (state, 0.0)
-            )
+            working_state, dissolved = state, 0.0
             held_state = self._quenched_thermal_hold(
                 working_state,
                 duration_s=duration,
@@ -313,17 +203,19 @@ class ChemWorldReactionThermalServices:
             if dissolved > 0 and not seed_provenance_active(state):
                 energy = 20000.0 * dissolved
                 held_state = held_state.replace(
-                    ledger=held_state.ledger.with_updates(
-                        energy_jacket_J=held_state.ledger.energy_jacket_J + energy,
-                        heat_reaction_J=held_state.ledger.heat_reaction_J + energy,
+                    ledger=advance_ledger(
+                        held_state.ledger,
+                        0.0,
+                        energy_deltas={"energy_jacket_J": energy, "heat_reaction_J": energy},
                     )
                 )
-            return held_state
-        working_state, redissolved_target = (
-            self._redissolve_crystals_for_heating(state, target_temperature)
-            if heat
-            else (state, 0.0)
-        )
+            return ModelProviderResult(
+                outputs={},
+                diagnostics={},
+                state=held_state,
+                actual_duration_s=duration,
+            )
+        working_state, redissolved_target = state, 0.0
         active_phase_id: str | None = None
         active_phase: PhaseRecord | None = None
         if working_state.phases is not None:
@@ -354,32 +246,32 @@ class ChemWorldReactionThermalServices:
                 stirring_speed_rpm=stirring_speed,
                 jacket_program=jacket_program,
             )
-        except (RuntimeError, ValueError):
-            # The kernel transaction manager owns rollback.  Return a candidate
-            # that deterministically fails the vessel-temperature constitution;
-            # no physical or resource mutation from the failed model is kept.
-            maximum_temperature = 470.0
-            if (
-                working_state.vessels is not None
-                and state.vessel_id in working_state.vessels.vessels
-            ):
-                maximum_temperature = working_state.vessels.vessels[
-                    state.vessel_id
-                ].max_temperature_K
-            return working_state.replace(temperature_K=maximum_temperature + 1.0)
+        except (ArithmeticError, RuntimeError, ValueError) as exc:
+            return ModelProviderResult(
+                outputs={},
+                diagnostics={"solver_error": str(exc), "error_type": type(exc).__name__},
+                outcome="numerical_failure",
+                success=False,
+                failure_reason="reaction_solver_failed",
+            )
         if result is None:
-            raise RuntimeError("positive-duration reaction advance returned no result")
+            return ModelProviderResult(
+                outputs={},
+                diagnostics={"solver_returned_no_result": True},
+                outcome="numerical_failure",
+                success=False,
+                failure_reason="reaction_solver_failed",
+            )
         dissolution_heat_J = 20_000.0 * redissolved_target
-        ledger = working_state.ledger.with_updates(
-            time_s=working_state.ledger.time_s + result.duration_s,
-            cost=working_state.ledger.cost + result.cost_delta,
-            energy_jacket_J=(
-                working_state.ledger.energy_jacket_J + result.energy_jacket_J + dissolution_heat_J
-            ),
-            heat_reaction_J=(
-                working_state.ledger.heat_reaction_J + result.heat_reaction_J + dissolution_heat_J
-            ),
-            heat_loss_J=working_state.ledger.heat_loss_J + result.heat_loss_J,
+        ledger = advance_ledger(
+            working_state.ledger,
+            result.duration_s,
+            cost_delta=result.cost_delta,
+            energy_deltas={
+                "energy_jacket_J": result.energy_jacket_J + dissolution_heat_J,
+                "heat_reaction_J": result.heat_reaction_J + dissolution_heat_J,
+                "heat_loss_J": result.heat_loss_J,
+            },
         )
         advance_index = int(reactor_settings.get("reaction_advance_index", 0)) + int(
             not state.quenched
@@ -440,7 +332,7 @@ class ChemWorldReactionThermalServices:
             )
             phases = PhaseLedger(phase_records)
             species_amounts = phases.total_amounts_mol()
-        return working_state.replace(
+        candidate = working_state.replace(
             species_amounts=species_amounts,
             temperature_K=result.temperature_K,
             ledger=ledger,
@@ -448,8 +340,42 @@ class ChemWorldReactionThermalServices:
             process=process,
             phases=phases,
         )
+        return ModelProviderResult(
+            outputs={},
+            state=candidate,
+            actual_duration_s=result.duration_s,
+            outcome="success" if result.termination_reason == "duration_reached" else "stopped",
+            diagnostics={"termination_reason": result.termination_reason},
+        )
 
     def with_risk_and_pressure(self, state: WorldState) -> WorldState:
+        if self.crystal.is_native(state):
+            return state  # Its declared fixed pressure is already the current pressure.
+        if self.concentration.supports(state):
+            return state.replace(pressure_Pa=self.concentration.model(state).pressure_Pa)
+        if self.column.supports(state):
+            return state.replace(pressure_Pa=self.column.model(state).pressure_Pa)
+        if self.liquid.supports(state):
+            return state.replace(pressure_Pa=self.liquid.model(state).pressure_Pa)
+        if self.flash.supports(state):
+            return state.replace(
+                pressure_Pa=self.flash.composition.physics.flash_models[state.vessel_id].pressure_Pa
+            )
+        if self.coupled.supports(state):
+            from chemworld.runtime.coupled_thermal import pressure_for_state
+
+            model = self.coupled.composition.physics.thermal_models[state.vessel_id]
+            return state.replace(pressure_Pa=pressure_for_state(state, model))
+        if any(strategy.supports(state) for _, strategy in self.advancer.declared):
+            # A module's accepted physical state already contains its pressure
+            # closure. Do not apply the legacy liquid-reactor proxy a second time.
+            return state
+        if (
+            self.coupled.composition is not None
+            and self.coupled.composition.physics is not None
+            and state.phase != "liquid"
+        ):
+            return state
         flow_settings = equipment_settings(state.equipment, "flow_reactor")
         pressure_override = flow_settings.get("outlet_pressure_Pa")
         controller = equipment_settings(state.equipment, "process_controller")

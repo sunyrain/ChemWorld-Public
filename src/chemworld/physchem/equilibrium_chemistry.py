@@ -1197,6 +1197,7 @@ def aqueous_ph_observation(
     calibration_offset_pH: float = 0.0,
     resolution_pH: float = 0.01,
     seed: int | None = None,
+    rng: np.random.Generator | None = None,
 ) -> PHObservationResult:
     """Generate a public pH-meter observation from an acid/base result.
 
@@ -1210,7 +1211,9 @@ def aqueous_ph_observation(
     _nonnegative(noise_std_pH, "noise_std_pH")
     _finite(calibration_offset_pH, "calibration_offset_pH")
     _nonnegative(resolution_pH, "resolution_pH")
-    rng = np.random.default_rng(seed)
+    if rng is not None and seed is not None:
+        raise ValueError("pH observation accepts either an RNG or a seed")
+    rng = rng if rng is not None else np.random.default_rng(seed)
     noise = float(rng.normal(0.0, noise_std_pH)) if noise_std_pH > 0.0 else 0.0
     measured_pH = result.pH + calibration_offset_pH + noise
     if resolution_pH > 0.0:
@@ -1223,6 +1226,11 @@ def aqueous_ph_observation(
     nernst_slope_mV_pH = 1000.0 * R_J_PER_MOL_K * temperature_K * log(10.0) / 96485.33212
     electrode_mV = -nernst_slope_mV_pH * (measured_pH - 7.0)
     hydrogen = 10.0 ** (-measured_pH)
+    hydrogen_key = (
+        "hydrogen_activity"
+        if result.metadata.get("activity_basis") == "molality"
+        else "hydrogen_mol_L"
+    )
     return PHObservationResult(
         raw_signal={
             "instrument_id": instrument_id,
@@ -1233,7 +1241,7 @@ def aqueous_ph_observation(
         },
         processed_estimate={
             "pH": measured_pH,
-            "hydrogen_mol_L": hydrogen,
+            hydrogen_key: hydrogen,
             "ionic_strength_mol_kg": result.ionic_strength_mol_kg,
             "charge_balance_error_eq": result.charge_balance_error_eq,
         },
@@ -1244,7 +1252,7 @@ def aqueous_ph_observation(
         },
         observed_mask={
             "pH": True,
-            "hydrogen_mol_L": True,
+            hydrogen_key: True,
             "ionic_strength_mol_kg": True,
             "charge_balance_error_eq": True,
             "species_amounts_mol": False,

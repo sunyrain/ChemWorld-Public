@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
+from chemworld.physchem.coupled_system import (
+    CoupledProcess,
+    CoupledStateView,
+    HeatFlux,
+    ProcessContribution,
+    assemble_coupled_rates,
+)
 from chemworld.physchem.reaction_network import ReactionNetworkSpec, ReactionSpec
 from chemworld.physchem.reactor_shared import (
     HeatTransferSpec,
@@ -216,22 +224,106 @@ def _reaction_heat_w(
     temperature_K: float,
     species_thermo: Mapping[str, NASA7SpeciesThermo] | None = None,
 ) -> float:
+    return _network_contribution(
+        network, CoupledStateView(amounts_mol, temperature_K, volume_L),
+        species_thermo=species_thermo, legacy_energy=True,
+    ).legacy_reaction_energy_W or 0.0
+
+
+def _network_contribution(
+    network: ReactionNetworkSpec, state: CoupledStateView, *,
+    species_thermo: Mapping[str, NASA7SpeciesThermo] | None = None,
+    legacy_energy: bool = False,
+) -> ProcessContribution:
     rates = network.reaction_rates(
-        amounts_mol,
-        volume_L=volume_L,
-        temperature_K=temperature_K,
+        state.amounts_mol,
+        volume_L=state.volume_L,
+        temperature_K=state.temperature_K,
         species_thermo=species_thermo,
     )
-    return sum(
+    energy = sum(
         _reaction_enthalpy_j_mol(
             reaction,
-            temperature_K=temperature_K,
+            temperature_K=state.temperature_K,
             species_thermo=species_thermo,
         )
         * rates[reaction.reaction_id]
-        * volume_L
+        * state.volume_L
         for reaction in network.reactions
+    ) if legacy_energy else None
+    return ProcessContribution(
+        amount_rates_mol_s=network.amount_derivatives_from_rates(rates, volume_L=state.volume_L),
+        reaction_progress_mol_s={
+            f"{network.network_id}:{key}": value * state.volume_L for key, value in rates.items()
+        },
+        legacy_reaction_energy_W=energy,
     )
+
+
+def reaction_network_process(
+    network: ReactionNetworkSpec, *, process_id: str | None = None,
+    species_thermo: Mapping[str, NASA7SpeciesThermo] | None = None,
+    legacy_energy: bool = False,
+) -> CoupledProcess:
+    """Bulk adapter; all rate laws and stoichiometry remain owned by the network."""
+    def evaluate(state: CoupledStateView) -> ProcessContribution:
+        local = CoupledStateView(
+            {key: state.amounts_mol[key] for key in network.species_ids},
+            state.temperature_K, state.volume_L, state.time_s,
+        )
+        return _network_contribution(
+            network, local, species_thermo=species_thermo, legacy_energy=legacy_energy,
+        )
+    return CoupledProcess(process_id or network.network_id, evaluate)
+
+
+@dataclass(frozen=True)
+class _LegacyBatchThermodynamics:
+    """Published liquid model; no claim of a general U(n,T) state function."""
+    inventory_keys: tuple[str, ...]
+    rho_cp_J_per_L_K: float
+
+    def heat_capacity_j_k(self, state: CoupledStateView) -> float:
+        return self.rho_cp_J_per_L_K * state.volume_L
+
+    def internal_energy_j(self, state: CoupledStateView) -> None:
+        return None
+
+    def chemical_energy_rate_w(
+        self, state: CoupledStateView, derivatives: Mapping[str, float],
+        contributions: Sequence[ProcessContribution],
+    ) -> float:
+        return sum(item.legacy_reaction_energy_W or 0.0 for item in contributions)
+
+
+def make_batch_rhs(
+    network: ReactionNetworkSpec, *, volume_getter: Callable[[], float],
+    thermal: HeatTransferSpec,
+    species_thermo: Mapping[str, NASA7SpeciesThermo] | None = None,
+    jacket_program: Callable[[float], float] | None = None,
+) -> Callable[[float, np.ndarray], np.ndarray]:
+    """Compatibility packing over the native common derivative assembly."""
+    process = reaction_network_process(network, species_thermo=species_thermo, legacy_energy=True)
+    thermodynamics = _LegacyBatchThermodynamics(network.species_ids, thermal.rho_cp_J_per_L_K)
+
+    def heat_flux(state: CoupledStateView) -> HeatFlux:
+        jacket = (jacket_program(state.time_s) if jacket_program is not None
+                  else thermal.jacket_temperature_K)
+        return HeatFlux(
+            _jacket_heat_w(thermal, temperature_K=state.temperature_K,
+                           jacket_temperature_K=jacket),
+            thermal.heat_loss_w(state.temperature_K),
+        )
+
+    def rhs(time_s: float, values: np.ndarray) -> np.ndarray:
+        state = CoupledStateView(
+            _amounts_from_vector(network, values[:len(network.species_ids)]),
+            max(float(values[len(network.species_ids)]), 1.0), volume_getter(), time_s,
+        )
+        return assemble_coupled_rates(
+            state, processes=(process,), thermodynamics=thermodynamics, heat_flux=heat_flux,
+        ).legacy_batch_vector(network.species_ids)
+    return rhs
 
 
 def _reaction_enthalpy_j_mol(

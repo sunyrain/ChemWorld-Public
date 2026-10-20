@@ -1,30 +1,38 @@
-# 扩展待办清单
+# 原生扩展与模型范围
 
-以下为待实施方向，开源资料核对日期为2026年10月19日。工作量按熟悉项目的单个开发者估算，
-包含有限模型、操作与测量接口、示例和参考比较，不包含真实实验、大规模Agent实验或完整重写外部软件。
+当前开发源码已经包含下列有限模型，统一使用ChemWorld的状态、操作、观测和事务接口。
+开源工具用于方程参考和可选数值对照，运行原生模型不需要安装这些求解器。
+合成模型的适用范围如下，不等同于完整复刻上游软件或预测特定真实材料。
 
-| 优先级 | 扩展与开源参考 | 首批交付 | 工作量 |
-| --- | --- | --- | --- |
-| P0 | 表面微观动力学：[Cantera](https://github.com/Cantera/cantera) | 位点守恒的吸附—脱附—表面反应网络，动态覆盖度及覆盖度依赖速率；比较温度和进料干预。 | 8–12人日 |
-| P1 | 电池循环与老化：[PyBaMM](https://github.com/pybamm-team/PyBaMM) | 有限单粒子模型、集中热模型和一种SEI生长机理；充放电、静置与诊断脉冲共享持续状态。 | 15–25人日 |
-| P1 | 水溶液与矿物反应：[Reaktoro](https://github.com/reaktoro/reaktoro) | 一个碳酸盐—水—气体系，包含活度、相出现以及矿物溶解／沉淀动力学。 | 10–15人日 |
-| P1 | 膜分离：[WaterTAP](https://github.com/watertap-org/watertap)、[IDAES](https://github.com/IDAES/idaes-pse) | 单个反渗透单元，包含有限进料、压力／通量／截盐和浓差极化，闭合物料能量收支。 | 8–12人日 |
-| P2 | 随机生化反应：[COPASI](https://github.com/copasi/COPASI) | 一个带抑制与反馈的酶网络，提供确定性与Gillespie参照，分开内禀随机性和测量噪声。 | 8–12人日 |
-| P2 | 更丰富的反应网络：[RMG-Py](https://github.com/ReactionMechanismGenerator/RMG-Py) | 接入一个小型生成机理，检查物种、单位和速率律兼容性，明确未支持部分并比较轨迹。 | 6–10人日 |
-| P2 | 耦合电池衰退：PyBaMM | 在首批电池模型通过验证后加入析锂、活性物质损失，比较相近容量衰减背后的可辨识性。 | 追加10–15人日 |
-| P2 | 复杂催化：Cantera、[CatMAP](https://github.com/SUNCAT-Center/catmap) | 在首批表面网络之后增加多类位点、覆盖度相互作用及竞争机理。 | 追加8–12人日 |
+| 领域 | 已实现的原生范围 | 示例或说明 |
+| --- | --- | --- |
+| 共同基座 | Gym、CLI、Agent共用实验会话；模块声明、物料／设备所有权、提交前守恒、物理单位与保存续算 | [原生会话](native_foundation.md) |
+| 表面催化 | 有限CO／O2吸附与氧化、可选体相反应、共同热推进；可逆双位点、覆盖度相互作用与位点交换 | `python -m chemworld.examples.native_multisite_surface` |
+| 热力学与相过程 | 状态相关物性、TP／PH闪蒸、两液相稳定性、有限动态蒸馏、浓缩、吸附再生及结晶／重溶 | `python -m chemworld.examples.native_distillation_research`；`python -m chemworld.examples.native_crystal_research` |
+| 输运与电极 | 有限罐、压头／功率受限泵与换热；平面／球形守恒扩散和有限扩散—BV电极 | `python -m chemworld.examples.native_liquid_transport`；`python -m chemworld.examples.native_electrode_research` |
+| 电池 | 球形单粒子扩散、恒流／恒压／静置、集中合成热模型、有限溶剂SEI与锂损失 | `python -m chemworld.examples.native_battery_degradation` |
+| 水相与矿物 | 稀碳酸盐／水平衡、有限方解石、带种子的溶解／沉淀及归属固相的表面几何；298.15 K | `python -m chemworld.examples.native_mineral_research` |
+| 膜分离 | 有限进料／收集罐、恒温稀NaCl反渗透、浓差极化、持续合成污染与有限纯水冲洗 | `python -m chemworld.examples.native_membrane_fouling` |
+| 随机生化 | 恒容恒温Gillespie事件、可逆和显式酶网络、整数加料与分子捕获；过程和检测随机性分开 | [生化世界](native_biochemical.md)、[SSA](native_stochastic.md) |
+| 机理与仪器 | 有限YAML／JSON机理导入、P-log／Chebyshev、NASA7气相热力学；程序色谱和持续仪器状态 | [机理导入](native_mechanisms.md)；`python -m chemworld.examples.programmed_chromatography --output chromatography-run` |
+| 二元固体 | 一／两种替位相、理想混合与L0／L1项、全局支撑线检查及热路径中的局部平衡 | `python -m chemworld.examples.native_solid_solution` |
 
-## 每项实施顺序
+源码检出后，Python命令加前缀`uv run --no-sync`。这些示例不需要模型密钥。
+生化示例运行`uv run --no-sync python examples/native_biochemical.py`。
 
-- [ ] 选定有限现象、适用范围及可观察任务。
-- [ ] 固定开源参考版本，梳理方程、公开接口、参数来源及数值容差。
-- [ ] 按独立方程／接口规格实现，接入ChemWorld状态、操作和资源账本。
-- [ ] 检查解析极限、守恒、收敛及声明范围内的参考结果，保留失败与差异。
-- [ ] 增加测量选择、资源约束和无需模型密钥的研究示例。
-- [ ] 发布支持范围与参照比较结果。
+## 待完成的集成与科学扩展
 
-建议先用Cantera增强已有催化机理；首个新增模拟领域选择PyBaMM参考下的电池循环。
-电池中的操作会持续改变样品，具有区分扩散、极化、温升和不可逆衰退的研究空间。
+本次同步尚不包含共享实验室时钟、有限设备队列和异步分析发布；它们仍在开发。
+当前示例明确使用局部时钟，未选容器不会自动同时老化。最终跨领域组合验收需要等待该功能交付。
 
-资料依据与许可证记录见[英文清单](https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/extension-roadmap.md)。本次同步没有复制任何这些外部求解器代码。
-净室式独立实现以公开方程与行为为依据；若复用源码或参数数据，仍保留其许可证、出处和适用条件。
+后续科学扩展仍须分别规定有限方程、参数和对照：电池电解液输运、析锂／裂纹、高浓度非理想水相、
+膜反向流动与化学清洗、空间表面动力学、晶体破碎／聚并、非恒温SSA／ODE混合以及多子晶格固体。
+现有SPM、膜和二元固体均有明确范围，不代表完整PyBaMM、WaterTAP或CALPHAD能力。
+
+## 开源参考与原生实现
+
+[英文说明](extension-roadmap.md)列出Cantera、PyBaMM、Reaktoro、WaterTAP、IDAES、
+COPASI、RMG-Py、CatMAP和pycalphad等参考项目。先确定方程、适用域、状态归属和交换规则，
+再接入同一求解与实验会话，并检查解析极限、守恒和有限参考条件。
+复用的数据夹具保留来源和许可证，例如`tests/fixtures/mechanisms/`中的Cantera 3.1.0机理。
+外部求解器保持可选；原生重写不免除实际复用代码或数据的许可义务。

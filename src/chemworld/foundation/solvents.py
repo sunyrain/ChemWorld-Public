@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import exp, fsum, isfinite, log
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from chemworld.foundation.state import WorldState
 
 SOLVENT_IDS = ("water", "ethanol", "acetonitrile", "toluene")
 # Dimensionless surrogate endpoint ratios relative to the world's base rho*Cp.
@@ -20,6 +23,23 @@ VISCOSITY_RATIOS = (1.0, 1.2, 0.37, 0.59)
 RELATIVE_VOLATILITIES = (1.0, 2.0, 1.8, 0.7)
 ORGANIC_DISTRIBUTION_RATIOS = (0.02, 1.2, 1.8, 24.0)
 MIXTURE_MODEL_ID = "finite-additive-volume-log-property-mixtures-v1"
+
+
+def total_solvents(state: WorldState) -> SolventInventory:
+    """Finite carriers across the same vessels and samples as the material boundary."""
+    total = SolventInventory()
+    if state.phases is not None:
+        for phase in state.phases.phases.values():
+            total = total + phase.solvents
+    for sample in state.samples.samples.values():
+        if sample.contents is None:
+            total = total + SolventInventory.pure(sample.solvent, sample.volume_L)
+        else:
+            for phase in sample.contents.phases.phases.values():
+                total = total + phase.solvents
+    for local in state.inactive_vessels.values():
+        total = total + total_solvents(local)
+    return total
 
 
 @dataclass(frozen=True)

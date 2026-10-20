@@ -19,6 +19,7 @@ from types import MappingProxyType
 from typing import Any
 
 from chemworld.data.logging import to_builtin
+from chemworld.world.operations import MATERIAL_STOCK_FIELDS
 
 
 def canonical_json_sha256(payload: Any) -> str:
@@ -48,19 +49,6 @@ DEFAULT_PROTECTED_CLOSEOUT_OPERATIONS = frozenset(
 # agent adapters.
 ELECTROCHEMICAL_REAGENT_ACTION_UPPER_MOL = 0.040
 ELECTROCHEMICAL_SOLVENT_ACTION_UPPER_L = 0.080
-
-_STOCK_FIELDS_BY_OPERATION: dict[str, tuple[str, str]] = {
-    "add_component": ("reagent_mol", "amount_mol"),
-    "add_reagent": ("reagent_mol", "amount_mol"),
-    "add_solvent": ("solvent_L", "volume_L"),
-    "resuspend_crystals": ("solvent_L", "volume_L"),
-    "add_catalyst": ("catalyst_mol", "catalyst_amount_mol"),
-    "seed_crystals": ("seed_g", "seed_mass_g"),
-    "add_extractant": ("extractant_L", "volume_L"),
-    "add_phase": ("phase_liquid_L", "volume_L"),
-    "wash": ("wash_solvent_L", "wash_volume_L"),
-}
-
 
 class CampaignResourceError(RuntimeError):
     """Base class for campaign resource failures."""
@@ -474,7 +462,7 @@ def derive_campaign_resource_delta(
     operation = str(action.get("operation", "invalid"))
     committed = outcome is None or _is_committed(outcome)
     stocks: dict[str, float] = {}
-    stock_contract = _STOCK_FIELDS_BY_OPERATION.get(operation)
+    stock_contract = MATERIAL_STOCK_FIELDS.get(operation)
     if committed and stock_contract is not None:
         stock_id, field_name = stock_contract
         amount = _positive_action_float(action, field_name)
@@ -482,6 +470,14 @@ def derive_campaign_resource_delta(
             amount *= reagent_charge_molar_multiplier
         if amount > 0.0:
             stocks[stock_id] = amount
+    if committed and outcome is not None and "material_stock_consumption" in outcome:
+        actual_stocks = outcome["material_stock_consumption"]
+        if not isinstance(actual_stocks, Mapping):
+            raise CampaignResourceIntegrityError("material stock receipt must be a mapping")
+        stocks = {
+            str(key): _finite_nonnegative(value, name=str(key))
+            for key, value in actual_stocks.items()
+        }
 
     instrument = str(action.get("instrument", "")) if operation == "measure" else ""
     is_final = committed and instrument == "final_assay"
@@ -1293,7 +1289,7 @@ class CampaignResourceLedger:
             )
             for instrument, limit in self.card.per_instrument_limits.items()
         }
-        payload: dict[str, Any] = {
+        payload = {
             "operation_attempts": self.operation_attempts,
             "vessel_starts": self.vessel_starts,
             "final_assays": self.final_assays,

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from math import isclose, isfinite
 from typing import Any
 
 from chemworld.foundation import PhysicalConstitution, WorldState
+from chemworld.foundation.balances import TransitionBalance
+from chemworld.foundation.constitution import CheckResult
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,7 @@ class TransactionResult:
     transaction_status: str
     rollback_reason: str | None
     constitution_checks: tuple[dict[str, object], ...]
+    material_balance: TransitionBalance = field(default_factory=TransitionBalance)
 
     def to_info(self) -> dict[str, Any]:
         return {
@@ -63,8 +68,14 @@ class TransactionResult:
 class TransactionManager:
     """Apply patches atomically and roll back failed constitution checks."""
 
-    def __init__(self, constitution: PhysicalConstitution) -> None:
+    def __init__(
+        self, constitution: PhysicalConstitution,
+        material_boundary: Callable[
+            [WorldState, WorldState, dict[str, Any]], TransitionBalance
+        ] | None = None,
+    ) -> None:
         self.constitution = constitution
+        self.material_boundary = material_boundary
 
     def commit(
         self,
@@ -73,13 +84,49 @@ class TransactionManager:
         operation_type: str,
         events: tuple[WorldEvent, ...],
         patches: tuple[StatePatch, ...],
+        action: dict[str, Any] | None = None,
+        actual_duration_s: float | None = None,
     ) -> TransactionResult:
         candidate = state
         for patch in patches:
             candidate = patch.apply(candidate)
         report = self.constitution.check_state(candidate)
-        checks = tuple(check.to_dict() for check in report.checks)
-        if report.passed:
+        balance = TransitionBalance()
+        transition_checks: list[CheckResult] = []
+        if actual_duration_s is not None:
+            transition_checks.append(CheckResult(
+                "operation_actual_duration",
+                isfinite(actual_duration_s) and actual_duration_s >= 0.0 and isclose(
+                    candidate.ledger.time_s - state.ledger.time_s,
+                    actual_duration_s, rel_tol=1e-9, abs_tol=1e-7,
+                ),
+                "candidate physical clock agrees with the provider's actual elapsed time",
+            ))
+        try:
+            if self.material_boundary is not None and action is not None:
+                if action.get("operation") != operation_type:
+                    raise ValueError("action and transaction operation disagree")
+                balance = self.material_boundary(state, candidate, action)
+            transition_checks.append(self.constitution.check_transition(state, candidate, balance))
+            transition_checks.append(
+                self.constitution.check_carrier_transition(state, candidate, balance)
+            )
+        except ValueError as exc:
+            transition_checks.append(CheckResult("boundary_exchange_integrity", False, str(exc)))
+        if operation_type in {"quench", "cool_crystallize"}:
+            thermal = candidate.metadata.get("last_energy_transition", {})
+            residual = (
+                float(thermal.get("energy_balance_residual_J", float("inf")))
+                if isinstance(thermal, dict) and thermal.get("operation") == operation_type
+                else float("inf")
+            )
+            transition_checks.append(CheckResult(
+                "operation_energy_conservation", abs(residual) <= 1e-8,
+                "signed sensible, jacket, environmental, and phase-change heat close",
+                value=residual, tolerance=1e-8,
+            ))
+        checks = tuple(check.to_dict() for check in (*report.checks, *transition_checks))
+        if all(check["passed"] for check in checks):
             return TransactionResult(
                 state=candidate,
                 events=events,
@@ -87,6 +134,7 @@ class TransactionManager:
                 transaction_status="committed",
                 rollback_reason=None,
                 constitution_checks=checks,
+                material_balance=balance,
             )
         penalty_state = self._penalize_rollback(state)
         failed_checks = [check["name"] for check in checks if not check["passed"]]
@@ -116,6 +164,7 @@ class TransactionManager:
             transaction_status="rolled_back",
             rollback_reason="constitution_failed",
             constitution_checks=checks,
+            material_balance=balance,
         )
 
     def rollback(

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
+from hashlib import sha256
+
 from chemworld.physchem.mechanism_library import (
     MechanismScenarioCard,
     get_mechanism_card,
     list_mechanism_cards,
     load_library_mechanism,
 )
+from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.runtime.mechanism_manifest import (
     CompiledMechanism,
     MechanismManifest,
@@ -69,8 +74,7 @@ def compile_mechanism(
     validation_report = validate_mechanism_file(card.resolved_mechanism_path)
     network = load_library_mechanism(card)
     species_roles = {
-        species.species_id: tuple(species.observable_aliases)
-        for species in network.species
+        species.species_id: tuple(species.observable_aliases) for species in network.species
     }
     observable_mapping = build_observable_mapping(network, card)
     limiting_species = initial_limiting_species(card)
@@ -90,6 +94,68 @@ def compile_mechanism(
         impurity_species=card.impurity_species,
         initial_limiting_species=limiting_species,
     )
+    return _assemble_compiled_network(
+        network,
+        species_roles,
+        observable_mapping,
+        score_spec,
+        card.initial_amounts_mol,
+        validation_report,
+    )
+
+
+def compile_native_network(
+    network: ReactionNetworkSpec, *, initial_amounts: Mapping[str, float]
+) -> CompiledMechanism:
+    """Compile an explicitly authored network, including a nonreacting inventory.
+
+    No scenario lookup or benchmark role defaults apply at this boundary. Roles
+    are the aliases declared by the network; absent roles remain absent.
+    """
+    roles = {s.species_id: tuple(s.observable_aliases) for s in network.species}
+    observable = {
+        role: tuple(name for name, aliases in roles.items() if role in aliases)
+        for role in sorted({r for aliases in roles.values() for r in aliases})
+    }
+    reactants = observable.get("reactant", ())
+    score = ScoreSpec(
+        observable.get("target", ()),
+        observable.get("impurity", ()),
+        reactants[0] if reactants else None,
+    )
+    payload = {
+        "network_id": network.network_id,
+        **({"stochastic": network.stochastic} if network.stochastic is not None else {}),
+        "species": [s.to_dict() for s in network.species],
+        "reactions": [r.to_dict() for r in network.reactions],
+        "units": network.units,
+        "metadata": network.metadata,
+    }
+    digest = sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    equations = tuple(sorted({r.rate_law.equation_id for r in network.reactions}))
+    report = MechanismValidationReport(
+        network.network_id,
+        MECHANISM_SCHEMA_VERSION,
+        digest,
+        "world-composition",
+        True,
+        (),
+        (),
+        len(network.species),
+        len(network.reactions),
+        equations,
+    )
+    return _assemble_compiled_network(network, roles, observable, score, initial_amounts, report)
+
+
+def _assemble_compiled_network(
+    network,
+    species_roles,
+    observable_mapping,
+    score_spec,
+    initial_amounts,
+    validation_report,
+) -> CompiledMechanism:
     manifest = MechanismManifest(
         mechanism_id=network.network_id,
         mechanism_version=MECHANISM_SCHEMA_VERSION,
@@ -101,7 +167,7 @@ def compile_mechanism(
         species_roles=species_roles,
         observable_mapping=observable_mapping,
         score_spec=score_spec,
-        initial_amount_policy=dict(card.initial_amounts_mol),
+        initial_amount_policy=dict(initial_amounts),
         validation_report=validation_report,
     )
     return CompiledMechanism(
@@ -112,13 +178,12 @@ def compile_mechanism(
         species_index=network.species_index,
         stoichiometric_matrix=network.stoichiometric_matrix(),
         reaction_enthalpies={
-            reaction.reaction_id: reaction.delta_h_J_per_mol
-            for reaction in network.reactions
+            reaction.reaction_id: reaction.delta_h_J_per_mol for reaction in network.reactions
         },
         species_roles=species_roles,
         observable_mapping=observable_mapping,
         score_spec=score_spec,
-        initial_amount_policy=dict(card.initial_amounts_mol),
+        initial_amount_policy=dict(initial_amounts),
         manifest=manifest,
     )
 
@@ -132,6 +197,7 @@ __all__ = [
     "ScoreSpec",
     "compile_mechanism",
     "compile_mechanism_for_scenario",
+    "compile_native_network",
     "mechanism_hash",
     "mechanism_id_for_scenario",
     "validate_mechanism_file",

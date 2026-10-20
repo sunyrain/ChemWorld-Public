@@ -9,7 +9,11 @@ from typing import Any, Literal, cast
 
 from chemworld.physchem.equilibrium import (
     ActivityModelSpec,
+    LiquidEquilibriumResult,
+    LiquidStabilityReport,
     activity_coefficients,
+    entrain_liquid_amounts,
+    equilibrate_liquids,
     lle_phase_stability_diagnostic,
 )
 from chemworld.physchem.extraction_units import DistributionCoefficientModelSpec
@@ -25,6 +29,69 @@ PHASEPY_LLE_PATH = "phasepy/equilibrium/lle.py"
 PHASEPY_STABILITY_PATH = "phasepy/equilibrium/stability.py"
 
 ContinuousPhasePolicy = Literal["auto", "aqueous", "organic"]
+
+
+@dataclass(frozen=True)
+class StrictLiquidSystemSpec:
+    """Isothermal liquid material law, distinct from empirical contact policy.
+
+    Pure-liquid chemical reference terms cancel between the equal-T phases.
+    Only relative mixing potentials are supplied. Mixing heat/PV work is not
+    an implemented energy closure in this finite isothermal model.
+    """
+
+    activity_model: ActivityModelSpec
+    molar_holdups_L_mol: dict[str, float]
+    temperature_K: float = 298.15
+    pressure_Pa: float = 101325.0
+    wash_feed_id: str = ""
+    retained_phase: int = 1
+    entrainment_fraction: float = .01
+    max_iterations: int = 1000
+
+    def __post_init__(self):
+        if len(self.activity_model.component_ids) not in (2, 3):
+            raise ValueError("strict liquid model supports binary/ternary material")
+        volumes = dict(self.molar_holdups_L_mol)
+        if (set(volumes) != set(self.activity_model.component_ids)
+                or any(not isfinite(v) or v <= 0 for v in volumes.values())
+                or any(not isfinite(v) or v <= 0 for v in (self.temperature_K, self.pressure_Pa))
+                or self.retained_phase not in (0, 1) or isinstance(self.retained_phase, bool)
+                or not 0 <= self.entrainment_fraction < 1 or isinstance(self.max_iterations, bool)
+                or not isinstance(self.max_iterations, int) or self.max_iterations <= 0):
+            raise ValueError("invalid strict liquid holdup/temperature/pressure/contact data")
+        object.__setattr__(self, "molar_holdups_L_mol", volumes)
+
+    def solve(self, amounts):
+        feed = _amounts(amounts, label="strict liquid feed", require_positive_total=False)
+        if set(feed) != set(self.activity_model.component_ids):
+            raise ValueError("strict liquid feed identities differ from its model")
+        if sum(feed.values()) == 0:
+            stability = LiquidStabilityReport(self.temperature_K, feed, 0, feed, (), ())
+            return LiquidEquilibriumResult(self.temperature_K, feed, (), stability, (), 0, 0, 0)
+        return equilibrate_liquids(self.activity_model, feed, temperature_K=self.temperature_K,
+                                   max_iterations=self.max_iterations)
+
+    def volume_l(self, amounts):
+        return sum(self.molar_holdups_L_mol[key] * amount for key, amount in amounts.items())
+
+    def to_dict(self):
+        from dataclasses import fields
+
+        return {"mode": "strict_liquid_equilibrium_v1", **{
+            f.name: (self.activity_model.to_dict() if f.name == "activity_model"
+                     else getattr(self, f.name))
+            for f in fields(self)}}
+
+    @classmethod
+    def from_dict(cls, payload):
+        values = dict(payload)
+        if values.pop("mode") != "strict_liquid_equilibrium_v1":
+            raise ValueError("unsupported liquid equilibrium model mode")
+        activity = dict(values["activity_model"])
+        activity["component_ids"] = tuple(activity["component_ids"])
+        values["activity_model"] = ActivityModelSpec(**activity)
+        return cls(**values)
 
 
 def _finite_positive(value: float, label: str) -> float:
@@ -677,13 +744,12 @@ def _contact_stage(
         entrained_to = continuous_phase
         source = aqueous if dispersed_phase == "aqueous" else organic
         target = organic if continuous_phase == "organic" else aqueous
-        entrained_amounts = {
-            component_id: entrainment_fraction * source[component_id]
-            for component_id in component_ids
-        }
-        for component_id, amount in entrained_amounts.items():
-            source[component_id] -= amount
-            target[component_id] += amount
+        source, target, entrained_amounts = entrain_liquid_amounts(
+            source, target, entrainment_fraction)
+        if dispersed_phase == "aqueous":
+            aqueous, organic = source, target
+        else:
+            organic, aqueous = source, target
         dispersed_volume = aqueous_volume_L if dispersed_phase == "aqueous" else organic_volume_L
         entrained_volume = entrainment_fraction * dispersed_volume
 
@@ -894,6 +960,7 @@ __all__ = [
     "StabilityAwareContactReport",
     "StabilityAwareExtractionRequest",
     "StabilityAwareExtractionResult",
+    "StrictLiquidSystemSpec",
     "ideal_organic_fraction",
     "simulate_stability_aware_extraction",
     "stability_aware_lle_model_card",

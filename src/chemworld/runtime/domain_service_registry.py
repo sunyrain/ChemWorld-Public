@@ -6,9 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from chemworld.world.control_contract import CONTROL_OPERATIONS
-from chemworld.world.operations import OPERATION_TYPES
-from chemworld.world.stream_contract import STREAM_OPERATIONS
+from chemworld.world.domain_modules import DomainModuleRegistry
 
 
 @dataclass(frozen=True)
@@ -32,92 +30,33 @@ class DomainServiceContract:
 @dataclass(frozen=True)
 class DomainServiceRegistry:
     contracts: tuple[DomainServiceContract, ...]
+    modules: DomainModuleRegistry | None = None
 
     @classmethod
     def default(cls) -> DomainServiceRegistry:
-        return cls(
-            (
-                DomainServiceContract(
-                    "primitive_operations",
-                    "reaction",
-                    "ChemWorldPrimitiveOperationServices",
-                    (
-                        "add_reagent",
-                        "add_component",
-                        "add_solvent",
-                        "add_catalyst",
-                        "sample",
-                        "quench",
-                        "create_container",
-                        "transfer_material",
-                        "select_vessel",
-                        "route_material",
-                        "evaporate",
-                        "terminate",
-                    ),
-                    ("reaction",),
-                ),
-                DomainServiceContract(
-                    "reaction_thermal",
-                    "reaction",
-                    "ChemWorldReactionThermalServices",
-                    ("heat", "wait", *CONTROL_OPERATIONS),
-                    ("reaction",),
-                ),
-                DomainServiceContract(
-                    "phase_separation",
-                    "separation",
-                    "ChemWorldPhaseSeparationServices",
-                    (
-                        "add_phase",
-                        "add_extractant",
-                        "mix",
-                        "settle",
-                        "separate_phase",
-                        "wash",
-                        "dry",
-                        "concentrate",
-                        "transfer",
-                    ),
-                    ("separation",),
-                ),
-                DomainServiceContract(
-                    "crystallization",
-                    "crystallization",
-                    "ChemWorldCrystallizationServices",
-                    ("seed_crystals", "cool_crystallize", "filter_crystals", "resuspend_crystals"),
-                    ("crystallization",),
-                ),
-                DomainServiceContract(
-                    "distillation",
-                    "distillation",
-                    "ChemWorldDistillationServices",
-                    ("distill", "collect_fraction"),
-                    ("distillation",),
-                ),
-                DomainServiceContract(
-                    "continuous_flow",
-                    "continuous_flow",
-                    "ChemWorldFlowServices",
-                    ("set_flow_rate", "run_flow", *STREAM_OPERATIONS),
-                    ("continuous_flow",),
-                ),
-                DomainServiceContract(
-                    "electrochemistry",
-                    "electrochemistry",
-                    "ChemWorldElectrochemicalServices",
-                    ("set_potential", "electrolyze"),
-                    ("electrochemistry",),
-                ),
-                DomainServiceContract(
-                    "instrument_cost",
-                    "observation",
-                    "ChemWorldInstrumentCostServices",
-                    ("measure", "configure_instrument"),
-                    ("observation",),
-                ),
+        return cls.from_modules(DomainModuleRegistry.default())
+
+    @classmethod
+    def from_modules(cls, modules: DomainModuleRegistry) -> DomainServiceRegistry:
+        operations = modules.operation_specs()
+        contracts = []
+        for service in modules.service_order():
+            owned = tuple(
+                name
+                for name in modules.operation_order()
+                if name in operations and operations[name].service_id == service.service_id
             )
-        )
+            capabilities = tuple(sorted({operations[name].capability for name in owned}))
+            contracts.append(
+                DomainServiceContract(
+                    service.service_id,
+                    capabilities[0] if capabilities else "shared",
+                    service.service_class,
+                    owned,
+                    capabilities,
+                )
+            )
+        return cls(tuple(contracts), modules)
 
     def validate_contract_integrity(self) -> None:
         owners: dict[str, str] = {}
@@ -127,7 +66,9 @@ class DomainServiceRegistry:
                 if operation in owners:
                     duplicates.append(operation)
                 owners[operation] = contract.service_id
-        unknown = sorted(set(owners) - set(OPERATION_TYPES))
+        unknown = sorted(
+            set(owners) - set((self.modules or DomainModuleRegistry.default()).operation_specs())
+        )
         if duplicates or unknown:
             details = {
                 "duplicates": sorted(duplicates),
@@ -138,7 +79,11 @@ class DomainServiceRegistry:
     def validate_operation_coverage(self, operations: Iterable[str] | None = None) -> None:
         self.validate_contract_integrity()
         owners = set(self.operation_map())
-        expected = set(OPERATION_TYPES) if operations is None else set(operations)
+        expected = (
+            set((self.modules or DomainModuleRegistry.default()).operation_specs())
+            if operations is None
+            else set(operations)
+        )
         missing = sorted(expected - owners)
         if missing:
             raise ValueError(

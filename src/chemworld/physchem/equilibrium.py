@@ -60,8 +60,14 @@ def davies_aqueous_activity_coefficient(
     ionic_strength_mol_kg: float,
     charge: float,
     temperature_K: float = 298.15,
+    debye_huckel_A: float | None = None,
+    davies_b: float = 0.3,
 ) -> AqueousActivityCoefficientResult:
-    """Return ``gamma`` from the Davies equation and fail outside its domain."""
+    """Return Davies gamma, with optional authored A at the stated temperature.
+
+    Without an override, retain the existing bounded temperature approximation.
+    The caller owns the validity of any supplied A/b parameterization.
+    """
 
     if not isfinite(ionic_strength_mol_kg) or ionic_strength_mol_kg < 0.0:
         raise ValueError("ionic_strength_mol_kg must be finite and nonnegative")
@@ -76,18 +82,26 @@ def davies_aqueous_activity_coefficient(
         raise ValueError("Davies activity model is outside its temperature applicability domain")
     if not isfinite(charge):
         raise ValueError("charge must be finite")
+    if (
+        (debye_huckel_A is not None and (not isfinite(debye_huckel_A) or debye_huckel_A < 0))
+        or not isfinite(davies_b)
+        or davies_b < 0
+    ):
+        raise ValueError("Davies coefficients must be finite and nonnegative")
     if charge == 0.0 or ionic_strength_mol_kg == 0.0:
         coefficient = 1.0
     else:
         sqrt_ionic_strength = sqrt(ionic_strength_mol_kg)
         # The 298 K Davies coefficient is temperature-scaled as a transparent
         # bounded approximation; this is not a Pitzer replacement.
-        debye_huckel_a = 0.5092 * (298.15 / temperature_K) ** 1.5
+        debye_huckel_a = (
+            0.5092 * (298.15 / temperature_K) ** 1.5 if debye_huckel_A is None else debye_huckel_A
+        )
         log10_gamma = (
             -debye_huckel_a
             * charge
             * charge
-            * (sqrt_ionic_strength / (1.0 + sqrt_ionic_strength) - 0.3 * ionic_strength_mol_kg)
+            * (sqrt_ionic_strength / (1.0 + sqrt_ionic_strength) - davies_b * ionic_strength_mol_kg)
         )
         coefficient = 10.0**log10_gamma
     return AqueousActivityCoefficientResult(
@@ -171,7 +185,7 @@ class RachfordRiceDiagnosticReport:
     liquid_composition: dict[str, float]
     vapor_composition: dict[str, float]
     objective_at_zero: float
-    objective_at_one: float
+    objective_at_one: float | None
     residual: float
     iterations: int
     phase_status: FlashPhaseStatus
@@ -181,17 +195,27 @@ class RachfordRiceDiagnosticReport:
         "reference_repos/thermo/thermo/flash/flash_base.py: ideal flash workflow notes",
     )
 
+    liquid_fraction: float | None = None
+
     def __post_init__(self) -> None:
+        if self.liquid_fraction is None:
+            object.__setattr__(self, "liquid_fraction", 1-self.vapor_fraction)
+        if not 0 <= self.liquid_fraction <= 1:
+            raise ValueError("liquid_fraction must be in [0, 1]")
         if self.phase_status not in {"all_liquid", "two_phase", "all_vapor"}:
             raise ValueError("Unsupported Rachford-Rice phase status")
         if not 0.0 <= self.vapor_fraction <= 1.0:
             raise ValueError("vapor_fraction must be in [0, 1]")
-        for field_name in (
-            "objective_at_zero",
-            "objective_at_one",
-            "residual",
+        if self.objective_at_one is None and not any(
+            value > 0 and self.k_values[key] == 0
+            for key,value in self.overall_composition.items()
         ):
-            if not isfinite(float(getattr(self, field_name))):
+            raise ValueError("undefined beta=1 objective requires nonvolatile inventory")
+        for field_name in ("objective_at_zero", "objective_at_one", "residual"):
+            value = getattr(self,field_name)
+            if value is None and field_name == "objective_at_one":
+                continue
+            if value is None or not isfinite(float(value)):
                 raise ValueError(f"{field_name} must be finite")
         if self.iterations < 0:
             raise ValueError("iterations cannot be negative")
@@ -203,6 +227,7 @@ class RachfordRiceDiagnosticReport:
             "overall_composition": dict(self.overall_composition),
             "k_values": dict(self.k_values),
             "vapor_fraction": self.vapor_fraction,
+            "liquid_fraction": self.liquid_fraction,
             "liquid_composition": dict(self.liquid_composition),
             "vapor_composition": dict(self.vapor_composition),
             "objective_at_zero": self.objective_at_zero,
@@ -609,6 +634,8 @@ class LLEPhaseStabilityDiagnostic:
             "partition_log_spread": self.partition_log_spread,
             "nonideality_drive": self.nonideality_drive,
             "minimum_tpd_like": self.minimum_tpd_like,
+            "diagnostic_kind": "empirical_partition_contact",
+            "thermodynamic_stability_certified": False,
             "warnings": list(self.warnings),
             "reference_reading": list(self.reference_reading),
         }
@@ -759,6 +786,7 @@ def gamma_phi_k_value_report(
     vapor_fugacity_coefficients: Mapping[str, float] | None = None,
     liquid_reference_fugacity_coefficients: Mapping[str, float] | None = None,
     poynting_factors: Mapping[str, float] | None = None,
+    nonvolatile_component_ids: tuple[str, ...] = (),
 ) -> GammaPhiKValueReport:
     """Return an auditable gamma-phi VLE K-value report.
 
@@ -773,7 +801,8 @@ def gamma_phi_k_value_report(
     if temperature_K <= 0 or not isfinite(temperature_K):
         raise ValueError("temperature_K must be positive and finite")
     x = _composition_vector_mapping(activity_model.component_ids, liquid_composition)
-    _validate_vapor_pressure_values(x, vapor_pressures_Pa)
+    _validate_vapor_pressure_values(x, vapor_pressures_Pa,
+                                    nonvolatile_component_ids=nonvolatile_component_ids)
     gamma = activity_coefficients(
         activity_model,
         x,
@@ -802,8 +831,11 @@ def gamma_phi_k_value_report(
         / (phi_v[component_id] * pressure_Pa)
         for component_id in activity_model.component_ids
     }
-    _validate_k_values(x, k_values)
-    reference_component_id = min(k_values, key=lambda component_id: k_values[component_id])
+    _validate_k_values(x, k_values,nonvolatile_component_ids=nonvolatile_component_ids)
+    volatile = {key:value for key,value in k_values.items() if value > 0}
+    if not volatile:
+        raise ValueError("a VLE model requires at least one potentially volatile component")
+    reference_component_id = min(volatile,key=volatile.get)
     reference_k = k_values[reference_component_id]
     relative_volatilities = {
         component_id: k_values[component_id] / reference_k
@@ -819,7 +851,8 @@ def gamma_phi_k_value_report(
             for component_id in activity_model.component_ids
         },
         activity_coefficients=gamma,
-        vapor_fugacity_coefficients=phi_v,
+        vapor_fugacity_coefficients={k:v for k,v in phi_v.items()
+                                     if k not in nonvolatile_component_ids},
         liquid_reference_fugacity_coefficients=phi_l_ref,
         poynting_factors=poynting,
         k_values=k_values,
@@ -1001,56 +1034,97 @@ def rachford_rice_diagnostic_report(
     *,
     tolerance: float = 1e-12,
     max_iterations: int = 200,
+    nonvolatile_component_ids: tuple[str, ...] = (),
 ) -> RachfordRiceDiagnosticReport:
     if tolerance <= 0:
         raise ValueError("tolerance must be positive")
     if max_iterations <= 0:
         raise ValueError("max_iterations must be positive")
     z = _normalize_composition(overall_composition)
-    _validate_k_values(z, k_values)
+    _validate_k_values(z,k_values,nonvolatile_component_ids=nonvolatile_component_ids)
     k = {component_id: float(k_values[component_id]) for component_id in z}
 
     def objective(beta: float) -> float:
         return sum(
             z[component_id] * (k[component_id] - 1.0) / (1.0 + beta * (k[component_id] - 1.0))
-            for component_id in z
+            for component_id in z if z[component_id] > 0
         )
 
     f0 = objective(0.0)
-    f1 = objective(1.0)
+    has_nonvolatile_inventory = any(z[key] > 0 for key in nonvolatile_component_ids)
+    f1 = None if has_nonvolatile_inventory else objective(1.0)
     warnings: list[str] = []
+    if has_nonvolatile_inventory:
+        warnings.append("beta=1 objective is undefined for retained nonvolatile inventory")
     iterations = 0
+    liquid_fraction = None
     if f0 <= 0.0:
         beta = 0.0
         phase_status: FlashPhaseStatus = "all_liquid"
         warnings.append("Rachford-Rice objective indicates a single liquid phase")
-    elif f1 >= 0.0:
+    elif f1 is not None and f1 >= 0.0:
         beta = 1.0
         phase_status = "all_vapor"
         warnings.append("Rachford-Rice objective indicates a single vapor phase")
     else:
-        low = 0.0
-        high = 1.0
-        beta = 0.5
         phase_status = "two_phase"
-        for iteration in range(1, max_iterations + 1):
-            beta = 0.5 * (low + high)
-            value = objective(beta)
-            iterations = iteration
-            if abs(value) < tolerance:
-                break
-            if value > 0.0:
-                low = beta
-            else:
-                high = beta
+        active = [key for key in z if z[key] > 0]
+        if has_nonvolatile_inventory:
+            # Solve log(L/F), retaining a positive trace liquid fraction even
+            # when float(1-L/F) rounds to one. K=0 gives an exact retained
+            # component, so L/F >= z_nonvolatile is a physical lower bound.
+            from scipy.optimize import brentq
+
+            def liquid_objective(log_liquid):
+                fraction = exp(log_liquid)
+                return sum(z[key]*(k[key]-1)/(fraction+(1-fraction)*k[key])
+                           for key in active)
+
+            lower = sum(z[key] for key in nonvolatile_component_ids)
+            root, info = brentq(liquid_objective, log(lower), 0.0,
+                xtol=5e-15, rtol=1e-14, maxiter=max_iterations, full_output=True)
+            liquid_fraction = exp(root)
+            beta = 1-liquid_fraction
+            iterations = info.iterations
         else:
-            warnings.append("Rachford-Rice bisection reached max_iterations before tolerance")
+            liquid_fraction = None
+        if not has_nonvolatile_inventory:
+            analytic = None
+            if len(active) == 2:
+                left, right = active
+                a, b = k[left] - 1, k[right] - 1
+                if a * b:
+                    candidate = -(z[left] * a + z[right] * b) / (a * b)
+                    if 0 < candidate < 1 and abs(objective(candidate)) < tolerance:
+                        analytic = candidate
+            if analytic is not None:
+                beta = analytic
+            else:
+                low, high = 0.0, 1.0
+                for iteration in range(1, max_iterations + 1):
+                    beta = 0.5 * (low + high)
+                    value = objective(beta)
+                    iterations = iteration
+                    if abs(value) < tolerance:
+                        break
+                    if value > 0.0:
+                        low = beta
+                    else:
+                        high = beta
+                else:
+                    warnings.append(
+                        "Rachford-Rice bisection reached max_iterations before tolerance")
+    if liquid_fraction is None:
+        liquid_fraction = 1-beta
     liquid = {
-        component_id: z[component_id] / (1.0 + beta * (k[component_id] - 1.0)) for component_id in z
+        component_id: (z[component_id] / (
+                        (liquid_fraction + beta * k[component_id]) if has_nonvolatile_inventory
+                        else (1.0 + beta * (k[component_id] - 1.0)))
+                       if z[component_id] else 0.0) for component_id in z
     }
     liquid = _normalize_composition(liquid)
     vapor = {component_id: k[component_id] * liquid[component_id] for component_id in z}
-    vapor = _normalize_composition(vapor)
+    vapor = _normalize_composition(vapor) if sum(vapor.values()) else vapor
     return RachfordRiceDiagnosticReport(
         overall_composition=z,
         k_values=k,
@@ -1059,7 +1133,10 @@ def rachford_rice_diagnostic_report(
         vapor_composition=vapor,
         objective_at_zero=f0,
         objective_at_one=f1,
-        residual=objective(beta),
+        residual=(sum(z[key]*(k[key]-1)/(liquid_fraction+beta*k[key])
+                      for key in z if z[key] > 0) if has_nonvolatile_inventory
+                  else objective(beta)),
+        liquid_fraction=liquid_fraction,
         iterations=iterations,
         phase_status=phase_status,
         warnings=tuple(warnings),
@@ -1306,6 +1383,217 @@ def dew_pressure_pa(
     return pressure
 
 
+@dataclass(frozen=True)
+class LiquidStabilityReport:
+    """Actual normalized TPD minimization, with deterministic start outcomes."""
+
+    temperature_K: float
+    feed_composition: dict[str, float]
+    minimum_tpd: float
+    minimizing_composition: dict[str, float]
+    starts: tuple[dict[str, object], ...]
+    minima: tuple[dict[str, float], ...]
+
+    def to_dict(self):
+        from dataclasses import asdict
+
+        return {"model_id": "liquid_tpd_minimization_v1", **asdict(self)}
+
+
+@dataclass(frozen=True)
+class LiquidEquilibriumResult:
+    temperature_K: float
+    feed_amounts_mol: dict[str, float]
+    phases: tuple[dict[str, float], ...]
+    stability: LiquidStabilityReport
+    post_split_stability: tuple[LiquidStabilityReport, ...]
+    chemical_potential_error_RT: float
+    material_balance_error_mol: float
+    gibbs_mixing_RT_mol: float
+    solver_starts: tuple[dict[str, object], ...] = ()
+    mixing_chemical_potentials_RT: tuple[dict[str, float], ...] = ()
+
+    @property
+    def phase_status(self):
+        if not self.phases:
+            return "empty"
+        return "two_liquid" if len(self.phases) == 2 else "single_liquid"
+
+    def to_dict(self):
+        from dataclasses import asdict
+
+        return {"model_id": "strict_two_liquid_equilibrium_v1",
+                "phase_status": self.phase_status,
+                "chemical_potential_basis": (
+                    "relative_to_common_pure_liquid_standard; divided_by_RT"),
+                **asdict(self)}
+
+
+def _liquid_simplex_seeds(z):
+    import numpy as np
+
+    size = len(z)
+    if size == 1:
+        return [np.ones(1)]
+    seeds = [np.asarray(z), np.full(size, 1 / size)]
+    for index in range(size):
+        point = np.full(size, 1e-8)
+        point[index] = 1 - (size - 1) * 1e-8
+        seeds.append(point)
+    if size == 2:
+        seeds.extend(np.array([x, 1 - x]) for x in (.01, .05, .1, .2, .35, .5, .65, .8, .9,
+                                                       .95, .99))
+    else:
+        seeds.extend(np.array([i, j, 8-i-j]) / 8 for i in range(1, 7)
+                     for j in range(1, 8-i))
+    return seeds
+
+
+def _liquid_activity_state(activity_model, active_ids, composition, temperature):
+    import numpy as np
+
+    full = dict.fromkeys(activity_model.component_ids, 0.0)
+    full.update(zip(active_ids, composition, strict=True))
+    gamma = activity_coefficients(activity_model, full, temperature_K=temperature)
+    return np.array([log(x) + log(gamma[k]) for k, x in zip(
+        active_ids, composition, strict=True)])
+
+
+def liquid_tpd_minimum(
+    activity_model: ActivityModelSpec, composition: Mapping[str, float], *,
+    temperature_K: float, max_iterations: int = 1000,
+) -> LiquidStabilityReport:
+    """Minimize sum w_i[ln(w_i gamma_i(w))-ln(z_i gamma_i(z))].
+
+    Positive-inventory support is fixed; no absent component is manufactured.
+    The finite deterministic multistart design is reported, not a proof of
+    exhaustive global optimization for arbitrary activity functions.
+    """
+    import numpy as np
+    from scipy.optimize import minimize
+
+    if (not isfinite(temperature_K) or temperature_K <= 0
+            or isinstance(max_iterations, bool) or not isinstance(max_iterations, int)
+            or max_iterations <= 0
+            or len(activity_model.component_ids) not in (2, 3)
+            or set(composition) - set(activity_model.component_ids)):
+        raise ValueError("strict liquid stability needs binary/ternary composition and positive T")
+    feed = _normalize_amounts(dict.fromkeys(activity_model.component_ids, 0.0) | dict(composition))
+    total = sum(feed.values())
+    if not isfinite(total):
+        raise ValueError("liquid composition total must be finite")
+    z_full = {k: v / total for k, v in feed.items()}
+    ids = tuple(k for k in activity_model.component_ids if feed[k] > 0)
+    z = np.array([z_full[k] for k in ids])
+    mu = _liquid_activity_state(activity_model, ids, z, temperature_K)
+    def objective(w):
+        point = w / w.sum()
+        delta = _liquid_activity_state(activity_model, ids, point, temperature_K) - mu
+        value = float(w @ delta)
+        return value, delta
+    outcomes, minima, best = [], [], (0.0, z)
+    for index, seed in enumerate(_liquid_simplex_seeds(z)):
+        if len(ids) == 1:
+            value, point, success, message, iterations = 0.0, z, True, "pure support", 0
+        else:
+            result = minimize(
+                objective, seed, jac=True, method="SLSQP", bounds=[(1e-14, 1)] * len(ids),
+                constraints={"type": "eq", "fun": lambda w: w.sum() - 1,
+                             "jac": lambda w: np.ones(len(ids))},
+                options={"ftol": 1e-13, "maxiter": max_iterations})
+            value, point = float(result.fun), result.x / result.x.sum()
+            success, message, iterations = bool(result.success), str(result.message), result.nit
+        outcomes.append({"start": index, "converged": success, "iterations": iterations,
+                         "minimum_tpd": value, "message": message})
+        full = dict.fromkeys(activity_model.component_ids, 0.0)
+        full.update(zip(ids, map(float, point), strict=True))
+        minima.append(full)
+        if value < best[0]:
+            best = value, point
+    if any(not result["converged"] for result in outcomes):
+        raise RuntimeError(f"liquid TPD has unresolved starts: {outcomes}")
+    minimizing = dict.fromkeys(activity_model.component_ids, 0.0)
+    minimizing.update(zip(ids, map(float, best[1]), strict=True))
+    return LiquidStabilityReport(temperature_K, z_full, best[0], minimizing,
+                                  tuple(outcomes), tuple(minima))
+
+
+def equilibrate_liquids(
+    activity_model: ActivityModelSpec, feed_amounts_mol: Mapping[str, float], *,
+    temperature_K: float, tpd_tolerance: float = 1e-9, max_iterations: int = 1000,
+) -> LiquidEquilibriumResult:
+    """Constrained Gibbs minimization then actual chemical-potential refinement.
+
+    At most two liquids. A negative post-split TPD rejects an unsupported
+    additional phase. No partition coefficient or empirical drive is used.
+    """
+    import numpy as np
+    from scipy.optimize import least_squares, minimize
+
+    if not isfinite(tpd_tolerance) or tpd_tolerance <= 0:
+        raise ValueError("liquid TPD tolerance must be positive and finite")
+    feed = _normalize_amounts(dict.fromkeys(activity_model.component_ids, 0.0)
+                              | dict(feed_amounts_mol))
+    stability = liquid_tpd_minimum(activity_model, feed, temperature_K=temperature_K,
+                                    max_iterations=max_iterations)
+    ids = tuple(k for k in activity_model.component_ids if feed[k] > 0)
+    n = np.array([feed[k] for k in ids])
+    total, z = float(n.sum()), n / n.sum()
+    def mu(point):
+        return _liquid_activity_state(activity_model, ids, point, temperature_K)
+    initial_g = float(total * (z @ mu(z)))
+    if stability.minimum_tpd >= -tpd_tolerance:
+        return LiquidEquilibriumResult(temperature_K, feed, (feed,), stability,
+                                       (stability,), 0.0, 0.0, initial_g,
+                                       mixing_chemical_potentials_RT=(dict(zip(
+                                           ids, map(float, mu(z)), strict=True)),))
+    def objective(fractions):
+        first, second = z * fractions, z * (1 - fractions)
+        a, b = mu(first / first.sum()), mu(second / second.sum())
+        return float(first @ a + second @ b), z * (a - b)
+    starts, candidates = [], []
+    for index, trial in enumerate(stability.minima):
+        w = np.array([trial[k] for k in ids])
+        beta = min(.5, .5 * float(np.min(z / np.maximum(w, 1e-300))))
+        fractions = np.clip(beta * w / z, 1e-10, 1 - 1e-10)
+        result = minimize(objective, fractions, jac=True, method="L-BFGS-B",
+                          bounds=[(1e-12, 1-1e-12)] * len(ids),
+                          options={"gtol": 1e-10, "ftol": 1e-15, "maxiter": max_iterations})
+        starts.append({"start": index, "converged": bool(result.success),
+                       "message": str(result.message), "gibbs_RT_per_mol": float(result.fun)})
+        if result.success and result.fun < initial_g / total - tpd_tolerance:
+            candidates.append(result)
+    if not candidates:
+        raise RuntimeError(f"unstable liquid could not produce a lower-G split: {starts}")
+    optimum = min(candidates, key=lambda result: result.fun)
+    def mismatch(fractions):
+        first, second = z * fractions, z * (1 - fractions)
+        return mu(first / first.sum()) - mu(second / second.sum())
+    refined = least_squares(mismatch, optimum.x, bounds=(1e-12, 1 - 1e-12),
+                            xtol=1e-13, ftol=1e-13, gtol=1e-13, max_nfev=max_iterations)
+    error = float(np.max(np.abs(mismatch(refined.x))))
+    first, second = n * refined.x, n * (1 - refined.x)
+    if not refined.success or error > 1e-7 or np.max(abs(
+        first / first.sum() - second / second.sum())) < 1e-6:
+        raise RuntimeError("strict liquid split failed chemical-potential refinement")
+    phases = []
+    for amounts in (first, second):
+        phase = dict.fromkeys(activity_model.component_ids, 0.0)
+        phase.update(zip(ids, map(float, amounts), strict=True))
+        phases.append(phase)
+    phases.sort(key=lambda phase: tuple(phase[k] / sum(phase.values()) for k in ids))
+    post = tuple(liquid_tpd_minimum(activity_model, phase, temperature_K=temperature_K,
+                                    max_iterations=max_iterations) for phase in phases)
+    if any(report.minimum_tpd < -1e-7 for report in post):
+        raise ValueError("remaining liquid instability may require an unsupported additional phase")
+    balance = max(abs(feed[k] - sum(phase[k] for phase in phases)) for k in feed)
+    return LiquidEquilibriumResult(
+        temperature_K, feed, tuple(phases), stability, post, error, balance,
+        float(total * objective(refined.x)[0]), tuple(starts), tuple(
+            dict(zip(ids, map(float, mu(np.array([p[k] / sum(p.values()) for k in ids]))),
+                     strict=True)) for p in phases))
+
+
 def lle_phase_stability_diagnostic(
     feed_amounts_mol: Mapping[str, float],
     *,
@@ -1418,6 +1706,16 @@ def lle_phase_stability_diagnostic(
     )
 
 
+def entrain_liquid_amounts(source, target, fraction):
+    """Move a declared fraction of one real liquid inventory into the outlet."""
+    if (set(source) != set(target) or not isfinite(fraction) or not 0 <= fraction < 1
+            or any(not isfinite(v) or v < 0 for v in (*source.values(), *target.values()))):
+        raise ValueError("entrainment requires matching finite inventories and a fraction in [0,1)")
+    moved = {key: fraction * value for key, value in source.items()}
+    return ({key: value - moved[key] for key, value in source.items()},
+            {key: value + moved[key] for key, value in target.items()}, moved)
+
+
 def liquid_liquid_split(
     feed_amounts_mol: Mapping[str, float],
     *,
@@ -1460,12 +1758,11 @@ def liquid_liquid_split(
         ideal_organic /= coefficient * organic_volume_L + aqueous_volume_L
         organic_amount = stage_efficiency * ideal_organic
         aqueous_amount = amount - organic_amount
-        entrained = entrainment_fraction * aqueous_amount
-        organic_amount += entrained
-        aqueous_amount -= entrained
         organic[component_id] = max(organic_amount, 0.0)
         aqueous[component_id] = max(aqueous_amount, 0.0)
-        recovery[component_id] = 0.0 if amount <= 0 else organic[component_id] / amount
+    aqueous, organic, _ = entrain_liquid_amounts(aqueous, organic, entrainment_fraction)
+    recovery = {key: 0 if amount <= 0 else organic[key] / amount
+                for key, amount in feed_amounts_mol.items()}
     balance_error = max(
         (
             abs(feed_amounts_mol[key] - organic.get(key, 0.0) - aqueous.get(key, 0.0))
@@ -1673,6 +1970,7 @@ def _dew_pressure_and_liquid_composition(
 def _validate_vapor_pressure_values(
     composition: Mapping[str, float],
     vapor_pressures_Pa: Mapping[str, float],
+    *, nonvolatile_component_ids: tuple[str, ...] = (),
 ) -> None:
     missing = sorted(set(composition) - set(vapor_pressures_Pa))
     extra = sorted(set(vapor_pressures_Pa) - set(composition))
@@ -1680,7 +1978,11 @@ def _validate_vapor_pressure_values(
         raise ValueError(
             f"vapor pressure keys must match composition: missing={missing}, extra={extra}"
         )
-    if any(value <= 0 or not isfinite(float(value)) for value in vapor_pressures_Pa.values()):
+    declared = set(nonvolatile_component_ids)
+    if declared-set(composition):
+        raise ValueError("nonvolatile identities must belong to the mixture")
+    if any(not isfinite(float(value)) or (value != 0 if key in declared else value <= 0)
+           for key,value in vapor_pressures_Pa.items()):
         raise ValueError("vapor pressures must be finite and positive")
 
 
@@ -2205,12 +2507,17 @@ def _normalize_composition(composition: Mapping[str, float]) -> dict[str, float]
 def _validate_k_values(
     composition: Mapping[str, float],
     k_values: Mapping[str, float],
+    *, nonvolatile_component_ids: tuple[str, ...] = (),
 ) -> None:
     missing = sorted(set(composition) - set(k_values))
     extra = sorted(set(k_values) - set(composition))
     if missing or extra:
         raise ValueError(f"K-value ids do not match composition: missing={missing}, extra={extra}")
-    if any(value <= 0 or not isfinite(value) for value in k_values.values()):
+    declared = set(nonvolatile_component_ids)
+    if declared-set(composition):
+        raise ValueError("nonvolatile identities must belong to the mixture")
+    if any(not isfinite(value) or (value != 0 if key in declared else value <= 0)
+           for key,value in k_values.items()):
         raise ValueError("K-values must be finite and positive")
 
 
@@ -2228,6 +2535,8 @@ __all__ = [
     "GammaPhiKValueReport",
     "LLEPhaseStabilityDiagnostic",
     "LLEStageResult",
+    "LiquidEquilibriumResult",
+    "LiquidStabilityReport",
     "RachfordRiceDiagnosticReport",
     "UNIQUACActivityReport",
     "VLESolveMode",
@@ -2240,9 +2549,12 @@ __all__ = [
     "davies_aqueous_activity_coefficient",
     "dew_pressure_pa",
     "dew_temperature_report",
+    "entrain_liquid_amounts",
+    "equilibrate_liquids",
     "flash_isothermal",
     "gamma_phi_k_value_report",
     "liquid_liquid_split",
+    "liquid_tpd_minimum",
     "lle_phase_stability_diagnostic",
     "rachford_rice_diagnostic_report",
     "rachford_rice_vapor_fraction",

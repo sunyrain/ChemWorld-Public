@@ -6,6 +6,11 @@ not a new frozen benchmark or a PyPI release.
 
 ## What changed
 
+The native session and domain extensions are now available on top of these
+existing capabilities. See the [native guide](native_foundation.md) for execution,
+state ownership and model-specific examples, and the [extension scope](extension-roadmap.md)
+for the delivered slices and pending shared-clock integration.
+
 | Capability | Current public behavior |
 | --- | --- |
 | Materials and vessels | Create containers, transfer identified samples, select vessels and route material through declared component ports. |
@@ -18,10 +23,10 @@ not a new frozen benchmark or a PyPI release.
 | Resources and replay | Retain attempted versus committed actions, physical consumption, rejected requests and exactly replayable current-runtime trajectories. |
 | Scientific records | Reusable document storage, versioned notebooks and public-history access are included; study-specific campaign runners are not distributed. |
 
-The global registries contain 43 operation types, 19 world-intervention axes and
-9 instrument definitions when particle sizing is included. Task contracts expose
-only compatible subsets. The previous public snapshot registered 28, 12 and 5,
-respectively. Existing classic optimization and optional reinforcement-learning
+Operation, component and instrument declarations come from the native module
+registry; each compiled world and task exposes its compatible subset. Native
+physical channels retain units while the historical Gym vector is a compatibility
+projection. Existing classic optimization and optional reinforcement-learning
 interfaces remain available.
 
 ## Try the current runtime
@@ -42,13 +47,24 @@ Optional external reference checks are reported as skipped when their reference
 installation is absent. Install/build checks are described in
 [contributing](https://github.com/sunyrain/ChemWorld-Public/blob/main/CONTRIBUTING.md).
 
-The synchronization check on Windows AMD64 completed with 466 tests passed and
+The preceding foundation synchronization on Windows AMD64 completed with 466 tests passed and
 1 skipped (the optional external IDAES checkout was unavailable), plus Ruff,
 mypy and the strict bilingual documentation build. Wheel and source-distribution
 installs were checked independently on Python 3.11.15 and 3.12.10, including all
 15 task initializations, packaged resources, Student Lab and exact replay of the
 offline examples. These are software integration checks, not a new scientific
 qualification of the historical reports.
+
+The native extension synchronization adds 21 further installed examples, covering
+667 committed operations per archive. Wheel and sdist both passed on Windows
+Python 3.12.10 with ten upstream solver/reference packages absent, alongside the
+eight surface variants, four equipment-reuse variants, task binding, saved
+continuation and JSONL replay. The Python 3.11.15 integration first found two
+failures among 721 cases: an inconsistent temperature fixture and single-phase
+inventory roundoff. Both were corrected without relaxing assertions; all 147
+affected flash, column, concentration, measurement and public-entry checks then
+passed. The unchanged checks and the follow-up overlap and are not added into a
+new denominator. Shared-clock and final cross-domain acceptance remain pending.
 
 ## Model scope
 

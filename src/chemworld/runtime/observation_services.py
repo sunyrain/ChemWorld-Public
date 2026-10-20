@@ -7,7 +7,8 @@ from typing import Any, cast
 import numpy as np
 
 from chemworld.foundation import Observation, PhysicalConstitution, WorldState, equipment_settings
-from chemworld.foundation.state import ProcessLedger, selected_phase_id
+from chemworld.foundation.observations import ObservationTime, legacy_scalar_projection
+from chemworld.foundation.state import ProcessLedger, instrument_equipment_id, selected_phase_id
 from chemworld.physchem.configurable_spectra import SPECTRAL_MODEL_ID, acquire_spectrum
 from chemworld.physchem.equilibrium_chemistry import (
     SolubilityProductSpec,
@@ -61,8 +62,10 @@ class ChemWorldObservationKernel:
         *,
         observation_noise_multiplier: float = 1.0,
         instrument_provider: ValidatedInstrumentRuntimeProvider | None = None,
+        modules=None,
     ) -> None:
         self.constitution = constitution
+        self.modules = modules
         self.objective = objective
         self.compiled_mechanism = compiled_mechanism
         self.scoring_contract = scoring_contract or TaskScoringContract.from_success_metrics(
@@ -83,7 +86,7 @@ class ChemWorldObservationKernel:
         action: dict[str, Any],
         rng: np.random.Generator,
     ) -> Observation:
-        operation = operation_name(action["operation"])
+        operation = operation_name(action["operation"], modules=self.modules)
         if operation != "measure":
             process = state.process or ProcessLedger()
             last = dict(process.last_observation)
@@ -92,21 +95,46 @@ class ChemWorldObservationKernel:
             observed_mask = self._base_observed_mask()
             values.update(last)
             observed_mask.update({str(key): bool(value) for key, value in last_mask.items()})
-            values["cost"] = min(1.0, state.ledger.cost)
+            values["cost"] = state.ledger.cost
             values["safety_risk"] = state.ledger.risk
             observed_mask["cost"] = True
             observed_mask["safety_risk"] = True
-            values["score"] = self._score(values)
-            observed_mask["score"] = True
-            return Observation(
+            self._apply_score(values, observed_mask)
+            fresh = Observation(
                 values=values,
                 units=self._observation_units(),
                 observed_mask=observed_mask,
                 processed_estimate=self._processed_estimate(values, observed_mask),
+                sampled_at=ObservationTime(time_s=state.ledger.time_s),
             )
+            if process.last_observation_record is None:
+                return fresh
+            record = process.last_observation_record.native_record()
+            dynamic = {"cost", "safety_risk", "score"}
+            fresh_channels = {c.channel_id: c.to_dict() for c in fresh.channels}
+            record["channels"] = [
+                fresh_channels.get(c["channel_id"], c) if c["channel_id"] in dynamic else c
+                for c in record["channels"]
+            ]
+            record.update(instrument_id=None, cost=0.0, sample_consumed_L=0.0)
+            return Observation.from_native_record(record)
 
-        instrument_id = instrument_name(action.get("instrument", "hplc"))
+        instrument_id = instrument_name(action.get("instrument", "hplc"), modules=self.modules)
         instrument = self.constitution.instruments[instrument_id]
+        spec = None if self.modules is None else self.modules.instrument_specs().get(instrument_id)
+        if spec is not None and spec.native_observer is not None:
+            observation = spec.native_observer(state, action, rng)
+            if (
+                not isinstance(observation, Observation)
+                or observation.instrument_id != instrument_id
+            ):
+                raise ValueError("Native instrument must return its own Observation")
+            if (
+                observation.cost != instrument.cost
+                or observation.sample_consumed_L != instrument.sample_volume_L
+            ):
+                raise ValueError("Native instrument accounting differs from its declaration")
+            return observation
         if instrument_id in SPECTRAL_INSTRUMENTS:
             return self._spectral_observation(state, instrument_id, rng)
         truth_values = self._truth_values(state)
@@ -149,12 +177,11 @@ class ChemWorldObservationKernel:
                 )
             )
             observed_mask["virtual_spectrum_summary"] = True
-        noisy["cost"] = min(1.0, state.ledger.cost)
+        noisy["cost"] = state.ledger.cost
         noisy["safety_risk"] = state.ledger.risk
         observed_mask["cost"] = True
         observed_mask["safety_risk"] = True
-        noisy["score"] = self._score(noisy)
-        observed_mask["score"] = True
+        self._apply_score(noisy, observed_mask)
         public_species_amounts = self._public_species_amounts(
             state,
             observable_keys=observable_keys,
@@ -188,6 +215,8 @@ class ChemWorldObservationKernel:
             instrument_id=instrument_id,
             cost=instrument.cost,
             sample_consumed_L=instrument.sample_volume_L,
+            sampled_at=ObservationTime(time_s=state.ledger.time_s),
+            sample_id=self._sample_id(state, instrument_id),
         )
 
     def _spectral_observation(
@@ -239,7 +268,8 @@ class ChemWorldObservationKernel:
         for key in allowed:
             values[key] = estimates[key]
             mask[key] = estimates[key] is not None
-        values["score"] = self._score(values)
+        self._apply_score(values, mask)
+        values["cost"] = state.ledger.cost
         self.last_provider_execution = {
             "model_id": SPECTRAL_MODEL_ID,
             "maturity": "development",
@@ -258,6 +288,8 @@ class ChemWorldObservationKernel:
             instrument_id=instrument_id,
             cost=acquisition_cost(instrument_id, configuration),
             sample_consumed_L=instrument.sample_volume_L,
+            sampled_at=ObservationTime(time_s=state.ledger.time_s),
+            sample_id=self._sample_id(state, instrument_id),
         )
 
     def failed_observation(self) -> Observation:
@@ -352,6 +384,14 @@ class ChemWorldObservationKernel:
         return observation_units()
 
     @staticmethod
+    def _sample_id(state: WorldState, instrument_id: str) -> str:
+        count = equipment_settings(state.equipment, instrument_equipment_id(instrument_id)).get(
+            "use_count",
+            0,
+        )
+        return f"{state.vessel_id}:{instrument_id}:acquisition:{count}"
+
+    @staticmethod
     def _base_public_values(state: WorldState) -> dict[str, float | None]:
         return base_public_values(cost=state.ledger.cost, safety_risk=state.ledger.risk)
 
@@ -367,8 +407,13 @@ class ChemWorldObservationKernel:
     def _score(self, values: dict[str, float | None]) -> float:
         return task_score_observation(
             contract=self.scoring_contract,
-            values=values,
+            values={**values, "cost": legacy_scalar_projection(float(values.get("cost") or 0.0))},
         )
+
+    def _apply_score(self, values, mask) -> None:
+        scored = self.scoring_contract.score_family != "unscored"
+        values["score"] = self._score(values) if scored else None
+        mask["score"] = scored
 
     def _truth_values(self, state: WorldState) -> dict[str, float]:
         truth = self.species_view.truth_values(state)

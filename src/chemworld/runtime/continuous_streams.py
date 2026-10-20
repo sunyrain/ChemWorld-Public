@@ -16,8 +16,10 @@ from chemworld.foundation import (
 )
 from chemworld.foundation.solvents import HEAT_CAPACITY_RATIOS, SolventInventory
 from chemworld.foundation.state_ledgers import PhaseLedger
-from chemworld.physchem.coupled_flow import FLOW_MODEL, integrate_flow
+from chemworld.physchem.coupled_flow import FLOW_MODEL
 from chemworld.physchem.reaction_network import evaluate_rate_law
+from chemworld.runtime.advance_paths import advance_ledger
+from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.runtime.material_routing import (
     _active,
     _contents,
@@ -53,6 +55,11 @@ def _edges(state: WorldState, program: dict[str, Any]) -> list[tuple[dict[str, A
 
 
 def _liquid(state: WorldState) -> None:
+    if any(
+        slot.spec.owner_kind != "equipment" or slot.spec.time_evolution != "static"
+        for slot in state.state_slots.slots
+    ):
+        raise ValueError("This continuous-flow solver does not transport or evolve entity state")
     if state.phases is None or set(state.phases.phases) != {"reactor_liquid"} or state.volume_L < 0:
         raise ValueError("Continuous streams support one homogeneous liquid phase")
 
@@ -174,10 +181,11 @@ def _install_sample(state: WorldState, sample: Any) -> WorldState:
 
 
 class ContinuousStreamServices:
-    def __init__(self, world: Any, species_view: Any) -> None:
+    def __init__(self, world: Any, species_view: Any, advancer: Any) -> None:
         self.world, self.species_view = world, species_view
+        self.advancer = advancer
 
-    def apply(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+    def apply(self, state: WorldState, action: dict[str, Any]) -> WorldState | ModelProviderResult:
         error = stream_error(state, action["operation"], action)
         if error:
             raise ValueError(error)
@@ -199,6 +207,19 @@ class ContinuousStreamServices:
                     },
                 )
             )
+        try:
+            return self._advance(state, action)
+        except (ArithmeticError, RuntimeError, ValueError) as exc:
+            return ModelProviderResult(
+                outputs={},
+                diagnostics={"solver_error": str(exc), "error_type": type(exc).__name__},
+                success=False,
+                outcome="numerical_failure",
+                failure_reason="flow_solver_failed",
+            )
+
+    def _advance(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        program = settings(state)
         duration = action["duration_s"]
         edges = _edges(state, program)
         inputs = [(e, q) for e, q in edges if e["target_vessel"] == state.vessel_id]
@@ -237,7 +258,7 @@ class ContinuousStreamServices:
         catalyst_index = int(reactor.get("catalyst", 0))
         # Mixing already checks catalyst identity. Carry the inlet identity into the tank.
         for _, _, feed in feeds:
-            feed_settings = equipment_settings(_contents(feed).equipment, "batch_reactor")
+            feed_settings = _contents(feed).properties.get("batch_reactor", {})
             if feed_settings.get("catalyst_amount_mol", 0) > 0:
                 catalyst_index = int(feed_settings["catalyst"])
         assert state.species is not None
@@ -254,6 +275,7 @@ class ContinuousStreamServices:
                 return derivative, heat
             volume = float(solvents.sum())
             concentrations = dict(zip(ids, amounts / volume, strict=True))
+            progress = dict.fromkeys((r.reaction_id for r in network.reactions), 0.0)
             for index, item in enumerate(network.reactions):
                 if item.rate_law.equation_id == "runtime_owned":
                     continue
@@ -275,10 +297,10 @@ class ContinuousStreamServices:
                     * catalyst_factor
                     * stirring
                 )
-                for species, coefficient in item.stoichiometry.items():
-                    derivative[ids.index(species)] += rate * coefficient
+                progress[item.reaction_id] = rate / volume
                 heat += rate * item.delta_h_J_per_mol
-            return derivative, heat
+            derivatives = network.amount_derivatives_from_rates(progress, volume_L=volume)
+            return np.asarray([derivatives[key] for key in ids]), heat
 
         electrode = (
             self.species_view.reactant_species(state),
@@ -291,7 +313,7 @@ class ContinuousStreamServices:
                 raise ValueError(
                     "The finite electrode channel requires isoelemental lumped species"
                 )
-        result = integrate_flow(
+        result = self.advancer.mixed_tank(
             inventory=inventory,
             inlet_rates=rates,
             species_count=count,
@@ -310,6 +332,69 @@ class ContinuousStreamServices:
             current_mA=action["current_mA"],
             electrode_indices=tuple(ids.index(s) for s in electrode),
         )
+        requested_duration = duration
+        duration = result.actual_duration_s
+        quantity_units = (
+            *((key, "mol") for key in ids),
+            *((f"carrier:{i}", "L") for i in range(4)),
+            *((f"reference:{key}", "dimensionless") for key in refs),
+        )
+        exchanges = []
+        for edge, rate, feed in feeds:
+            transferred = vector(feed) * rate / feed.volume_L * duration
+            for (key, unit), amount in zip(quantity_units, transferred, strict=True):
+                exchanges.append(
+                    {
+                        "exchange_id": f"{edge['id']}:{key}",
+                        "inventory_key": key,
+                        "source": edge["source_vessel"],
+                        "destination": state.vessel_id,
+                        "unit": unit,
+                        "amount": float(amount),
+                    }
+                )
+            exchanges.append(
+                {
+                    "exchange_id": f"{edge['id']}:carrier_enthalpy",
+                    "source": edge["source_vessel"],
+                    "destination": state.vessel_id,
+                    "unit": "J",
+                    "energy_J": float(np.dot(transferred[count : count + 4], cp))
+                    * (feed.temperature_K - 298.15),
+                }
+            )
+        for edge, _ in outputs:
+            for (key, unit), amount in zip(quantity_units, result.outlet, strict=True):
+                exchanges.append(
+                    {
+                        "exchange_id": f"{edge['id']}:{key}",
+                        "inventory_key": key,
+                        "source": state.vessel_id,
+                        "destination": edge["target_vessel"],
+                        "unit": unit,
+                        "amount": float(amount),
+                    }
+                )
+        for row in result.exchanges:
+            if row["unit"] != "J" or row["exchange_id"] == "carrier_in":
+                continue
+            if row["exchange_id"] == "carrier_out":
+                if not outputs:
+                    continue
+                row = {
+                    **row,
+                    "source": state.vessel_id,
+                    "destination": outputs[0][0]["target_vessel"],
+                }
+            else:
+                row = {
+                    **row,
+                    "source": state.vessel_id if row["source"] == "tank" else row["source"],
+                    "destination": state.vessel_id
+                    if row["destination"] == "tank"
+                    else row["destination"],
+                }
+            exchanges.append(row)
         lineage = tuple(
             dict.fromkeys(
                 (*original.lineage, *(name for _, _, feed in feeds for name in feed.lineage))
@@ -337,25 +422,22 @@ class ContinuousStreamServices:
                 reference_shares=shares,
                 metrics={},
             )
-            equipment = upsert_equipment_record(
-                contents.equipment,
-                equipment_id="batch_reactor",
-                equipment_type="batch_reactor",
-                attached_vessel_id=state.vessel_id,
-                settings={
-                    **reactor,
+            properties = {
+                **contents.properties,
+                "batch_reactor": {
+                    **contents.properties.get("batch_reactor", {}),
                     "catalyst": catalyst_index,
                     "catalyst_amount_mol": sum(values[i] for i in catalyst_ids),
                     "solvent_volume_L": solvents.volume_L,
                 },
-            )
+            }
             return replace(
                 original,
                 species_amounts_mol=amounts,
                 volume_L=solvents.volume_L,
                 temperature_K=temperature,
                 lineage=lineage,
-                contents=replace(contents, equipment=equipment),
+                contents=replace(contents, properties=properties),
             )
 
         after = _install_sample(state, material(result.tank, result.temperature_K))
@@ -431,6 +513,7 @@ class ContinuousStreamServices:
         ledger = result.ledger
         step = {
             "duration_s": duration,
+            "requested_duration_s": requested_duration,
             "inlet_volume_L": sum(q for _, q in inputs) * duration,
             "outlet_volume_L": sum(q for _, q in outputs) * duration,
             "residence_time_s": state.volume_L / sum(q for _, q in inputs) if inputs else None,
@@ -450,21 +533,25 @@ class ContinuousStreamServices:
                 equipment_type="finite_reservoir_flow",
                 attached_vessel_id=state.vessel_id,
                 status="configured",
-                settings={**program, "last_step": step, "totals": totals},
+                settings={
+                    **program,
+                    "last_step": step,
+                    "totals": totals,
+                    "last_exchanges": tuple(exchanges),
+                },
             ),
-            ledger=state.ledger.with_updates(
-                time_s=state.ledger.time_s + duration,
-                cost=state.ledger.cost
-                + duration * 0.03 / 3600
+            ledger=advance_ledger(
+                state.ledger,
+                duration,
+                cost_delta=duration * 0.03 / 3600
                 + (ledger["electrical_work_J"] + ledger["pump_work_J"]) / 250000,
-                energy_jacket_J=state.ledger.energy_jacket_J
-                + ledger["jacket_J"]
-                + ledger["cell_heat_J"],
-                heat_reaction_J=state.ledger.heat_reaction_J + ledger["reaction_J"],
-                heat_loss_J=state.ledger.heat_loss_J + ledger["loss_J"],
-                flow_pump_work_J=state.ledger.flow_pump_work_J + ledger["pump_work_J"],
-                flow_electrical_work_J=state.ledger.flow_electrical_work_J
-                + ledger["electrical_work_J"],
+                energy_deltas={
+                    "energy_jacket_J": ledger["jacket_J"] + ledger["cell_heat_J"],
+                    "heat_reaction_J": ledger["reaction_J"],
+                    "heat_loss_J": ledger["loss_J"],
+                    "flow_pump_work_J": ledger["pump_work_J"],
+                    "flow_electrical_work_J": ledger["electrical_work_J"],
+                },
             ),
         )
         return after

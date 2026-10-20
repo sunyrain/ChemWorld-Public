@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 from math import exp, isfinite, log, log10, sqrt
 from typing import Literal
 
 import numpy as np
+
+from chemworld.physchem.reactor_shared import ScalarControlProgram
 
 R_J_PER_MOL_K = 8.31446261815324
 ChromatographyInstrument = Literal["hplc", "gc"]
@@ -228,6 +231,119 @@ def evaluate_chromatography_method(
         warnings=tuple(warnings),
         provenance_id=analyte.provenance_id,
     )
+
+
+@dataclass(frozen=True)
+class ChromatographyProgram:
+    """Uniform, delayed column programme; time is seconds, dead time is minutes.
+
+    This is a retention integral, not a spatial gradient/thermal column model.
+    After the last knot the final value is held. A missing peak is not extrapolated
+    beyond the declared analysis duration.
+    """
+
+    temperature: ScalarControlProgram
+    mobile_phase: ScalarControlProgram | None = None
+    dead_time_min: float = 0.05
+    duration_s: float = 60.0
+    delay_s: float = 0.0
+
+    def __post_init__(self):
+        _positive(self.dead_time_min, "dead_time_min")
+        _positive(self.duration_s, "duration_s")
+        _nonnegative(self.delay_s, "delay_s")
+        for program, unit, limits in (
+            (self.temperature, "K", (0, float("inf"))),
+            (self.mobile_phase, "dimensionless", (0, 1)),
+        ):
+            if program is None:
+                continue
+            if program.unit != unit or program.mode != "linear":
+                raise ValueError("Chromatography requires native-unit linear programmes")
+            times = [t for t, _ in program.setpoints]
+            if times[0] != 0 or any(b <= a for a, b in pairwise(times)):
+                raise ValueError("Programme starts at zero and knots strictly increase")
+            if times[-1] > self.duration_s:
+                raise ValueError("Programme knot exceeds analysis duration")
+            for _, value in program.setpoints:
+                if not limits[0] <= value <= limits[1] or (unit == "K" and value == 0):
+                    raise ValueError("Programme value outside physical domain")
+
+    def to_dict(self):
+        return {
+            "temperature": self.temperature.to_dict(),
+            "mobile_phase": None if self.mobile_phase is None else self.mobile_phase.to_dict(),
+            "dead_time_min": self.dead_time_min,
+            "duration_s": self.duration_s,
+            "delay_s": self.delay_s,
+        }
+
+    @classmethod
+    def from_dict(cls, payload):
+        return cls(
+            ScalarControlProgram(**payload["temperature"]),
+            None
+            if payload.get("mobile_phase") is None
+            else ScalarControlProgram(**payload["mobile_phase"]),
+            payload["dead_time_min"],
+            payload["duration_s"],
+            payload.get("delay_s", 0),
+        )
+
+    def evaluate(self, analyte, time_s, *, detector_concentration=0):
+        time = max(0, time_s - self.delay_s)
+        return evaluate_chromatography_method(
+            analyte,
+            dead_time_min=self.dead_time_min,
+            temperature_K=self.temperature.value_at(time),
+            mobile_phase_fraction=(
+                None if self.mobile_phase is None else self.mobile_phase.value_at(time)
+            ),
+            detector_concentration=detector_concentration,
+        )
+
+    def retention_time_s(self, analyte, *, tolerance=1e-10):
+        from scipy.integrate import quad
+        from scipy.optimize import brentq
+
+        if not isfinite(tolerance) or tolerance <= 0:
+            raise ValueError("Tolerance must be positive and finite")
+        knots = sorted(
+            {
+                self.delay_s + t
+                for p in (self.temperature, self.mobile_phase)
+                if p is not None
+                for t, _ in p.setpoints
+                if 0 < self.delay_s + t < self.duration_s
+            }
+        )
+
+        def distance(end):
+            value, _ = quad(
+                lambda t: 1 / (60 * self.evaluate(analyte, t).retention_time_min),
+                0,
+                end,
+                points=[t for t in knots if t < end],
+                epsabs=tolerance,
+                epsrel=tolerance,
+                limit=100,
+            )
+            return value
+
+        total = distance(self.duration_s)
+        if abs(total - 1) <= tolerance:
+            return self.duration_s
+        if total < 1:
+            return None
+        return float(
+            brentq(
+                lambda t: distance(t) - 1,
+                0,
+                self.duration_s,
+                xtol=tolerance,
+                rtol=max(tolerance, 1e-14),
+            )
+        )
 
 
 def gc_linear_retention_index(

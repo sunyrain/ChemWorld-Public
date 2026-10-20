@@ -15,9 +15,7 @@ from chemworld.runtime.kernel_contracts import (
 )
 from chemworld.runtime.profiles import TaskRuntimeProfile
 from chemworld.runtime.transactions import StatePatch, WorldEvent
-from chemworld.world.control_contract import CONTROL_OPERATIONS
-from chemworld.world.operations import OPERATION_TYPES, operation_contracts
-from chemworld.world.stream_contract import STREAM_OPERATIONS
+from chemworld.world.domain_modules import DomainModuleRegistry
 
 
 @dataclass(frozen=True)
@@ -49,11 +47,13 @@ class ServiceOperationKernel:
         action: dict[str, Any],
         context: RuntimeContext,
     ) -> KernelPlan:
-        del state, action, context
+        del state, action
         return KernelPlan(
             operation_type=self.operation_type,
             kernel_id=self.kernel_id,
-            affected_ledgers=affected_ledgers(self.operation_type),
+            affected_ledgers=affected_ledgers(
+                self.operation_type, modules=context.domain_services.modules
+            ),
             required_capabilities=tuple(sorted(self.required_capabilities)),
         )
 
@@ -65,26 +65,32 @@ class ServiceOperationKernel:
     ) -> KernelResult:
         before = state
         domain_service_id = context.domain_services.service_id_for_operation(self.operation_type)
-        affected = affected_ledgers(self.operation_type)
-        next_state, record = context.domain_services.apply_operation(state, action)
-        failed_preconditions = tuple(
-            key for key, passed in record.preconditions.items() if not passed
-        )
-        if failed_preconditions:
+        affected = affected_ledgers(self.operation_type, modules=context.domain_services.modules)
+        provider = context.domain_services.evaluate_operation(state, action)
+        preconditions = dict(provider.outputs["preconditions"])
+        failed_preconditions = tuple(key for key, passed in preconditions.items() if not passed)
+        next_state = before if provider.state is None else provider.state
+        diagnostics = dict(provider.diagnostics)
+        if provider.failure_reason is not None:
+            diagnostics["failure_reason"] = provider.failure_reason
+        if provider.outcome in {"rejected", "numerical_failure"}:
             rejection_event = WorldEvent(
-                event_type="operation_rejected",
+                event_type=f"operation_{provider.outcome}",
                 operation_type=self.operation_type,
                 payload={
                     "kernel_id": self.kernel_id,
                     "domain_service_id": domain_service_id,
                     "affected_ledgers": list(affected),
                     "failed_preconditions": list(failed_preconditions),
+                    "diagnostics": diagnostics,
                 },
             )
             transaction = context.transaction_manager.rollback(
                 state=before,
                 operation_type=self.operation_type,
-                rollback_reason="precondition_failed",
+                rollback_reason=(
+                    "precondition_failed" if failed_preconditions else str(provider.outcome)
+                ),
                 failed_preconditions=failed_preconditions,
                 events=(rejection_event,),
             )
@@ -92,8 +98,9 @@ class ServiceOperationKernel:
                 self.operation_type,
                 before,
                 transaction.state,
-                record.preconditions,
+                preconditions,
                 action,
+                constitution_checks=transaction.constitution_checks,
             )
             return KernelResult(
                 state=transaction.state,
@@ -111,12 +118,18 @@ class ServiceOperationKernel:
                 kernel_version=self.kernel_version,
                 transaction_status=transaction.transaction_status,
                 rollback_reason=transaction.rollback_reason,
+                outcome=str(provider.outcome),
+                diagnostics=diagnostics,
             )
         patch = StatePatch(
             patch_type="replace_state",
             affected_ledgers=affected,
             state=next_state,
-            summary=record.state_delta_summary,
+            summary=context.domain_services.operation_recorder.state_delta_summary(
+                self.operation_type,
+                before,
+                next_state,
+            ),
         )
         event = WorldEvent(
             event_type="operation_applied",
@@ -125,6 +138,8 @@ class ServiceOperationKernel:
                 "kernel_id": self.kernel_id,
                 "domain_service_id": domain_service_id,
                 "affected_ledgers": list(affected),
+                "outcome": provider.outcome,
+                "actual_duration_s": provider.actual_duration_s,
             },
         )
         transaction = context.transaction_manager.commit(
@@ -132,21 +147,20 @@ class ServiceOperationKernel:
             operation_type=self.operation_type,
             events=(event,),
             patches=(patch,),
+            action=action,
+            actual_duration_s=provider.actual_duration_s,
         )
-        if transaction.transaction_status != "committed":
-            record = context.domain_services.record_operation(
-                self.operation_type,
-                before,
-                transaction.state,
-                record.preconditions,
-                action,
-            )
-            if record.is_instrument_measurement:
-                record = replace(
-                    record,
-                    measurement_cost=0.0,
-                    sample_consumed_L=0.0,
-                )
+        record = context.domain_services.record_operation(
+            self.operation_type,
+            before,
+            transaction.state,
+            preconditions,
+            action,
+            constitution_checks=transaction.constitution_checks,
+            material_balance=transaction.material_balance,
+        )
+        if transaction.transaction_status != "committed" and record.is_instrument_measurement:
+            record = replace(record, measurement_cost=0.0, sample_consumed_L=0.0)
         return KernelResult(
             state=transaction.state,
             operation_record=record,
@@ -158,11 +172,30 @@ class ServiceOperationKernel:
             sample_delta=(
                 transaction.state.ledger.sample_consumed_L - before.ledger.sample_consumed_L
             ),
-            affected_ledgers=affected,
+            affected_ledgers=(
+                affected if transaction.transaction_status == "committed" else ("process",)
+            ),
             kernel_id=self.kernel_id,
             kernel_version=self.kernel_version,
             transaction_status=transaction.transaction_status,
             rollback_reason=transaction.rollback_reason,
+            outcome=(
+                str(provider.outcome)
+                if transaction.transaction_status == "committed"
+                else "numerical_failure"
+            ),
+            actual_duration_s=transaction.state.ledger.time_s - before.ledger.time_s,
+            diagnostics=diagnostics,
+            measurement_status=(
+                "pending"
+                if transaction.transaction_status == "committed"
+                and record.is_instrument_measurement
+                else None
+            ),
+            measurement_state=(
+                provider.measurement_state
+                if transaction.transaction_status == "committed" else None
+            ),
         )
 
 
@@ -173,8 +206,9 @@ class OperationKernelRegistry:
             raise ValueError("Duplicate operation kernels are not allowed")
 
     @classmethod
-    def default(cls) -> OperationKernelRegistry:
-        contracts = operation_contracts()
+    def default(cls, *, modules: DomainModuleRegistry | None = None) -> OperationKernelRegistry:
+        modules = modules or DomainModuleRegistry.default()
+        contracts = modules.contracts()
         return cls(
             [
                 ServiceOperationKernel(
@@ -183,7 +217,8 @@ class OperationKernelRegistry:
                     if operation_type in contracts
                     else "general",
                 )
-                for operation_type in OPERATION_TYPES
+                for operation_type in modules.operation_order()
+                if operation_type in contracts
             ]
         )
 
@@ -225,82 +260,9 @@ class OperationKernelRegistry:
         }
 
 
-def affected_ledgers(operation_type: str) -> tuple[str, ...]:
-    material = {
-        "add_reagent",
-        "add_component",
-        "add_catalyst",
-        "add_solvent",
-        "sample",
-        "heat",
-        "wait",
-        "add_phase",
-        "add_extractant",
-        "mix",
-        "settle",
-        "separate_phase",
-        "wash",
-        "dry",
-        "concentrate",
-        "transfer",
-        "seed_crystals",
-        "cool_crystallize",
-        "filter_crystals",
-        "resuspend_crystals",
-        "evaporate",
-        "distill",
-        "collect_fraction",
-        "run_flow",
-        "electrolyze",
-    }
-    affected = ["process"]
-    if operation_type in material:
-        affected.append("species")
-        affected.append("phases")
-    if operation_type in {
-        "add_solvent",
-        "heat",
-        "wait",
-        "quench",
-        "evaporate",
-        "distill",
-        "run_flow",
-    }:
-        affected.append("thermal")
-        affected.append("vessels")
-    if operation_type in {
-        "add_solvent",
-        "add_catalyst",
-        "heat",
-        "wait",
-        "mix",
-        "seed_crystals",
-        "set_flow_rate",
-        "set_potential",
-        "electrolyze",
-        "distill",
-        "measure",
-    }:
-        affected.append("equipment")
-    if operation_type == "measure":
-        affected.append("observation")
-    if operation_type == "resuspend_crystals":
-        affected.extend(("samples", "vessels", "equipment"))
-    if operation_type in {"create_container", "transfer_material"}:
-        affected.extend(("samples", "species", "phases", "vessels", "equipment"))
-    if operation_type in {"select_vessel", "route_material"}:
-        affected.extend(
-            ("inactive_vessels", "samples", "species", "phases", "vessels", "equipment", "thermal")
-        )
-    if operation_type in CONTROL_OPERATIONS:
-        affected.extend(("equipment", "species", "phases", "thermal", "process"))
-    if operation_type in STREAM_OPERATIONS:
-        affected.extend(
-            ("inactive_vessels", "samples", "equipment", "species", "phases", "vessels", "thermal")
-        )
-    if operation_type == "configure_instrument":
-        affected.append("equipment")
-    return tuple(dict.fromkeys(affected))
+def affected_ledgers(operation_type: str, *, modules=None) -> tuple[str, ...]:
+    spec = (modules or DomainModuleRegistry.default()).operation_specs().get(operation_type)
+    return ("process",) if spec is None else spec.affected_ledgers
 
 
 __all__ = [

@@ -4,6 +4,7 @@ from chemworld.physchem.enthalpy import (
     MixtureEnthalpyLedger,
     PhaseEnthalpyReport,
     PhaseTransitionSpec,
+    caloric_polynomial_change,
     heat_capacity_report,
     mixture_enthalpy_ledger,
     phase_path_enthalpy_report,
@@ -17,12 +18,20 @@ from chemworld.physchem.hazard_properties import (
 )
 from chemworld.physchem.property_cards import property_correlation_model_cards
 from chemworld.physchem.property_equations import evaluate_correlation
-from chemworld.physchem.property_packages import ComponentPropertyPackage
+from chemworld.physchem.property_packages import (
+    ComponentPropertyPackage,
+    PropertyPackageThermodynamics,
+    SpeciesCaloricModel,
+    evaluate_caloric_correlation,
+    evaluate_property_state,
+)
 from chemworld.physchem.property_reports import (
     R_J_PER_MOL_K,
     STANDARD_PRESSURE_PA,
+    CaloricReference,
     PhaseLabel,
     PropertyEvaluation,
+    StatePropertyReport,
     ValidityPolicy,
 )
 from chemworld.physchem.saturation import (
@@ -64,6 +73,7 @@ from chemworld.physchem.volume_properties import (
 __all__ = [
     "R_J_PER_MOL_K",
     "STANDARD_PRESSURE_PA",
+    "CaloricReference",
     "ComponentPropertyPackage",
     "MixtureEnthalpyLedger",
     "MixtureTransportLedger",
@@ -73,13 +83,19 @@ __all__ = [
     "PhaseLabel",
     "PhaseTransitionSpec",
     "PropertyEvaluation",
+    "PropertyPackageThermodynamics",
     "PureSaturationReport",
+    "SpeciesCaloricModel",
+    "StatePropertyReport",
     "TransportPropertyReport",
     "ValidityPolicy",
     "VaporPressureReport",
     "binary_gas_diffusivity_fuller_report",
+    "caloric_polynomial_change",
     "density_to_molar_volume_m3_mol",
+    "evaluate_caloric_correlation",
     "evaluate_correlation",
+    "evaluate_property_state",
     "gas_mixture_effective_diffusivity_ledger",
     "gas_thermal_conductivity_dippr9b_report",
     "heat_capacity_report",

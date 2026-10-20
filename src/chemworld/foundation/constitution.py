@@ -7,6 +7,7 @@ from math import isfinite
 from numbers import Real
 from typing import Any, ClassVar
 
+from chemworld.foundation.balances import TransitionBalance
 from chemworld.foundation.constitution_preconditions import check_operation_preconditions
 from chemworld.foundation.constitution_reports import CheckResult, ConstitutionReport
 from chemworld.foundation.constitution_state_checks import (
@@ -20,8 +21,9 @@ from chemworld.foundation.constitution_state_checks import (
 )
 from chemworld.foundation.ontology import Instrument, Substance, Vessel
 from chemworld.foundation.public_leakage import audit_public_payload
+from chemworld.foundation.solvents import SOLVENT_IDS, total_solvents
 from chemworld.foundation.state import Observation, WorldState
-from chemworld.foundation.units import canonical_unit
+from chemworld.foundation.units import unit_spec
 
 
 class PhysicalConstitution:
@@ -191,6 +193,10 @@ class PhysicalConstitution:
         debug_truth: bool = False,
     ) -> ConstitutionReport:
         checks: list[CheckResult] = []
+        native_errors = observation.errors()
+        checks.append(CheckResult(
+            "observation_native_channels", not native_errors, "; ".join(native_errors),
+        ))
         leakage = audit_public_payload(
             observation.to_dict(),
             hidden_species_ids=set(self.substances),
@@ -212,7 +218,7 @@ class PhysicalConstitution:
             CheckResult(
                 "observation_values_finite_and_bounded",
                 normalized_values,
-                "Public scalar observations must be missing or finite values in [0, 1].",
+                "Legacy Gym projections must be missing or finite values in [0, 1].",
             )
         )
         mask_consistent = all(
@@ -229,9 +235,7 @@ class PhysicalConstitution:
                 "Observed mask entries must be boolean and observed values cannot be missing.",
             )
         )
-        processed_valid = all(
-            _is_missing_or_normalized(value) for value in observation.processed_estimate.values()
-        )
+        processed_valid = _json_numeric_tree_is_finite(observation.processed_estimate)
         uncertainty_valid = all(
             _is_finite_nonnegative(value) for value in observation.uncertainty.values()
         )
@@ -241,7 +245,7 @@ class PhysicalConstitution:
                 CheckResult(
                     "observation_processed_estimate_finite_and_bounded",
                     processed_valid,
-                    "Processed estimates must be missing or finite values in [0, 1].",
+                    "Native processed estimates must be missing or finite in their declared units.",
                 ),
                 CheckResult(
                     "observation_uncertainty_finite_nonnegative",
@@ -274,7 +278,7 @@ class PhysicalConstitution:
             checks.append(
                 CheckResult(
                     f"observation_unit:{key}",
-                    _is_canonical_unit(unit),
+                    _is_supported_observation_unit(unit),
                     str(unit),
                 )
             )
@@ -294,16 +298,13 @@ class PhysicalConstitution:
         after: WorldState,
         *,
         allowed_element_delta: dict[str, float] | None = None,
+        allowed_owned_delta: dict[tuple[str,str],float] | None = None,
     ) -> CheckResult:
         allowed_element_delta = allowed_element_delta or {}
-        unknown_species = (
-            set(before.species_amounts)
-            | set(after.species_amounts)
-            | set(before.samples.total_amounts_mol())
-            | set(after.samples.total_amounts_mol())
-            | {s for local in before.inactive_vessels.values() for s in local.species_amounts}
-            | {s for local in after.inactive_vessels.values() for s in local.species_amounts}
-        ) - set(self.substances)
+        allowed_owned_delta = allowed_owned_delta or {}
+        before_amounts = self.material_inventory(before)
+        after_amounts = self.material_inventory(after)
+        unknown_species = (before_amounts.keys() | after_amounts.keys()) - self.substances.keys()
         if unknown_species:
             return CheckResult(
                 "material_conservation",
@@ -312,29 +313,119 @@ class PhysicalConstitution:
                 value=float(len(unknown_species)),
                 tolerance=0.0,
             )
-        before_amounts = before.species_amounts.copy()
-        after_amounts = after.species_amounts.copy()
-        for amounts, state in ((before_amounts, before), (after_amounts, after)):
-            for species, amount in state.samples.total_amounts_mol().items():
-                amounts[species] = amounts.get(species, 0.0) + amount
-            for local in state.inactive_vessels.values():
-                for species, amount in local.species_amounts.items():
-                    amounts[species] = amounts.get(species, 0.0) + amount
         before_elements = self.element_totals(before_amounts)
         after_elements = self.element_totals(after_amounts)
+        if not all(isfinite(value) for values in (before_elements, after_elements,
+                                                  allowed_element_delta)
+                   for value in values.values()):
+            return CheckResult("material_conservation", False, "nonfinite material balance")
         errors: list[float] = []
         elements = before_elements.keys() | after_elements.keys() | allowed_element_delta.keys()
         for element in sorted(elements):
             expected = before_elements.get(element, 0.0) + allowed_element_delta.get(element, 0.0)
             errors.append(abs(after_elements.get(element, 0.0) - expected))
         max_error = max(errors) if errors else 0.0
+        # Declared entity quantities are closed unless an installed producer
+        # supplies an explicit typed external packet (for example disposable kg).
+        owned_before = self.owned_inventory(before)
+        owned_after = self.owned_inventory(after)
+        if any(not isfinite(v) for values in (owned_before,owned_after,allowed_owned_delta)
+               for v in values.values()):
+            return CheckResult("material_conservation",False,"nonfinite entity balance")
+        owned_keys = owned_before.keys() | owned_after.keys() | allowed_owned_delta.keys()
+        changed = [key for key in owned_keys
+                   if abs(owned_after.get(key, 0) - owned_before.get(key, 0)
+                          - allowed_owned_delta.get(key,0))
+                   > 1e-12 + 1e-9 * abs(owned_before.get(key, 0))]
         return CheckResult(
             "material_conservation",
-            max_error <= self.tolerance,
-            f"max element-balance error={max_error:.3g}",
+            max_error <= self.tolerance and not changed,
+            f"max element-balance error={max_error:.3g}; "
+            f"changed entity inventory count={len(changed)}",
             value=max_error,
             tolerance=self.tolerance,
         )
+
+    @staticmethod
+    def material_inventory(state: WorldState) -> dict[str, float]:
+        """Registered species across every vessel and retained sample, once each."""
+        amounts = state.species_amounts.copy()
+        inventories = [state.samples.total_amounts_mol(), state.state_slots.species_amounts()]
+        inventories.extend(
+            PhysicalConstitution.material_inventory(local)
+            for local in state.inactive_vessels.values()
+        )
+        for inventory in inventories:
+            for species, amount in inventory.items():
+                amounts[species] = amounts.get(species, 0.0) + amount
+        return amounts
+
+    @staticmethod
+    def owned_inventory(state: WorldState) -> dict[tuple[str, str], float]:
+        inventories = [state.state_slots.conserved()]
+        inventories.extend(sample.contents.state_slots.conserved()
+                           for sample in state.samples.samples.values() if sample.contents)
+        inventories.extend(PhysicalConstitution.owned_inventory(local)
+                           for local in state.inactive_vessels.values())
+        result: dict[tuple[str, str], float] = {}
+        for inventory in inventories:
+            for key, value in inventory.items():
+                result[key] = result.get(key, 0) + value
+        return result
+
+    def check_transition(
+        self, before: WorldState, after: WorldState, balance: TransitionBalance
+    ) -> CheckResult:
+        from chemworld.foundation.discrete_inventory import integer_element_residual
+
+        try:
+            atoms = integer_element_residual(before, after, balance, self.substances)
+        except (ValueError, KeyError) as exc:
+            return CheckResult("material_conservation", False, str(exc), tolerance=0)
+        if atoms is not None and atoms != 0:
+            return CheckResult("material_conservation", False,
+                               "integer atom balance does not close", value=atoms, tolerance=0)
+        delta: dict[str, float] = {}
+        entity_delta = {}
+        for exchange in balance.exchanges:
+            if exchange.inventory_kind == "entity":
+                known = self.owned_inventory(before).keys() | self.owned_inventory(after).keys()
+                for quantity,amount in exchange.amounts:
+                    key = (quantity,exchange.unit)
+                    if key not in known:
+                        return CheckResult("material_conservation",False,
+                                           "undeclared entity quantity/unit in boundary exchange")
+                    entity_delta[key] = entity_delta.get(key,0)+(
+                        amount if exchange.direction == "in" else -amount)
+            if exchange.inventory_kind != "species":
+                continue
+            if any(key not in self.substances for key, _ in exchange.amounts):
+                return CheckResult("material_conservation", False,
+                                   "unregistered species in boundary exchange")
+            sign = 1.0 if exchange.direction == "in" else -1.0
+            for element, amount in self.element_totals(dict(exchange.amounts)).items():
+                delta[element] = delta.get(element, 0.0) + sign * amount
+        return self.check_material_conservation(before, after, allowed_element_delta=delta,
+                                               allowed_owned_delta=entity_delta)
+
+    def check_carrier_transition(
+        self, before: WorldState, after: WorldState, balance: TransitionBalance
+    ) -> CheckResult:
+        delta = dict.fromkeys(SOLVENT_IDS, 0.0)
+        for exchange in balance.exchanges:
+            if exchange.inventory_kind != "carrier":
+                continue
+            for key, amount in exchange.amounts:
+                if key not in delta:
+                    return CheckResult("carrier_conservation", False, "unregistered carrier")
+                delta[key] += amount if exchange.direction == "in" else -amount
+        residual = max(abs(new - old - delta[key]) for key, old, new in zip(
+            SOLVENT_IDS, total_solvents(before).volumes_L, total_solvents(after).volumes_L,
+            strict=True,
+        ))
+        return CheckResult("carrier_conservation", residual <= 1e-10,
+                           "finite carrier component volumes close", value=residual,
+                           tolerance=1e-10)
 
     def check_yield_upper_bound(self, product_amount: float, limiting_amount: float) -> CheckResult:
         yield_value = 0.0 if limiting_amount <= self.tolerance else product_amount / limiting_amount
@@ -366,11 +457,11 @@ def _is_missing_or_normalized(value: Any) -> bool:
     return isfinite(resolved) and 0.0 <= resolved <= 1.0
 
 
-def _is_canonical_unit(value: Any) -> bool:
+def _is_supported_observation_unit(value: Any) -> bool:
     if not isinstance(value, str):
         return False
     try:
-        canonical_unit(value)
+        unit_spec(value)
     except ValueError:
         return False
     return True

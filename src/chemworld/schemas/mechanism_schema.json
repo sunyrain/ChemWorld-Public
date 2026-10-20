@@ -105,6 +105,8 @@
                   "third_body_arrhenius",
                   "lindemann_falloff",
                   "troe_falloff",
+                  "pressure_log",
+                  "chebyshev",
                   "catalytic_activity",
                   "catalyst_deactivation",
                   "langmuir_hinshelwood",
@@ -114,40 +116,7 @@
               "parameters": {
                 "type": "object"
               }
-            },
-            "allOf": [
-              {
-                "if": {
-                  "properties": {
-                    "equation_id": {
-                      "const": "runtime_owned"
-                    }
-                  },
-                  "required": [
-                    "equation_id"
-                  ]
-                },
-                "then": {
-                  "required": [
-                    "parameters"
-                  ],
-                  "properties": {
-                    "parameters": {
-                      "type": "object",
-                      "required": [
-                        "runtime_model_id"
-                      ],
-                      "properties": {
-                        "runtime_model_id": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            ]
+            }
           },
           "metadata": {
             "type": "object"

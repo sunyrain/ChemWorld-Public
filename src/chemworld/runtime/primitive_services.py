@@ -40,9 +40,12 @@ def _action_index(action: dict[str, Any], key: str, default: int, count: int) ->
 class ChemWorldPrimitiveOperationServices:
     """Apply primitive material, sampling, quench, evaporation, and penalty updates."""
 
-    def __init__(self, world: ChemWorldParameters, species_view: MechanismSpeciesView) -> None:
+    def __init__(
+        self, world: ChemWorldParameters, species_view: MechanismSpeciesView, material_router=None
+    ) -> None:
         self.world = world
         self.species_view = species_view
+        self.material_router = material_router
 
     def _declared_phase(self, species_id: str) -> str | None:
         network = self.species_view.mechanism.network
@@ -106,39 +109,71 @@ class ChemWorldPrimitiveOperationServices:
         ledger = PhaseLedger(phases)
         return ledger.total_amounts_mol(), ledger
 
-    def add_reagent(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+    def feed_additions(self, state: WorldState, action: dict[str, Any]) -> dict[str, float]:
+        if self.material_router is not None and self.material_router.uses_native_packets(state):
+            return self.material_router.feed_additions(state, action)
+        if action.get("operation") == "add_component":
+            component = int(action["component"])
+            feeds = self.species_view.feed_species
+            if not 0 <= component < len(feeds):
+                raise ValueError("Component is outside this mechanism's feed catalog")
+            return {feeds[component]: float(action["amount_mol"])}
         amount = float(np.clip(_action_float(action, "amount_mol", 0.003), 0.0, 0.040))
-        additions = self.species_view.reagent_charge_amounts(
+        return self.species_view.reagent_charge_amounts(
             state,
             limiting_amount_mol=amount,
         )
-        return self._add_feed(state, additions)
+
+    def add_reagent(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        return self._add_feed(state, self.feed_additions(state, action))
 
     def add_component(self, state: WorldState, action: dict[str, Any]) -> WorldState:
-        component = int(action["component"])
-        feeds = self.species_view.feed_species
-        if not 0 <= component < len(feeds):
-            raise ValueError("Component is outside this mechanism's feed catalog")
-        return self._add_feed(state, {feeds[component]: float(action["amount_mol"])})
+        if self.material_router is not None and self.material_router.uses_native_packets(state):
+            return self.material_router.add_finite_feed(state, action)
+        return self._add_feed(state, self.feed_additions(state, action))
 
     def _add_feed(self, state: WorldState, additions: dict[str, float]) -> WorldState:
+        discrete = state.process.stochastic_continuation is not None
+        if discrete:
+            from chemworld.foundation.discrete_inventory import counts_to_mol, mol_to_counts
+
+            dose = mol_to_counts(additions)
+            existing = mol_to_counts(state.species_amounts)
+            final_counts = {key: existing.get(key, 0) + dose.get(key, 0)
+                            for key in existing.keys() | dose.keys()}
+            exact_amounts = counts_to_mol(final_counts)
         species, phases = self._phase_aware_material_state(
             state,
             additions_mol=additions,
         )
+        if discrete:
+            species = exact_amounts
+            phases = PhaseLedger({key: replace(phase, species_amounts_mol=exact_amounts)
+                                  for key, phase in phases.phases.items()})
         species_ledger = species_with_added_initial_amounts(state.species, additions)
         amount = sum(additions.values())
         ledger = state.ledger.with_updates(cost=state.ledger.cost + 0.03 * amount / 0.01)
+        process = state.process
+        if discrete and amount > 0:
+            process = replace(process, stochastic_continuation={
+                **process.stochastic_continuation, "pending": None, "signature": None})
         return state.replace(
             species_amounts=species,
             phases=phases,
             ledger=ledger,
             species=species_ledger,
+            process=process,
         )
 
     def add_solvent(self, state: WorldState, action: dict[str, Any]) -> WorldState:
         volume = float(np.clip(_action_float(action, "volume_L", 0.025), 0.0, 0.080))
         solvent = _action_index(action, "solvent", 0, len(SOLVENTS))
+        from chemworld.runtime.condensed_material_routing import add_background, background_model
+
+        if (self.material_router is not None
+                and background_model(state,self.material_router.physics) is not None):
+            return add_background(state,self.material_router.physics,volume_L=volume,
+                solvent_index=solvent,cost_delta=volume*8*float(self.world.solvent_costs[solvent]))
         previous_settings = equipment_settings(state.equipment, "batch_reactor")
         equipment = upsert_equipment_record(
             state.equipment,
@@ -196,8 +231,12 @@ class ChemWorldPrimitiveOperationServices:
         )
         return PhaseLedger(phases)
 
+    @staticmethod
+    def catalyst_charge(action: dict[str, Any]) -> float:
+        return float(np.clip(_action_float(action, "catalyst_amount_mol", 0.00020), 0.0, 0.005))
+
     def add_catalyst(self, state: WorldState, action: dict[str, Any]) -> WorldState:
-        amount = float(np.clip(_action_float(action, "catalyst_amount_mol", 0.00020), 0.0, 0.005))
+        amount = self.catalyst_charge(action)
         catalyst = _action_index(action, "catalyst", 0, len(CATALYSTS))
         previous_settings = equipment_settings(state.equipment, "batch_reactor")
         active_catalyst = self.species_view.active_catalyst_species(state)
@@ -230,10 +269,11 @@ class ChemWorldPrimitiveOperationServices:
         )
 
     def sample(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+        from chemworld.runtime.aqueous_mineral import close_aqueous
         from chemworld.runtime.full_process_contract import withdraw_sample
 
         volume = float(np.clip(_action_float(action, "sample_volume_L", 0.0001), 0.0, 0.002))
-        return withdraw_sample(state, volume).replace(
+        return close_aqueous(withdraw_sample(state, volume)).replace(
             ledger=state.ledger.with_updates(
                 sample_consumed_L=state.ledger.sample_consumed_L + volume,
                 cost=state.ledger.cost + 0.01,
@@ -349,7 +389,8 @@ class ChemWorldPrimitiveOperationServices:
             },
         )
 
-    def penalize_invalid(self, state: WorldState) -> WorldState:
+    @staticmethod
+    def penalize_invalid(state: WorldState) -> WorldState:
         ledger = state.ledger.with_updates(
             cost=state.ledger.cost + 0.01,
             risk=min(1.0, state.ledger.risk + 0.08),

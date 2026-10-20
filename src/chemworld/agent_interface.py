@@ -8,17 +8,16 @@ never latent composition, process-quality summaries, or rate constants.
 
 from __future__ import annotations
 
+import json
 import math
-from collections.abc import Callable
 from contextvars import ContextVar
 from copy import deepcopy
 from functools import wraps
-from typing import Any, Concatenate, ParamSpec, TypeVar
+from typing import Any
 
 import numpy as np
 
 from chemworld.data.logging import to_builtin
-from chemworld.envs.spaces import OBSERVATION_KEYS
 from chemworld.foundation import equipment_settings, selected_phase_id
 from chemworld.foundation.samples import CONTAINER_IDS
 from chemworld.materials import material_choice_labels
@@ -36,19 +35,16 @@ from chemworld.runtime.component_network import public_network
 from chemworld.runtime.continuous_streams import public_streams
 from chemworld.runtime.control_program import public_control
 from chemworld.runtime.spectral_settings import public_spectral_settings
-from chemworld.world.actions import CATALYSTS, ELECTROLYTE_PROFILES, SOLVENTS
-from chemworld.world.control_contract import CONTROL_CHOICES, CONTROL_NUMERIC
+from chemworld.world.control_contract import CONTROL_CHOICES
 from chemworld.world.operations import (
     CAMPAIGN_CONTROL_OPERATIONS,
-    OPERATION_FIELD_BOUNDS,
-    OPERATION_FIELD_CHOICES,
     OPERATION_TYPES,
     operation_contracts,
 )
 from chemworld.world.operations import (
     EXTENDED_INSTRUMENTS as INSTRUMENTS,
 )
-from chemworld.world.spectral_contract import SPECTRAL_BOUNDS
+from chemworld.world.operations import PUBLIC_OBSERVATION_KEYS as OBSERVATION_KEYS
 
 PUBLIC_ACTION_SCHEMA_VERSION = "chemworld-public-action-affordance-0.2"
 
@@ -61,15 +57,9 @@ _RESOURCE_READ: ContextVar[tuple[Any, Any, Any, dict[str, Any]] | None] = Contex
 )
 
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
-
-def _resource_read(
-    function: Callable[Concatenate[Any, _P], _R],
-) -> Callable[Concatenate[Any, _P], _R]:
+def _resource_read(function):
     @wraps(function)
-    def read(env: Any, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def read(env, *args, **kwargs):
         base = _base_env(env)
         ledger = getattr(base, "_campaign_resource_ledger", None)
         state = getattr(base, "_state", None)
@@ -101,80 +91,6 @@ def _campaign_snapshot(base: Any, ledger: Any) -> dict[str, Any]:
         cache["snapshot"] = ledger.snapshot()
     return cache["snapshot"]
 
-
-FIELD_UNITS: dict[str, str] = {
-    **{key: values[2] for key, values in SPECTRAL_BOUNDS.items()},
-    **{key: values[2] for key, values in CONTROL_NUMERIC.items()},
-    **dict.fromkeys(CONTROL_CHOICES, "categorical"),
-    "vessel": "categorical",
-    "connection": "categorical",
-    "capacity_L": "L",
-    "container": "categorical",
-    "source_container": "categorical",
-    "destination_container": "categorical",
-    "mixing": "categorical",
-    "amount_mol": "mol",
-    "volume_L": "L",
-    "catalyst_amount_mol": "mol",
-    "target_temperature_K": "K",
-    "duration_s": "s",
-    "stirring_speed_rpm": "rpm",
-    "sample_volume_L": "L",
-    "wash_volume_L": "L",
-    "transfer_fraction": "dimensionless",
-    "seed_mass_g": "g",
-    "reflux_ratio": "dimensionless",
-    "flow_rate_mL_min": "mL/min",
-    "residence_time_s": "s",
-    "potential_V": "V",
-    "current_mA": "mA",
-    "instrument": "categorical",
-    "catalyst": "categorical",
-    "solvent": "categorical",
-    "phase": "categorical",
-    "target_phase": "categorical",
-    "extractant": "categorical",
-    "reason": "text",
-}
-
-FIELD_RANGES: dict[str, tuple[float, float]] = {
-    **{key: (values[0], values[1]) for key, values in SPECTRAL_BOUNDS.items()},
-    **{key: (values[0], values[1]) for key, values in CONTROL_NUMERIC.items()},
-    "capacity_L": (0.0001, 0.1),
-    "amount_mol": (0.0, 0.040),
-    "volume_L": (0.0, 0.080),
-    "catalyst_amount_mol": (0.0, 0.005),
-    "target_temperature_K": (250.0, 520.0),
-    "duration_s": (0.0, 14_400.0),
-    "stirring_speed_rpm": (100.0, 1200.0),
-    "sample_volume_L": (0.0, 0.002),
-    "wash_volume_L": (0.0, 0.040),
-    "transfer_fraction": (0.0, 1.0),
-    "seed_mass_g": (0.0, 1.0),
-    "reflux_ratio": (0.0, 10.0),
-    "flow_rate_mL_min": (0.0, 20.0),
-    "residence_time_s": (1.0, 7200.0),
-    "potential_V": (-3.0, 3.0),
-    "current_mA": (0.0, 500.0),
-}
-
-FIELD_CHOICES: dict[str, list[Any]] = {
-    **{key: list(range(len(values))) for key, values in CONTROL_CHOICES.items()},
-    "vessel": list(range(16)),
-    "connection": list(range(64)),
-    "component": list(range(16)),
-    "container": list(range(1, 17)),
-    "source_container": list(range(len(CONTAINER_IDS))),
-    "destination_container": list(range(len(CONTAINER_IDS))),
-    "mixing": [0, 1],
-    "instrument": list(INSTRUMENTS),
-    "catalyst": list(range(len(CATALYSTS))),
-    "solvent": list(range(len(SOLVENTS))),
-    "phase": ["aqueous", "organic"],
-    "target_phase": ["aqueous", "organic"],
-    "extractant": list(range(len(SOLVENTS))),
-    "electrolyte_profile": list(range(len(ELECTROLYTE_PROFILES))),
-}
 
 OPERATION_GROUPS: dict[str, tuple[str, ...]] = {
     "reaction_setup": ("add_solvent", "add_reagent", "add_component", "add_catalyst"),
@@ -445,15 +361,21 @@ def _field_schema(
     *,
     operation: str | None = None,
     task_id: str | None = None,
+    modules=None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
+    from chemworld.world.domain_modules import DomainModuleRegistry
+
+    registry = modules or DomainModuleRegistry.default()
+    spec = registry.operation_specs().get(operation)
+    declared = None if spec is None else next((f for f in spec.fields if f.name == field), None)
+    payload = {
         "field": field,
-        "unit": FIELD_UNITS.get(field, "unitless"),
+        "unit": "text" if field == "reason" else "unitless",
         "required": True,
     }
-    bounds = OPERATION_FIELD_BOUNDS.get((operation, field)) if operation is not None else None
-    if bounds is None:
-        bounds = FIELD_RANGES.get(field)
+    if declared is not None:
+        payload = declared.public_schema()
+    bounds = None if declared is None else (declared.runtime_bounds or declared.bounds)
     if bounds is not None:
         low, high = bounds
         payload["bounds"] = {"low": low, "high": high}
@@ -467,10 +389,7 @@ def _field_schema(
             or (field == "volume_L" and operation in {"add_solvent", "add_phase", "add_extractant"})
         )
         payload["upper_bound_inclusive"] = True
-    operation_choices = (
-        OPERATION_FIELD_CHOICES.get((operation, field)) if operation is not None else None
-    )
-    choices = list(operation_choices) if operation_choices is not None else FIELD_CHOICES.get(field)
+    choices = None if declared is None else (declared.runtime_choices or declared.choices or None)
     if choices is not None:
         payload["choices"] = list(choices)
         if field in {"container", "source_container", "destination_container"}:
@@ -510,8 +429,10 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
     """Return the public JSON-friendly schema for one operation."""
 
     base = _base_env(env)
+    modules = getattr(base, "domain_modules", None)
     contracts = operation_contracts(
-        include_campaign_controls=operation in CAMPAIGN_CONTROL_OPERATIONS
+        include_campaign_controls=operation in CAMPAIGN_CONTROL_OPERATIONS,
+        modules=modules,
     )
     if operation not in contracts:
         return {
@@ -524,9 +445,14 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
     state = getattr(base, "_state", None)
     task_id = getattr(base, "task_id", None)
     fields = [
-        _field_schema(field, operation=operation, task_id=task_id)
+        _field_schema(field, operation=operation, task_id=task_id, modules=modules)
         for field in contract.required_fields
     ]
+    if modules is not None and operation in modules.operation_specs():
+        fields = [
+            _field_schema(f.name, operation=operation, task_id=task_id, modules=modules)
+            for f in modules.operation_specs()[operation].fields
+        ]
     from chemworld.runtime.full_process_contract import population_active
 
     if operation == "distill" and state is not None and population_active(state):
@@ -551,7 +477,7 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
                 ),
                 "choices": [
                     instrument_id
-                    for instrument_id in INSTRUMENTS
+                    for instrument_id in base.action_codec.instruments
                     if instrument_id in allowed_instruments
                 ],
             }
@@ -608,7 +534,24 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
         constraints.append(
             {"id": "material_routing", "kind": "material_routes", "routes": material_routes(state)}
         )
-    if operation == "cool_crystallize" and state is not None:
+    if (
+        operation == "cool_crystallize"
+        and state is not None
+        and base.operation_validator.native_crystal_model(state) is not None
+    ):
+        constraints.append(
+            {
+                "id": "finite_crystal_thermal_control",
+                "kind": "physical_control",
+                "description": "Temperature is a setpoint. Actual cooling and phase transfer "
+                "are limited by the connected device's finite power.",
+            }
+        )
+    if (
+        operation == "cool_crystallize"
+        and state is not None
+        and base.operation_validator.native_crystal_model(state) is None
+    ):
         constraints.extend(
             [
                 {
@@ -891,13 +834,15 @@ def _campaign_remaining(base: Any) -> dict[str, Any]:
     result = deepcopy(remaining) if isinstance(remaining, dict) else {}
     local = getattr(base, "_batch_resource_ledger", None)
     if local is not None:
-        def intersect(global_values: dict[str, Any], local_values: dict[str, Any]) -> None:
+
+        def intersect(global_values, local_values):
             for key, value in local_values.items():
                 if isinstance(value, dict):
                     intersect(global_values.setdefault(key, {}), value)
                 elif isinstance(value, (int, float)):
                     existing = global_values.get(key)
                     global_values[key] = min(existing, value) if existing is not None else value
+
         intersect(result, local.snapshot()["state"]["remaining"])
     return result
 
@@ -961,9 +906,13 @@ def _campaign_resource_rejection_reasons_for_action(
     )
     local = getattr(base, "_batch_resource_ledger", None)
     if local is not None:
-        reasons += tuple("per_batch:" + reason for reason in local.preview_rejection_reasons(
-            action, starts_vessel=_campaign_starts_vessel(base, operation),
-        ))
+        reasons += tuple(
+            "per_batch:" + reason
+            for reason in local.preview_rejection_reasons(
+                action,
+                starts_vessel=_campaign_starts_vessel(base, operation),
+            )
+        )
     return reasons
 
 
@@ -1239,7 +1188,12 @@ def _task_prompt_profile(info: dict[str, Any], base: Any) -> dict[str, Any]:
     return _default_task_prompt_profile(info, base)
 
 
-def experiment_lifecycle_contract(episode_mode: Any) -> dict[str, str]:
+def experiment_lifecycle_contract(
+    episode_mode: Any,
+    *,
+    termination_policy: str = "final-assay-or-budget",
+    terminal_instruments: tuple[str, ...] = ("final_assay",),
+) -> dict[str, str]:
     """Describe experiment completion without prescribing a search strategy."""
 
     final_effect = (
@@ -1248,7 +1202,7 @@ def experiment_lifecycle_contract(episode_mode: Any) -> dict[str, str]:
         if episode_mode == "campaign"
         else "A valid final_assay completes the experiment and ends the episode."
     )
-    return {
+    contract = {
         "terminate_action_template": '{"operation":"terminate"}',
         "final_assay_action_template": ('{"operation":"measure","instrument":"final_assay"}'),
         "terminate_effect": (
@@ -1276,6 +1230,28 @@ def experiment_lifecycle_contract(episode_mode: Any) -> dict[str, str]:
             else "unavailable outside campaign mode"
         ),
     }
+    if termination_policy == "explicit-stop-or-budget":
+        contract.update(
+            terminate_effect="terminate completes this experiment and retains its equipment state.",
+            final_assay_action_template="No terminal assay is required by this task.",
+            final_assay_precondition="No terminal assay is required by this task.",
+            final_assay_effect="Observation collection can end directly with terminate.",
+        )
+    elif terminal_instruments != ("final_assay",):
+        instrument = terminal_instruments[0] if terminal_instruments else None
+        contract.update(
+            final_assay_action_template=json.dumps(
+                {"operation": "measure", "instrument": instrument}, separators=(",", ":")
+            ),
+            final_assay_precondition=(
+                f"Declared terminal instruments {', '.join(terminal_instruments)} "
+                "require terminate."
+            ),
+            final_assay_effect=(
+                "A valid terminal assay completes the experiment; physical state remains frozen."
+            ),
+        )
+    return contract
 
 
 def _render_task_prompt_text(
@@ -1337,7 +1313,15 @@ def task_prompt(env: Any) -> dict[str, Any]:
     )
     operation_groups = _allowed_operation_groups(allowed_operations)
     profile = _task_prompt_profile(info, base)
-    experiment_lifecycle = experiment_lifecycle_contract(info.get("episode_mode"))
+    experiment_lifecycle = experiment_lifecycle_contract(
+        info.get("episode_mode"),
+        termination_policy=_task_spec_value(base, "termination_policy", "final-assay-or-budget"),
+        terminal_instruments=tuple(
+            name
+            for name in allowed_instruments
+            if base.constitution.instruments[name].requires_terminated
+        ),
+    )
     task_id = str(info.get("task_id") or "")
     text = _render_task_prompt_text(
         task_id=task_id,
@@ -1705,7 +1689,9 @@ def _instrument_summary(info: dict[str, Any]) -> dict[str, Any]:
 
 def _final_assay_summary(info: dict[str, Any], campaign: dict[str, Any]) -> dict[str, Any]:
     instrument = info.get("instrument_source") or info.get("instrument")
-    is_final_assay = info.get("operation_type") == "measure" and instrument == "final_assay"
+    is_final_assay = info.get("operation_type") == "measure" and bool(
+        info.get("terminal_assay", instrument == "final_assay")
+    )
     leaderboard_score = info.get("leaderboard_score")
     return {
         "is_final_assay": is_final_assay,
@@ -1996,6 +1982,28 @@ def tool_json_view(env: Any, observation: dict[str, Any], info: dict[str, Any]) 
     """Return a structured public observation bundle for tool agents."""
 
     actions = available_actions(env)
+    from chemworld.world.instruments import public_native_observation
+
+    native = info.get("native_observation")
+    if native is not None:
+        native = public_native_observation(
+            native,
+            _base_env(env).constitution,
+            debug_truth=getattr(_base_env(env), "debug_truth", False),
+        )
+        from chemworld.envs.spaces import to_observation
+        from chemworld.foundation.observations import Observation
+
+        reading = Observation.from_native_record(native)
+        observation = to_observation(reading.values)
+        info = {
+            **info,
+            "raw_signal": reading.raw_signal,
+            "processed_estimate": reading.processed_estimate,
+            "uncertainty": reading.uncertainty,
+            "observed_mask": reading.observed_mask,
+            "observed_keys": [k for k, seen in reading.observed_mask.items() if seen],
+        }
     material_state = getattr(_base_env(env), "_state", None)
     operational = full_process_operational_state(env, info)
     research = getattr(_base_env(env), "research_brief", None)
@@ -2011,6 +2019,7 @@ def tool_json_view(env: Any, observation: dict[str, Any], info: dict[str, Any]) 
         },
         "observation": to_builtin(observation),
         "raw_signal": to_builtin(info.get("raw_signal", {})),
+        "native_observation": to_builtin(native),
         "spectral_fit": _spectral_fit(info),
         "processed_estimate": to_builtin(info.get("processed_estimate", {})),
         "uncertainty": to_builtin(info.get("uncertainty", {})),

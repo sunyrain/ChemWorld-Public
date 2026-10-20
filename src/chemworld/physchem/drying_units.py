@@ -397,17 +397,10 @@ def simulate_sorbent_drying(request: SorbentDryingRequest) -> SorbentDryingResul
     contact_fraction = -expm1(
         -sorbent.mass_transfer_rate_per_s * request.contact_time_s
     )
-    final_loading = {
-        component_id: (
-            initial_loading[component_id]
-            + contact_fraction
-            * (
-                equilibrium.loading_mol_per_kg[component_id]
-                - initial_loading[component_id]
-            )
-        )
-        for component_id in sorbent.affinity_L_per_mol
-    }
+    from chemworld.physchem.sorbent_kinetics import isothermal_sorbent_loading
+
+    final_loading = isothermal_sorbent_loading(sorbent, request.wet_liquid_amounts_mol,
+        volume_L=request.liquid_volume_L, duration_s=request.contact_time_s)
     if sum(final_loading.values()) > (
         sorbent.site_capacity_mol_per_kg + request.balance_tolerance
     ):
@@ -508,7 +501,10 @@ def simulate_sorbent_drying(request: SorbentDryingRequest) -> SorbentDryingResul
             / product_input
         )
 
-    warnings: list[str] = []
+    warnings: list[str] = [
+        "contact_fraction_of_equilibrium is the legacy nominal single-rate time factor; "
+        "actual loadings use instantaneous finite-fluid Langmuir/LDF integration"
+    ]
     if sorbent.sorbent_mass_kg <= request.balance_tolerance:
         warnings.append(
             "zero sorbent mass: only mechanical liquid retention changes the "
@@ -568,7 +564,7 @@ def simulate_sorbent_drying(request: SorbentDryingRequest) -> SorbentDryingResul
         warnings=tuple(warnings),
         provenance=(
             "extended-Langmuir shared-site equilibrium with exact component inventory",
-            "linear-driving-force approach using one rate for capacity-preserving transients",
+            "shared finite-fluid Langmuir/LDF contribution through CoupledSystem",
             (
                 f"IDAES {IDAES_COMMIT}:{IDAES_ADSORPTION_PATH} extended-isotherm "
                 "convention; ChemWorld uses an independent bounded liquid-contact ledger"
@@ -598,8 +594,9 @@ def sorbent_drying_model_card() -> ModelCard:
         assumptions=(
             "one isothermal, well-mixed liquid contact with a shared class of sorption sites",
             (
-                "one LDF rate applies to all competing components so total "
-                "transient loading stays bounded"
+                "the isothermal contact supplies one rate to the shared local-concentration "
+                "Langmuir/LDF contribution; native component rates use explicit "
+                "finite-site constraints"
             ),
             (
                 "liquid volume is additive and unchanged by sorption before "
@@ -615,10 +612,11 @@ def sorbent_drying_model_card() -> ModelCard:
                 "declared affinity and capacity parameters only; no sorbent is "
                 "inferred from a trade name"
             ),
-            "single liquid phase without reaction, precipitation, evaporation, or heat effects",
+            "the legacy request is one isothermal liquid contact without a caloric/heat claim",
             (
-                "no intraparticle diffusion distribution, bed pressure drop, "
-                "regeneration, or scale-up model"
+                "no intraparticle distribution, axial bed, pressure drop or scale-up; "
+                "native persistent-carrier regeneration uses the shared contribution "
+                "with caloric data"
             ),
             (
                 "equilibrium parameters must be fitted or justified for the "
@@ -694,12 +692,12 @@ def sorbent_drying_model_card() -> ModelCard:
                 "ledger, not sorbent selection or plant design."
             ),
             (
-                "This proposal does not model vacuum/thermal drying and does not "
-                "alter the v0.3 dry route."
+                "The native persistent-carrier path requires authored caloric data; "
+                "the legacy disposable path draws from an explicit finite media kit."
             ),
         ),
         intended_use=(
-            "World Law vNext dry-operation candidate for declared sorbent parameter cards",
+            "Declared finite sorbent contact with shared native kinetic contribution",
             (
                 "agent environments that must trade drying capacity against "
                 "product loss and waste inventory"

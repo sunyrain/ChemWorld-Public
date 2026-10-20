@@ -22,6 +22,7 @@ from chemworld.physchem.specs import (
     ComponentUncertainty,
     PropertyCorrelation,
     component_alias_index,
+    resolve_component_identifier,
 )
 
 _CURATED_INCHI_IDENTITIES: dict[str, tuple[str, str]] = {
@@ -440,13 +441,17 @@ def _metadata(record: _CuratedPropertyRecord, *, source_table: str) -> dict[str,
 
 
 def _record(component_id_or_alias: str) -> _CuratedPropertyRecord:
-    normalized = component_id_or_alias.strip().lower().replace(" ", "_")
+    try:
+        canonical = resolve_component_identifier(curated_components(), component_id_or_alias)
+    except KeyError as exc:
+        allowed = ", ".join(record.component_id for record in _CURATED_RECORDS)
+        raise KeyError(
+            f"unknown curated component {component_id_or_alias!r}; allowed={allowed}"
+        ) from exc
     for record in _CURATED_RECORDS:
-        aliases = {record.component_id, *record.aliases}
-        if normalized in aliases:
+        if canonical == record.component_id:
             return record
-    allowed = ", ".join(record.component_id for record in _CURATED_RECORDS)
-    raise KeyError(f"unknown curated component {component_id_or_alias!r}; allowed={allowed}")
+    raise KeyError(f"unknown curated component {component_id_or_alias!r}")
 
 
 __all__ = [

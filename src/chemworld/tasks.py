@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from chemworld.physchem.maturity import (
@@ -112,6 +112,7 @@ class TaskSpec:
     description: str
     tags: tuple[str, ...]
     kernel_maturity: TaskMaturitySpec
+    domain_modules: Any = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -184,7 +185,7 @@ class TaskSpec:
         )
         from chemworld.schemas.validation import validate_task_schema
 
-        schema_result = validate_task_schema(self.to_dict())
+        schema_result = validate_task_schema(self.to_dict(), modules=self.domain_modules)
         if not schema_result.valid:
             raise ValueError(
                 f"invalid task contract for {self.task_id!r}: " + "; ".join(schema_result.errors)
