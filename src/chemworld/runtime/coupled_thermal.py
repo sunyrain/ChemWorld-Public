@@ -96,35 +96,9 @@ def reconnect_thermal_device(state: WorldState, device_id: str, destination: str
         for record in locals_[destination].equipment.equipment.values()
     ):
         raise ValueError("destination already has its thermal controller")
-    moved = tuple(
-        slot
-        for slot in locals_[source].state_slots.slots
-        if slot.spec.owner_kind == "equipment" and slot.spec.owner_id == device_id
-    )
-    source_equipment = dict(locals_[source].equipment.equipment)
-    source_equipment.pop(device_id)
-    locals_[source] = locals_[source].replace(
-        equipment=EquipmentLedger(source_equipment),
-        state_slots=StateSlots(
-            tuple(slot for slot in locals_[source].state_slots.slots if slot not in moved)
-        ),
-    )
-    locals_[destination] = locals_[destination].replace(
-        equipment=EquipmentLedger(
-            {
-                **locals_[destination].equipment.equipment,
-                device_id: replace(device, attached_vessel_id=destination),
-            }
-        ),
-        state_slots=StateSlots(
-            (
-                *locals_[destination].state_slots.slots,
-                *(replace(slot, location_id=destination) for slot in moved),
-            )
-        ),
-    )
-    active = locals_.pop(state.vessel_id)
-    return active.replace(inactive_vessels=locals_)
+    from chemworld.runtime.component_network import reconnect_device
+
+    return reconnect_device(state, device_id, destination)
 
 
 def material_inventory(state):

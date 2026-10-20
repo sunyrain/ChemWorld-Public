@@ -253,6 +253,12 @@ def instrument_cost(context):
     )
 
 
+def lab_schedule(context):
+    from chemworld.runtime.scheduling import LabScheduleServices
+
+    return LabScheduleServices(context)
+
+
 def configure_instrument(state, action):
     from chemworld.runtime.spectral_settings import configure_instrument as execute
 

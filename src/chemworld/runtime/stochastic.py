@@ -40,7 +40,7 @@ class StochasticRuntime:
         installed = {key for key, s in physics.initial_states.items() if self.supports(s)}
         if declared != installed or bool(installed) != (physics.network.stochastic is not None):
             raise ValueError("SSA network, components and owned process state must agree")
-        if installed and installed != set(physics.initial_states):
+        if installed and installed != set(physics.initial_states) and physics.lab_clock is None:
             raise ValueError(
                 "SSA network cannot implicitly advance an undeclared continuous vessel"
             )
@@ -58,11 +58,17 @@ class StochasticRuntime:
             if any(vessel in models for models in competing) or state.state_slots.slots:
                 raise ValueError("mixed continuous ODE/SSA system is not supported")
             if any(
-                c.vessel == vessel and c.kind not in {"stochastic", "observation", "material_input"}
+                c.vessel == vessel and c.kind not in {
+                    "stochastic", "observation", "material_input", "lab_schedule",
+                }
                 for c in self.composition.components
             ):
                 raise ValueError("SSA components cannot enable unsupported continuous controls")
-            if any(r.equipment_type != "batch_reactor" for r in state.equipment.equipment.values()):
+            equipment_types = (
+                {"batch_reactor", "instrument"} if physics.lab_clock else {"batch_reactor"}
+            )
+            if any(r.equipment_type not in equipment_types
+                   for r in state.equipment.equipment.values()):
                 raise ValueError("SSA slice has no continuous equipment coupling")
             from chemworld.world.composition import physical_instruments
 

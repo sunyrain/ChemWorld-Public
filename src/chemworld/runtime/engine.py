@@ -525,6 +525,12 @@ class ChemWorldRuntime:
         from chemworld.foundation.state_ledgers import EquipmentRecord
         from chemworld.foundation.state_ownership import StateSlots
 
+        if self._state.lab_clock is not None:
+            raise ValueError(
+                "shared laboratory lifecycle requires full reset; "
+                "partial resets cannot split clocks"
+            )
+
         if scope == "equipment":
             replacement = options["replacement"]
             if isinstance(replacement, Mapping):
@@ -1275,6 +1281,12 @@ class ChemWorldRuntime:
         """Read the latest committed public packet without sampling or charging."""
         return deepcopy(self._last_reading)
 
+    def lab_status(self) -> dict[str, Any]:
+        """Read queues and released offline results without acquisition or RNG draws."""
+        from chemworld.runtime.scheduling import public_lab
+
+        return public_lab(self._state)
+
     def snapshot(self) -> SessionSnapshot:
         """Capture a private, JSON-serializable continuation without acquiring evidence."""
         return capture_session(self)
@@ -1945,6 +1957,14 @@ class ChemWorldRuntime:
             from chemworld.runtime.disposable_sorbent import install_legacy_media_supplies
 
             state = install_legacy_media_supplies(state)
+        from chemworld.runtime.scheduling import initialize_lab
+
+        state = initialize_lab(
+            state, None if self.compiled_composition is None else self.compiled_composition.spec,
+            self._rng,
+        )
+        if state.lab_clock is not None and self.observation_noise_mode != "sequential":
+            raise ValueError("shared lab uses its persistent sequential detector stream")
         return initialize_solvents(state)
 
     def _observation_seed(self, world_seed: int) -> int:

@@ -698,7 +698,7 @@ def _check_native_task(
                 "final assay requires its instrument and measure",
             )
         )
-    if instruments and "measure" not in operations:
+    if instruments and not {"measure", "queue_lab_measure"}.intersection(operations):
         diagnostics.append(
             _diagnostic("missing_capability", "task.operations", "instruments require measure")
         )

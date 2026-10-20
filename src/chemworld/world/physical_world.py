@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from chemworld.foundation import WorldState
+from chemworld.foundation.lab_clock import LabClockSpec
 from chemworld.physchem.coupled_concentration import CoupledConcentrationSpec
 from chemworld.physchem.crystal_thermal_kinetics import CrystalThermalSpec
 from chemworld.physchem.dynamic_distillation import DynamicColumnSpec
@@ -42,6 +43,7 @@ class CompositionPhysics:
     concentration_models: dict[str, CoupledConcentrationSpec] = field(default_factory=dict)
     sorbent_models: dict[str, SorbentKineticsSpec] = field(default_factory=dict)
     crystal_models: dict[str, CrystalThermalSpec] = field(default_factory=dict)
+    lab_clock: LabClockSpec | None = None
     surface_models: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -58,6 +60,7 @@ class CompositionPhysics:
             "concentration_models",
             "sorbent_models",
             "crystal_models",
+            "lab_clock",
             "surface_models",
         }:
             raise ValueError("unsupported composition physics fields")
@@ -115,12 +118,14 @@ class CompositionPhysics:
                 name: CrystalThermalSpec.from_dict(model)
                 for name, model in payload.get("crystal_models", {}).items()
             },
+            LabClockSpec(**payload["lab_clock"]) if "lab_clock" in payload else None,
             {name: surface_spec_from_dict(model)
              for name, model in payload.get("surface_models", {}).items()},
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            **({"lab_clock": self.lab_clock.to_dict()} if self.lab_clock is not None else {}),
             "network": {
                 "network_id": self.network.network_id,
                 "species": [s.to_dict() for s in self.network.species],
@@ -226,6 +231,16 @@ class CompositionPhysics:
     def available_operations(self, operations, modules, vessel: str) -> tuple[str, ...]:
         """Intersect declared thermal actions with the installed device capability."""
         from chemworld.runtime.aqueous_mineral import aqueous_record
+
+        if self.lab_clock is not None:
+            from chemworld.runtime.scheduling import ALLOWED
+
+            return tuple(
+                op for op in operations if op in ALLOWED
+                and (op != "queue_lab_heat" or
+                     (self.lab_clock.heater_id and vessel in self.thermal_models))
+                and (op != "queue_lab_measure" or self.lab_clock.analyzer)
+            )
 
         state = self.initial_states[vessel]
         aqueous = aqueous_record(state)
@@ -442,6 +457,9 @@ class CompositionPhysics:
         )
 
     def validate(self, spec) -> None:
+        from chemworld.runtime.scheduling import validate_lab
+
+        validate_lab(spec)
         vessels = {v["id"]: v for v in spec.vessels}
         if set(self.initial_states) != set(vessels):
             raise ValueError("physics.initial_states must match the declared vessels exactly")

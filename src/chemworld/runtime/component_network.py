@@ -34,6 +34,7 @@ def _local(state: WorldState) -> WorldState:
     thermal = state.thermal.vessels[state.vessel_id]
     return state.replace(
         inactive_vessels={},
+        lab_clock=None,
         vessel_elapsed_s={},
         ledger=Ledger(
             time_s=state.vessel_elapsed_s.get(state.vessel_id, 0),
@@ -59,6 +60,7 @@ def _activate(
         inactive_vessels=inactive,
         vessel_elapsed_s=global_state.vessel_elapsed_s,
         ledger=global_state.ledger,
+        lab_clock=global_state.lab_clock,
         terminated=global_state.terminated,
         solvent_accounting=global_state.solvent_accounting,
         samples=replace(
@@ -202,6 +204,37 @@ def select_vessel(state: WorldState, action: dict[str, Any]) -> WorldState:
     target = inactive.pop(name)
     inactive[state.vessel_id] = _local(state)
     return _activate(state, target, inactive)
+
+
+def reconnect_device(state: WorldState, identity: str, destination: str) -> WorldState:
+    """Move one actual device and owned state; materials remain in place."""
+    locals_ = {state.vessel_id: state, **state.inactive_vessels}
+    owners = [key for key, local in locals_.items() if identity in local.equipment.equipment]
+    if len(owners) != 1 or destination not in locals_:
+        raise ValueError("equipment needs exactly one owner and a declared destination")
+    source = owners[0]
+    if source == destination:
+        return state
+    src, dst = locals_[source], locals_[destination]
+    record = src.equipment.equipment[identity]
+    slots = tuple(
+        slot for slot in src.state_slots.slots
+        if slot.spec.owner_kind == "equipment" and slot.spec.owner_id == identity
+    )
+    locals_[source] = src.replace(
+        equipment=EquipmentLedger(
+            {k: v for k, v in src.equipment.equipment.items() if k != identity}
+        ),
+        state_slots=StateSlots(tuple(slot for slot in src.state_slots.slots if slot not in slots)),
+    )
+    locals_[destination] = dst.replace(
+        equipment=EquipmentLedger({**dst.equipment.equipment,
+                                   identity: replace(record, attached_vessel_id=destination)}),
+        state_slots=StateSlots((*dst.state_slots.slots,
+                               *(replace(slot, location_id=destination) for slot in slots))),
+    )
+    active = locals_.pop(state.vessel_id)
+    return active.replace(inactive_vessels=locals_)
 
 
 def _index(value: Any, count: int) -> int:
@@ -515,7 +548,8 @@ def public_network(state: WorldState) -> dict[str, Any] | None:
             for index, name in enumerate(network["vessels"])
         ],
         "connections": [{"index": i, **edge} for i, edge in enumerate(network["connections"])],
-        "clock_model": "explicit_local_advancement; inactive vessels held unchanged",
+        "clock_model": ("shared_lab_clock" if state.lab_clock is not None else
+                        "explicit_local_advancement; inactive vessels held unchanged"),
         "terminal_scope": "episode; final assay samples the selected vessel",
     }
 

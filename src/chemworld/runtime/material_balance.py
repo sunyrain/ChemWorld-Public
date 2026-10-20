@@ -30,6 +30,8 @@ class ServiceMaterialBoundary:
         self, before: WorldState, after: WorldState, action: dict[str, Any]
     ) -> TransitionBalance:
         operation = str(action["operation"])
+        if before.lab_clock is not None and operation == "wait":
+            return self.services.lab_schedule.boundary(before, after)
         exchanges: list[MaterialExchange] = []
         stocks: dict[str, float] = {}
         unmodeled: list[str] = []

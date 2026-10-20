@@ -482,6 +482,10 @@ def build_step_info(
         "sample_inventory": env._state.samples.public_summary(),
         "material_routing": env._state.samples.routing_summary(),
         "component_network": public_network(env._state),
+        "lab_clock": (
+            None if env._state.lab_clock is None
+            else env._state.lab_clock.to_dict(include_hidden=False)
+        ),
         "process_control": public_control(env._state),
         "continuous_streams": public_streams(env._state),
         "spectral_configurations": public_spectral_settings(env._state),

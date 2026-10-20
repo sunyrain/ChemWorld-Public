@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from chemworld.foundation.lab_clock import LabClockState
 from chemworld.foundation.material_properties import MATERIAL_METRICS, extract_material_properties
 from chemworld.foundation.samples import MaterialContents, SampleLedger, StoredSample
 from chemworld.foundation.solvents import SOLVENT_IDS, SolventAccounting, SolventInventory
@@ -132,4 +133,5 @@ def restore_state(payload: dict[str, Any]):
         vessel_elapsed_s=payload.get("vessel_elapsed_s", {}),
         state_slots=StateSlots.from_dict(payload.get("state_slots", {})),
         liquid_heat_capacity_J_L_K=payload.get("liquid_heat_capacity_J_L_K", 4180.0),
+        lab_clock=(LabClockState(**payload["lab_clock"]) if "lab_clock" in payload else None),
     )

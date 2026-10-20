@@ -48,6 +48,33 @@ def _instruments():
 
 BUILTIN_MODULES = (
     DomainModuleSpec(
+        module_id="lab_schedule",
+        operations=(
+            OperationSpec(
+                Operation("queue_lab_heat", "Queue the shared heater",
+                          ("duration_s", "target_temperature_K"), ("not_terminated",)),
+                "lab_schedule", "lab_schedule", "queue",
+                fields=(ActionFieldSpec("duration_s", "s", (1.0, 14400.0)),
+                        ActionFieldSpec("target_temperature_K", "K", (1.0, 3000.0))),
+                affected_ledgers=("equipment", "process"),
+            ),
+            OperationSpec(
+                Operation("queue_lab_measure", "Queue the shared offline analyzer",
+                          (), ("not_terminated",)),
+                "lab_schedule", "lab_schedule", "queue", affected_ledgers=("equipment", "process"),
+            ),
+        ),
+        services=(ServiceFactorySpec(
+            "lab_schedule", "lab_schedule", factories.lab_schedule,
+            "LabScheduleServices", ("reaction_thermal", "instrument_cost"),
+        ),),
+        components=(("lab_schedule", ComponentCapability(
+            operations=("queue_lab_heat", "queue_lab_measure", "wait"),
+            interfaces=("time",), state_owners=("lab_clock",),
+        )),),
+        dependencies=("thermal", "observation"),
+    ),
+    DomainModuleSpec(
         module_id="solid_solution",
         components=(("solid_solution", ComponentCapability(
             operations=("heat", "wait", "pause_control", "resume_control"),
@@ -1707,7 +1734,7 @@ BUILTIN_MODULES = (
                     outputs=(),
                     interfaces=("public_measurement", "missingness", "cost", "latency", "sample"),
                     state_owners=("public_measurement",),
-                    required_all=("measure",),
+                    required_any=("measure", "queue_lab_measure"),
                     parameters=(
                         (
                             "instruments",

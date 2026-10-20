@@ -18,6 +18,7 @@ packages or establish fidelity to a particular laboratory material.
 | Stochastic biochemistry | Constant-volume/temperature Gillespie events, reversible and explicit enzyme networks; integer additions, molecular capture and separate process/detector randomness | [Biochemical worlds](native_biochemical.md), [SSA](native_stochastic.md) |
 | Mechanisms and instruments | Bounded YAML/JSON import with P-log/Chebyshev and NASA7 gas thermodynamics; programmed chromatography with retained instrument state | [Mechanisms](native_mechanisms.md); `python -m chemworld.examples.programmed_chromatography --output chromatography-run` |
 | Binary solids | One/two substitutional phases, ideal mixing and L0/L1 Redlich–Kister terms; global supporting-line checks and thermal local-equilibrium paths | `python -m chemworld.examples.native_solid_solution` |
+| Shared laboratory time | One/two independent thermal or SSA vessels, one switched heater and one offline analyzer; FIFO requests, atomic time slices and delayed readings | [Shared laboratory clock](native_shared_lab.md) |
 
 In a checkout, prefix Python commands with `uv run --no-sync`. The package examples
 run without model credentials. The biochemical checkout example is
@@ -25,10 +26,11 @@ run without model credentials. The biochemical checkout example is
 
 ## Remaining integration and scientific extensions
 
-Shared laboratory time, finite equipment queues and asynchronous analyzer publication
-are still in development in this snapshot. The current examples use explicit local
-time semantics; unselected vessels do not all age automatically. The final cross-domain
-integration acceptance remains pending that delivery.
+Shared time is an explicit session configuration. All enabled vessels then age together,
+and snapshots retain queued jobs, pending SSA events and unpublished readings. Local
+time remains the default. Shared mode currently excludes open flow, alternate phase
+strategies and keyed detector noise; see the guide for its full scope. The final
+cross-domain combination and installation acceptance is in progress.
 
 Further scientific extensions need their own finite equations, parameters and reference
 cases: electrolyte-resolved battery models, plating/cracking, nonideal concentrated

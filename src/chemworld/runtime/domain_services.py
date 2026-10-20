@@ -75,6 +75,8 @@ class ChemWorldDomainServices:
             context.services[factory.service_id] = service
             setattr(self, factory.attribute, service)
         installed = self.service_registry.operation_map()
+        if hasattr(self, "lab_schedule"):
+            self.lab_schedule._domains = self
         self._operation_methods = {
             name: spec.bind(context.services)
             for name, spec in self.modules.operation_specs().items()
@@ -127,7 +129,20 @@ class ChemWorldDomainServices:
         method = self.operation_methods().get(operation)
         if method is None:
             raise ValueError(f"Unsupported operation: {operation}")
-        evaluated = method(state, action)
+        if state.lab_clock is not None:
+            from chemworld.runtime.scheduling import ALLOWED
+
+            if operation not in ALLOWED:
+                return ModelProviderResult(
+                    {}, diagnostics={}, state=None, success=False,
+                    outcome="rejected", failure_reason="unsupported_shared_clock_action",
+                )
+            evaluated = (
+                self.lab_schedule.advance(state, action)
+                if operation == "wait" else method(state, action)
+            )
+        else:
+            evaluated = method(state, action)
         if isinstance(evaluated, ModelProviderResult):
             result = evaluated
             if result.outcome in {"rejected", "numerical_failure"}:
@@ -150,11 +165,12 @@ class ChemWorldDomainServices:
                 actual_duration_s=next_state.ledger.time_s - before.ledger.time_s,
             )
 
-        next_state = finish_solvent_transition(state, next_state, action)
+        if not (state.lab_clock is not None and operation == "wait"):
+            next_state = finish_solvent_transition(state, next_state, action)
         context_thermal = getattr(self, "reaction_thermal", None)
         if context_thermal is not None:
             next_state = context_thermal.with_risk_and_pressure(next_state)
-        if state.vessel_elapsed_s:
+        if state.vessel_elapsed_s and state.lab_clock is None:
             elapsed = dict(next_state.vessel_elapsed_s)
             elapsed[state.vessel_id] = (
                 state.vessel_elapsed_s[state.vessel_id]

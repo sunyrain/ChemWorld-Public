@@ -8,6 +8,7 @@ from math import isfinite
 from typing import Any
 
 from chemworld.foundation.balances import TransitionBalance
+from chemworld.foundation.lab_clock import LabClockState
 from chemworld.foundation.observations import Observation
 from chemworld.foundation.samples import SampleLedger
 from chemworld.foundation.solvents import SolventAccounting, SolventInventory
@@ -88,6 +89,7 @@ class WorldState:
     vessel_elapsed_s: dict[str, float] = field(default_factory=dict)
     state_slots: StateSlots = field(default_factory=StateSlots)
     liquid_heat_capacity_J_L_K: float = 4180.0
+    lab_clock: LabClockState | None = None
 
     def __post_init__(self) -> None:
         if not isfinite(self.liquid_heat_capacity_J_L_K) or self.liquid_heat_capacity_J_L_K <= 0:
@@ -258,6 +260,8 @@ class WorldState:
             payload["species_amounts"] = deepcopy(self.species_amounts)
             payload["active_reference_sources"] = deepcopy(self.samples.active_reference_sources)
             payload["active_reference_shares"] = deepcopy(self.samples.active_reference_shares)
+        if self.lab_clock is not None:
+            payload["lab_clock"] = self.lab_clock.to_dict(include_hidden=include_hidden)
         return payload
 
     def replace(self, **updates: Any) -> WorldState:

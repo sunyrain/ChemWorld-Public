@@ -16,14 +16,16 @@
 | 随机生化 | 恒容恒温Gillespie事件、可逆和显式酶网络、整数加料与分子捕获；过程和检测随机性分开 | [生化世界](native_biochemical.md)、[SSA](native_stochastic.md) |
 | 机理与仪器 | 有限YAML／JSON机理导入、P-log／Chebyshev、NASA7气相热力学；程序色谱和持续仪器状态 | [机理导入](native_mechanisms.md)；`python -m chemworld.examples.programmed_chromatography --output chromatography-run` |
 | 二元固体 | 一／两种替位相、理想混合与L0／L1项、全局支撑线检查及热路径中的局部平衡 | `python -m chemworld.examples.native_solid_solution` |
+| 共享实验室时间 | 一至两个独立热／SSA容器、一台切换热设备和一台离线分析仪；FIFO请求、原子时间片及延迟读数 | [共享实验室时钟](native_shared_lab.md) |
 
 源码检出后，Python命令加前缀`uv run --no-sync`。这些示例不需要模型密钥。
 生化示例运行`uv run --no-sync python examples/native_biochemical.py`。
 
 ## 待完成的集成与科学扩展
 
-本次同步尚不包含共享实验室时钟、有限设备队列和异步分析发布；它们仍在开发。
-当前示例明确使用局部时钟，未选容器不会自动同时老化。最终跨领域组合验收需要等待该功能交付。
+共享时钟通过会话配置显式开启，所有已启用容器同时老化，快照保留设备队列、待发SSA事件与未发布读数。
+局部时钟仍为默认。共享模式目前不包含开放流路、替代相策略及keyed检测噪声，完整范围见使用说明。
+最终跨领域组合与独立安装验收正在实施。
 
 后续科学扩展仍须分别规定有限方程、参数和对照：电池电解液输运、析锂／裂纹、高浓度非理想水相、
 膜反向流动与化学清洗、空间表面动力学、晶体破碎／聚并、非恒温SSA／ODE混合以及多子晶格固体。
