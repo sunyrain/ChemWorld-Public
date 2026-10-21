@@ -19,13 +19,16 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
  try{
   await go('home');
   await check('Home exposes the real hierarchy and defers guide payloads',async()=>{
-   assert.equal(await page.locator('.site-nav [data-nav]').count(),5);assert.equal(await page.locator('.site-explorer-toolbar').count(),0);
+   assert.equal(await page.locator('.site-nav [data-nav]').count(),4);assert.equal(await page.locator('[data-nav="research"]').count(),0);assert.equal(await page.locator('.site-explorer-toolbar').count(),0);
    assert.match(await page.locator('.home-scale').innerText(),/17/);assert.match(await page.locator('.home-scale').innerText(),/68/);
    assert.match(await page.locator('.architecture-captions').innerText(),/任务与评测/);
    assert.ok(!requests.some(u=>/chemworld-guide-(content|localized)\.js/.test(u)));await screenshot('site-home');
   });
   await check('Catalog filtering and player navigation work',async()=>{
    await page.locator('[data-nav="experiments"]').click();await page.locator('.case-card').first().waitFor();
+   await page.locator('.case-card').last().scrollIntoViewIfNeeded();await page.waitForFunction(()=>[...document.querySelectorAll('.case-card-art img')].every(img=>img.complete&&img.naturalWidth>0));
+   assert.equal(new Set(await page.locator('.case-card-art img').evaluateAll(images=>images.map(img=>img.currentSrc))).size,3);
+   assert.equal(await page.locator('.case-card-art > svg').count(),0);await page.evaluate(()=>scrollTo(0,0));await screenshot('site-experiments-zh');
    assert.equal(await page.locator('.case-card:visible').count(),3);await page.locator('[data-filter="separation"]').click();assert.equal(await page.locator('.case-card:visible').count(),2);
    await page.locator('[data-filter="reaction"]').click();await page.locator('.case-card:visible .site-link').click();
    await page.locator('#step-counter').waitFor();assert.equal(await page.locator('#step-counter').textContent(),'6 / 11');
@@ -85,17 +88,22 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
    assert.equal((await camera()).zoom,'2');assert.equal((await camera()).transform,'none');await page.locator('#fit-map').click();await screenshot('site-atlas');
   });
   await check('Browser history and return from another page keep the explorer usable',async()=>{
-   await page.locator('[data-nav="research"]').click();await page.locator('.research-grid').waitFor();await page.goBack();await page.locator('#atlas-view:not([hidden])').waitFor();await page.locator('[data-view="index"]').click();assert.ok(await page.locator('#document h1').isVisible());
+   await page.locator('.header-start').click();await page.locator('.start-layout').waitFor();await page.goBack();await page.locator('#atlas-view:not([hidden])').waitFor();await page.locator('[data-view="index"]').click();assert.ok(await page.locator('#document h1').isVisible());
+  });
+  await check('The retired research route resolves to the experiment collection',async()=>{
+   await page.evaluate(()=>location.hash='research');await page.waitForURL('**#experiments');await page.locator('.experiment-collection').waitFor();assert.equal(await page.locator('.research-grid,[data-nav="research"]').count(),0);
   });
   await check('Installation commands can be copied',async()=>{
    await hash('start');await page.locator('[data-copy="install"]').click();assert.match(await page.evaluate(()=>navigator.clipboard.readText()),/uv sync --locked --extra dev/);
   });
   for(const width of [1440,1024,736,390,320])await check(`Chinese and English routes fit at ${width}px`,async()=>{
    await page.setViewportSize({width,height:1000});
-   for(const lang of ['zh','en'])for(const route of ['home','experiments','experiment/reaction-to-purification/6','atlas/materials','index/combustion','guides/thermal-reaction/native_mechanisms','research','start']){
+   for(const lang of ['zh','en'])for(const route of ['home','experiments','experiment/reaction-to-purification/6','atlas/materials','index/combustion','guides/thermal-reaction/native_mechanisms','start']){
     await go(route,lang);const overflow=await page.evaluate(()=>({page:document.documentElement.scrollWidth,viewport:innerWidth}));assert.ok(overflow.page<=overflow.viewport+1,`${width}/${lang}/${route}: ${JSON.stringify(overflow)}`);
-    if(width===390&&lang==='en'&&['home','experiment/reaction-to-purification/6','guides/thermal-reaction/native_mechanisms'].includes(route))await screenshot('site-mobile-'+route.split('/')[0]);
+    const clippedNav=await page.locator('.site-nav a').evaluateAll(links=>links.filter(link=>{const box=link.getBoundingClientRect();return box.left<0||box.right>innerWidth;}).map(link=>link.textContent));assert.deepEqual(clippedNav,[],`${width}/${lang}: clipped navigation`);
+    if(width===390&&lang==='en'&&['home','experiments','experiment/reaction-to-purification/6','guides/thermal-reaction/native_mechanisms'].includes(route))await screenshot('site-mobile-'+route.split('/')[0]);
     if(width===1440&&lang==='en'&&route==='home')await screenshot('site-home-en');
+    if(width===1440&&lang==='en'&&route==='experiments')await screenshot('site-experiments-en');
    }
   });
   await check('Mobile guide navigation, capability directory and player stay interactive',async()=>{

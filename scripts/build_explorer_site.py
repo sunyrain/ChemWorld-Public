@@ -81,6 +81,10 @@ def build(output: Path) -> None:
     for source in web.iterdir():
         if source.is_file() and source.suffix in {".html", ".js", ".css"}:
             shutil.copyfile(source, output / source.name)
+    for source in (web / "assets").rglob("*.webp"):
+        destination = output / source.relative_to(web)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
     locales = {name: {lang: render(name, lang) for lang in ("zh", "en")} for name in GUIDES}
     pages = {name: editions["en"] for name, editions in locales.items()}
     # Map both actual source paths to the same guide; the reader preserves locale.
