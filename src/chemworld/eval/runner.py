@@ -129,8 +129,15 @@ def run_agent(
     observation_noise_mode: str | None = None,
     observation_noise_namespace: str | None = None,
     full_process_contract_id: str | None = None,
+    initialization_after_action: Mapping[int | str, Mapping[str, Any]] | None = None,
 ) -> list[HistoryRecord]:
     """Run one benchmark episode and optionally write a JSONL trajectory."""
+
+    from chemworld.runtime.lifecycle import initialization_boundaries
+
+    boundaries = initialization_boundaries(initialization_after_action)
+    if boundaries and env_wrapper is not None:
+        raise ValueError("evaluator initialization boundaries require the native Agent session")
 
     if task_id is not None and composition is not None:
         raise ValueError("task_id and composition are mutually exclusive")
@@ -207,6 +214,8 @@ def run_agent(
     if episode_mode_override is not None:
         env_kwargs["episode_mode_override"] = episode_mode_override
     effective_budget = budget_override if budget_override is not None else budget
+    if any(index >= effective_budget for index in boundaries):
+        raise ValueError("initialization boundary must precede a recorded action")
     # Wrappers retain their Gym boundary. Ordinary Agent/CLI execution uses
     # the native session directly; the published scalar log view stays v1.
     native_session = env_id == chemworld.ENV_ID and env_wrapper is None
@@ -299,6 +308,10 @@ def run_agent(
     try:
         logger = logger_context.__enter__() if logger_context is not None else None
         for step in range(1, effective_budget + 1):
+            if step - 1 in boundaries:
+                current_observation, current_info = env.reset(options=boundaries[step - 1])
+                if native_session:
+                    current_observation = to_observation(current_observation.values)
             pre_decision_view = agent_view_bundle(env, current_observation, current_info)
             spectrum_request_factory = getattr(agent, "consume_historical_spectrum_request", None)
             requested_spectrum_id = (
@@ -418,6 +431,7 @@ def run_agent(
                 )
             else:
                 observation, reward, terminated, truncated, info = env.step(action)
+            logging_task_info.update(base_env.evaluator_provenance())
             obs_json = observation_to_json(observation)
             update_started = perf_counter()
             agent.update(action, obs_json, float(reward), info)

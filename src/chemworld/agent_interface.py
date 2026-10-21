@@ -34,6 +34,7 @@ from chemworld.physchem.electrochemical_task_contract import (
 from chemworld.runtime.component_network import public_network
 from chemworld.runtime.continuous_streams import public_streams
 from chemworld.runtime.control_program import public_control
+from chemworld.runtime.scheduling import lab_instrument_reservation
 from chemworld.runtime.spectral_settings import public_spectral_settings
 from chemworld.world.control_contract import CONTROL_CHOICES
 from chemworld.world.operations import (
@@ -41,15 +42,13 @@ from chemworld.world.operations import (
     OPERATION_TYPES,
     operation_contracts,
 )
-from chemworld.world.operations import (
-    EXTENDED_INSTRUMENTS as INSTRUMENTS,
-)
 from chemworld.world.operations import PUBLIC_OBSERVATION_KEYS as OBSERVATION_KEYS
 
 PUBLIC_ACTION_SCHEMA_VERSION = "chemworld-public-action-affordance-0.2"
 
 # Synchronous public-view builders never execute actions. Reuse the verified
-# resource snapshot only within that read, then discard it even on exceptions.
+# resource snapshot and derived affordances only within that read, then discard
+# them even on exceptions. Action execution never consumes this view context.
 # ContextVar isolates concurrent callers; nested calls for another env/state
 # receive their own scope. Nothing is cached by state identity across requests.
 _RESOURCE_READ: ContextVar[tuple[Any, Any, Any, dict[str, Any]] | None] = ContextVar(
@@ -64,7 +63,7 @@ def _resource_read(function):
         ledger = getattr(base, "_campaign_resource_ledger", None)
         state = getattr(base, "_state", None)
         active = _RESOURCE_READ.get()
-        if ledger is None or (
+        if (
             active is not None and active[0] is base and active[1] is ledger and active[2] is state
         ):
             return function(env, *args, **kwargs)
@@ -75,6 +74,19 @@ def _resource_read(function):
             _RESOURCE_READ.reset(token)
 
     return read
+
+
+def _view_affordances(base):
+    """One validator traversal for all views in the same synchronous request."""
+    active = _RESOURCE_READ.get()
+    if active is None or active[0] is not base or active[2] is not base._state:
+        return base.operation_validator.operation_affordances(base._state)
+    cache = active[3]
+    if "affordances" not in cache:
+        cache["affordances"] = base.operation_validator.operation_affordances(base._state)
+    # Public view construction annotates preconditions with resource reasons.
+    # Those annotations must not mutate the validator's physical result.
+    return deepcopy(cache["affordances"])
 
 
 def _campaign_snapshot(base: Any, ledger: Any) -> dict[str, Any]:
@@ -439,6 +451,8 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
             "schema_version": PUBLIC_ACTION_SCHEMA_VERSION,
             "operation": operation,
             "valid_operation_type": False,
+            "installed": False,
+            "task_allowed": False,
             "error": f"Unknown operation {operation!r}",
         }
     contract = contracts[operation]
@@ -467,7 +481,18 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
             }
         )
     if operation == "measure":
-        allowed_instruments = getattr(base, "allowed_instruments", set(INSTRUMENTS))
+        instrument_status = base.operation_validator.measurement_affordances(state)
+        for row in instrument_status:
+            reasons = _campaign_resource_rejection_reasons_for_action(
+                base, {"operation": "measure", "instrument": row["instrument"]}
+            )
+            if reasons:
+                row["valid"] = False
+                row["preconditions"]["campaign_resources_available"] = False
+                row["invalid_reasons"] = list(dict.fromkeys([
+                    *row["invalid_reasons"], "campaign_resources_available",
+                    *[f"campaign_resource:{reason}" for reason in reasons],
+                ]))
         fields = [
             {
                 **_field_schema(
@@ -475,13 +500,41 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
                     operation=operation,
                     task_id=task_id,
                 ),
-                "choices": [
-                    instrument_id
-                    for instrument_id in base.action_codec.instruments
-                    if instrument_id in allowed_instruments
+                "choices": [row["instrument"] for row in instrument_status if row["valid"]],
+                "installed_choices": [
+                    row["instrument"] for row in instrument_status if row["installed"]
                 ],
+                "task_allowed_choices": [
+                    row["instrument"] for row in instrument_status if row["task_allowed"]
+                ],
+                "choice_status": instrument_status,
+                "state_dependent_choices": True,
+                "resource_limited": any(
+                    not row["preconditions"].get("campaign_resources_available", True)
+                    for row in instrument_status if row["installed"] and row["task_allowed"]
+                ),
             }
         ]
+    electrical_fields = None
+    if operation in {"configure_electrical_control", "queue_electrical_stage"}:
+        from chemworld.runtime.control_program import electrical_device
+
+        try:
+            settings = electrical_device(state).settings["electrical_control"]
+        except ValueError:
+            settings = {}
+        electrical_fields = [
+            name for name, key in (("current_A", "limits_A"), ("potential_V", "limits_V"))
+            if key in settings
+        ]
+        fields = [
+            field for field in fields
+            if field["field"] not in {"current_A", "potential_V"}
+            or field["field"] in electrical_fields
+        ]
+        for field in fields:
+            if field["field"] in electrical_fields:
+                field["conditionally_required"] = "electrical_control_quantity"
     for field in fields:
         field_name = str(field["field"])
         bounds = field.get("bounds")
@@ -498,7 +551,7 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
                 field["recommended_range"] = {"low": low, "high": high}
                 field["state_dependent_bounds"] = True
         choices = field.get("choices")
-        if isinstance(choices, list) and state is not None:
+        if isinstance(choices, list) and state is not None and operation != "measure":
             public_choices = list(
                 base.operation_validator.public_field_choices(
                     operation,
@@ -524,6 +577,12 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
             field["locked_for_current_experiment"] = True
     _apply_campaign_resource_schema(base, operation, fields)
     constraints: list[dict[str, Any]] = []
+    if electrical_fields is not None:
+        constraints.append({
+            "id": "electrical_control_quantity", "kind": "exactly_one_field",
+            "fields": electrical_fields,
+            "description": "Select exactly one quantity supported by the connected source.",
+        })
     if operation in {"select_vessel", "route_material"} and state is not None:
         constraints.append(
             {"id": "component_network", "kind": "material_ports", "network": public_network(state)}
@@ -619,10 +678,13 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
                         },
                     }
                 )
+    from chemworld.runtime.component_network import operation_available
+
     return {
         "schema_version": PUBLIC_ACTION_SCHEMA_VERSION,
         "operation": operation,
         "valid_operation_type": True,
+        "installed": state is None or operation_available(state, operation),
         "module": contract.module,
         "kind": contract.kind,
         "required_fields": list(contract.required_fields),
@@ -632,8 +694,9 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
         "task_allowed": operation in getattr(base, "allowed_operations", set(OPERATION_TYPES)),
         "notes": [
             "Use validate_action(action) before executing.",
+            "Installed capabilities and task permissions persist when current preconditions fail.",
             "Payload aliases are canonicalized by the environment action codec.",
-            "Fields outside operation and required_fields are rejected atomically.",
+            "Only declared fields are accepted; required_fields and constraints apply together.",
             *(
                 [
                     "Storage domain: quenched finite-catalog mixed liquids and crystal slurries; "
@@ -713,7 +776,7 @@ def available_actions(env: Any, *, include_invalid: bool = False) -> list[dict[s
     """Return current operation affordances for agents and tool planners."""
 
     base = _base_env(env)
-    affordances = base.operation_validator.operation_affordances(base._state)
+    affordances = _view_affordances(base)
     allowed = set(getattr(base, "allowed_operations", set(OPERATION_TYPES)))
     actions: list[dict[str, Any]] = []
     operation_types = tuple(getattr(base.operation_validator, "operation_types", OPERATION_TYPES))
@@ -737,6 +800,22 @@ def available_actions(env: Any, *, include_invalid: bool = False) -> list[dict[s
         )
         resource_reasons = list(dict.fromkeys(resource_reasons))
         is_valid = affordance.is_valid and not resource_reasons
+        if operation == "measure" and schema["valid_operation_type"]:
+            # The default candidate is a physical witness, not a resource-aware
+            # choice. At least one fully bound instrument must remain executable.
+            choices = schema["fields"][0]["choices"]
+            is_valid = bool(choices)
+            validation["preconditions"]["measurement_choice_available"] = is_valid
+            validation["invalid_reasons"] = (
+                [] if is_valid else list(dict.fromkeys([
+                    *validation["invalid_reasons"], "measurement_choice_available",
+                    *[
+                        reason for row in schema["fields"][0]["choice_status"]
+                        if row["installed"] and row["task_allowed"]
+                        for reason in row["invalid_reasons"]
+                    ],
+                ]))
+            )
         if resource_reasons:
             validation["preconditions"] = {
                 **validation["preconditions"],
@@ -756,6 +835,8 @@ def available_actions(env: Any, *, include_invalid: bool = False) -> list[dict[s
         actions.append(
             {
                 "operation": operation,
+                "installed": schema["installed"],
+                "task_allowed": schema["task_allowed"],
                 "valid": is_valid,
                 "invalid_reasons": validation["invalid_reasons"],
                 "preconditions": validation["preconditions"],
@@ -766,11 +847,68 @@ def available_actions(env: Any, *, include_invalid: bool = False) -> list[dict[s
 
 
 @_resource_read
+def sample_valid_action(
+    env: Any,
+    rng: np.random.Generator,
+    *,
+    operation: str | None = None,
+    max_attempts: int = 100,
+) -> dict[str, Any]:
+    """Sample semantic payloads from bound schemas and validate before returning.
+
+    Only the caller's RNG is consumed. This does not execute a physical action,
+    and failed search does not imply that the feasible domain is empty.
+    """
+    if isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts < 1:
+        raise ValueError("max_attempts must be a positive integer")
+    actions = [
+        row for row in available_actions(env)
+        if operation is None or row["operation"] == operation
+    ]
+    if not actions:
+        raise ValueError("No currently available operation matches the request")
+    for _ in range(max_attempts):
+        schema = actions[int(rng.integers(len(actions)))]["schema"]
+        candidate: dict[str, Any] = {"operation": schema["operation"]}
+        exclusive = {
+            field for rule in schema["constraints"] if rule["kind"] == "exactly_one_field"
+            for field in rule["fields"]
+        }
+        selected = {
+            rule["fields"][int(rng.integers(len(rule["fields"])))]
+            for rule in schema["constraints"]
+            if rule["kind"] == "exactly_one_field" and rule["fields"]
+        }
+        for field in schema["fields"]:
+            name = field["field"]
+            if name in exclusive and name not in selected:
+                continue
+            if (not field.get("required", True) and name not in selected
+                    and not rng.integers(2)):
+                continue
+            choices = field.get("choices")
+            bounds = field.get("bounds")
+            if choices:
+                candidate[field["field"]] = choices[int(rng.integers(len(choices)))]
+            elif isinstance(bounds, dict) and bounds["low"] <= bounds["high"]:
+                candidate[field["field"]] = float(rng.uniform(bounds["low"], bounds["high"]))
+            else:
+                break
+        else:
+            result = validate_action(env, candidate)
+            if result["valid"]:
+                return result["canonical_action"]
+    raise RuntimeError("No valid payload found within max_attempts; no action was executed")
+
+
+@_resource_read
 def resource_blocked_actions(env: Any) -> list[dict[str, Any]]:
     """Return physically valid operations blocked only by campaign resources."""
 
     base = _base_env(env)
-    valid = set(base.operation_validator.valid_operations(base._state))
+    if _campaign_ledger(base) is None:
+        return []
+    valid = {name for name, result in _view_affordances(base).items() if result.is_valid}
     allowed = set(getattr(base, "allowed_operations", set(OPERATION_TYPES)))
     blocked: list[dict[str, Any]] = []
     operation_types = tuple(getattr(base.operation_validator, "operation_types", OPERATION_TYPES))
@@ -903,6 +1041,7 @@ def _campaign_resource_rejection_reasons_for_action(
     reasons = ledger.preview_rejection_reasons(
         action,
         starts_vessel=_campaign_starts_vessel(base, operation),
+        instrument_reservation=lab_instrument_reservation(getattr(base, "_state", None), action),
     )
     local = getattr(base, "_batch_resource_ledger", None)
     if local is not None:
@@ -911,41 +1050,12 @@ def _campaign_resource_rejection_reasons_for_action(
             for reason in local.preview_rejection_reasons(
                 action,
                 starts_vessel=_campaign_starts_vessel(base, operation),
+                instrument_reservation=lab_instrument_reservation(
+                    getattr(base, "_state", None), action,
+                ),
             )
         )
     return reasons
-
-
-def _campaign_measure_resource_choices(
-    base: Any,
-    choices: list[Any],
-) -> tuple[list[Any], tuple[str, ...]]:
-    ledger = _campaign_ledger(base)
-    if ledger is None:
-        return choices, ()
-    remaining = _campaign_remaining(base)
-    nonfinal_remaining = int(remaining.get("nonfinal_instrument_uses", 0))
-    final_remaining = int(remaining.get("final_assays", 0))
-    per_instrument = remaining.get("per_instrument", {})
-    if not isinstance(per_instrument, dict):
-        per_instrument = {}
-    filtered: list[Any] = []
-    rejected: list[str] = []
-    for instrument in choices:
-        if instrument == "final_assay":
-            if final_remaining < 1:
-                rejected.append("final_assay_limit")
-                continue
-        else:
-            if nonfinal_remaining < 1:
-                rejected.append("nonfinal_instrument_use_limit")
-                continue
-            instrument_remaining = per_instrument.get(instrument)
-            if instrument_remaining is not None and int(instrument_remaining) < 1:
-                rejected.append(f"per_instrument_limit:{instrument}")
-                continue
-        filtered.append(instrument)
-    return filtered, tuple(dict.fromkeys(rejected))
 
 
 def _campaign_resource_rejection_reasons_for_operation(
@@ -968,28 +1078,6 @@ def _campaign_resource_rejection_reasons_for_operation(
         reasons.append(f"operation_repeat_limit:{operation}")
     if _campaign_starts_vessel(base, operation) and int(remaining.get("vessel_starts", 0)) < 1:
         reasons.append("vessel_start_limit")
-    if operation == "measure":
-        schema_choices = [
-            instrument
-            for instrument in INSTRUMENTS
-            if instrument in getattr(base, "allowed_instruments", set(INSTRUMENTS))
-        ]
-        state = getattr(base, "_state", None)
-        if state is not None:
-            schema_choices = list(
-                base.operation_validator.public_field_choices(
-                    operation,
-                    "instrument",
-                    state,
-                    choices=tuple(schema_choices),
-                )
-            )
-        filtered_choices, measure_reasons = _campaign_measure_resource_choices(
-            base,
-            schema_choices,
-        )
-        if not filtered_choices:
-            reasons.extend(measure_reasons or ("measurement_resource_limit",))
     stock_contract = _CAMPAIGN_RESOURCE_STOCK_FIELDS.get(operation)
     if stock_contract is not None:
         stock_id, _ = stock_contract
@@ -1013,6 +1101,17 @@ def _campaign_schema_resource_rejection_reasons(
     if ledger is None:
         return ()
     reasons: list[str] = []
+    if (operation == "measure" and schema["valid_operation_type"]
+            and not schema["fields"][0]["choices"]):
+        for row in schema["fields"][0]["choice_status"]:
+            checks = row["preconditions"]
+            if all(passed for key, passed in checks.items()
+                   if key != "campaign_resources_available"):
+                reasons.extend(
+                    reason.removeprefix("campaign_resource:")
+                    for reason in row["invalid_reasons"]
+                    if reason.startswith("campaign_resource:")
+                )
     stock_contract = _CAMPAIGN_RESOURCE_STOCK_FIELDS.get(operation)
     remaining = _campaign_remaining(base)
     stock_id = ""
@@ -1108,13 +1207,6 @@ def _apply_campaign_resource_schema(
                 }
                 field["state_dependent_bounds"] = True
                 field["resource_limited"] = new_high < old_high
-        if operation == "measure" and field_name == "instrument":
-            choices = field.get("choices")
-            if isinstance(choices, list):
-                filtered, _ = _campaign_measure_resource_choices(base, choices)
-                field["choices"] = filtered
-                if filtered != choices:
-                    field["resource_limited"] = True
 
 
 def _task_spec_value(base: Any, name: str, fallback: Any = None) -> Any:
@@ -2098,6 +2190,7 @@ __all__ = [
     "resource_blocked_actions",
     "rl_observation_spec",
     "rl_observation_view",
+    "sample_valid_action",
     "spectra_summary",
     "task_prompt",
     "tool_json_view",

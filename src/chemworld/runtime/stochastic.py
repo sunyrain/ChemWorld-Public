@@ -48,12 +48,12 @@ class StochasticRuntime:
             state = physics.initial_states[vessel]
             self.validate(state)
             competing = (
-                physics.thermal_models,
-                physics.flash_models,
-                physics.liquid_models,
-                physics.column_models,
-                physics.concentration_models,
-                physics.crystal_models,
+                physics.models_of("thermal"),
+                physics.models_of("flash"),
+                physics.models_of("liquid"),
+                physics.models_of("column"),
+                physics.models_of("concentration"),
+                physics.models_of("crystal"),
             )
             if any(vessel in models for models in competing) or state.state_slots.slots:
                 raise ValueError("mixed continuous ODE/SSA system is not supported")

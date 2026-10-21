@@ -10,8 +10,6 @@ from dataclasses import dataclass, replace
 from math import isclose, isfinite, pi, ulp
 from time import monotonic
 
-from scipy.optimize import brentq
-
 from chemworld.physchem.coupled_system import (
     CoupledEvent,
     CoupledProcess,
@@ -26,6 +24,7 @@ from chemworld.physchem.crystallization_units import (
     SolubilityCurveSpec,
     _occlusion_loading_ratio,
 )
+from chemworld.physchem.enthalpy import caloric_temperature
 
 
 @dataclass(frozen=True)
@@ -272,11 +271,12 @@ def _release_vanished_hosts(
     candidate = replace(packed, amounts_mol=amounts)
     phase_energy = energy(candidate) - initial_energy
     if not isothermal and phase_energy != 0:
-        temperature = brentq(
-            lambda t: energy(replace(candidate, temperature_K=t)) - initial_energy,
-            model.solubility.minimum_temperature_K,
-            model.solubility.maximum_temperature_K,
-            xtol=1e-10,
+        temperature = caloric_temperature(
+            lambda t: energy(replace(candidate, temperature_K=t)), initial_energy,
+            (model.solubility.minimum_temperature_K, model.solubility.maximum_temperature_K),
+            energy_basis=(
+                "internal_energy" if thermal.internal_energy_j(packed) is not None else "enthalpy"
+            ),
         )
         candidate = replace(candidate, temperature_K=temperature)
     candidate = replace(

@@ -110,6 +110,23 @@ def test_no_flux_constant_field_and_each_internal_face_cancel(geometry):
     assert operator.inventory_jacobian_s_inv.nnz <= 3 * grid.cells
 
 
+@pytest.mark.parametrize("exponent", [1, 2, 3])
+def test_spherical_shell_average_quadratic_has_exact_flux_on_graded_mesh(exponent):
+    faces = 1 - (1 - np.linspace(0, 1, 13))**exponent
+    grid = DiffusionMesh("spherical", tuple(faces), particle_count=2)
+    a, b = faces[:-1], faces[1:]
+    # Independent exact volume integral, not midpoint sampling.
+    means = 2 + .3 * 3 / 5 * (b**5 - a**5) / (b**3 - a**3)
+    operator = ConservativeDiffusion(grid, .1, right=DiffusionBoundary("concentration", 2.3))
+    result = operator.evaluate(means * grid.cell_volumes_m3)
+    expected = -.1 * .6 * faces * (8 * pi * faces**2)
+    np.testing.assert_allclose(result.face_rates_mol_s, expected, atol=2e-10, rtol=1e-9)
+    np.testing.assert_allclose(result.amount_rates_mol_s / grid.cell_volumes_m3,
+                               6 * .1 * .3, atol=2e-7)
+    boundary = means[-1] + .6 * grid.spherical_surface_distance_m
+    assert boundary == pytest.approx(2.3, abs=1e-12)
+
+
 @pytest.mark.parametrize("geometry", ["planar", "spherical"])
 def test_sparse_inventory_jacobian_matches_independent_perturbations(geometry):
     grid = mesh(geometry, 20)

@@ -5,10 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from math import isfinite
 from typing import Any
 
-from chemworld.foundation import Instrument
+from chemworld.foundation import Instrument, Observation
 from chemworld.world.spectra import raw_signal_schema
 from chemworld.world.spectral_contract import (
     SCAN_TIME_S,
@@ -299,6 +300,47 @@ class InstrumentContract:
     @property
     def physical_duration_s(self) -> float:
         return self.latency_s + (self.analysis_time_s if self.host_evolves_during_analysis else 0.0)
+
+    def validate_native_readout(self, observation: Observation) -> None:
+        """Enforce declared native quantities for direct and queued acquisition.
+
+        Native schemas map channel names (or explicit patterns) to units.
+        Legacy JSON packet schemas remain a separate compatibility boundary.
+        """
+        if (
+            not isinstance(observation, Observation)
+            or observation.instrument_id != self.instrument_id
+        ):
+            raise ValueError("Native instrument must return its own Observation")
+        if (
+            observation.cost != self.cost
+            or observation.sample_consumed_L != self.sample_consumption_L
+        ):
+            raise ValueError("Native instrument accounting differs from its declaration")
+        for role, schema in (
+            ("raw", self.raw_signal_schema), ("processed", self.processed_estimate_schema),
+        ):
+            for pattern, definition in schema.items():
+                if not isinstance(definition, dict) or not {"unit", "units"} & definition.keys():
+                    continue
+                channels = [
+                    c for c in observation.channels if fnmatchcase(c.channel_id, pattern)
+                ]
+                if not channels and definition.get("required", True):
+                    raise ValueError(f"Native instrument omitted declared channel {pattern}")
+                for channel in channels:
+                    allowed_units = (definition["units"] if "units" in definition
+                                     else (definition["unit"],))
+                    if channel.unit not in allowed_units or channel.role != role:
+                        raise ValueError(f"Native channel unit/role differs: {channel.channel_id}")
+                    axis = self.axis_contract if role == "raw" else {"shape": "scalar"}
+                    if axis.get("shape") == "scalar" and channel.shape:
+                        raise ValueError("Native instrument requires scalar channels")
+                    if "points" in axis and (
+                        channel.shape != (axis["points"],)
+                        or channel.axis is None or channel.axis.unit != axis["unit"]
+                    ):
+                        raise ValueError("Native instrument curve differs from declared axis")
 
     def to_dict(self) -> dict[str, Any]:
         return {

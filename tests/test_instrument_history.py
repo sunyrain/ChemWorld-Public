@@ -236,7 +236,7 @@ def test_saturation_invalidates_estimates_not_real_sampling():
     volume = s._state.volume_L
     result = execute(s, operation="measure", instrument="programmed_hplc")
     assert result.observation.channel("chromatogram").quality == "saturated"
-    assert result.observation.channel("peak_1_concentration").quality == "invalid"
+    assert result.observation.channel("peak_1_concentration").quality == "saturated"
     assert s._state.volume_L == pytest.approx(volume - SAMPLE_L)
     assert s._state.ledger.sample_consumed_L == SAMPLE_L
     assert sum(memory(s._state, "programmed_hplc").values.values()) > 0
@@ -347,7 +347,8 @@ def test_unidentifiable_peaks_do_not_fabricate_concentrations(mode):
     load_bottle(s, "sample")
     result = execute(s, operation="measure", instrument="programmed_hplc")
     assert all(
-        result.observation.channel(f"peak_{i}_concentration").quality == "invalid"
+        result.observation.channel(f"peak_{i}_concentration").quality
+        == ("fit_failed" if mode == "overlap" else "out_of_range")
         for i in range(1, 4)
     )
     assert s._state.ledger.sample_consumed_L == SAMPLE_L

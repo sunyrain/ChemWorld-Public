@@ -30,7 +30,6 @@ from chemworld.world.component_registry import NETWORK_OPERATIONS, component_ope
 
 
 def _local(state: WorldState) -> WorldState:
-    assert state.thermal is not None
     thermal = state.thermal.vessels[state.vessel_id]
     return state.replace(
         inactive_vessels={},
@@ -80,8 +79,8 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
     network = {
         "vessels": [v["id"] for v in spec.vessels],
         "thermal_systems": [] if spec.physics is None else sorted(
-            set(spec.physics.thermal_models) | set(spec.physics.flash_models)
-            | set(spec.physics.liquid_models)),
+            set(spec.physics.models_of("thermal")) | set(spec.physics.models_of("flash"))
+            | set(spec.physics.models_of("liquid"))),
         "operations": {
             v["id"]: list(
                 physical_operations(spec, v["id"])
@@ -122,8 +121,6 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
         ],
     }
     locals_: dict[str, WorldState] = {}
-    assert state.phases is not None and state.vessels is not None and state.equipment is not None
-    assert state.species is not None
     template_vessel = state.vessels.vessels[state.vessel_id]
     for index, vessel in enumerate(spec.vessels):
         name = vessel["id"]
@@ -206,15 +203,26 @@ def select_vessel(state: WorldState, action: dict[str, Any]) -> WorldState:
     return _activate(state, target, inactive)
 
 
-def reconnect_device(state: WorldState, identity: str, destination: str) -> WorldState:
+def reconnect_device(state: WorldState, identity: str, destination: str | None) -> WorldState:
     """Move one actual device and owned state; materials remain in place."""
     locals_ = {state.vessel_id: state, **state.inactive_vessels}
     owners = [key for key, local in locals_.items() if identity in local.equipment.equipment]
-    if len(owners) != 1 or destination not in locals_:
+    if len(owners) != 1 or (destination is not None and destination not in locals_):
         raise ValueError("equipment needs exactly one owner and a declared destination")
     source = owners[0]
-    if source == destination:
-        return state
+    if source == destination or destination is None:
+        local = locals_[source]
+        record = local.equipment.equipment[identity]
+        locals_[source] = local.replace(equipment=EquipmentLedger({
+            **local.equipment.equipment,
+            identity: replace(
+                record, attached_vessel_id=source if destination is None else destination,
+                status="parked" if destination is None
+                else "idle" if record.status == "parked" else record.status,
+            ),
+        }))
+        active = locals_.pop(state.vessel_id)
+        return active.replace(inactive_vessels=locals_)
     src, dst = locals_[source], locals_[destination]
     record = src.equipment.equipment[identity]
     slots = tuple(
@@ -229,7 +237,11 @@ def reconnect_device(state: WorldState, identity: str, destination: str) -> Worl
     )
     locals_[destination] = dst.replace(
         equipment=EquipmentLedger({**dst.equipment.equipment,
-                                   identity: replace(record, attached_vessel_id=destination)}),
+                                   identity: replace(
+                                       record, attached_vessel_id=destination,
+                                       status=("idle" if record.status == "parked"
+                                               else record.status),
+                                   )}),
         state_slots=StateSlots((*dst.state_slots.slots,
                                *(replace(slot, location_id=destination) for slot in slots))),
     )
@@ -244,7 +256,6 @@ def _index(value: Any, count: int) -> int:
 
 
 def _whole(state: WorldState) -> StoredSample:
-    assert state.phases is not None
     return _active(state.replace(volume_L=sum(p.volume_L for p in state.phases.phases.values())))
 
 
@@ -285,7 +296,6 @@ def _withdraw(
         retained = _portion(whole, 1 - fraction, state.vessel_id)
         after = _install(state, retained)
     else:
-        assert state.phases is not None and state.species is not None
         phase = state.phases.phases.get(port)
         if phase is None or phase.phase_type != "liquid" or phase.volume_L <= 0:
             raise ValueError("Requested liquid outlet has no available inventory")
@@ -297,6 +307,10 @@ def _withdraw(
         )
         basis = _portion(whole, share * fraction, target)
         contents = _contents(basis)
+        retained_slots, incoming_slots = state.state_slots.split_material(
+            fraction, state.vessel_id, target, phase_id=port,
+            destination_phase_id="reactor_liquid",
+        )
         incoming_phase = replace(
             phase,
             phase_id="reactor_liquid",
@@ -322,14 +336,7 @@ def _withdraw(
                     "solvent_volume_L": incoming_phase.volume_L,
                 }
             },
-            state_slots=StateSlots(
-                tuple(
-                    replace(slot, spec=replace(slot.spec, phase_id="reactor_liquid"))
-                    for slot in state.state_slots.material(phase_id=port)
-                    .portion(fraction, target)
-                    .slots
-                )
-            ),
+            state_slots=incoming_slots,
             metrics={},
         )
         incoming = replace(
@@ -351,14 +358,7 @@ def _withdraw(
         retained = _portion(whole, 1 - share * fraction, state.vessel_id)
         selected = next((p for p in phases.values() if p.selected), None)
         after = state.replace(
-            state_slots=StateSlots(
-                tuple(
-                    slot.portion(1 - fraction, state.vessel_id)
-                    if slot.spec.owner_kind == "material" and slot.spec.phase_id == port
-                    else slot
-                    for slot in state.state_slots.slots
-                )
-            ),
+            state_slots=retained_slots,
             phases=PhaseLedger(phases),
             species_amounts=PhaseLedger(phases).total_amounts_mol(),
             volume_L=selected.volume_L
@@ -390,12 +390,19 @@ def _withdraw(
     ), incoming
 
 
-def route_material(state: WorldState, action: dict[str, Any]) -> WorldState:
+def resolve_material_connection(state, action, *, source_ports=None):
+    """Resolve the compiled material edge and common transfer constraints once."""
     network = state.metadata["component_network"]
     edge = network["connections"][_index(action.get("connection"), len(network["connections"]))]
+    if state.lab_clock is not None and edge.get("scheduling") != "manual":
+        raise ValueError("shared routing requires an explicitly manual connection")
     source, target = edge["source_vessel"], edge["target_vessel"]
     if source != state.vessel_id:
         raise ValueError("Select the source vessel before routing its output")
+    if source == target or target not in state.inactive_vessels:
+        raise ValueError("material connection requires a distinct installed destination")
+    if source_ports is not None and edge["source"]["port"] not in source_ports:
+        raise ValueError("select a supported source material outlet")
     fraction = action.get("transfer_fraction")
     if (
         isinstance(fraction, bool)
@@ -406,6 +413,12 @@ def route_material(state: WorldState, action: dict[str, Any]) -> WorldState:
         raise ValueError("Transfer fraction must be in (0, 1]")
     if action.get("mixing") not in (0, 1) or isinstance(action.get("mixing"), bool):
         raise ValueError("Mixing must be empty_only=0 or allow=1")
+    return edge, fraction
+
+
+def route_material(state: WorldState, action: dict[str, Any]) -> WorldState:
+    edge, fraction = resolve_material_connection(state, action)
+    source, target = edge["source_vessel"], edge["target_vessel"]
     destination = state.inactive_vessels[target]
     original = _whole(destination)
     if _occupied(original) and action["mixing"] != 1:
@@ -468,6 +481,8 @@ def available_connections(state: WorldState, material_router=None) -> tuple[int,
     network = state.metadata.get("component_network", {})
     result = []
     for index, edge in enumerate(network.get("connections", [])):
+        if state.lab_clock is not None and edge.get("scheduling") != "manual":
+            continue
         if edge["source_vessel"] != state.vessel_id:
             continue
         target = state.inactive_vessels[edge["target_vessel"]]
@@ -487,7 +502,6 @@ def available_connections(state: WorldState, material_router=None) -> tuple[int,
             ):
                 result.append(index)
             continue
-        assert state.phases is not None and target.phases is not None and target.vessels is not None
         port = edge["source"]["port"]
         source_volume = (
             sum(p.volume_L for p in state.phases.phases.values())
@@ -570,7 +584,6 @@ def public_network(state: WorldState) -> dict[str, Any] | None:
     locals_ = {state.vessel_id: state, **state.inactive_vessels}
     capacities = {}
     for name, local in locals_.items():
-        assert local.vessels is not None
         capacities[name] = local.vessels.vessels[name].max_volume_L
     return {
         "active_vessel": state.vessel_id,

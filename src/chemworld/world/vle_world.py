@@ -48,7 +48,7 @@ def vle_world_spec(properties):
                 {"id": f"{vessel}:sensor", "kind": "observation", "vessel": vessel,
                  "parameters": {"instruments": ["phase_state"]}}))
     physics = CompositionPhysics(network, states, feed_sources={"mixture-feed": "supply"},
-                                 flash_models={"reactor": model, "receiver": model})
+                                 models={"flash": {"reactor": model, "receiver": model}})
     return WorldCompositionSpec.from_dict({
         "schema_version": "chemworld-world-composition-0.1", "composition_id": "finite-vle",
         "components": components, "vessels": [{"id": name, "capacity_L": .1} for name in states],

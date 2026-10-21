@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from chemworld.physchem.correlation_families import CORRELATION_FAMILIES
 from chemworld.physchem.maturity import MaturityLevel, ModelCard, ValidationEvidence
 
 _HEAT_ENTHALPY_REFERENCE_READING = (
@@ -42,6 +43,101 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
 
     return (
         ModelCard(
+            model_id="native_dippr_correlation_families",
+            module_id="properties",
+            title="Native DIPPR equations and caloric integration",
+            maturity=MaturityLevel.REFERENCE_VALIDATED,
+            summary=("Fourteen declared formula variants with analytic first temperature "
+                     "derivatives and adaptive definite integrals; existing caloric and "
+                     "phase-path consumers use the same equations."),
+            equations=tuple(key for key in CORRELATION_FAMILIES if key.startswith("dippr")),
+            assumptions=("Coefficients use absolute K and the declared output-unit scale.",
+                         "Each property_id must match its declared physical dimension."),
+            validity_limits=("Synthetic same-equation validation; no material-data qualification.",
+                             "Critical endpoints are excluded for 105/106/114/116.",
+                             "Inventory admission requires an explicit U/Cv closure and "
+                             "nonnegative Cv throughout its temperature interval."),
+            failure_modes=("Unknown parameters, poles, invalid signs and nonfinite results fail.",
+                           "Integration rejects crossed poles, unestablished positive heat "
+                           "capacity and quadrature that misses the requested accuracy."),
+            units={"temperature": "K", "value": "declared physical output unit",
+                   "slope": "output unit/K", "integral": "output unit*K",
+                   "integral_over_temperature": "output unit"},
+            reference_reading=tuple(family.reference for key, family in CORRELATION_FAMILIES.items()
+                                    if key.startswith("dippr")),
+            validation_evidence=(ValidationEvidence(
+                evidence_id="native-dippr-1.5.2-fixed-block",
+                evidence_type="same_equation_reference",
+                description="84 value/slope cases, 56 integrals and 2 caloric reference cases.",
+                status="implemented", reference_backend="chemicals 1.5.2",
+                command_or_path="tests/reference/test_native_dippr_reference.py",
+                tolerance="value 2e-12; slope 3e-11; integral 5e-9 relative, explicit abs floors",
+            ),),
+            model_limit_notes=("A formula reference is not the source of a material parameter.",
+                               "Integration error estimates are not experimental uncertainty.",
+                               "Database coverage, ranking, coefficient fitting and higher "
+                               "derivatives remain in NATIVE-CONV-22B through 22G."),
+            intended_use=("Explicit-parameter caloric and property-package calculations.",),
+        ),
+        ModelCard(
+            model_id="native_heat_capacity_families",
+            module_id="properties",
+            title="Native heat capacity families and piecewise caloric consumers",
+            maturity=MaturityLevel.REFERENCE_VALIDATED,
+            summary=("Fifteen gas/liquid/solid formula families with analytic first derivatives, "
+                     "H/S quadrature, bounded temperature inversion and same-phase piecewise "
+                     "curves consumed by native caloric inventories."),
+            equations=tuple(key for key, family in CORRELATION_FAMILIES.items()
+                            if family.reference_method),
+            assumptions=("Coefficients use each formula's published convention and produce "
+                         "J/(mol*K); Shomate coefficients use K rather than kK.",
+                         "Similarity methods explicitly require MW and atoms per gram.",
+                         "Rowlinson derivatives hold the supplied Cpgm parameter fixed.",
+                         "Piecewise segments share a phase, capacity basis and energy datum; "
+                         "the right segment owns an internal boundary."),
+            validity_limits=("Formula reproduction with synthetic parameter variants, not "
+                             "experimental material accuracy or complete parameter data.",
+                             "Gas Cp-to-Cv conversion requires an explicit ideal-gas phase; "
+                             "liquid/solid Cp alone does not determine U or Cv.",
+                             "Mathematical bounds do not replace empirical validity ranges; "
+                             "piecewise gaps and implicit extrapolation are rejected.",
+                             "Statistical vibration supports polyatomic rigid rotors."),
+            failure_modes=("Unknown parameters, critical poles and inconsistent phases fail.",
+                           "Unestablished interval heat-capacity bounds or negative Cv fail.",
+                           "Unreachable caloric targets and undeclared entropy data fail."),
+            units={"temperature": "K", "capacity": "J/(mol*K)",
+                   "slope": "J/(mol*K^2)", "enthalpy": "J/mol", "entropy": "J/(mol*K)"},
+            reference_reading=tuple(family.reference for family in CORRELATION_FAMILIES.values()
+                                    if family.reference_method),
+            validation_evidence=(
+                ValidationEvidence(
+                    evidence_id="native-caloric-fixed-348",
+                    evidence_type="same_equation_reference",
+                    description=("348 units: 90 values/slopes, 180 integrals, 60 inverses, "
+                                 "6 piecewise and 12 branch/limit units. Original 4 quasi-entropy "
+                                 "reference discrepancies retained; a separate 9-unit diagnosis "
+                                 "supports the explicit series-reference corrected block."),
+                    status="implemented",
+                    reference_backend="chemicals 1.5.2 and independent series",
+                    command_or_path="tests/reference/run_heat_capacity_foundation_block.py",
+                    tolerance="Cp 2e-11 relative; derivative 3e-7; integral 2e-10; root 2e-7 K",
+                ),
+                ValidationEvidence(
+                    evidence_id="native-piecewise-caloric-consumer",
+                    evidence_type="unit_test",
+                    description="Native thermal operations and exact JSON snapshot continuation.",
+                    status="implemented", command_or_path="tests/test_heat_capacity_families.py",
+                    tolerance="exact snapshot equality; explicit thermodynamic tolerances",
+                ),
+            ),
+            model_limit_notes=("Quadrature error estimates are not material uncertainty.",
+                               "CaloricDatabase, PressureDatabase and PhaseChangeDatabase "
+                               "read explicitly supplied external sources; data coverage "
+                               "does not establish material prediction accuracy."),
+            intended_use=("Declared caloric curves for property packages, phase-path H/S, "
+                          "native gas thermal inventories and replayable energy closure.",),
+        ),
+        ModelCard(
             model_id="vapor_pressure_correlation_families",
             module_id="properties",
             title="Vapor-Pressure Correlation Families",
@@ -56,7 +152,12 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
                 "Wagner original 3,6 form: ln(P/Pc) = "
                 "(a*tau + b*tau**1.5 + c*tau**3 + d*tau**6)/Tr",
                 "DIPPR101: P = exp(A + B/T + C*ln(T) + D*T**E)",
-                "dP/dT is analytic for Antoine, Wagner, and DIPPR101 reports.",
+                "Wagner2.5,5, TRC extended Antoine, Yaws, TDE and DIPPR115 pressure forms.",
+                "Boiling/critical, Lee-Kesler, Ambrose-Walton, Sanjari and Edalat estimators; "
+                "Clapeyron sublimation and explicit Arrhenius extrapolation.",
+                "IF97 region-4 water saturation with one shared forward/inverse relation.",
+                "dP/dT, d2P/dT2, d3P/dT3 and named coefficient Jacobians "
+                "use analytic chain rules on the same formula as pressure.",
             ),
             assumptions=(
                 "Coefficient units must match each PropertyCorrelation input "
@@ -77,13 +178,17 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
             failure_modes=(
                 "Unsupported equations fail before derivative evaluation.",
                 "Antoine singularities fail when T + C is nonpositive.",
-                "Wagner reports fail at or above the declared critical temperature.",
+                "Legacy Wagner3,6 requires T<Tc. Wagner2.5,5 supports the critical value "
+                "and first derivative; divergent higher derivatives fail explicitly.",
+                "Underflow to zero pressure and undefined TRC branch derivatives fail.",
                 "Out-of-range calls can hard-fail with validity_policy='raise'.",
             ),
             units={
                 "temperature": "K or declared temperature unit",
                 "pressure": "Pa or declared pressure unit",
                 "dP_dT": "declared_pressure_unit/K",
+                "d2P_dT2": "declared_pressure_unit/K^2",
+                "d3P_dT3": "declared_pressure_unit/K^3",
                 "dlnP_dT": "1/K",
             },
             reference_reading=(
@@ -95,6 +200,17 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
                 "VaporPressure method ranking, validity limits, and derivative API",
             ),
             validation_evidence=(
+                ValidationEvidence(
+                    evidence_id="complete-pressure-methods-and-sources",
+                    evidence_type="reference_comparison",
+                    description=("Fixed 72-unit public-method/derivative/Jacobian/recovery block "
+                                 "and separate complete 13-source external-data block; source "
+                                 "missing/invalid data and all original failures stay explicit."),
+                    status="implemented",
+                    command_or_path="workstreams/world_foundation/NATIVE_CONV22C3_EXPERIMENT.md",
+                    tolerance="Fixed per-measurement tolerances in the experiment note",
+                    reference_backend="chemicals 1.5.2",
+                ),
                 ValidationEvidence(
                     evidence_id="antoine-vapor-pressure-derivative-test",
                     evidence_type="unit_test",
@@ -119,9 +235,11 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
                 ),
             ),
             model_limit_notes=(
-                "This is a compact formula-family implementation, not a "
-                "replacement for chemicals/thermo data coverage or EOS-based "
-                "critical-region saturation solvers.",
+                "Complete selected pressure sources use an explicit external directory; "
+                "coefficients are not redistributed or treated as validated material predictions.",
+                "VDI interpolation is explicit ln(P) versus 1/T, returned as native source "
+                "intervals; no cross-knot derivative or missing-data filling.",
+                "IF97 region 4 is a saturation curve, not the full water EOS or phase envelope.",
             ),
             intended_use=(
                 "Flash, distillation, volatility-risk, and safety-envelope "
@@ -163,6 +281,8 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
                 "implemented in this slice.",
                 "A non-bracketing target pressure hard-fails instead of "
                 "extrapolating silently.",
+                "A bracketed root does not certify global uniqueness; Sanjari requires an "
+                "explicit bracket. Explicit extrapolation uses a separately constructed curve.",
             ),
             failure_modes=(
                 "Nonpositive pressure or temperature fails.",
@@ -228,14 +348,17 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
             title="Phase-Aware Heat Capacity And Enthalpy Package",
             maturity=MaturityLevel.REFERENCE_VALIDATED,
             summary=(
-                "Phase-tagged molar heat-capacity evaluation, analytic "
-                "sensible-enthalpy integrals, signed latent-heat transitions, "
+                "Phase-tagged molar heat-capacity evaluation, analytic polynomial "
+                "and declared-correlation quadrature integrals, signed latent-heat transitions, "
                 "and mixture enthalpy ledgers for reactor and separation duties."
             ),
             equations=(
                 "DIPPR100-style Cp polynomial: Cp = a + bT + cT^2 + dT^3 + eT^4.",
                 "Sensible enthalpy: Delta H = integral Cp(T) dT along one phase.",
                 "Watson latent heat: Hvap(T) = Hvap_ref*((1-Tr)/(1-Tr_ref))^n.",
+                "Clapeyron, Pitzer, SMK/MK, Velasco, Alibakhshi and PPDS12 latent-heat families.",
+                "Riedel/Chen/Liu/Vetere give normal-boiling anchors; "
+                "Watson_n recovers the exponent.",
                 "Phase paths sum sensible segments plus signed latent heats.",
                 "Mixture duty: Delta H_mix = sum_i n_i Delta H_i.",
             ),
@@ -248,11 +371,13 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
                 "rather than inferred from hidden data tables.",
             ),
             validity_limits=(
-                "Only analytic cp_polynomial integrals are implemented in this "
-                "slice; tabular and Zabransky/Lastovka families remain future "
-                "deepening tasks.",
-                "Latent heat supports the existing Watson and constant "
-                "phase-change correlations with caller-supplied coefficients.",
+                "Polynomial, DIPPR and fifteen caloric formula families support "
+                "same-phase integration and external data through CaloricDatabase.",
+                "PhaseChangeDatabase preserves full sources, single-temperature observations "
+                "and explicit table intervals; missing source conditions must be supplied.",
+                "Fusion, vaporization and sublimation have distinct positive directions. "
+                "Critical values do not imply finite critical derivatives; Clapeyron's "
+                "T derivative holds its declared Psat/dZ fixed.",
                 "No EOS departure enthalpy, pressure correction, or broad "
                 "component database is included here.",
             ),
@@ -260,8 +385,8 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
                 "Unsupported Cp equations fail before integration.",
                 "Missing phase Cp, invalid phase labels, and disconnected phase "
                 "paths fail explicitly.",
-                "Negative heat capacity over sampled integration intervals "
-                "hard-fails instead of being clipped.",
+                "Negative or unestablished heat capacity over the integration "
+                "interval fails instead of being clipped.",
                 "Latent heat direction is signed; invalid transition direction "
                 "raises a validation error.",
             ),
@@ -273,6 +398,17 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
             },
             reference_reading=_HEAT_ENTHALPY_REFERENCE_READING,
             validation_evidence=(
+                ValidationEvidence(
+                    evidence_id="native-latent-fixed-methods-and-sources",
+                    evidence_type="same_equation_reference",
+                    description="63 method units and 112703 complete source records; "
+                                "computed curves, points and missing data counted separately.",
+                    status="implemented", reference_backend="chemicals 1.5.2",
+                    command_or_path="tests/reference/run_phase_change_methods_block.py; "
+                                    "tests/reference/run_phase_change_data_block.py",
+                    tolerance="values 3e-10 relative/1e-8 J/mol; "
+                              "slopes 5e-7 relative/3e-7 J/(mol K)",
+                ),
                 ValidationEvidence(
                     evidence_id="phase-cp-integral-regression-test",
                     evidence_type="unit_test",
@@ -298,9 +434,9 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
             ),
             model_limit_notes=(
                 "This closes a path/ledger slice needed by ChemWorld reactor "
-                "and flash duties. It is not chemicals/thermo data coverage, "
-                "CoolProp-level reference-state thermodynamics, or an EOS "
-                "departure-property package.",
+                "and flash duties. Source formula agreement is not material validation "
+                "or a general EOS departure-property package. VLE free-energy models "
+                "keep their own consistent Psat-derived enthalpy difference.",
             ),
             intended_use=(
                 "Dynamic reactor heat-duty ledgers and flash/distillation "
@@ -315,9 +451,9 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
             title="Density And Molar-Volume Package",
             maturity=MaturityLevel.REFERENCE_VALIDATED,
             summary=(
-                "Liquid Rackett molar volume, ideal-gas and second-virial gas "
-                "volume reports, density/molar-volume conversion helpers, and "
-                "Amgat-style mixture volume ledgers."
+                "Fifteen pure volume/density methods with saturation, molten-liquid, "
+                "solid and ideal-gas paths, analytic derivatives and parameter Jacobians; "
+                "second-virial gas reports and Amgat-style mixture volume ledgers."
             ),
             equations=(
                 "Rackett: Vm = R Tc/Pc * Zc**(1 + (1 - T/Tc)**(2/7)).",
@@ -335,8 +471,11 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
                 "Mixture volume ledger assumes zero excess volume.",
             ),
             validity_limits=(
-                "Rackett hard-fails at or above Tc and does not apply a "
-                "compressed-liquid Tait correction.",
+                "The legacy Rackett alias requires T < Tc; explicit pure volume families "
+                "allow finite critical values but reject divergent derivatives and T > Tc. "
+                "Saturation slopes are not fixed-pressure liquid responses.",
+                "Campbell hydroxyl_polar_term=1 follows the chemicals 1.5.2 public API; "
+                "=0 follows its rendered hydroxyl beta equation. Source disagreement is retained.",
                 "Only a CRC-style second-virial coefficient polynomial hook is "
                 "implemented; broader Tsonopoulos/Pitzer families are future "
                 "deepening work.",
@@ -360,6 +499,17 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
             },
             reference_reading=_VOLUME_REFERENCE_READING,
             validation_evidence=(
+                ValidationEvidence(
+                    evidence_id="pure-volume-methods-d2a",
+                    evidence_type="unit_test",
+                    description=("221 fixed development units cover all 15 pure methods, "
+                        "33 parameter sets, full Bhirud table, analytic derivatives, "
+                        "JSON and property-package consumption; 18 additional hydroxyl "
+                        "convention units retain the documented/API distinction."),
+                    status="implemented",
+                    command_or_path="tests/reference/run_volume_pure_block.py",
+                    tolerance="Fixed value/derivative tolerances in NATIVE_CONV22D2A_EXPERIMENT.md",
+                ),
                 ValidationEvidence(
                     evidence_id="rackett-liquid-volume-test",
                     evidence_type="unit_test",

@@ -265,32 +265,16 @@ def gas_thermal_conductivity_dippr9b_report(
 ) -> TransportPropertyReport:
     """DIPPR9B-style gas thermal conductivity from Cv and viscosity."""
 
-    if temperature_K <= 0:
-        raise ValueError("temperature_K must be positive")
-    if molecular_weight_g_mol <= 0:
-        raise ValueError("molecular_weight_g_mol must be positive")
-    if molar_cv_J_mol_K <= 0:
-        raise ValueError("molar_cv_J_mol_K must be positive")
-    if viscosity_Pa_s <= 0:
-        raise ValueError("viscosity_Pa_s must be positive")
-    cv_j_kmol_k = molar_cv_J_mol_K * 1000.0
-    if molecule_type == "monoatomic":
-        conductivity = 2.5 * viscosity_Pa_s * cv_j_kmol_k / molecular_weight_g_mol
-    elif molecule_type == "nonlinear":
-        conductivity = viscosity_Pa_s / molecular_weight_g_mol * (1.15 * cv_j_kmol_k + 16903.36)
-    elif molecule_type == "linear":
+    from chemworld.physchem.conductivity_kernels import conductivity_value
+
+    if molecule_type not in {"monoatomic", "nonlinear", "linear"}:
+        raise ValueError("molecule_type must be monoatomic, linear, or nonlinear")
+    parameters = {"MW": molecular_weight_g_mol, "Cvm": molar_cv_J_mol_K, "mu": viscosity_Pa_s}
+    if molecule_type == "linear":
         if critical_temperature_K is None or critical_temperature_K <= 0:
             raise ValueError("linear DIPPR9B gas conductivity requires positive Tc")
-        reduced_temperature = temperature_K / critical_temperature_K
-        conductivity = (
-            viscosity_Pa_s
-            / molecular_weight_g_mol
-            * (1.30 * cv_j_kmol_k + 14644.0 - 2928.80 / reduced_temperature)
-        )
-    else:
-        raise ValueError("molecule_type must be monoatomic, linear, or nonlinear")
-    if conductivity <= 0 or not isfinite(conductivity):
-        raise ValueError("DIPPR9B gas conductivity returned nonpositive value")
+        parameters["Tc"] = critical_temperature_K
+    conductivity = conductivity_value("DIPPR9B_" + molecule_type, temperature_K, **parameters)
     return TransportPropertyReport(
         evaluation=PropertyEvaluation(
             property_id="thermal_conductivity",
@@ -328,32 +312,23 @@ def wilke_gas_mixture_viscosity_ledger(
 ) -> MixtureTransportLedger:
     """Wilke low-pressure gas-mixture viscosity ledger."""
 
+    from chemworld.physchem.viscosity_mixtures import wilke_denominators
+
     fractions = _validated_fraction_mapping(component_mole_fractions, "mole")
     _require_same_keys(fractions, component_viscosities_Pa_s, "viscosity")
     _require_same_keys(fractions, component_molecular_weights_g_mol, "molecular weight")
     component_ids = tuple(fractions)
+    denominators = wilke_denominators(
+        tuple(fractions.values()),
+        tuple(component_viscosities_Pa_s[k] for k in component_ids),
+        tuple(component_molecular_weights_g_mol[k] for k in component_ids),
+    )
     contributions: dict[str, dict[str, float]] = {}
     mixture_viscosity = 0.0
-    for i in component_ids:
+    for i, denominator in zip(component_ids, denominators, strict=True):
         yi = fractions[i]
         mui = component_viscosities_Pa_s[i]
         mwi = component_molecular_weights_g_mol[i]
-        if mui <= 0:
-            raise ValueError(f"viscosity must be positive for {i!r}")
-        if mwi <= 0:
-            raise ValueError(f"molecular weight must be positive for {i!r}")
-        denominator = 0.0
-        for j in component_ids:
-            muj = component_viscosities_Pa_s[j]
-            mwj = component_molecular_weights_g_mol[j]
-            if muj <= 0:
-                raise ValueError(f"viscosity must be positive for {j!r}")
-            if mwj <= 0:
-                raise ValueError(f"molecular weight must be positive for {j!r}")
-            phi_ij = (1.0 + sqrt(mui / muj) * (mwj / mwi) ** 0.25) ** 2.0 / sqrt(
-                8.0 * (1.0 + mwi / mwj)
-            )
-            denominator += fractions[j] * phi_ij
         partial = yi * mui / denominator
         mixture_viscosity += partial
         contributions[i] = {
@@ -389,16 +364,17 @@ def liquid_mixture_thermal_conductivity_dippr9h_ledger(
 
     fractions = _validated_fraction_mapping(component_mass_fractions, "mass")
     _require_same_keys(fractions, component_thermal_conductivities_W_m_K, "conductivity")
-    inverse_square_sum = 0.0
+    from chemworld.physchem.conductivity_mixtures import dippr9h_conductivity_terms
+
+    terms = dippr9h_conductivity_terms(
+        tuple(fractions.values()),
+        tuple(component_thermal_conductivities_W_m_K[k] for k in fractions),
+    )
     contributions: dict[str, dict[str, float]] = {}
     max_k = 0.0
     min_k = float("inf")
-    for component_id, mass_fraction in fractions.items():
+    for (component_id, mass_fraction), term in zip(fractions.items(), terms, strict=True):
         conductivity = component_thermal_conductivities_W_m_K[component_id]
-        if conductivity <= 0:
-            raise ValueError(f"thermal conductivity must be positive for {component_id!r}")
-        term = mass_fraction / (conductivity * conductivity)
-        inverse_square_sum += term
         max_k = max(max_k, conductivity)
         min_k = min(min_k, conductivity)
         contributions[component_id] = {
@@ -415,7 +391,7 @@ def liquid_mixture_thermal_conductivity_dippr9h_ledger(
         property_id="mixture_thermal_conductivity",
         method_family="DIPPR9H",
         unit="W/(m*K)",
-        mixture_value=1.0 / sqrt(inverse_square_sum),
+        mixture_value=sum(terms) ** -0.5,
         contributions=contributions,
         warnings=tuple(warnings),
         reference_reading=_TRANSPORT_REFERENCE_READING,

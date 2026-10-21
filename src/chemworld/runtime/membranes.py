@@ -130,6 +130,14 @@ def unpack_membrane(state):
         raise ValueError("clean-only membrane has undeclared bound inventory")
     for index, name in enumerate(membrane_liquid_ids(state, spec)):
         local = state if name == state.vessel_id else state.inactive_vessels[name]
+        # Independently owned static instrument stocks are outside the liquid
+        # membrane inventory and survive install_liquid unchanged. Dynamic or
+        # thermal extra state still requires an explicit coupled model.
+        passive = {slot.spec.slot_id for slot in local.state_slots.slots
+                   if slot.spec.owner_kind == "equipment"
+                   and slot.spec.owner_id != record.equipment_id
+                   and slot.spec.time_evolution == "static"
+                   and slot.spec.heat_capacity_field is None and not slot.spec.energy_interactions}
         if (
             set(local.species_amounts) != set(expected_ids)
             or set(local.phases.phases) != {"liquid"}
@@ -144,6 +152,7 @@ def unpack_membrane(state):
                 s.spec.slot_id: s
                 for s in local.state_slots.slots
                 if s.spec.state_type != FOULING_STATE
+                and s.spec.slot_id not in passive
             }
             != {s.spec.slot_id: s for s in enthalpy_slots(local, 0.0, 0.0).slots}
         ):
@@ -177,6 +186,31 @@ class MembraneRuntime:
 
     def supports(self, state):
         return membrane_record(state) is not None
+
+    def shared_system(self, state, strategy_id):
+        from chemworld.foundation.lab_clock import SharedAdvanceSystem
+        from chemworld.runtime.shared_systems import connection_ids
+
+        spec = MembraneSpec.from_dict(membrane_record(state).settings["physical_model"])
+        pairs = [(state.vessel_id, spec.collector_vessel_id)]
+        if spec.fouling:
+            pairs += [(spec.fouling.wash_vessel_id, state.vessel_id),
+                      (state.vessel_id, spec.fouling.waste_vessel_id)]
+        return SharedAdvanceSystem(
+            state.vessel_id, strategy_id, membrane_liquid_ids(state, spec),
+            connection_ids(self.composition, pairs),
+        )
+
+    @property
+    def protected_lifecycle_vessels(self):
+        result = set()
+        if self.composition is not None and self.composition.physics is not None:
+            for state in self.composition.physics.initial_states.values():
+                if self.supports(state):
+                    spec = MembraneSpec.from_dict(membrane_record(state).settings["physical_model"])
+                    if spec.fouling:
+                        result.add(spec.fouling.wash_vessel_id)
+        return result
 
     @property
     def preserved_source_vessels(self):

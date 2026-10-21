@@ -20,7 +20,6 @@ from chemworld.world.mixtures import working_solvents
 
 
 def initialize_solvents(state: WorldState) -> WorldState:
-    assert state.phases is not None
     medium = working_solvents(state)
     phases = {
         k: replace(p, solvents=medium.at_volume(p.volume_L))
@@ -161,7 +160,6 @@ def solvent_outputs(
 def finish_solvent_transition(
     before: WorldState, after: WorldState, action: dict[str, Any]
 ) -> WorldState:
-    assert before.phases is not None and after.phases is not None
     operation = str(action["operation"])
     old, phases = before.phases.phases, after.phases.phases.copy()
     added = solvent_input(operation, action, state=before, after=after)

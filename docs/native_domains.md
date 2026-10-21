@@ -52,6 +52,79 @@ The shared-clock example explicitly declares subsecond waits so a snapshot can
 retain a busy one-second analyzer and an unexecuted SSA event; it does not shorten
 the analyzer's physical analysis time.
 
+An authored shared clock uses `LabClockSpec(vessel_capacity=4, ...)` to allow
+four independent closed thermal/SSA vessels. The default is two; the explicit
+integer capacity is 1–64, separate from the finite job queue `capacity`.
+The 1-, 2- and 4-vessel paths have direct functional coverage. All declared
+vessels evolve to the same event endpoint, including unselected vessels.
+Changing declaration order or selecting another vessel does not choose the
+numerical assembly order. One physical heater and one offline analyzer serve
+persistent FIFO requests. A failed slice discards sampling and RNG changes;
+the existing rejected-action cost/risk penalty remains in history. Open
+connections beyond declared finite apparatus, multiple devices and same-vessel
+ODE/SSA mixing remain unsupported.
+
+`chemworld.examples.closed_shared_labs.reactive_closed_lab()` authors four
+independent synthetic systems: a thermal A/B reaction, thermal SPM battery,
+finite adsorption contact and low-copy SSA. `phase_closed_lab()` combines
+finite crystal growth with a separate Al/Cu solid specimen. Construct a
+`ChemWorldRuntime(composition=...)` with either recipe and use `select_vessel`,
+`queue_lab_heat`, optional `queue_lab_measure` and `wait`. Electrical drive is
+an explicitly authored initial program; these recipes do not add a controller.
+The one finite heater moves between systems, and each model keeps its own
+temperature domain. An isothermal battery advances but cannot accept heating.
+All strategies must explicitly declare `shared_clock=True`; installing a module
+alone does not grant this capability. A physical cutoff aligns every system to
+that actual time and stops the laboratory. These combinations use the existing
+native equations and synthetic parameters; they do not establish material fits.
+
+`chemworld.examples.open_shared_labs.open_shared_lab("transport")` combines
+the finite source–pump/pipe/heat-exchanger–receiver apparatus with a closed
+thermal bottle. Choose `"membrane"` for finite RO, retained fouling, wash/waste
+and a separate bottle. Select the apparatus's `reactor`, call `set_flow_rate`,
+then use `wait` to advance the complete laboratory. Select `bottle` and
+`queue_lab_measure` to occupy its one offline chromatograph while flow continues.
+The existing local `run_flow` action cannot introduce a second clock here.
+
+Each finite apparatus advances once, including its source and collection
+containers. The configured vessel capacity counts physical containers: three
+for the transport example and five for the fouling membrane example. A finite
+source, collection limit or wash exhaustion aligns all systems to the actual
+stop. Global material, pump work and heat remain in their original ledgers;
+connected-system references appear in the outcome diagnostics. Extra paths,
+shared reservoirs, unmodelled loops and overlapping strategy ownership are
+rejected during compilation. These recipes reuse the original bounded flow,
+dilute/isothermal membrane and thermal equations.
+
+## Residual and caloric solver choices
+
+`BatterySPMSpec` and `TransientElectrodeSpec` default to
+`numerical_form="residual"`. Set `numerical_form="ode"` to select their original
+ODE path explicitly. The selection is saved with the physical model and survives
+snapshot restoration. A residual solve failure remains a numerical failure;
+it does not select another algorithm.
+
+Both paths use the same finite inventories, transport and reaction equations,
+energy conventions, device bounds and runtime transactions. For SPM, the residual
+path solves current and voltage constraints together, including constant-current,
+constant-voltage and finite-source current limits. Nonterminal events locate
+the limit transitions. Algebraic values appear in solver diagnostics and are
+recomputed from physical state; they are not another persistent inventory.
+The planar electrode retains its existing redox, diffusion and double-layer
+charge model and its isothermal energy scope.
+
+The common backend reduces regular block index-1 residual systems to BDF or
+Radau. It is not an arbitrary-index DAE solver. Diagnostics identify analytic
+and finite-difference derivatives separately; the common physical assembly uses
+an analytic rate matrix and explicit numerical state/time derivatives.
+
+`FiniteTransportSpec.caloric_algorithm` defaults to `"residual"`, consuming the
+same liquid enthalpy, analytic heat capacity and apparatus heat capacity. The
+explicit `"brentq"` choice remains available. `caloric_residual_system` also
+provides native temperature responses to target energy and declared physical
+parameters. A missing analytic parameter derivative is reported as unavailable.
+None of these numerical choices expands the underlying synthetic material scope.
+
 ## Capability and validation scope
 
 See [the generated module table](native_capabilities.md). Its source is the

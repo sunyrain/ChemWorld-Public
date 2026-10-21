@@ -1,0 +1,47 @@
+
+    <section id="index-view" class="index-layout" aria-label="Capability index">
+      <aside class="sidebar" aria-label="Capabilities">
+        <div class="sidebar-head"><span>Capabilities <small id="directory-count"></small></span><button type="button" id="collapse-tree" class="text-button">Collapse branches</button></div>
+        <button id="mobile-directory" type="button" aria-expanded="false">Browse capabilities <span aria-hidden="true">⌄</span></button>
+        <div id="outline" class="outline"></div>
+        <div class="sidebar-foot">Architectural Layer → Capability Domain → Functional Group → Specific Capability → Method / Variant<br><a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/current-foundation.md" target="_blank" rel="noopener">Delivery status and release information ↗</a></div>
+      </aside>
+      <article id="document" class="document" aria-label="Detailed capabilities"></article>
+    </section>
+    <section id="atlas-view" class="atlas-layout" aria-label="Overview atlas" hidden>
+      <div class="atlas-main">
+        <div class="atlas-heading">
+          <div><h1>Capability overview</h1><p id="atlas-summary"></p></div>
+          <div class="atlas-actions"><label class="level-control">Expand to <select id="map-level" aria-label="Atlas expansion level"><option value="2">Capability domain</option><option value="3">Function group</option><option value="4">Capability</option><option value="5">Method / variant</option><option value="custom" disabled>Custom branch</option></select></label><button type="button" id="focus-branch">Focus branch</button><button type="button" id="show-overview">Full overview</button></div>
+        </div>
+        <div id="map-scope" class="map-scope" aria-label="Atlas scope"></div>
+        <div id="map-viewport" class="map-viewport" aria-label="Capability hierarchy: drag to pan, scroll to zoom, click a node to expand or select it">
+          <div id="map-world" class="map-world"><svg id="map-lines" aria-hidden="true" /><div id="map-nodes"></div></div>
+          <div class="map-guide">Drag to pan · Scroll to zoom · Click to expand</div>
+          <div class="map-controls" aria-label="Atlas zoom">
+            <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+            <output id="zoom-level" aria-label="Atlas zoom level">100%</output>
+            <button type="button" id="zoom-in" aria-label="Zoom in">＋</button>
+            <span class="control-divider"></span>
+            <button type="button" id="fit-map">Fit canvas</button>
+            <button type="button" id="locate-node">Locate selection</button>
+          </div>
+          <svg id="minimap" viewBox="0 0 180 116" role="img" aria-label="Atlas minimap" />
+        </div>
+      </div>
+      <aside id="inspector" class="inspector" aria-label="Details for nodes in the graph"></aside>
+    </section>
+    <section id="guides-view" class="guides-layout" aria-label="Domain guides" hidden>
+      <aside class="guide-sidebar" aria-label="Domain Guide Navigation">
+        <div class="guide-nav-head">Domain guides <span>By architecture</span></div>
+        <button type="button" id="guide-mobile-nav" aria-expanded="false">Browse domain guides <span aria-hidden="true">⌄</span></button>
+        <nav id="guide-navigation" aria-label="Guide Contents"></nav>
+        <div class="guide-nav-foot">Explore capabilities, their methods and runnable examples.</div>
+      </aside>
+      <article id="guide-reader" class="guide-reader" aria-label="Guide text"></article>
+      <aside class="guide-context" aria-label="Page navigation">
+        <div class="guide-context-head">On this page</div>
+        <nav id="guide-toc" aria-label="Table of Contents"></nav>
+        <div id="guide-related" class="guide-related"></div>
+      </aside>
+    </section>

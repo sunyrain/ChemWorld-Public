@@ -37,7 +37,7 @@ MEMORY_TYPE = "chromatography_retained_inventory_v1"
 def settings(state, instrument):
     if instrument not in INSTRUMENT_IDS:
         raise ValueError("Unknown programmed chromatography instrument")
-    values = equipment_settings(state.equipment, instrument_equipment_id(instrument))
+    values = equipment_settings(state.equipment, instrument_equipment_id(instrument, state=state))
     if "chromatography" not in values:
         raise ValueError("No physical chromatography instance is installed at this vessel")
     return values
@@ -92,8 +92,8 @@ def programme(state, instrument):
     return result
 
 
-def initial_memory(instrument, vessel, analytes):
-    owner = instrument_equipment_id(instrument)
+def initial_memory(instrument, vessel, analytes, *, device_id=None):
+    owner = device_id or instrument_equipment_id(instrument)
     spec = StateSlotSpec(
         owner + ":residue",
         "equipment",
@@ -108,7 +108,7 @@ def initial_memory(instrument, vessel, analytes):
 
 
 def memory(state, instrument):
-    owner = instrument_equipment_id(instrument)
+    owner = instrument_equipment_id(instrument, state=state)
     matches = [
         s
         for s in state.state_slots.slots
@@ -155,19 +155,20 @@ def transport(state, instrument, injected):
 
 def sample_outlet(before, action, injected):
     name = action["instrument"]
+    device = instrument_equipment_id(name, state=before)
     _, outlet, _, released = transport(before, name, injected)
     return (
         MaterialExchange(
             "sample",
             f"vessel:{before.vessel_id}",
-            f"sink:instrument:{name}",
+            f"sink:{device}",
             "out",
             tuple(sorted((k, n - released[k]) for k, n in outlet.items())),
         ),
         MaterialExchange(
             "instrument:carryover",
-            instrument_equipment_id(name),
-            f"sink:instrument:{name}",
+            device,
+            f"sink:{device}",
             "out",
             tuple(sorted(released.items())),
         ),
@@ -220,7 +221,7 @@ def configure(state, action):
     candidate = state.replace(
         equipment=upsert_equipment_record(
             state.equipment,
-            equipment_id=instrument_equipment_id(instrument),
+            equipment_id=instrument_equipment_id(instrument, state=state),
             equipment_type="instrument",
             attached_vessel_id=state.vessel_id,
             batch_reset="preserve",
@@ -269,7 +270,7 @@ def calibrate(state, action):
     return state.replace(
         equipment=upsert_equipment_record(
             state.equipment,
-            equipment_id=instrument_equipment_id(instrument),
+            equipment_id=instrument_equipment_id(instrument, state=state),
             equipment_type="instrument",
             attached_vessel_id=state.vessel_id,
             batch_reset="preserve",

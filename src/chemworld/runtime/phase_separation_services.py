@@ -553,7 +553,7 @@ class ChemWorldPhaseSeparationServices:
     def dry_phase(self, state: WorldState):
         from chemworld.physchem.sorbent_kinetics import SORBENT_STATE_TYPE
 
-        if (self.thermal is not None and self.thermal.coupled.supports(state)
+        if (self.thermal is not None and self.thermal.advancer.supports(state)
                 and any(s.spec.state_type == SORBENT_STATE_TYPE for s in state.state_slots.slots)):
             return self.thermal.advancer.batch(state,
                 {"operation":"dry", "duration_s":300.}, heat=False)

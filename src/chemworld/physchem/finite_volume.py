@@ -91,6 +91,21 @@ class DiffusionMesh:
     def cells(self):
         return len(self.faces_m) - 1
 
+    @property
+    def shell_mean_square_radius_m2(self):
+        """Volume average of r^2; stable polynomial quotient for thin shells."""
+        if self.geometry != "spherical":
+            raise ValueError("shell moments require spherical geometry")
+        a, b = np.asarray(self.faces_m[:-1]), np.asarray(self.faces_m[1:])
+        return 3 / 5 * (b**4 + b**3 * a + b**2 * a**2 + b * a**3 + a**4) / (
+            b**2 + b * a + a**2)
+
+    @property
+    def spherical_surface_distance_m(self):
+        """Surface derivative to outer shell-average difference for a+b*r^2."""
+        radius = self.faces_m[-1]
+        return (radius**2 - self.shell_mean_square_radius_m2[-1]) / (2 * radius)
+
 
 @dataclass(frozen=True)
 class DiffusionBoundary:
@@ -129,14 +144,25 @@ class DiffusionCoupling:
 @dataclass(frozen=True)
 class ConservativeDiffusion:
     mesh: DiffusionMesh
-    diffusivity_m2_s: float
+    diffusivity_m2_s: float | tuple[float, ...]
     left: DiffusionBoundary = DiffusionBoundary()
     right: DiffusionBoundary = DiffusionBoundary()
+    storage_fractions: tuple[float, ...] | None = field(default=None, kw_only=True)
     _jacobian: csr_matrix = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        if not isfinite(self.diffusivity_m2_s) or self.diffusivity_m2_s < 0:
+        coefficient = np.asarray(self.diffusivity_m2_s, dtype=float)
+        if (coefficient.shape not in {(), (self.mesh.cells,)}
+                or not np.all(np.isfinite(coefficient)) or np.any(coefficient < 0)):
             raise ValueError("diffusivity must be finite and nonnegative")
+        if coefficient.ndim:
+            object.__setattr__(self, "diffusivity_m2_s", tuple(coefficient))
+        if self.storage_fractions is not None:
+            fractions = np.asarray(self.storage_fractions, dtype=float)
+            if (fractions.shape != (self.mesh.cells,) or not np.all(np.isfinite(fractions))
+                    or np.any(fractions <= 0) or np.any(fractions > 1)):
+                raise ValueError("storage fractions require one finite value in (0, 1] per cell")
+            object.__setattr__(self, "storage_fractions", tuple(fractions))
         if self.mesh.geometry == "spherical" and (
             self.left.kind == "concentration" or self.left.value != 0
         ):
@@ -148,7 +174,7 @@ class ConservativeDiffusion:
             columns.append(column)
             values.append(value)
 
-        volumes = self.mesh.cell_volumes_m3
+        volumes = self.storage_volumes_m3
         for face, conductance in enumerate(self._internal_conductances(), 1):
             left, right = face - 1, face
             add(left, left, -conductance / volumes[left])
@@ -165,13 +191,46 @@ class ConservativeDiffusion:
         object.__setattr__(self, "_jacobian", matrix)
 
     def _internal_conductances(self):
+        faces = np.asarray(self.mesh.faces_m[1:-1])
+        left_distance = faces - self.mesh.centers_m[:-1]
+        right_distance = self.mesh.centers_m[1:] - faces
+        if self.mesh.geometry == "spherical":
+            # Inventories encode shell averages, not point values at arithmetic
+            # midpoints. In r^2 coordinates these distances reproduce c=a+b*r^2
+            # exactly, including on graded meshes, while retaining one positive
+            # conservative two-point conductance at each face.
+            means = self.mesh.shell_mean_square_radius_m2
+            left_distance = (faces**2 - means[:-1]) / (2 * faces)
+            right_distance = (means[1:] - faces**2) / (2 * faces)
+        if isinstance(self.diffusivity_m2_s, tuple):
+            # Resistances of the two half-cells are in series, including at
+            # material interfaces. One face flux serves both adjacent cells.
+            coefficients = np.asarray(self.diffusivity_m2_s)
+            valid = (coefficients[:-1] > 0) & (coefficients[1:] > 0)
+            result = np.zeros(self.mesh.cells - 1)
+            result[valid] = self.mesh.face_areas_m2[1:-1][valid] / (
+                left_distance[valid] / coefficients[:-1][valid]
+                + right_distance[valid] / coefficients[1:][valid]
+            )
+            return result
         return (self.diffusivity_m2_s * self.mesh.face_areas_m2[1:-1]
-                / np.diff(self.mesh.centers_m))
+                / (left_distance + right_distance))
 
     def _boundary_conductance(self, side):
         index = 0 if side == "left" else -1
         distance = abs(self.mesh.faces_m[index] - self.mesh.centers_m[index])
-        return self.diffusivity_m2_s * self.mesh.face_areas_m2[index] / distance
+        if self.mesh.geometry == "spherical" and side == "right":
+            distance = self.mesh.spherical_surface_distance_m
+        coefficient = (self.diffusivity_m2_s[index]
+                       if isinstance(self.diffusivity_m2_s, tuple) else self.diffusivity_m2_s)
+        return coefficient * self.mesh.face_areas_m2[index] / distance
+
+    @property
+    def storage_volumes_m3(self):
+        """Physical pore volume, not an extra copy of the caller's inventory."""
+        if self.storage_fractions is None:
+            return self.mesh.cell_volumes_m3
+        return self.mesh.cell_volumes_m3 * np.asarray(self.storage_fractions)
 
     @property
     def inventory_jacobian_s_inv(self):
@@ -183,7 +242,7 @@ class ConservativeDiffusion:
         if (amounts.shape != (self.mesh.cells,) or not np.all(np.isfinite(amounts))
                 or np.any(amounts < 0)):
             raise ValueError("diffusion inventory must be finite, nonnegative and match cells")
-        concentration = amounts / self.mesh.cell_volumes_m3
+        concentration = amounts / self.storage_volumes_m3
         faces = np.zeros(self.mesh.cells + 1)
         faces[1:-1] = self._internal_conductances() * (
             concentration[:-1] - concentration[1:])
@@ -199,6 +258,86 @@ class ConservativeDiffusion:
         if not np.all(np.isfinite(faces)) or not np.all(np.isfinite(derivatives)):
             raise ValueError("diffusion face rates exceed the finite model domain")
         return DiffusionRates(derivatives, faces)
+
+    def residual_system(
+        self, inventory_keys, *, system_id, basis="amount", concentration_scale_mol_m3=1.0,
+        time_scale_s=1.0, reaction_rates=None, reaction_jacobian=None,
+        reaction_parameter_jacobian=None, reaction_time_derivative=None,
+        parameters=(), parameter_values=(), derivatives="analytic",
+    ):
+        """Reuse the affine face operator in an amount or concentration residual.
+
+        Reaction callbacks consume amounts (mol) and return mol/s, with their
+        Jacobian with respect to those amounts. Concentration coordinates use
+        the actual cell-volume mass matrix. The affine diffusion extension to
+        solver trials does not clip inventories; accepted states remain bounded.
+        """
+        from scipy.sparse import diags
+
+        from chemworld.physchem.residual_solver import mass_matrix_system
+        from chemworld.physchem.residual_system import (
+            ResidualEquation,
+            ResidualVariable,
+            matrix,
+            vector,
+        )
+
+        keys = tuple(inventory_keys)
+        n = self.mesh.cells
+        if len(keys) != n or len(set(keys)) != n or basis not in {"amount", "concentration"}:
+            raise ValueError("diffusion needs one unique key per cell and a declared basis")
+        if not isfinite(concentration_scale_mol_m3) or concentration_scale_mol_m3 <= 0:
+            raise ValueError("concentration scale must be finite and positive")
+        if not isfinite(time_scale_s) or time_scale_s <= 0:
+            raise ValueError("diffusion time scale must be finite and positive")
+        if reaction_rates is not None and derivatives == "analytic" and reaction_jacobian is None:
+            raise ValueError("analytic reaction diffusion requires the reaction Jacobian")
+        mass = np.ones(n) if basis == "amount" else self.storage_volumes_m3
+        amounts_scale = concentration_scale_mol_m3 * self.storage_volumes_m3
+        variables = tuple(ResidualVariable(
+            key, "mol" if basis == "amount" else "mol/m^3", amounts_scale[i] / mass[i], lower=0,
+        ) for i, key in enumerate(keys))
+        equations = tuple(ResidualEquation(key, "mol/s", amounts_scale[i] / time_scale_s)
+                          for i, key in enumerate(keys))
+        operator = self.inventory_jacobian_s_inv
+        boundary = self.evaluate(np.zeros(n)).amount_rates_mol_s
+
+        def rhs(t, y, p):
+            amounts = y * mass
+            rates = operator @ amounts + boundary
+            if reaction_rates is not None:
+                rates += vector(reaction_rates(t, _readonly(amounts), p), n, "reaction rates")
+            return rates
+
+        def jacobian(t, y, p):
+            total = operator
+            if reaction_rates is not None:
+                total = total + matrix(reaction_jacobian(t, _readonly(y * mass), p),
+                                       (n, n), "reaction Jacobian")
+            return csr_matrix(total) @ diags(mass)
+
+        options = {}
+        if derivatives == "analytic":
+            options["rhs_jacobian"] = jacobian
+            if reaction_rates is None:
+                options["rhs_time_derivative"] = lambda t, y, p: np.zeros(n)
+                options["rhs_parameter_jacobian"] = lambda t, y, p: np.zeros((n, len(parameters)))
+            else:
+                if reaction_time_derivative is not None:
+                    options["rhs_time_derivative"] = lambda t, y, p: reaction_time_derivative(
+                        t, _readonly(y * mass), p
+                    )
+                if reaction_parameter_jacobian is not None:
+                    options["rhs_parameter_jacobian"] = lambda t, y, p: reaction_parameter_jacobian(
+                        t, _readonly(y * mass), p
+                    )
+        elif any(fn is not None for fn in (reaction_jacobian, reaction_parameter_jacobian,
+                                          reaction_time_derivative)):
+            raise ValueError("numerical reaction derivatives cannot include analytic callbacks")
+        return mass_matrix_system(system_id, variables, equations, diags(mass), rhs,
+                                  derivatives=derivatives, parameters=parameters,
+                                  parameter_values=parameter_values, time_scale_s=time_scale_s,
+                                  **options)
 
     def couple(
         self, inventory_keys: Sequence[str], *, process_id: str, owner_id: str,

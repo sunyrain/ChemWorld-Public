@@ -1,0 +1,47 @@
+
+    <section id="index-view" class="index-layout" aria-label="能力索引">
+      <aside class="sidebar" aria-label="能力目录">
+        <div class="sidebar-head"><span>能力目录 <small id="directory-count"></small></span><button type="button" id="collapse-tree" class="text-button">收起分支</button></div>
+        <button id="mobile-directory" type="button" aria-expanded="false">浏览能力目录 <span aria-hidden="true">⌄</span></button>
+        <div id="outline" class="outline"></div>
+        <div class="sidebar-foot">架构层 → 能力领域 → 功能组 → 具体能力 → 方法 / 变体<br><a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/current-foundation.md" target="_blank" rel="noopener">交付状态与发布事项 ↗</a></div>
+      </aside>
+      <article id="document" class="document" aria-label="能力详情"></article>
+    </section>
+    <section id="atlas-view" class="atlas-layout" aria-label="总览图谱" hidden>
+      <div class="atlas-main">
+        <div class="atlas-heading">
+          <div><h1>能力总览</h1><p id="atlas-summary"></p></div>
+          <div class="atlas-actions"><label class="level-control">展开到 <select id="map-level" aria-label="图谱展示层级"><option value="2">能力领域</option><option value="3">功能组</option><option value="4">具体能力</option><option value="5">方法 / 变体</option><option value="custom" disabled>自定义分支</option></select></label><button type="button" id="focus-branch">聚焦分支</button><button type="button" id="show-overview">查看全貌</button></div>
+        </div>
+        <div id="map-scope" class="map-scope" aria-label="图谱范围"></div>
+        <div id="map-viewport" class="map-viewport" aria-label="能力层级图，拖动平移，滚轮缩放，点击节点展开或选择">
+          <div id="map-world" class="map-world"><svg id="map-lines" aria-hidden="true"></svg><div id="map-nodes"></div></div>
+          <div class="map-guide">拖动平移 · 滚轮缩放 · 点击展开</div>
+          <div class="map-controls" aria-label="图谱缩放">
+            <button type="button" id="zoom-out" aria-label="缩小图谱">−</button>
+            <output id="zoom-level" aria-label="图谱缩放比例">100%</output>
+            <button type="button" id="zoom-in" aria-label="放大图谱">＋</button>
+            <span class="control-divider"></span>
+            <button type="button" id="fit-map">适应画布</button>
+            <button type="button" id="locate-node">定位所选</button>
+          </div>
+          <svg id="minimap" viewBox="0 0 180 116" role="img" aria-label="图谱缩略图"></svg>
+        </div>
+      </div>
+      <aside id="inspector" class="inspector" aria-label="图谱节点详情"></aside>
+    </section>
+    <section id="guides-view" class="guides-layout" aria-label="领域指南" hidden>
+      <aside class="guide-sidebar" aria-label="领域指南导航">
+        <div class="guide-nav-head">领域指南 <span>按架构浏览</span></div>
+        <button type="button" id="guide-mobile-nav" aria-expanded="false">浏览领域指南 <span aria-hidden="true">⌄</span></button>
+        <nav id="guide-navigation" aria-label="指南目录"></nav>
+        <div class="guide-nav-foot">从能力进入方法，再进入可运行示例。</div>
+      </aside>
+      <article id="guide-reader" class="guide-reader" aria-label="指南正文"></article>
+      <aside class="guide-context" aria-label="本页导航">
+        <div class="guide-context-head">本页目录</div>
+        <nav id="guide-toc" aria-label="章节目录"></nav>
+        <div id="guide-related" class="guide-related"></div>
+      </aside>
+    </section>

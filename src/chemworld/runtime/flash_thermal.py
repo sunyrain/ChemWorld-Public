@@ -8,6 +8,7 @@ from dataclasses import replace
 from math import isclose
 
 from chemworld.foundation import species_with_added_initial_amounts
+from chemworld.foundation.balances import MaterialPacket
 from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, PhaseRecord
 from chemworld.physchem.property_reports import R_J_PER_MOL_K
 from chemworld.physchem.solver_backend import ODESolverPolicy, solve_ode
@@ -18,22 +19,18 @@ from chemworld.runtime.kernel_contracts import ModelProviderResult
 
 def inventory_enthalpy_j(state, model):
     """Derive H from the primary phase inventory, including pure plateaus."""
-    total_h = model.support_heat_capacity_J_K * (
-        state.temperature_K - model.support_reference_temperature_K)
+    inventories = {
+        kind: dict.fromkeys(model.properties.component_ids, 0.0) for kind in ("liquid", "gas")
+    }
     for phase in state.phases.phases.values():
-        total = sum(phase.species_amounts_mol.values())
-        if not total:
-            continue
-        composition = {k: phase.species_amounts_mol.get(k, 0) / total
-                       for k in model.properties.component_ids}
-        hl, hv = model.properties.phase_enthalpies(
-            state.temperature_K, model.pressure_Pa, composition, composition)
-        if phase.phase_type not in {"liquid", "gas"}:
+        if phase.phase_type not in inventories:
             raise ValueError("VLE inventory contains an unsupported phase")
-        if phase.phase_type == "gas" and hv is None:
-            raise ValueError("nonvolatile liquid material cannot own gas-phase enthalpy")
-        total_h += total * (hv if phase.phase_type == "gas" else hl)
-    return total_h
+        for key, amount in phase.species_amounts_mol.items():
+            inventories[phase.phase_type][key] += amount
+    liquid_h, vapor_h = model.properties.inventory_enthalpies(
+        state.temperature_K, model.pressure_Pa, inventories["liquid"], inventories["gas"])
+    return liquid_h + vapor_h + model.support_heat_capacity_J_K * (
+        state.temperature_K - model.support_reference_temperature_K)
 
 
 def install_flash(state, model, result):
@@ -91,15 +88,21 @@ def validate_flash_state(state, model):
 
 
 class FlashThermalRuntime:
+    supported_operations = ("wait",)
+
+    def reconcile_pressure(self, state):
+        model = self.composition.physics.models_of("flash")[state.vessel_id]
+        return state.replace(pressure_Pa=model.pressure_Pa)
+
     def __init__(self, composition):
         self.composition = composition
 
     def supports(self, state):
         return (self.composition is not None and self.composition.physics is not None
-                and state.vessel_id in self.composition.physics.flash_models)
+                and state.vessel_id in self.composition.physics.models_of("flash"))
 
     def advance(self, state, action, *, heat, jacket_program=None):
-        model = self.composition.physics.flash_models[state.vessel_id]
+        model = self.composition.physics.models_of("flash")[state.vessel_id]
         record, device = connected_device(state, required=False)
         try:
             if jacket_program is not None:
@@ -189,10 +192,10 @@ class FlashThermalRuntime:
 
 
 def exchange_flash_packet(source, target, physics, amounts, *, fraction=0, fixed_source=False):
-    model = physics.flash_models[target.vessel_id]
+    model = physics.models_of("flash")[target.vessel_id]
     if source.state_slots.slots or target.state_slots.slots:
         raise ValueError("flash packets do not support extra owned slots in this slice")
-    source_model = model if fixed_source else physics.flash_models.get(source.vessel_id)
+    source_model = model if fixed_source else physics.models_of("flash").get(source.vessel_id)
     if (source_model is None or source_model.properties != model.properties
             or source_model.pressure_Pa != model.pressure_Pa):
         raise ValueError("flash endpoints must share constitutive/reference/pressure data")
@@ -208,8 +211,8 @@ def exchange_flash_packet(source, target, physics, amounts, *, fraction=0, fixed
     apparatus_h = source_model.support_heat_capacity_J_K * (
         source.temperature_K - source_model.support_reference_temperature_K)
     packet_h = fraction * (source_h - apparatus_h)
-    remaining = {k: v - amounts.get(k, 0) for k, v in source.species_amounts.items()}
-    received = {k: v + amounts.get(k, 0) for k, v in target.species_amounts.items()}
+    packet = MaterialPacket(source.vessel_id, target.vessel_id, tuple(amounts.items()))
+    remaining, received = packet.apply(source.species_amounts, target.species_amounts)
     target_candidate = install_flash(target, model, model.at_ph(received, target_h + packet_h))
     if fixed_source:
         phases = {k: replace(p, species_amounts_mol={s: v * (1 - fraction)
@@ -233,7 +236,7 @@ def exchange_flash_packet(source, target, physics, amounts, *, fraction=0, fixed
     if abs(residual) > 1e-6 or (source_residual is not None and abs(source_residual) > 1e-6):
         raise ValueError("flash packet violates its enthalpy balance")
     return source_candidate, target_candidate, {
-        "source": source.vessel_id, "destination": target.vessel_id, "amounts_mol": amounts,
+        **packet.to_dict(),
         "packet_enthalpy_J": packet_h, "destination_energy_residual_J": residual,
         "source_energy_residual_J": source_residual,
         "source_thermal_boundary": "fixed_temperature_stock; utility heat/work not modelled"

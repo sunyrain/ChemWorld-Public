@@ -28,6 +28,7 @@ SOURCE_EXTRAS = frozenset(
         "pyproject.toml",
         "uv.lock",
         "README.md",
+        "README.zh-CN.md",
         "LICENSE",
         "CONTRIBUTING.md",
         "DEVELOPMENT.md",
@@ -72,6 +73,8 @@ def public_path(name: str) -> bool:
     if name.startswith("src/chemworld/"):
         return (
             path.suffix == ".py"
+            or (name.startswith("src/chemworld/physchem/atomic_data/")
+                and path.suffix in {".csv", ".json"})
             or (name.startswith("src/chemworld/schemas/") and path.suffix == ".json")
             or (
                 name.startswith("src/chemworld/lab/static/")

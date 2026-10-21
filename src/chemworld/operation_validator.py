@@ -72,6 +72,7 @@ class OperationValidation:
         blocking_reasons = {
             "action_schema_valid",
             "operation_allowed_by_task",
+            "operation_installed",
             "instrument_allowed_by_task",
             # Campaign-resource preflight is an authoritative admission gate.
             # A rejected action must be recorded as a charged attempt without
@@ -269,6 +270,29 @@ class OperationValidator:
 
         dynamic_low = low
         dynamic_high = high
+        if operation_type == "configure_control" and field == "headspace_L":
+            from chemworld.runtime.control_program import control_settings
+
+            settings = control_settings(state)
+            if settings:
+                dynamic_low = dynamic_high = settings["headspace_L"]
+        if operation_type in {"configure_electrical_control", "queue_electrical_stage"}:
+            from chemworld.runtime.control_program import electrical_device
+
+            try:
+                settings = electrical_device(state).settings["electrical_control"]
+            except ValueError:
+                settings = {}
+            key = {
+                "current_A": "limits_A", "potential_V": "limits_V",
+                "stop_abs_current_A": "limits_A",
+                "stop_voltage_below_V": "limits_V", "stop_voltage_above_V": "limits_V",
+            }.get(field)
+            if key in settings:
+                limits = settings[key]
+                dynamic_low = max(low, 0 if field == "stop_abs_current_A" else limits[0])
+                dynamic_high = min(high, max(abs(v) for v in limits)
+                                   if field == "stop_abs_current_A" else limits[1])
         if (operation_type in {"heat", "configure_control", "queue_control_stage"}
                 and field == "target_temperature_K" and self.material_router is not None
                 and self.material_router.physics is not None):
@@ -382,6 +406,12 @@ class OperationValidator:
     ) -> tuple[Any, ...]:
         """Narrow categorical choices to physically persistent task state."""
 
+        modules = self.action_codec.modules
+        if modules is not None and operation_type in modules.operation_specs():
+            declared = next((f for f in modules.operation_specs()[operation_type].fields
+                             if f.name == field), None)
+            if declared is not None and declared.choice_provider is not None:
+                return tuple(declared.choice_provider(state, self))
         if field in {"vessel", "connection"}:
             network = state.metadata.get("component_network", {})
             if field == "connection":
@@ -425,13 +455,12 @@ class OperationValidator:
             return tuple(i for i in choices if CONTAINER_IDS[i] not in state.samples.samples)
 
         if operation_type == "measure" and field == "instrument":
-            network = state.metadata.get("component_network")
-            if network is not None:
-                choices = tuple(i for i in choices if i in network["instruments"][state.vessel_id])
-            choices = tuple(
-                choice
-                for choice in choices
-                if self.constitution.instruments[choice].requires_terminated == state.terminated
+            return tuple(
+                name for name in choices
+                if name in self.constitution.instruments
+                and all(self._preconditions(
+                    "measure", {"operation": "measure", "instrument": name}, state
+                ).values())
             )
         if operation_type == "configure_instrument" and field == "instrument":
             from chemworld.world.spectral_contract import SPECTRAL_INSTRUMENTS
@@ -451,16 +480,42 @@ class OperationValidator:
             locked = settings.get("electrolyte_profile")
             if isinstance(locked, int) and not isinstance(locked, bool):
                 return tuple(choice for choice in choices if choice == locked)
-        if (
-            self.task_id == "electrochemical-conversion"
-            and operation_type == "measure"
-            and field == "instrument"
-            and self.electrochemical_workflow_mode != ELECTROCHEMICAL_WORKFLOW_AUTONOMOUS_OPEN_V1
-        ):
-            required = self._electrochemical_required_instruments(state)
-            if required:
-                return tuple(choice for choice in choices if choice in required)
         return choices
+
+    def measurement_affordances(self, state: WorldState) -> list[dict[str, Any]]:
+        """Read installed, permitted and executable instruments from one binding.
+
+        The constitution also includes optional semantic-only instruments, which
+        need not have a coordinate in the fixed action codec.
+        """
+        network = state.metadata.get("component_network")
+        names = tuple(dict.fromkeys((
+            *self.action_codec.instruments, *self.constitution.instruments,
+        )))
+        installed = set(self.constitution.instruments)
+        if network is not None:
+            installed &= set(network["instruments"][state.vessel_id])
+        permitted = (
+            set(self.constitution.instruments)
+            if self.allowed_instruments is None else self.allowed_instruments
+        )
+        rows = []
+        for name in names:
+            if name not in installed and name not in permitted:
+                continue
+            checks = self._preconditions(
+                "measure", {"operation": "measure", "instrument": name}, state
+            )
+            reasons = [key for key, passed in checks.items() if not passed]
+            rows.append({
+                "instrument": name,
+                "installed": name in installed,
+                "task_allowed": "measure" in self.allowed_operations and name in permitted,
+                "valid": not reasons,
+                "invalid_reasons": reasons,
+                "preconditions": checks,
+            })
+        return rows
 
     def operation_affordance(
         self,
@@ -562,10 +617,28 @@ class OperationValidator:
                     state, self.constitution, payload
                 )
             )
+            for field in modules.operation_specs()[operation_type].fields:
+                if field.choice_provider is not None:
+                    preconditions[f"available_choices:{field.name}"] = bool(
+                        field.choice_provider(state, self)
+                    )
         preconditions["operation_allowed_by_task"] = operation_type in self.allowed_operations
+        preconditions["operation_installed"] = (
+            operation_type in self.action_codec.contracts(include_campaign_controls=True)
+        )
         from chemworld.runtime.component_network import operation_available
 
         preconditions["operation_available_in_vessel"] = operation_available(state, operation_type)
+        if operation_type in {"configure_electrical_control", "queue_electrical_stage"}:
+            from chemworld.runtime.control_program import electrical_device
+
+            try:
+                settings = electrical_device(state).settings["electrical_control"]
+            except ValueError:
+                settings = {}
+            preconditions["electrical_source_available"] = bool(settings)
+            if operation_type == "queue_electrical_stage":
+                preconditions["staged_controller_available"] = settings.get("staged_control", False)
         if operation_type == "configure_instrument":
             from chemworld.world.spectral_contract import SPECTRAL_INSTRUMENTS
 
@@ -945,6 +1018,13 @@ class OperationValidator:
         state: WorldState,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"operation": operation_type}
+        modules = self.action_codec.modules
+        if modules is not None and operation_type in modules.operation_specs():
+            for field in modules.operation_specs()[operation_type].fields:
+                if field.choice_provider is not None:
+                    choices = field.choice_provider(state, self)
+                    if choices:
+                        payload[field.name] = choices[0]
         if operation_type == "discard_batch":
             payload["reason"] = "campaign decision"
         if operation_type == "measure":
@@ -967,16 +1047,15 @@ class OperationValidator:
             instrument = self.constitution.instruments.get(instrument_id)
             if instrument is None:
                 continue
-            if state.terminated != bool(instrument.requires_terminated):
-                continue
-            if state.volume_L + self.constitution.tolerance < instrument.sample_volume_L:
-                continue
-            return instrument_id
+            if all(self._preconditions(
+                "measure", {"operation": "measure", "instrument": instrument_id}, state
+            ).values()):
+                return instrument_id
         return permitted[0] if permitted else "hplc"
 
     def native_crystal_model(self, state):
         physics = None if self.material_router is None else self.material_router.physics
-        return None if physics is None else physics.crystal_models.get(state.vessel_id)
+        return None if physics is None else physics.models_of("crystal").get(state.vessel_id)
 
     def _payload_checks(
         self,
@@ -991,16 +1070,35 @@ class OperationValidator:
             and operation_type not in OPERATION_TYPES
             and operation_type in modules.operation_specs()
         ):
+            if operation_type in {"configure_electrical_control", "queue_electrical_stage"}:
+                from chemworld.runtime.control_program import electrical_control_error
+
+                checks["payload_electrical_control_valid"] = (
+                    electrical_control_error(state, payload) is None
+                )
             for field in modules.operation_specs()[operation_type].fields:
                 if field.required:
                     checks[f"payload_has:{field.name}"] = field.name in payload
                 if field.name not in payload:
                     continue
                 value = payload[field.name]
-                if field.choices:
-                    checks[f"payload_choice:{field.name}"] = value in (
-                        field.runtime_choices or field.choices
-                    )
+                if field.value_kind == "number_map":
+                    from chemworld.world.domain_modules import normalize_number_map
+
+                    try:
+                        normalize_number_map(value)
+                    except ValueError:
+                        valid_map = False
+                    else:
+                        valid_map = True
+                    checks[f"payload_numeric_map:{field.name}"] = valid_map
+                    continue
+                if field.choices or field.choice_provider is not None:
+                    choices = field.choice_provider(state, self) \
+                        if field.choice_provider is not None else (
+                            field.runtime_choices or field.choices
+                        )
+                    checks[f"payload_choice:{field.name}"] = value in choices
                 else:
                     numeric = (
                         isinstance(value, (int, float))
@@ -1008,6 +1106,8 @@ class OperationValidator:
                         and math.isfinite(value)
                     )
                     checks[f"payload_numeric:{field.name}"] = numeric
+                    if field.integer:
+                        checks[f"payload_integer:{field.name}"] = numeric and value == int(value)
                     bounds = field.runtime_bounds or field.bounds
                     if numeric and bounds:
                         checks[f"payload_bounds:{field.name}"] = bounds[0] <= value <= bounds[1]
@@ -1493,7 +1593,8 @@ class OperationValidator:
             from chemworld.runtime.aqueous_mineral import aqueous_record
 
             physics = self.material_router.physics
-            if (state.vessel_id in physics.flash_models or state.vessel_id in physics.liquid_models
+            if (state.vessel_id in physics.models_of("flash")
+                    or state.vessel_id in physics.models_of("liquid")
                     or aqueous_record(state) is not None):
                 # Native PH candidate validation below checks actual finite
                 # filling and energy; a sealed-gas pressure inversion is invalid.
@@ -1505,7 +1606,7 @@ class OperationValidator:
                     ),
                     default=0.0,
                 )
-            model = physics.thermal_models.get(state.vessel_id)
+            model = physics.models_of("thermal").get(state.vessel_id)
             if model is None:
                 return 0.0
             available = max(

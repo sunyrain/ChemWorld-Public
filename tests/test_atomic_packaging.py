@@ -1,0 +1,725 @@
+"""Check native atomic resources in actual wheel and sdist-built wheel."""
+
+import subprocess
+import sys
+import tarfile
+import zipfile
+from pathlib import Path
+
+
+def test_atomic_resources_survive_sdist_wheel_and_isolated_import(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    # uv builds the wheel from the sdist, exercising the generated source index.
+    subprocess.run(
+        ["uv", "build", "--out-dir", str(tmp_path)],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    resources = ("elements.csv", "isotopes.csv", "provenance.json")
+    wheel = next(tmp_path.glob("*.whl"))
+    with zipfile.ZipFile(wheel) as archive:
+        for name in resources:
+            package_path = "chemworld/physchem/atomic_data/" + name
+            assert archive.read(package_path) == (root / "src" / package_path).read_bytes()
+    with tarfile.open(next(tmp_path.glob("*.tar.gz"))) as archive:
+        for name in resources:
+            member = next(item for item in archive if item.name.endswith("/atomic_data/" + name))
+            assert (
+                archive.extractfile(member).read()
+                == (root / "src/chemworld/physchem/atomic_data" / name).read_bytes()
+            )
+    program = """
+import sys
+sys.path.insert(0, sys.argv[1])
+import chemworld
+assert sys.argv[1] in chemworld.__file__, chemworld.__file__
+from chemworld.physchem import ComponentSpec, get_element, get_isotope, atomic_data_provenance
+from chemworld.physchem import (
+    PropertyCorrelation, PiecewiseHeatCapacity, temperature_from_caloric_change,
+    vibrational_temperature,
+)
+from chemworld.data.identifiers import IdentifierDatabase
+from chemworld.data.constants import ConstantDatabase
+from chemworld.data.caloric import CaloricDatabase
+from chemworld.data import TdbDatabase
+from chemworld.data.scientific_inputs import InputSource
+from chemworld.physchem.data_conflicts import DataSourceProvenance
+from chemworld.data.pressure import PressureDatabase
+from chemworld.data.phase_change import PhaseChangeDatabase
+from chemworld.data.viscosity import ViscosityDatabase
+from chemworld.physchem import viscosity_value, water_viscosity_iapws, wilke_viscosity
+viscosity_data = ViscosityDatabase(sys.argv[1] + '.external-data')
+assert len(viscosity_data.catalog) == 8 and viscosity_data.loaded_sources == ()
+assert abs(water_viscosity_iapws(298.15, 998)-.000889735100149808) < 1e-14
+assert viscosity_value('mu_air_lemmon', 300, rho=40) > 1.8e-5
+assert wilke_viscosity([1], [1e-5], [28]) == 1e-5
+from chemworld.physchem import (
+    VISCOSITY_SCALES, viscosity_converter, viscosity_index, twu_1985_viscosity,
+    przedziecki_sridhar_temperature_viscosity, lucas_liquid_viscosity,
+    gas_mixture_viscosity_ledger, dense_mixture_viscosity_ledger,
+)
+assert len(VISCOSITY_SCALES) == 47
+assert viscosity_index(6.394e-6, 2e-6, rounding=True) == 100
+assert 3300e-6 < viscosity_converter((1.4*2.5)**.5, 'barbey', 'kinematic viscosity') < 4400e-6
+assert abs(twu_1985_viscosity(338.7055, 672.3166, 895.5189)-.008235009644854494) < 1e-14
+assert viscosity_value('Przedziecki_Sridhar', 383, Tm=178, Tc=591.8, Pc=41e5,
+                       Vc=316e-6, Vf=95e-6, omega=.263, MW=92.14) > 0
+assert lucas_liquid_viscosity(300, 5e7, critical_temperature_K=572.2,
+    critical_pressure_Pa=3.47e6, acentric_factor=.236,
+    saturation_pressure_Pa=2e5, saturation_viscosity_Pa_s=.00068) > .00068
+from chemworld.physchem import conductivity_value, conductivity_derivatives
+from chemworld.data.conductivity import ConductivityDatabase
+conductivity_data = ConductivityDatabase(sys.argv[1] + '.external-data')
+assert len(conductivity_data.catalog) == 4 and conductivity_data.loaded_sources == ()
+assert abs(conductivity_value('Sheffy_Johnson', 300, MW=47, Tm=280)-.17740150413112193) < 1e-12
+assert conductivity_derivatives('Nicola', 300,
+    dict(MW=142.3, Tc=611.7, Pc=2110000, omega=.49))[1] < 0
+from chemworld.physchem import filippov_conductivity, compressed_liquid_conductivity
+assert abs(filippov_conductivity((.258, .742), (.1692, .1528))-.159291676288) < 1e-12
+assert abs(compressed_liquid_conductivity(304, 633e6, method='Missenard',
+    critical_temperature_K=591.8, critical_pressure_Pa=4.1e6,
+    reference_conductivity_W_m_K=.129)-.2198375777069657) < 1e-12
+from chemworld.physchem import water_conductivity_iapws, air_conductivity_lemmon
+assert abs(water_conductivity_iapws(647.35, 750)-.5976194153179502) < 1e-12
+assert abs(air_conductivity_lemmon(300, 40)-.0263839695044) < 1e-12
+assert air_conductivity_lemmon(132.64, 10400, Cp=2000, Cv=35, mu=1.8e-5,
+    drho_dP=0, drho_dP_reference=0) > 0
+assert abs(conductivity_value('Eli_Hanley', 373.15, MW=72.151, Tc=460.4,
+    Vc=3.06e-4, Zc=.267, omega=.227, Cvm=135.9)-.02247951724513664) < 1e-12
+from chemworld.physchem import chung_dense_conductivity
+assert abs(chung_dense_conductivity(473, MW=42.081, Tc=364.9, Vc=184.6e-6,
+    omega=.142, Cvm=82.67, Vm=172.1e-6, mu=1.34e-5, dipole=.4)-.06160569232570781) < 1e-12
+from pathlib import Path
+import json
+from chemworld.physchem import (
+    volume_value, volume_derivatives, volume_correlation, ComponentPropertyPackage,
+    evaluate_correlation, correlation_temperature_derivative,
+)
+assert abs(volume_value('Goodman',200,Tt=243.225,Vml=.00023585)-.0002053665090860923) < 1e-15
+assert volume_derivatives('Bhirud_normal',500,{'Tc':500.,'Pc':4e6,'omega':.2},order=3)[0] > 0
+packed_volume = volume_correlation('PPDS17',
+    parameters={'Tc':562.05,'a0':.0115508,'a1':.281004,'a2':-.00635447},
+    temperature_range_K=(280,500),source_note='NIST TDE example',output='density')
+packed_volume = PropertyCorrelation.from_dict(json.loads(json.dumps(packed_volume.to_dict())))
+packed_volume_package = ComponentPropertyPackage(ComponentSpec('benzene','C6H6'),(packed_volume,))
+assert abs(packed_volume_package.evaluate('liquid_density',temperature_K=300).value
+    -871.520087707) < 1e-8
+assert correlation_temperature_derivative(packed_volume,temperature_K=300).to('g/(mL*K)').value < 0
+packed_gas_volume = volume_correlation('ideal_gas',parameters={},
+    temperature_range_K=(200,600),pressure_range_Pa=(1e5,1e6),source_note='ideal gas')
+assert evaluate_correlation(packed_gas_volume,temperature_K=300,pressure_Pa=2e5).value == (
+    evaluate_correlation(packed_gas_volume,temperature_K=300,pressure_Pa=4e5).value * 2)
+from chemworld.physchem import (
+    MixtureSpec, mixture_volume_correlation, mixture_volume_evaluation, evaluate_property_state,
+    volume_pressure_derivatives,
+)
+packed_liquids = (ComponentSpec('methanol','CH4O'), ComponentSpec('water','H2O'))
+packed_mix = MixtureSpec.from_mole_fractions(packed_liquids,(.4576,.5424),
+    phase_label='liquid',temperature_K=298,pressure_Pa=1e7)
+packed_mix_data = {'methanol':{'Tcs':512.58,'Vcs':.000117,'omegas':.559},
+    'water':{'Tcs':647.29,'Vcs':5.6e-5,'omegas':.344}}
+packed_mix_curve = mixture_volume_correlation(packed_mix,method='COSTALD_mixture_compressed',
+    component_parameters=packed_mix_data,saturation_pressure_model='generalized_riedel',
+    temperature_range_K=(280,350),pressure_range_Pa=(1e7,1e8),source_note='synthetic equation')
+packed_mix_curve = PropertyCorrelation.from_dict(json.loads(json.dumps(packed_mix_curve.to_dict())))
+packed_mix_reports = [evaluate_property_state(
+    tuple(ComponentPropertyPackage(c,()) for c in packed_liquids),
+    {'methanol':.4576,'water':.5424},temperature_K=298,pressure_Pa=p,phase='liquid',
+    quantities=('density','molar_volume'),volume_model=packed_mix_curve) for p in (1e7,1e8)]
+assert packed_mix_reports[1].properties['density'].value > (
+    packed_mix_reports[0].properties['density'].value)
+assert volume_pressure_derivatives('Tait_molar',300,
+    {'P':1e7,'P_ref':1e5,'V_ref':1e-4,'B':1e8,'C':.1},order=3)[1] < 0
+assert not any(name in sys.modules for name in ('chemicals','mpmath'))
+from chemworld.data.interface import InterfaceDatabase
+from chemworld.physchem import (
+    interface_value, interface_derivatives, winterfeld_scriven_davis,
+    water_oil_interfacial_tension, laplace_pressure, capillary_force,
+)
+from chemworld.physchem.property_inputs import PropertyInputCard
+interface_data = InterfaceDatabase(sys.argv[1] + '.external-data')
+assert len(interface_data.catalog) == 5 and interface_data.loaded_sources == ()
+assert abs(interface_value('sigma_IAPWS', 300)-.0716859625271) < 1e-12
+assert interface_derivatives('sigma_IAPWS', 647.096, {}) == (0, 0)
+assert winterfeld_scriven_davis((1,), (0,), (10000,)) == 0
+assert abs(water_oil_interfacial_tension(580, water_density_kg_m3=980,
+    oil_density_kg_m3=760, oil_critical_temperature_K=914)-.02893598143089256) < 1e-12
+interface_file = Path(sys.argv[1] + '.external-data') / 'Interface/Jasper-Lange.tsv'
+interface_file.parent.mkdir(parents=True, exist_ok=True)
+interface_file.write_text(chr(10).join((
+    chr(9).join(('CAS','Name','a','b','Tmin','Tmax')),
+    chr(9).join(('71-36-3','Synthetic','24','.0773','250','400')),
+)), encoding='utf8')
+interface_card = interface_data.property_input('71-36-3',
+    ComponentSpec('packed-butanol','C4H10O',cas_number='71-36-3'), method='JASPER_LANGE')
+interface_card = PropertyInputCard.from_dict(json.loads(json.dumps(interface_card.to_dict())))
+interface_pressures = []
+for t in (280,350):
+    sigma = interface_card.evaluate_state(temperature_K=t, pressure_Pa=101325,
+        phase='liquid', quantities=('surface_tension',)).properties['surface_tension']
+    interface_pressures.append(laplace_pressure(sigma.to('mN/m'),
+        curvature_1_per_m=1000, curvature_2_per_m=1000).value)
+    assert capillary_force(sigma, wetted_perimeter_m=.02, contact_angle_rad=0).value > 0
+assert interface_pressures[0] > interface_pressures[1] > 0
+from chemworld.physchem import boiling_vaporization_enthalpy, watson_exponent, evaluate_correlation
+from chemworld.physchem import (
+    CorrelationSpeciesThermo, CaloricReference, stoichiometric_matrix, balance_stoichiometry,
+    vapor_pressure_temperature_derivative, vapor_pressure_parameter_jacobian,
+    water_saturation_pressure, water_saturation_temperature,
+)
+from chemworld.foundation.dimensions import dimension_definition, unmapped_supported_unit_dimensions
+assert get_element('Og').atomic_number == 118
+assert get_isotope('D').mass.value == 2.01410177784
+assert ComponentSpec('salt', 'NH4+').charge == 1
+assert atomic_data_provenance()['isotopes'] == 2939
+assert IdentifierDatabase(sys.argv[1] + '.external-data').loaded_sources == ()
+constants = ConstantDatabase(sys.argv[1] + '.external-data')
+assert len(constants.catalog) == 43 and constants.loaded_sources == ()
+from chemworld.data.electro_optical import ElectroOpticalDatabase
+from chemworld.data.assessments import AssessmentDatabase, AssessmentValue
+from chemworld.data.fuels import FuelDatabase, FUEL_SOURCES, source_octane_index
+from chemworld.physchem import (
+    combustion_data, CombustionData, mixture_combustion_spec, combustion_stoichiometry,
+)
+from chemworld.foundation.units import Quantity
+from chemworld.physchem.specs import MixtureSpec
+packed_fuel = combustion_data('CH4',Hf=-74520,method='Stoichiometry')
+packed_fuel = CombustionData.from_dict(json.loads(json.dumps(packed_fuel.to_dict())))
+assert packed_fuel.heat(Quantity(2,'mol')).value == -1781208
+from chemworld.physchem import (
+    temperature_quantity, temperature_input, temperature_observation, temperature_convert,
+    its90_68_difference, henry_pressure, water_refractive_index_iapws,
+    suzuki_flammability_limit,
+)
+from chemworld.data.scientific_inputs import InputValue
+from chemworld.foundation.observations import Observation, ObservationChannel, ObservationTime
+packed_t = temperature_quantity(Quantity(226.85,'degC'),'ITS-68','ITS-90')
+assert abs(temperature_convert(packed_t.value,'ITS-90','ITS-68')-500) < 2e-10
+packed_input = temperature_input(InputValue(300,'K',.02,'Packaged measurement'),
+    'ITS-68','ITS-90')
+packed_raw = ObservationChannel('temperature','K',300,uncertainty=.02,
+    sample_id='packed',sampled_at=ObservationTime('world',4),available_at=ObservationTime('world',7))
+packed_observation = temperature_observation(packed_raw,'ITS-68','ITS-90')
+packed_observation = Observation.from_native_record(json.loads(json.dumps(
+    packed_observation.native_record(),allow_nan=False)))
+assert not packed_observation.errors()
+packed_calibrated = packed_observation.channel('converted_temperature')
+assert packed_calibrated.value == packed_input.value
+assert packed_observation.channel('temperature') == packed_raw
+assert henry_pressure(packed_calibrated.value,13,-300) != henry_pressure(300,13,-300)
+assert water_refractive_index_iapws(packed_calibrated.value,997) != (
+    water_refractive_index_iapws(300,997))
+assert suzuki_flammability_limit(packed_fuel.heat(Quantity(1,'mol')).value,limit='LFL') > 0
+assert its90_68_difference(77,convention='chemicals_1_5_2') == 0
+assert its90_68_difference(77) > 0
+assert combustion_stoichiometry('CH3Cl')['H2O'] == 1
+fuel_root = Path(sys.argv[1] + '.fuel-data')
+fuel_source = next(s for s in FUEL_SOURCES if s.source_id == 'FLORIAN_LIMING_ANN')
+fuel_path = fuel_root / fuel_source.relative_path
+fuel_path.parent.mkdir(parents=True,exist_ok=True)
+fuel_path.write_text(chr(10).join((chr(9).join(('CAS','RON','MON')),
+    chr(9).join(('64-17-5','100','90')))),encoding='utf8')
+fuel_db = FuelDatabase(fuel_root)
+assert len(fuel_db.catalog)==9 and fuel_db.loaded_sources==()
+octanes = [fuel_db.fuel_value('64-17-5',p,method='FLORIAN_LIMING_ANN') for p in ('RON','MON')]
+octanes = [AssessmentValue.from_dict(json.loads(json.dumps(v.to_dict()))) for v in octanes]
+assert source_octane_index(*octanes).value == 95
+burn_components = [ComponentSpec(f,f,default_phase='gas',cas_number=c) for f,c in (
+    ('N2','7727-37-9'),('O2','7782-44-7'),('CH4','74-82-8'),
+    ('H2O','7732-18-5'),('CO2','124-38-9'))]
+burn_air = MixtureSpec.from_mole_fractions(burn_components,[.79,.21,0,0,0],
+    phase_label='gas',temperature_K=300,pressure_Pa=101325)
+burn_feed = MixtureSpec.from_mole_fractions(burn_components,[0,0,1,0,0],
+    phase_label='gas',temperature_K=300,pressure_Pa=101325)
+burn_result = mixture_combustion_spec(burn_air,burn_feed,burn_components,
+    n_out=21,ratio=20,ratio_basis='mole')
+assert burn_result['n_air']==20 and burn_result['n_fuel']==1
+from chemworld.data.assessment_catalog import ASSESSMENT_SOURCE_MAP
+from chemworld.foundation.units import Quantity
+from chemworld.physchem import (
+    iso_10156_lower_limit, emission_impact, octanol_water_partition,
+    ppmv_to_mass_concentration, mass_concentration_to_ppmv, gas_exposure_comparison,
+)
+from chemworld.physchem.specs import MixtureSpec
+import gzip
+assessment_root = Path(sys.argv[1] + '.assessment-data')
+assessment_data = AssessmentDatabase(assessment_root)
+assert len(assessment_data.catalog) == 14 and assessment_data.loaded_sources == ()
+for source_id, rows in (
+    ('IPCC_2021', (('CAS','20yr GWP'),('74-82-8','80'))),
+    ('SYRRES', (('CAS','logP'),('64-17-5','-1'))),
+):
+    source = ASSESSMENT_SOURCE_MAP[source_id]
+    path = assessment_root / source.relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    opener = gzip.open if source.kind == 'tsv-gzip' else open
+    with opener(path, 'wt', encoding='utf8') as stream:
+        stream.write(chr(10).join(chr(9).join(row) for row in rows))
+gwp = assessment_data.assessment('74-82-8','GWP',method='IPCC (2021) 20yr')
+gwp = AssessmentValue.from_dict(json.loads(json.dumps(gwp.to_dict())))
+assert emission_impact({'74-82-8': Quantity(2,'kg')}, {'74-82-8':gwp}).value == 160
+logp = assessment_data.assessment('64-17-5','logP',method='SYRRES')
+logp = AssessmentValue.from_dict(json.loads(json.dumps(logp.to_dict())))
+split = octanol_water_partition({'64-17-5':1}, {'64-17-5':logp},
+    water_volume_L=1,octanol_volume_L=.25,temperature_K=300)
+assert abs(split.organic_amounts_mol['64-17-5']-.025/1.025) < 1e-12
+assert split.material_balance_error_mol < 1e-12
+ontario_path = assessment_root / ASSESSMENT_SOURCE_MAP['ONTARIO'].relative_path
+ontario_path.parent.mkdir(parents=True, exist_ok=True)
+ontario_path.write_text(json.dumps({'74-82-8':{
+    'Name':'Synthetic methane','TWA (ppm)':10,'TWA (mg/m^3)':None,
+    'Skin':False,'MW':16.043}}), encoding='utf8')
+exposure = assessment_data.assessment('74-82-8','TWA',method='Ontario Limits')
+exposure = AssessmentValue.from_dict(json.loads(json.dumps(exposure.to_dict())))
+gas = MixtureSpec.from_mole_fractions((
+    ComponentSpec('methane','CH4',default_phase='gas'),
+    ComponentSpec('nitrogen','N2',default_phase='gas')), (5e-6,1-5e-6),
+    phase_label='gas',temperature_K=300,pressure_Pa=101325)
+assert gas_exposure_comparison(gas,'methane',exposure,source_identity='74-82-8',
+    averaging_window='TWA').value == .5
+assert iso_10156_lower_limit([.5,.5],[.05,None],['74-82-8','7727-37-9']) == .1
+assert abs(Quantity(10,'ppmv').to('gas_volume_fraction').value-1e-5) < 1e-18
+concentration = ppmv_to_mass_concentration(100,40,temperature_K=300,pressure_Pa=101325)
+assert abs(mass_concentration_to_ppmv(concentration,40,
+    temperature_K=300,pressure_Pa=101325)-100) < 1e-10
+from chemworld.physchem import (
+    water_permittivity_iapws, water_refractive_index_iapws,
+    brix_to_refractive_index, brix_reading, parallel_plate_capacitance,
+)
+assert abs(water_permittivity_iapws(300,1000)-78.03317817364899) < 1e-11
+assert water_refractive_index_iapws(300,1000) > 1
+assert brix_to_refractive_index(95) > brix_to_refractive_index(85)
+optical_data = ElectroOpticalDatabase(sys.argv[1] + '.external-data')
+assert len(optical_data.catalog) == 7 and optical_data.loaded_sources == ()
+for filename, rows in (
+    ('Electrolytes/Permittivity (Dielectric Constant) of Liquids.tsv', (
+        ('CAS','Chemical','T','Permittivity','A','B','C','D','Tmin','Tmax'),
+        ('64-17-5','Synthetic','300','25','55','-.1','','','280','350'))),
+    ('Misc/CRC Handbook Organic RI.csv', (
+        ('CAS','RI','RIT'),('64-17-5','1.3611','293.15'))),
+):
+    path = Path(sys.argv[1] + '.external-data') / filename
+    path.parent.mkdir(parents=True,exist_ok=True)
+    path.write_text(chr(10).join(chr(9).join(row) for row in rows),encoding='utf8')
+for method, prop, temperature in (
+    ('CRC_PERMITTIVITY','relative_permittivity',300),
+    ('CRC_RI','refractive_index',293.15),
+):
+    card = optical_data.property_input('64-17-5',
+        ComponentSpec('packed-ethanol','C2H6O',cas_number='64-17-5'),
+        method=method,source_point=(method=='CRC_RI'))
+    card = PropertyInputCard.from_dict(json.loads(json.dumps(card.to_dict())))
+    result = card.package.evaluate(prop,temperature_K=temperature)
+    if prop == 'relative_permittivity':
+        assert parallel_plate_capacitance(result,area_m2=.01,separation_m=.001).value > 0
+    else:
+        assert brix_reading(result).quantity().to('degBx').value > 0
+from chemworld.physchem import (
+    henry_convert, henry_pressure, henry_pressure_mixture, henry_raoult_flash,
+    HansenParameters, hansen_distance, solid_solubility,
+)
+from chemworld.physchem.specs import MixtureSpec, PropertyCorrelation
+from chemworld.physchem.property_reports import PropertyEvaluation
+assert henry_convert(101325, 'SI', 'KHpx') == 1
+assert henry_convert(2, 'Hbp', 'mol/(kg*atm)') == 2
+assert abs(henry_pressure(300, 15, 300, .04, .001, 100, .00001)-37105004.47898146) < 1e-7
+assert 0 < solid_solubility(300,350,12000) < 1
+hansen_path = Path(sys.argv[1] + '.external-data') / 'Misc/hspipy_hansen_solubility_parameters.tsv'
+hansen_path.parent.mkdir(parents=True,exist_ok=True)
+hansen_path.write_text(chr(10).join((
+    chr(9).join(('CAS','HANSEN_DELTA_D','HANSEN_DELTA_P','HANSEN_DELTA_H')),
+    chr(9).join(('64-17-5','15000','8000','19000')),
+    chr(9).join(('71-36-3','16000','6000','16000')),
+)),encoding='utf8')
+hansen_vectors = [HansenParameters.from_record(r) for r in constants.records('HSPIPY_HANSEN')]
+hansen_vectors = [HansenParameters.from_dict(json.loads(json.dumps(v.to_dict())))
+                  for v in hansen_vectors]
+assert 4000 < hansen_distance(*hansen_vectors).value < 4200
+packed_henry = PropertyCorrelation('synthetic-gas-in-water','henry_pressure',
+    {'A':12.206072645530174},{'temperature':'K'},'Pa','henry_pressure',
+    {'temperature':(250,400)},'Synthetic source',{'solvent_id':'water'})
+packed_henry = PropertyCorrelation.from_dict(json.loads(json.dumps(packed_henry.to_dict())))
+packed_h = evaluate_correlation(packed_henry,temperature_K=300)
+packed_mixture = MixtureSpec.from_mole_fractions((ComponentSpec('water','H2O'),
+    ComponentSpec('gas','CO2')),(.7,.3),phase_label='liquid',temperature_K=300,pressure_Pa=50000)
+packed_flash = henry_raoult_flash(packed_mixture,henry_evaluations={'gas':packed_h},
+    solvent_vapor_pressures={'water':PropertyEvaluation('vapor_pressure','synthetic','constant',
+        20000,'Pa',{'temperature':300})})
+assert 0 < packed_flash.vapor_fraction < 1
+for identity,z in zip(packed_mixture.component_ids,packed_mixture.mole_fractions):
+    assert abs((1-packed_flash.vapor_fraction)*packed_flash.liquid_composition[identity]
+        +packed_flash.vapor_fraction*packed_flash.vapor_composition[identity]-z) < 1e-9
+assert dimension_definition('parachor').vector.mass == .25
+assert unmapped_supported_unit_dimensions() == ()
+cp = PropertyCorrelation('packed-cp', 'poling_cp', dict(a=4, b=0, c=0, d=0, e=0),
+    {'temperature': 'K'}, 'J/(mol*K)', 'ideal_gas_heat_capacity',
+    {'temperature': (200, 600)}, 'Synthetic packaged formula')
+curve = PiecewiseHeatCapacity('packed-ranges', (cp,), 'Synthetic packaged caloric input')
+root = temperature_from_caloric_change(curve, 4*8.31446261815324*100,
+    reference_temperature_K=300)
+assert abs(root-400) < 1e-8
+assert vibrational_temperature(667) > 900
+caloric = CaloricDatabase(sys.argv[1] + '.external-data')
+assert len(caloric.catalog) == 21 and caloric.loaded_sources == ()
+assert balance_stoichiometry(stoichiometric_matrix(
+    [{'H': 2}, {'O': 2}, {'H': 2, 'O': 1}], [True, True, False])) == (2, 1, 2)
+thermo = CorrelationSpeciesThermo('packed', curve,
+    CaloricReference(phase='gas', energy_J_mol=-1000, entropy_J_mol_K=100))
+assert thermo.evaluate(400).enthalpy_J_mol > -1000
+tdb = TdbDatabase.from_string('FUNCTION F 100 42; 1000 N !', source=InputSource(
+    DataSourceProvenance('packed-tdb', 0, 'Synthetic packaged TDB', '1', 'CC0-1.0'),
+    'synthetic'))
+assert tdb.evaluate_function('F', 300) == 42
+assert TdbDatabase.from_dict(tdb.to_dict()).to_dict() == tdb.to_dict()
+from chemworld.physchem.calphad import CefPhaseModel
+cef_input = TdbDatabase.from_string(chr(10).join([
+    'ELEMENT FE BCC_A2 55.845 0 0 !', 'TYPE_DEF % SEQ * !',
+    'PHASE ALPHA % 1 1 !', 'CONSTITUENT ALPHA :FE: !',
+    'PARAMETER G(ALPHA,FE;0) 100 1000+T; 1000 N !',
+]), source=tdb.source)
+cef = CefPhaseModel(cef_input, 'ALPHA')
+assert cef.evaluate([{'FE': 1}], 500).enthalpy_J_mol == 1000
+assert CefPhaseModel.from_dict(cef.to_dict()).to_dict() == cef.to_dict()
+from chemworld.data import ChemSageDatabase
+cs_text = chr(10).join(('Synthetic packaged ChemSage Cp', '1 1 0 1', 'FE', '55.845',
+    '6 1 2 3 4 5 6', '1 1', 'ALPHA', '10 1 1', '1234 32.1',
+    '1800 30 0 0 0', '1 .3 .5'))+chr(10)
+cs_input = ChemSageDatabase.from_string(cs_text, source=tdb.source)
+cs_model = CefPhaseModel(cs_input, 'ALPHA')
+assert abs(cs_model.temperature_response([{'FE': 1}], 600
+    ).fixed_constitution_heat_capacity_J_mol_K-(30+.3*600**.5)) < 1e-9
+assert CefPhaseModel.from_dict(cs_model.to_dict()).database.text == cs_text
+from chemworld.physchem import MQMQAPhaseModel
+mq_text = chr(10).join(('Synthetic packaged MQMQA', '2 2 0 1 0', 'FE O', '55.845 15.999',
+    '6 1 2 3 4 5 6', '1 1', 'SLAG', 'SUBQ', '1 1', 'FEO', '1 1 1 1',
+    '1800 0 0 -60 0 0 0', '1 1 0 0 0', '2.4', '1 1', 'FE', 'O', '2', '1',
+    '2', '1', '1', '1', '1 1 2 2 4 4 4 4', '0'))+chr(10)
+mq_input = ChemSageDatabase.from_string(mq_text, source=InputSource(DataSourceProvenance(
+    'packed-mqmqa', 0, 'Synthetic packaged MQMQA', '1', 'CC0-1.0'), 'synthetic'))
+mq_model = MQMQAPhaseModel(mq_input, 'SLAG')
+assert abs(mq_model.temperature_response([{'Q1_1_2_2': 1}], 600
+    ).fixed_constitution_heat_capacity_J_mol_K-30) < 1e-9
+assert MQMQAPhaseModel.from_dict(mq_model.to_dict()).database.text == mq_text
+assert cef.temperature_response([{'FE': 1}], 500).fixed_constitution_heat_capacity_J_mol_K == 0
+response = cef.derivatives([{'FE': 1}], 500)
+assert response.hessian.shape == (4, 3, 3)
+mu = cef.chemical_potentials([{'FE': 1}], 500)
+assert mu.status == 'determined' and abs(mu.values_J_mol['FE']-1500) < 1e-8
+constitution = cef.stationary_constitution({'FE': 1}, [{'FE': 1}], 500)
+assert constitution.success and abs(constitution.relaxed_heat_capacity_J_mol_K) < 1e-9
+from chemworld.physchem import CefMaterialSpec
+from chemworld.world.solid_world import calphad_world_spec
+from chemworld.runtime import ChemWorldRuntime
+cs_material = CefMaterialSpec(cs_model, ({'FE': 1},), 500, 700, 600, .01)
+cs_world = calphad_world_spec(cs_material,
+    element_amounts_mol={'FE': .001}, temperature_K=600)
+cs_runtime = ChemWorldRuntime(composition=cs_world)
+cs_runtime.reset(seed=40)
+cs_runtime = ChemWorldRuntime.from_snapshot(cs_runtime.snapshot())
+cs_result = cs_runtime.execute({'operation': 'heat', 'target_temperature_K': 610,
+    'duration_s': 1})
+assert cs_result.info['transaction_status'] == 'committed'
+assert 600 < cs_runtime._state.temperature_K < 610
+mq_material = CefMaterialSpec(mq_model, ({'Q1_1_2_2': 1},), 500, 700, 600, .01,
+    phase_type='liquid')
+mq_world = calphad_world_spec(mq_material,
+    element_amounts_mol={'FE': .0005, 'O': .0005}, temperature_K=600)
+mq_runtime = ChemWorldRuntime(composition=mq_world)
+mq_runtime.reset(seed=40)
+mq_runtime = ChemWorldRuntime.from_snapshot(mq_runtime.snapshot())
+mq_step = mq_runtime.execute({'operation': 'heat', 'target_temperature_K': 610, 'duration_s': 1})
+assert mq_step.info['transaction_status'] == 'committed', mq_step.info
+assert 600 < mq_runtime._state.temperature_K < 610
+from chemworld.runtime.solid_solutions import solid_enthalpy
+packed_material = CefMaterialSpec(cef, ({'FE': 1},), 400, 800, 500, .01)
+packed_world = calphad_world_spec(packed_material,
+    element_amounts_mol={'FE': .001}, temperature_K=500)
+packed_runtime = ChemWorldRuntime(composition=packed_world)
+packed_runtime.reset(seed=40)
+packed_before_H = solid_enthalpy(packed_runtime._state, packed_material)
+packed_step = packed_runtime.execute(
+    {'operation': 'heat', 'target_temperature_K': 510, 'duration_s': 1})
+assert packed_step.info['transaction_status'] == 'committed', packed_step.info
+assert packed_runtime._state.species_amounts == {'FE': .001}
+assert abs(solid_enthalpy(packed_runtime._state, packed_material) - packed_before_H
+    - packed_runtime._state.ledger.energy_jacket_J) < 1e-7
+assert ChemWorldRuntime.from_snapshot(packed_runtime.snapshot())._state.to_dict() == (
+    packed_runtime._state.to_dict())
+pressure_data = PressureDatabase(sys.argv[1] + '.external-data')
+assert len(pressure_data.catalog) == 10 and pressure_data.loaded_sources == ()
+pressure = PropertyCorrelation('packed-pressure', 'wagner25',
+    dict(Tc=600, Pc=3e6, a=-7, b=1, c=-1, d=-2), {'temperature': 'K'}, 'Pa',
+    'vapor_pressure', {'temperature': (250, 600)}, 'Synthetic packaged pressure input')
+assert vapor_pressure_temperature_derivative(pressure, temperature_K=350, order=2).valid
+jacobian = vapor_pressure_parameter_jacobian(pressure, (350,), parameters=('a', 'b'))
+assert len(jacobian.values[0]) == 2
+assert abs(water_saturation_temperature(water_saturation_pressure(373.15))-373.15) < 2e-8
+phase_data = PhaseChangeDatabase(sys.argv[1] + '.external-data')
+assert len(phase_data.catalog) == 10 and phase_data.loaded_sources == ()
+latent = PropertyCorrelation('packed-latent', 'velasco_hvap', dict(Tc=600, omega=.2),
+    {'temperature': 'K'}, 'J/mol', 'heat_of_vaporization')
+assert evaluate_correlation(latent, temperature_K=350).value > 0
+assert boiling_vaporization_enthalpy(method='Chen', boiling_temperature_K=300,
+    critical_temperature_K=600, critical_pressure_Pa=3e6) > 0
+assert abs(watson_exponent(temperature_1_K=300, temperature_2_K=400,
+    enthalpy_1_J_mol=30000, enthalpy_2_J_mol=30000*(2/3)**.38,
+    critical_temperature_K=600)-.38) < 1e-12
+from chemworld.physchem import (
+    CriticalEstimate, ComponentSpec, estimate_critical_property,
+    eos_component_from_critical_inputs, mixture_critical_property,
+)
+from chemworld.data.scientific_inputs import InputValue
+packed_component = ComponentSpec('packed-decane', 'C10H22')
+packed_Tc = estimate_critical_property(packed_component, method='Tb_Tc_relationship',
+    parameters={'Tb': 447.3, 'fit': 'Perry8E'})
+packed_Vc = estimate_critical_property(packed_component, method='Mersmann_Kind', parameters={})
+packed_Pc = estimate_critical_property(packed_component, method='Ihmels',
+    parameters={'Tc': packed_Tc, 'Vc': packed_Vc})
+assert CriticalEstimate.from_dict(packed_Tc.to_dict()) == packed_Tc
+assert eos_component_from_critical_inputs(packed_component, Tc=packed_Tc, Pc=packed_Pc,
+    omega=InputValue(.2, 'dimensionless', None, 'Explicit synthetic packed input')
+    ).critical_pressure_Pa > 0
+assert mixture_critical_property('Li', (.5, .5), Tcs=(400, 500), Vcs=(.0002, .0002)) == 450
+from chemworld.physchem import LennardJonesSpec, lennard_jones_collision_integral
+from chemworld.data.lennard_jones import LennardJonesDatabase
+assert len(LennardJonesDatabase(sys.argv[1] + '.external-data').catalog) == 2
+packed_lj = LennardJonesSpec('packed-decane', 300, 5e-10, 'Synthetic packaged LJ parameters')
+packed_viscosity = packed_lj.viscosity_correlation(packed_component,
+    collision_method='Kim_Monroe', temperature_range_K=(200, 1000))
+assert evaluate_correlation(packed_viscosity, temperature_K=500).value > 0
+assert lennard_jones_collision_integral(99, method='Neufeld_Janzen_Aziz', l=1, s=7) > 0
+assert 'chemicals' not in sys.modules and 'periodictable' not in sys.modules
+from chemworld.data import SBMLModel
+sbml_text = '''<sbml xmlns="http://www.sbml.org/sbml/level3/version2/core" level="3"
+version="2"><model timeUnits="second" substanceUnits="mole" volumeUnits="litre">
+<listOfParameters><parameter id="x" value="2" units="dimensionless" constant="true"/>
+<parameter id="y" units="dimensionless" constant="false"/></listOfParameters><listOfRules>
+<assignmentRule variable="y"><math xmlns="http://www.w3.org/1998/Math/MathML"><apply>
+<power/><ci>x</ci><cn>3</cn></apply></math></assignmentRule></listOfRules></model></sbml>'''
+sbml_source = InputSource(DataSourceProvenance('packaged-sbml', 0,
+    'Self-authored packaged declarative model', '1', 'CC0-1.0'), 'synthetic')
+sbml_model = SBMLModel(sbml_text, sbml_source)
+sbml_rule = sbml_model.declaration.items('listOfRules')[0].mathematics
+assert sbml_rule.evaluate({'x': 2.}) == 8.
+assert SBMLModel.from_dict(sbml_model.to_dict()).to_xml() == sbml_text
+assert sbml_model.model_unit('volumeUnits').volume_l(.1) == .1
+from chemworld.physchem.sbml_kinetics import SBMLKinetics
+sbml_equations = SBMLKinetics(sbml_model)
+assert dict(sbml_equations.initial_values) == {}
+assert sbml_equations.context({}, 0)['y'] == 8.
+from chemworld.physchem.coordinate_hybrid import CoordinateHybridMemory, advance_coordinate_events
+from chemworld.physchem.coupled_system import CoupledState
+from chemworld.physchem.sbml_events import SBMLTriggerRoots, sbml_coordinate_events
+from chemworld.physchem.sbml_kinetics import sbml_continuous_system
+packed_event_xml = sbml_text.replace('</listOfParameters>', '''<parameter id="z" value="0"
+constant="false" units="dimensionless"/></listOfParameters>''').replace('</model>', '''
+<listOfEvents><event id="queued" useValuesFromTriggerTime="true"><trigger initialValue="false"
+persistent="true"><math xmlns="http://www.w3.org/1998/Math/MathML"><true/></math></trigger>
+<delay><math xmlns="http://www.w3.org/1998/Math/MathML"><cn>0.2</cn></math></delay>
+<listOfEventAssignments><eventAssignment variable="z"><math
+xmlns="http://www.w3.org/1998/Math/MathML"><cn>3</cn></math></eventAssignment>
+</listOfEventAssignments></event></listOfEvents></model>''')
+packed_frame = SBMLKinetics(SBMLModel(packed_event_xml, sbml_source))
+packed_events = sbml_coordinate_events(packed_frame)
+packed_roots = SBMLTriggerRoots(packed_frame)
+packed_continuous = sbml_continuous_system(packed_frame)
+packed_before = advance_coordinate_events(packed_continuous,
+    CoupledState({}, 298.15, 1., coordinates=packed_frame.initial_values), .1,
+    CoordinateHybridMemory.initialize(packed_events), packed_events,
+    roots=packed_roots.roots, trigger_values=packed_roots.trigger_values)
+assert len(packed_before.memory.events.pending) == 1
+packed_resume = CoordinateHybridMemory.from_dict(json.loads(json.dumps(
+    packed_before.memory.to_dict(), allow_nan=False)))
+packed_after = advance_coordinate_events(packed_continuous, packed_before.final_state, .1,
+    packed_resume, packed_events, roots=packed_roots.roots,
+    trigger_values=packed_roots.trigger_values)
+assert packed_after.final_state.coordinates['P:z'] == 3.
+assert packed_after.memory.events.pending == () and len(packed_after.events) == 1
+from chemworld.world.sbml_world import sbml_world
+from chemworld.physchem.sbml_system import SBMLObservable, parameter_observable
+from chemworld.runtime import ChemWorldRuntime
+from chemworld.runtime.sbml_models import model_record
+packed_world_xml = packed_event_xml.replace('<listOfParameters>', '''<listOfCompartments>
+<compartment id="cell" size="1" spatialDimensions="3" units="litre" constant="true"/>
+</listOfCompartments><listOfParameters>''')
+packed_source_model = SBMLModel(packed_world_xml,sbml_source)
+packed_native = ChemWorldRuntime(composition=sbml_world(packed_source_model,
+    maximum_step_s=.02, controlled_parameters=('x',), readout_relative_sd=0.,
+    observables=(SBMLObservable('volume','cell'),parameter_observable(packed_source_model,'x'))))
+packed_native.reset(seed=3)
+assert packed_native.execute({'operation':'wait','duration_s':.1}).info[
+    'operation_outcome']=='success'
+assert len(model_record(packed_native._state).settings['continuation']['events']['pending']) == 1
+assert packed_native.execute({'operation':'set_model_parameters','values':{'x':4.}}).info[
+    'operation_outcome']=='success'
+packed_native = ChemWorldRuntime.from_snapshot(json.loads(json.dumps(
+    packed_native.snapshot().to_dict(),allow_nan=False)))
+assert packed_native.execute({'operation':'wait','duration_s':.1}).info[
+    'operation_outcome']=='success'
+assert model_record(packed_native._state).settings['coordinates']['P:z'] == 3.
+assert packed_native.execute({'operation':'measure','instrument':'formal_quantity_meter'}).info[
+    'operation_outcome']=='success'
+assert packed_native.observe().channels[0].unit == 'L'
+assert packed_native.observe().channels[1].unit == 'dimensionless'
+assert packed_native.observe().channels[1].value == 4.
+assert 'coordinates' not in packed_native._state.to_dict(include_hidden=False)['equipment'][
+    'formal_model']['settings']
+from chemworld.data.sedml_declarations import SEDMLDocument
+from chemworld.data.sedml_models import resolve_models
+from chemworld.data.sedml_simulations import resolve_simulations
+from chemworld.data.combine_archive import ArchiveEntry, CombineArchive, COMBINE_URI
+packed_sedml_text = '''<sedML xmlns="http://sed-ml.org/sed-ml/level1/version4"
+level="1" version="4" xmlns:s="http://www.sbml.org/sbml/level3/version2/core">
+<listOfModels><model id="base" language="urn:sedml:language:sbml" source="model.xml"/>
+<model id="derived" language="urn:sedml:language:sbml" source="#base"><listOfChanges>
+<changeAttribute target="/s:sbml/s:model/s:listOfParameters/s:parameter[@id='x']/@value"
+newValue="3"/></listOfChanges></model></listOfModels><listOfSimulations>
+<uniformTimeCourse id="course" initialTime="0" outputStartTime="0" outputEndTime="0.4"
+numberOfSteps="2"><algorithm kisaoID="KISAO:0000288"><listOfAlgorithmParameters>
+<algorithmParameter kisaoID="KISAO:0000467" value="0.02"/></listOfAlgorithmParameters>
+</algorithm></uniformTimeCourse></listOfSimulations><listOfTasks>
+<task id="task" modelReference="derived" simulationReference="course"/></listOfTasks></sedML>'''
+packed_sedml = SEDMLDocument(packed_sedml_text, sbml_source)
+packed_models = resolve_models(packed_sedml, {'model.xml':SBMLModel(packed_world_xml,sbml_source)})
+packed_derived = SBMLKinetics(packed_models['derived'])
+assert packed_derived.context(packed_derived.initial_values,0.)['y'] == 27.
+assert resolve_simulations(packed_sedml)['course'].source_times == (0.,.2,.4)
+packed_archive = CombineArchive((
+    ArchiveEntry('model.xml',COMBINE_URI+'sbml',packed_world_xml.encode('utf-8')),
+    ArchiveEntry('experiment.sedml',COMBINE_URI+'sed-ml',packed_sedml_text.encode('utf-8'),True),
+),sbml_source)
+packed_archive = CombineArchive.from_bytes(packed_archive.to_bytes(),source=sbml_source)
+assert packed_archive.document().to_xml() == packed_sedml_text
+assert packed_archive.entry('model.xml').data.decode('utf-8') == packed_world_xml
+from chemworld.world.sedml_protocol import SEDMLProtocol
+from chemworld.data.sedml_reports import SEDMLArray
+packed_scan = '''<repeatedTask id="scan" range="grid" resetModel="true" concatenate="false">
+<listOfRanges><vectorRange id="grid"><value>2</value><value>4</value></vectorRange></listOfRanges>
+<listOfChanges><setValue modelReference="derived" range="grid"
+target="/s:sbml/s:model/s:listOfParameters/s:parameter[@id='x']/@value"><math
+xmlns="http://www.w3.org/1998/Math/MathML"><ci>grid</ci></math></setValue></listOfChanges>
+<listOfSubTasks><subTask task="task"/></listOfSubTasks></repeatedTask>'''
+packed_outputs = '''<listOfDataGenerators><dataGenerator id="read_x"><listOfVariables>
+<variable id="vx" taskReference="scan"
+target="/s:sbml/s:model/s:listOfParameters/s:parameter[@id='x']"/></listOfVariables>
+<math xmlns="http://www.w3.org/1998/Math/MathML"><ci>vx</ci></math></dataGenerator>
+</listOfDataGenerators><listOfOutputs><report id="report"><listOfDataSets>
+<dataSet id="column" label="x" dataReference="read_x"/></listOfDataSets></report></listOfOutputs>'''
+packed_protocol_text = packed_sedml_text.replace('</listOfTasks>',packed_scan+'</listOfTasks>'
+    ).replace('</sedML>',packed_outputs+'</sedML>')
+packed_plan = SEDMLProtocol(SEDMLDocument(packed_protocol_text,sbml_source),
+    {'model.xml':SBMLModel(packed_world_xml,sbml_source)})
+packed_plan = SEDMLProtocol.from_dict(json.loads(json.dumps(packed_plan.to_dict(),allow_nan=False)))
+assert packed_plan.tasks.invocations['scan'] == 2 and packed_plan.tasks.samples['scan'] == 6
+assert packed_plan.worlds['derived'].physics.models_of('sbml')[
+    'formal_workspace'].controlled_parameters == ('x',)
+packed_x = SEDMLArray((2.,2.,2.,4.,4.,4.),(2,3),('scan:grid','time'),
+    tuple((i,t) for i in range(2) for t in (0.,.2,.4)),'dimensionless')
+assert packed_plan.reports.evaluate({('read_x','vx'):packed_x})['report'][0]['data'] == (
+    packed_x.to_dict())
+from chemworld.eval.sedml_experiment import run_sedml_experiment
+packed_experiment = run_sedml_experiment(packed_plan,seed=5)
+assert packed_experiment.reports['report'][0]['data']['values'] == list(packed_x.values)
+assert packed_experiment.reports['report'][0]['data']['shape'] == [2,3]
+assert all(record.info['operation_outcome']=='success' for record in packed_experiment.history)
+assert ChemWorldRuntime.from_snapshot(packed_experiment.snapshots['scan']['derived']).lab_status()[
+    'time_s']==.4
+assert all(name not in sys.modules for name in ('COPASI', 'libsbml', 'mpmath'))
+assert 'pycalphad' not in sys.modules
+from chemworld.physchem.battery_models import BatterySPMSpec, ParticleSpec
+from chemworld.physchem.battery_dfn import BatteryDFNSpec
+from chemworld.physchem.battery_electrolyte import BatteryElectrolyteSpec
+from chemworld.physchem.battery_impedance import battery_impedance
+from chemworld.physchem.battery_materials import ElectrodeOCV
+from chemworld.physchem import soh_from_battery, battery_spec_at_soc, soh_spec_from_dict
+from dataclasses import replace
+packed_soh_cell = BatterySPMSpec(minimum_voltage_V=3.38, maximum_voltage_V=3.92)
+packed_soh_state = packed_soh_cell.initial_state()
+packed_soh = soh_from_battery(packed_soh_cell, packed_soh_state)
+assert packed_soh.status == 'unique'
+assert soh_spec_from_dict(json.loads(json.dumps(packed_soh.spec.to_dict()))) == packed_soh.spec
+assert abs(packed_soh.theoretical_energy_j() - packed_soh.branch()['cell_capacity_C']*3.65) < 1e-8
+assert abs(battery_spec_at_soc(packed_soh_cell, packed_soh, .5).initial_negative_fraction-.5
+    ) < 1e-10
+assert packed_soh_state == packed_soh_cell.initial_state()
+assert packed_soh.soc_at_voltage(3.65).status == 'unique'
+from chemworld.physchem import BatteryMPMSpec, ParticleSizeDistribution, mpm_fields
+from chemworld.physchem.battery_models import advance_battery, battery_spec_from_dict
+from chemworld.physchem.reactor_shared import ScalarControlProgram
+packed_psd = ParticleSizeDistribution((5e-6,15e-6),(.5,.5),sbml_source)
+packed_mpm = BatteryMPMSpec(negative=ParticleSpec(cells=4),positive=ParticleSpec(cells=4),
+    negative_distribution=packed_psd, positive_distribution=packed_psd)
+assert battery_spec_from_dict(json.loads(json.dumps(packed_mpm.to_dict()))) == packed_mpm
+packed_mpm_fields = mpm_fields(packed_mpm, packed_mpm.initial_state(), current_A=.2)
+assert max(abs(x) for x in packed_mpm_fields['bv_residual_V']) < 1e-10
+packed_mpm_step = advance_battery(packed_mpm, packed_mpm.initial_state(),
+    ScalarControlProgram(((0.,.2),),'A'), .1)
+assert packed_mpm_step.outcome == 'success'
+assert abs(packed_mpm_step.final_state.coordinates['discharged_charge_C']-.02) < 1e-8
+from chemworld.physchem import TheveninSpec, TabulatedScalar, thevenin_system, thevenin_fields
+from chemworld.physchem.battery_thevenin import CONSTANT_UNITS
+from chemworld.data.scientific_inputs import (
+    InputValue, QuantityColumn, ScientificRow, ScientificTable,
+)
+def packed_constant(identity, value, unit):
+    table = ScientificTable(identity, 'parameters',
+        (QuantityColumn('value',unit,'parameter',(-1e9,1e9),'Synthetic package fixture'),),
+        (sbml_source,), (ScientificRow('value',sbml_source.provenance.source_id,
+        'model','constants','parameters',
+        {'value':InputValue(value,unit,None,'Uncertainty not supplied')}),))
+    return TabulatedScalar(table,(),'value',unit)
+packed_ecm_values = dict(capacity_C=100., maximum_current_A=1., minimum_voltage_V=.1,
+    maximum_voltage_V=5., initial_soc=.7, minimum_soc=0., maximum_soc=1.,
+    initial_cell_temperature_K=298.15, initial_jig_temperature_K=298.15,
+    minimum_temperature_K=250., maximum_temperature_K=400., cell_heat_capacity_J_K=100.,
+    jig_heat_capacity_J_K=500., cell_jig_conductance_W_K=.5,
+    jig_ambient_conductance_W_K=.2, reference_frame_temperature_K=298.15, housing_volume_L=.01)
+packed_ecm_parameters = ScientificTable('packed-ecm', 'parameters', tuple(
+    QuantityColumn(key,unit,'parameter',(-1e9,1e9),'Synthetic package fixture')
+    for key,unit in CONSTANT_UNITS.items()), (sbml_source,),
+    (ScientificRow('cell',sbml_source.provenance.source_id,'model','constants','parameters',
+    {key:InputValue(value,CONSTANT_UNITS[key],None,'Uncertainty not supplied')
+    for key,value in packed_ecm_values.items()}),))
+packed_ecm = TheveninSpec(packed_ecm_parameters,'cell',packed_constant('ocv',3.7,'V'),
+    packed_constant('r0',.1,'Ohm'),(),packed_constant('entropy',0.,'V/K'),
+    ScalarControlProgram(((0.,298.15),),'K'))
+packed_ecm = TheveninSpec.from_dict(json.loads(json.dumps(packed_ecm.to_dict(),allow_nan=False)))
+packed_ecm_control = ScalarControlProgram(((0.,.2),),'A')
+packed_ecm_step = thevenin_system(packed_ecm,packed_ecm_control).advance(
+    packed_ecm.initial_state(),.1)
+assert packed_ecm_step.outcome == 'success'
+assert abs(packed_ecm_step.final_state.coordinates['thevenin:soc']-.6998) < 1e-9
+assert abs(thevenin_fields(packed_ecm,packed_ecm_step.final_state,
+    packed_ecm_control)['voltage_V']-3.68) < 1e-9
+assert packed_ecm_step.energy_balance_residual_J is None
+packed_ocv = ElectrodeOCV('packaged-electrode', sbml_source, (.2,-.1),
+    tanh_terms=((-0.02,5.,.4),))
+assert ElectrodeOCV.from_dict(packed_ocv.to_dict()) == packed_ocv
+packed_particles = dict(negative=ParticleSpec(cells=8), positive=ParticleSpec(cells=8))
+packed_electrolyte = BatteryElectrolyteSpec(cells=(3,2,3))
+for packed_cell in (
+    BatterySPMSpec(**packed_particles, negative_ocv=packed_ocv),
+    BatterySPMSpec(**packed_particles, electrolyte=packed_electrolyte),
+    BatteryDFNSpec(**packed_particles, electrolyte=packed_electrolyte),
+):
+    packed_cell_state = packed_cell.initial_state()
+    packed_spectrum = battery_impedance(packed_cell, [.001,.01], state=packed_cell_state)
+    assert packed_spectrum.success
+    assert all(z.real > 0 and z.imag < 0 for z in packed_spectrum.impedance_ohm)
+    assert packed_cell_state == packed_cell.initial_state()
+    assert json.loads(json.dumps(packed_spectrum.to_dict(), allow_nan=False))['unit'] == 'ohm'
+assert 'pybamm' not in sys.modules
+print('packaged atomic resources OK')
+"""
+    probe = tmp_path / "isolated_wheel_probe.py"
+    probe.write_text(program, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-I", str(probe), str(wheel)],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "packaged atomic resources OK" in result.stdout

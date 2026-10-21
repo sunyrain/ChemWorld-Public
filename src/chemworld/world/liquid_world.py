@@ -42,7 +42,7 @@ def liquid_world_spec(model, components):
                  "parameters": {"instruments": ["phase_state"]}}))
     physics = CompositionPhysics(network, states,
         feed_sources={model.wash_feed_id: "wash_supply"},
-        liquid_models={"reactor": model, "receiver": model})
+        models={"liquid": {"reactor": model, "receiver": model}})
     return WorldCompositionSpec.from_dict({
         "schema_version": "chemworld-world-composition-0.1", "composition_id": "finite-liquid",
         "components": declarations, "vessels": [{"id": name, "capacity_L": .1} for name in states],

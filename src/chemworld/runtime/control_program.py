@@ -146,6 +146,20 @@ def queue_electrical_stage(state, action):
     return _store_electrical(state, settings)
 
 
+def electrical_control_error(state, action):
+    """Validate through the same pure candidate builder used by execution."""
+    try:
+        builder = (
+            queue_electrical_stage
+            if action["operation"] == "queue_electrical_stage"
+            else configure_electrical_control
+        )
+        builder(state, action)
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        return str(exc)
+    return None
+
+
 def advance_electrical_program(state, action, advance):
     """Drive the common interval loop with one selected physical strategy."""
     settings = dict(electrical_device(state).settings["electrical_control"])

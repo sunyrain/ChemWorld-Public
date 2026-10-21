@@ -8,23 +8,23 @@ from dataclasses import replace
 from math import isclose, isfinite
 
 from chemworld.foundation import species_with_added_initial_amounts
+from chemworld.foundation.balances import MaterialPacket
 from chemworld.foundation.solvents import SolventInventory
 from chemworld.foundation.state_ledgers import PhaseLedger, ProcessLedger
-from chemworld.foundation.state_ownership import StateSlots
 from chemworld.runtime.thermal_material_routing import _energy, _set_energy
 
 
 def background_model(state, physics):
     if physics is None:
         return None
-    model = physics.thermal_models.get(state.vessel_id)
+    model = physics.models_of("thermal").get(state.vessel_id)
     return model if model is not None and model.condensed_background is not None else None
 
 
 def source_models(physics, source_id):
     return [
         m
-        for m in physics.thermal_models.values()
+        for m in physics.models_of("thermal").values()
         if m.condensed_background is not None
         and m.condensed_background.source_vessel_id == source_id
     ]
@@ -44,7 +44,7 @@ def background_source_energy(state, physics):
 
 def validate_background_sources(physics, composition):
     declared = set()
-    for target_id, model in physics.thermal_models.items():
+    for target_id, model in physics.models_of("thermal").items():
         bg = model.condensed_background
         if bg is None or bg.source_vessel_id is None:
             continue
@@ -59,11 +59,11 @@ def validate_background_sources(physics, composition):
             or source.state_slots.slots
             or name
             in (
-                physics.thermal_models.keys()
-                | physics.flash_models.keys()
-                | physics.liquid_models.keys()
-                | physics.column_models.keys()
-                | physics.concentration_models.keys()
+                physics.models_of("thermal").keys()
+                | physics.models_of("flash").keys()
+                | physics.models_of("liquid").keys()
+                | physics.models_of("column").keys()
+                | physics.models_of("concentration").keys()
             )
             or any(
                 c.vessel == name and composition.modules.components()[c.kind].processes
@@ -250,22 +250,13 @@ def exchange_condensed_packet(source, target, physics, amounts, *, fraction, fix
         or target.volume_L + volume > target.vessels.vessels[target.vessel_id].max_volume_L
     ):
         raise ValueError("liquid packet leaves its finite source or receiving volume domain")
-    moved = source.state_slots.material().portion(fraction, target.vessel_id)
-    moved = StateSlots(
-        tuple(
-            replace(slot, spec=replace(slot.spec, phase_id=target_phase.phase_id))
-            for slot in moved.slots
-        )
+    source_slots, moved = source.state_slots.split_material(
+        fraction, source.vessel_id, target.vessel_id,
+        destination_phase_id=target_phase.phase_id,
     )
-    source_slots = StateSlots(
-        (
-            *source.state_slots.stationary().slots,
-            *source.state_slots.material().portion(1 - fraction, source.vessel_id).slots,
-        )
-    )
-    target_slots = StateSlots(
-        (*target.state_slots.stationary().slots, *target.state_slots.material().merge(moved).slots)
-    )
+    target_slots = target.state_slots.receive_material(moved)
+    packet = MaterialPacket(source.vessel_id, target.vessel_id, tuple(amounts.items()))
+    source_amounts, target_amounts = packet.apply(source.species_amounts, target.species_amounts)
     thermal = target_model.thermodynamics
     fluid_energy = sum(
         n * thermal.species_energy_j_mol(k, source.temperature_K) for k, n in amounts.items()
@@ -285,7 +276,7 @@ def exchange_condensed_packet(source, target, physics, amounts, *, fraction, fix
     source_candidate = _set_energy(
         _install(
             source,
-            {k: n - amounts[k] for k, n in source.species_amounts.items()},
+            source_amounts,
             source_slots,
             source.volume_L - volume,
             source_phase.solvents.scale(1 - fraction),
@@ -296,7 +287,7 @@ def exchange_condensed_packet(source, target, physics, amounts, *, fraction, fix
     target_candidate = _set_energy(
         _install(
             target,
-            {k: n + amounts[k] for k, n in target.species_amounts.items()},
+            target_amounts,
             target_slots,
             target.volume_L + volume,
             target_phase.solvents + source_phase.solvents.scale(fraction),
@@ -324,9 +315,7 @@ def exchange_condensed_packet(source, target, physics, amounts, *, fraction, fix
     if max(map(abs, residuals)) > 1e-6:
         raise ValueError("finite liquid packet failed its source/receiver energy balance")
     receipt = {
-        "source": source.vessel_id,
-        "destination": target.vessel_id,
-        "amounts_mol": dict(amounts),
+        **packet.to_dict(),
         "volume_L": volume,
         "inlet_temperature_K": source.temperature_K,
         "solute_energy_J": fluid_energy,
@@ -340,7 +329,7 @@ def exchange_condensed_packet(source, target, physics, amounts, *, fraction, fix
     return source_candidate, target_candidate, receipt
 
 
-def reconcile_condensed_initialization(previous, fresh, transition, physics):
+def reconcile_thermal_initialization(previous, fresh, transition, physics):
     """Mix new material with retained body/carrier energy at a lifecycle boundary."""
     scope = transition.receipt["scope"]
     if scope not in {"material", "vessel"}:
@@ -352,10 +341,10 @@ def reconcile_condensed_initialization(previous, fresh, transition, physics):
     old, templates, current = locals_of(previous), locals_of(fresh), locals_of(transition.state)
     receipts = {}
     for name in transition.receipt["vessels"]:
-        if name in physics.crystal_models:
+        if name in physics.models_of("crystal"):
             continue
         state = current[name]
-        model = background_model(state, physics)
+        model = physics.models_of("thermal").get(name)
         if model is None:
             continue
         thermal = model.thermodynamics
@@ -364,11 +353,12 @@ def reconcile_condensed_initialization(previous, fresh, transition, physics):
         introduced = sum(
             n * thermal.species_energy_j_mol(k, initial_t) for k, n in state.species_amounts.items()
         )
-        introduced += (
-            model.condensed_background.volumetric_cv_J_L_K
-            * state.volume_L
-            * (initial_t - reference)
-        )
+        if model.condensed_background is not None:
+            introduced += (
+                model.condensed_background.volumetric_cv_J_L_K
+                * state.volume_L
+                * (initial_t - reference)
+            )
         retained = 0.0
         for slot in state.state_slots.slots:
             keep = slot.spec.owner_kind == "equipment" or (
@@ -385,6 +375,15 @@ def reconcile_condensed_initialization(previous, fresh, transition, physics):
                 for f in slot.spec.fields
                 if f.species_id
             )
+            if slot.spec.energy_interactions:
+                from chemworld.physchem.inventory_interactions import InventoryInteraction
+
+                amounts = {f"{slot.spec.slot_id}:{key}": value
+                           for key, value in slot.values.items()}
+                energy += sum(
+                    InventoryInteraction.from_slot(slot, spec).energy_and_gradient(amounts)[0]
+                    for spec in slot.spec.energy_interactions
+                )
             if keep:
                 retained += energy
             else:
@@ -412,5 +411,5 @@ def reconcile_condensed_initialization(previous, fresh, transition, physics):
     return replace(
         transition,
         state=active.replace(inactive_vessels=current),
-        receipt={**transition.receipt, "condensed_thermal_reconciliation": receipts},
+        receipt={**transition.receipt, "thermal_inventory_reconciliation": receipts},
     )

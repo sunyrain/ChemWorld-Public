@@ -2,8 +2,10 @@
 
 from chemworld.foundation.ontology import Operation
 from chemworld.runtime import service_factories as factories
+from chemworld.world import builtin_physics_models as physics_models
 from chemworld.world.domain_modules import (
     ActionFieldSpec,
+    AdvanceStrategySpec,
     ComponentCapability,
     DomainModuleSpec,
     InstrumentSpec,
@@ -25,7 +27,8 @@ def _instruments():
     from chemworld.world.flash_instruments import flash_instrument_specs
     from chemworld.world.gas_instruments import gas_instrument_specs
     from chemworld.world.membrane_instruments import membrane_instrument_spec
-    from chemworld.world.solid_instruments import solid_instrument_spec
+    from chemworld.world.sbml_instruments import formal_instrument_spec
+    from chemworld.world.solid_instruments import calphad_instrument_spec, solid_instrument_spec
     from chemworld.world.transport_instruments import transport_instrument_spec
 
     contracts = _builtin_instrument_contracts(include_particle_size=True)
@@ -42,28 +45,38 @@ def _instruments():
         + (transport_instrument_spec(),)
         + aqueous_instrument_specs()
         + (membrane_instrument_spec(),)
-        + (solid_instrument_spec(),)
+        + (formal_instrument_spec(),)
+        + (solid_instrument_spec(), calphad_instrument_spec())
     )
 
 
 BUILTIN_MODULES = (
     DomainModuleSpec(
         module_id="lab_schedule",
-        scope_notes=("Single process; one or two independent closed thermal/SSA vessels; "
-                     "one heater and one offline analyzer; no same-vessel hybrid or open flow.",),
+        scope_notes=("Single process; finite independent closed systems with explicitly declared "
+                     "shared-clock strategies and atomic finite pump/membrane paths; "
+                     "explicit finite heater/analyzer identities with FIFO occupancy; "
+                     "no same-vessel hybrid or general loops.",),
         operations=(
             OperationSpec(
                 Operation("queue_lab_heat", "Queue the shared heater",
-                          ("duration_s", "target_temperature_K"), ("not_terminated",)),
+                          ("duration_s", "target_temperature_K"),
+                          ("not_terminated", "lab_device_selected")),
                 "lab_schedule", "lab_schedule", "queue",
                 fields=(ActionFieldSpec("duration_s", "s", (1.0, 14400.0)),
-                        ActionFieldSpec("target_temperature_K", "K", (1.0, 3000.0))),
+                        ActionFieldSpec("target_temperature_K", "K", (1.0, 3000.0)),
+                        ActionFieldSpec("device", required=False,
+                                        choice_provider=factories.lab_heat_choices)),
+                precondition_checks=(("lab_device_selected", factories.lab_heat_selected),),
                 affected_ledgers=("equipment", "process"),
             ),
             OperationSpec(
                 Operation("queue_lab_measure", "Queue the shared offline analyzer",
-                          (), ("not_terminated",)),
+                          (), ("not_terminated", "lab_device_selected")),
                 "lab_schedule", "lab_schedule", "queue", affected_ledgers=("equipment", "process"),
+                fields=(ActionFieldSpec("device", required=False,
+                                        choice_provider=factories.lab_analyzer_choices),),
+                precondition_checks=(("lab_device_selected", factories.lab_analyzer_selected),),
             ),
         ),
         services=(ServiceFactorySpec(
@@ -80,13 +93,19 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="solid_solution",
-        scope_notes=("Finite binary substitutional equilibrium; local thermal equilibrium, "
-                     "not nucleation kinetics, arbitrary TDB or a general CALPHAD backend.",),
+        scope_notes=("Finite binary equilibrium or explicitly selected native TDB/CEF phase; "
+                     "local constitution and thermal equilibrium; no global phase selection.",),
         components=(("solid_solution", ComponentCapability(
             operations=("heat", "wait", "pause_control", "resume_control"),
             interfaces=("material", "temperature"), state_owners=("solid_phase_equilibrium",),
-        )),),
-        advance_strategies=(("binary-solid-equilibrium", factories.solid_solution),),
+        )), ("calphad_phase", ComponentCapability(
+            operations=("heat", "wait", "pause_control", "resume_control"),
+            interfaces=("material", "temperature"), state_owners=("solid_phase_equilibrium",),
+        ))),
+        models=(physics_models.CALPHAD_MATERIAL,),
+        advance_strategies=(AdvanceStrategySpec(
+            "binary-solid-equilibrium", factories.solid_solution, shared_clock=True,
+        ),),
         dependencies=("thermal",),
     ),
     DomainModuleSpec(
@@ -103,6 +122,32 @@ BUILTIN_MODULES = (
         dependencies=("aqueous_mineral",),
     ),
     DomainModuleSpec(
+        module_id="sbml",
+        scope_notes=("Formal 3D SBML quantity coordinates and supported transverse events; "
+                     "no declared chemical formula, carrier mass or heat model.",),
+        components=(("sbml_model", ComponentCapability(
+            operations=("wait", "set_model_parameters"), minimum_operations=1,
+            interfaces=("formal_quantities",),
+            state_owners=("formal_model_coordinates_and_queue",), outputs=(), input_ports=(),
+        )),),
+        models=(physics_models.SBML,),
+        operations=(OperationSpec(
+            Operation("set_model_parameters", "Set declared model inputs", ("values",),
+                      ("not_terminated",)),
+            "sbml", "formal_models", "apply_parameters",
+            fields=(ActionFieldSpec("values", "per_parameter_source_units",
+                                    value_kind="number_map"),),
+            affected_ledgers=("process", "equipment"),
+        ),),
+        services=(ServiceFactorySpec("formal_models", "formal_models", factories.formal_models,
+            "SBMLAdvanceStrategy", ("reaction_thermal",)),),
+        advance_strategies=(AdvanceStrategySpec(
+            "formal-sbml-shared", factories.sbml, service_attribute="formal_models",
+            shared_clock=True,
+        ),),
+        dependencies=("thermal", "observation"),
+    ),
+    DomainModuleSpec(
         module_id="stochastic",
         scope_notes=("Integer Gillespie direct; constant volume/temperature mass action; "
                      "persistent event and RNG; not spatial kMC or automatic ODE/SSA switching.",),
@@ -110,7 +155,9 @@ BUILTIN_MODULES = (
             operations=("wait",), interfaces=("material",), minimum_operations=1,
             state_owners=("phases", "stochastic_continuation"),
         )),),
-        advance_strategies=(("gillespie-direct", factories.stochastic),),
+        advance_strategies=(AdvanceStrategySpec(
+            "gillespie-direct", factories.stochastic, shared_clock=True,
+        ),),
         dependencies=("thermal",),
     ),
     DomainModuleSpec(
@@ -123,7 +170,9 @@ BUILTIN_MODULES = (
             interfaces=("material", "flow_rate", "temperature"),
             state_owners=("liquid_transport_enthalpy_v1", "membrane_bound_foulant_v1"),
         )),),
-        advance_strategies=(("finite-dilute-ro", factories.ro_membrane),),
+        advance_strategies=(AdvanceStrategySpec(
+            "finite-dilute-ro", factories.ro_membrane, shared_clock=True,
+        ),),
         dependencies=("continuous_flow",),
     ),
     DomainModuleSpec(
@@ -135,7 +184,9 @@ BUILTIN_MODULES = (
             interfaces=("material", "flow_rate", "temperature"),
             state_owners=("liquid_transport_enthalpy_v1",),
         )),),
-        advance_strategies=(("finite-pump-transport", factories.finite_transport),),
+        advance_strategies=(AdvanceStrategySpec(
+            "finite-pump-transport", factories.finite_transport, shared_clock=True,
+        ),),
         dependencies=("continuous_flow",),
     ),
     DomainModuleSpec(
@@ -208,6 +259,7 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="sorbent_contact",
+        models=(physics_models.SORBENT,),
         scope_notes=("Competitive finite sorbent kinetics, owned carrier and finite wash; "
                      "explicit condensed calorics and temperature domain.",),
         processes=(("sorbent_contact", factories.sorbent_processes),),
@@ -284,8 +336,14 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="battery_spm",
-        scope_notes=("Synthetic single-particle battery with calorics/SEI and explicit cycling; "
-                     "no electrolyte gradients or full porous-electrode/PyBaMM backend.",),
+        scope_notes=("Synthetic SPM with calorics/SEI, or explicit isothermal SPMe-v1 "
+                     "with conservative electrolyte transport; shared native cycling. "
+                     "Explicit isothermal DFN has coupled spatial reactions and a fixed synthetic "
+                     "qualification at 24 through-plane cells per region / 64 radial cells. "
+                     "Development MPM adds shared-potential size populations with independent "
+                     "inventories; independent MPM scientific qualification remains pending. "
+                     "Coarser meshes and other parameters need convergence checks; "
+                     "not wet-lab validation. No PyBaMM runtime backend.",),
         components=(
             (
                 "battery_spm",
@@ -303,11 +361,20 @@ BUILTIN_MODULES = (
                 ),
             ),
         ),
-        advance_strategies=(("single-particle-battery", factories.battery_spm),),
+        advance_strategies=(AdvanceStrategySpec(
+            "single-particle-battery", factories.battery_spm, shared_clock=True,
+        ),),
         dependencies=("electrical_control",),
     ),
     DomainModuleSpec(
         module_id="vacuum_concentration",
+        advance_strategies=(
+            AdvanceStrategySpec(
+                "finite-vacuum-concentration-enthalpy", factories.concentration,
+                service_attribute="concentration",
+            ),
+        ),
+        models=(physics_models.CONCENTRATION,),
         scope_notes=("Finite variable-composition concentration with authored VLE/calorics; "
                      "unsupported kinetic coupling is rejected.",),
         components=(
@@ -325,6 +392,13 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="dynamic_distillation",
+        advance_strategies=(
+            AdvanceStrategySpec(
+                "finite-equilibrium-column", factories.dynamic_column,
+                service_attribute="column",
+            ),
+        ),
+        models=(physics_models.COLUMN,),
         scope_notes=("Finite tray/receiver inventories, heat and timed cuts; "
                      "authored small dynamic column, not arbitrary plant design.",),
         components=(
@@ -342,6 +416,13 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="liquid_equilibrium",
+        advance_strategies=(
+            AdvanceStrategySpec(
+                "isothermal-liquid-equilibrium", factories.liquid_equilibrium,
+                service_attribute="liquid",
+            ),
+        ),
+        models=(physics_models.LIQUID,),
         scope_notes=("Strict finite liquid phase equilibrium using declared component properties "
                      "and supported composition domain; no silent extrapolation.",),
         components=(
@@ -359,6 +440,13 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="vapor_liquid_equilibrium",
+        advance_strategies=(
+            AdvanceStrategySpec(
+                "constant-pressure-flash-enthalpy", factories.flash_thermal,
+                service_attribute="flash",
+            ),
+        ),
+        models=(physics_models.FLASH,),
         scope_notes=("Finite TP/PH closure with explicit phase/caloric models; "
                      "no simultaneous undeclared kinetic process.",),
         components=(
@@ -376,6 +464,7 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="surface_kinetics",
+        models=(physics_models.SURFACE,),
         scope_notes=("Finite owned sites; declared single/multisite mean-field mechanisms "
                      "and symmetric interactions; not spatial kMC or a real catalyst fit.",),
         processes=(("surface_kinetics", factories.surface_processes),),
@@ -666,6 +755,13 @@ BUILTIN_MODULES = (
                 ),
             ),
             (
+                "sample_storage",
+                ComponentCapability(
+                    operations=("create_container", "transfer_material"),
+                    interfaces=("material", "sample_identity"), state_owners=("samples",),
+                ),
+            ),
+            (
                 "reaction",
                 ComponentCapability(
                     operations=("add_reagent", "add_component", "add_solvent", "add_catalyst"),
@@ -692,6 +788,19 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="thermal",
+        advance_strategies=(
+            AdvanceStrategySpec(
+                "owned-inventory-temperature", factories.coupled_thermal,
+                service_attribute="coupled", shared_clock=True,
+            ),
+            AdvanceStrategySpec(
+                "static-finite-carrier-stock", factories.finite_carrier_supply,
+                timed_measurements=False, shared_clock=True,
+            ),
+            AdvanceStrategySpec("legacy-liquid-enthalpy", factories.legacy_liquid,
+                                timed_measurements=False, legacy_input_default=True),
+        ),
+        models=(physics_models.THERMAL,),
         scope_notes=("Finite-power or explicitly isothermal device; shared energy accounting; "
                      "manual reconnection requires one disabled heater in local-clock mode.",),
         operations=(
@@ -1178,6 +1287,13 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="crystallization",
+        advance_strategies=(
+            AdvanceStrategySpec(
+                "finite-crystal-population-temperature", factories.crystal_thermal,
+                service_attribute="crystal", shared_clock=True,
+            ),
+        ),
+        models=(physics_models.CRYSTAL,),
         operations=(
             OperationSpec(
                 Operation(
@@ -1728,7 +1844,7 @@ BUILTIN_MODULES = (
                             "particle_size",
                         ),
                     ),
-                    ActionFieldSpec("scan_count", "count", (1.0, 128.0), ()),
+                    ActionFieldSpec("scan_count", "count", (1.0, 128.0), (), integer=True),
                     ActionFieldSpec("resolution_factor", "dimensionless", (0.5, 8.0), ()),
                     ActionFieldSpec("dilution_factor", "dimensionless", (1.0, 1000.0), ()),
                 ),

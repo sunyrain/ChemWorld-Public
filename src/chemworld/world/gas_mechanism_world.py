@@ -97,7 +97,7 @@ def gas_mechanism_world(
                 {"kind": "observation", "parameters": {"instruments": instruments}},
             ],
             "physics": CompositionPhysics(
-                network, {"reactor": state}, thermal_models={"reactor": model}
+                network, {"reactor": state}, models={"thermal": {"reactor": model}}
             ).to_dict(),
             "task": {
                 "objective": "characterize finite gas mechanism",

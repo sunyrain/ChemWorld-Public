@@ -13,7 +13,7 @@ from chemworld.envs.chemworld_env import ChemWorldEnv
 from chemworld.envs.spaces import to_observation
 from chemworld.eval.runner import run_agent
 from chemworld.eval.verify import verify_records
-from chemworld.runtime import ChemWorldRuntime
+from chemworld.runtime import ChemWorldRuntime, SessionSnapshot
 from chemworld.world.surface_world import surface_world_spec
 
 FEEDS = [
@@ -206,3 +206,83 @@ def test_cli_render_executes_native_session(tmp_path, monkeypatch, capsys):
         paths.append(str(path))
     main(["render", "--task", "reaction-to-assay", "--seed", "5", "--actions", *paths])
     assert "step: 2/" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("noise", ["sequential", "keyed"])
+def test_four_entry_points_preserve_readouts_outcomes_and_final_physics(
+    tmp_path, monkeypatch, capsys, noise,
+):
+    from chemworld.cli import main
+
+    actions = (
+        {"operation": "unknown-action"},
+        *SequenceAgent.actions[:3],
+        {"operation": "wait", "duration_s": 1, "stirring_speed_rpm": 600},
+        *SequenceAgent.actions[3:],
+    )
+    session = ChemWorldRuntime(task_id="reaction-to-assay", observation_noise_mode=noise)
+    env = ChemWorldEnv(task_id="reaction-to-assay", observation_noise_mode=noise)
+    session.reset(seed=5)
+    env.reset(seed=5)
+    results = []
+    for action in actions:
+        result = session.execute(action)
+        _, reward, terminated, truncated, info = env.step(action)
+        results.append(result)
+        assert (reward, terminated, truncated) == (
+            result.reward, result.terminated, result.truncated,
+        )
+        assert public_result(info) == public_result(result.info)
+        assert session._state.to_dict() == env._state.to_dict()
+
+    action_paths = []
+    for index, action in enumerate(actions):
+        path = tmp_path / f"action-{index}.json"
+        path.write_text(json.dumps(action), encoding="utf-8")
+        action_paths.append(str(path))
+    cli_log, cli_snapshot = tmp_path / "cli.jsonl", tmp_path / "cli-snapshot.json"
+    main([
+        "render", "--task", "reaction-to-assay", "--seed", "5", "--noise-mode", noise,
+        "--format", "json", "--trajectory", str(cli_log), "--snapshot", str(cli_snapshot),
+        "--actions", *action_paths,
+    ])
+    assert len(json.loads(capsys.readouterr().out)["steps"]) == len(actions)
+    cli = ChemWorldRuntime.from_snapshot(SessionSnapshot.load(cli_snapshot))
+    assert cli._state.to_dict() == session._state.to_dict()
+
+    agent = SequenceAgent()
+    agent.actions = actions
+    agent_log = tmp_path / "agent.jsonl"
+    final_states = []
+    original_close = ChemWorldRuntime.close
+
+    def capture_close(runtime):
+        final_states.append(runtime._state.to_dict())
+        original_close(runtime)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ChemWorldRuntime, "close", capture_close)
+        agent_records = run_agent(
+            env_id="ChemWorld", agent=agent, task_id="reaction-to-assay",
+            world_split="public-dev", budget=30, objective="balanced", seed=5,
+            observation_noise_mode=noise,
+            output_path=agent_log,
+        )
+    assert final_states == [session._state.to_dict()]
+    assert len(agent_records) == len(results)
+    for records in (load_jsonl(cli_log), load_jsonl(agent_log)):
+        assert len(records) == len(results)
+        for record, result in zip(records, results, strict=True):
+            outcome = record["environment_outcome"]
+            assert (
+                record["evaluation_outcome"]["online_transition_reward"],
+                outcome["terminated"], outcome["truncated"],
+            ) == (
+                result.reward, result.terminated, result.truncated,
+            )
+            for key in (
+                "native_observation", "state_delta_summary", "operation_outcome",
+                "transaction_status", "actual_duration_s", "measurement_status",
+                "measurement_cost", "sample_consumed",
+            ):
+                assert outcome[key] == result.info[key]

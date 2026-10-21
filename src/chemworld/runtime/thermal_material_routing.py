@@ -6,14 +6,13 @@ mixing operation does not simulate a valve, pipe or pressure-driven flow.
 """
 
 from dataclasses import replace
-from math import fsum, isfinite
-
-from scipy.optimize import brentq
+from math import fsum
 
 from chemworld.foundation import species_with_added_initial_amounts
+from chemworld.foundation.balances import MaterialPacket
 from chemworld.foundation.state_ledgers import PhaseLedger, ProcessLedger
-from chemworld.foundation.state_ownership import StateSlots
 from chemworld.physchem.coupled_system import ConstantCvThermodynamics
+from chemworld.physchem.enthalpy import caloric_temperature
 from chemworld.physchem.reaction_network import R_J_PER_MOL_K
 from chemworld.runtime.coupled_thermal import local_thermodynamics, pressure_for_state
 
@@ -23,21 +22,10 @@ def feed_packet(state, physics, action):
     if source_id is None or source_id not in state.inactive_vessels:
         raise ValueError("feed must identify an inactive finite source")
     source = state.inactive_vessels[source_id]
-    amount = action.get("amount_mol")
-    # JSON may reorder species keys. A finite packet must not change its
-    # normalization (and subsequent physical history) with that representation.
-    available = fsum(source.species_amounts.values())
-    if (
-        isinstance(amount, bool)
-        or not isinstance(amount, (float, int))
-        or not isfinite(amount)
-        or not 0 <= amount <= available
-        or available <= 0
-    ):
-        raise ValueError("feed amount exceeds finite source inventory")
-    return source_id, {
-        key: value / available * amount for key, value in source.species_amounts.items()
-    }
+    packet = MaterialPacket.representative(
+        source_id, state.vessel_id, source.species_amounts, amount_mol=action.get("amount_mol")
+    )
+    return source_id, dict(packet.amounts_mol)
 
 
 def _replace_inventory(state, amounts, slots):
@@ -73,13 +61,15 @@ def _set_energy(state, model, energy):
             + (energy - thermo.internal_energy_j(reference)) / capacity
         )
     else:
-        def residual(temperature):
-            return thermo.internal_energy_j(replace(packed, temperature_K=temperature)) - energy
-
         lower, upper = model.minimum_temperature_K, model.stop_temperature_K
-        if residual(lower) > 0 or residual(upper) <= 0:
-            raise ValueError("packet energy leaves the supported caloric operating range")
-        temperature = float(brentq(residual, lower, upper, xtol=1e-10, rtol=1e-12))
+        temperature = caloric_temperature(
+            lambda t: thermo.internal_energy_j(replace(packed, temperature_K=t)),
+            energy, (lower, upper), energy_basis="internal_energy", rtol=1e-12,
+            algorithm="residual",
+            heat_capacity_at_temperature=lambda t: thermo.heat_capacity_j_k(
+                replace(packed, temperature_K=t)
+            ),
+        )
     if not model.minimum_temperature_K <= temperature < model.stop_temperature_K:
         raise ValueError("material packet would leave the supported thermal operating range")
     result = state.replace(temperature_K=temperature)
@@ -97,12 +87,12 @@ def exchange_packet(source, target, physics, amounts, *, fraction=0.0, fixed_sou
     if aqueous_record(target) is not None:
         return exchange_aqueous_packet(source, target, physics, amounts,
                                       fraction=fraction, fixed_source=fixed_source)
-    if target.vessel_id in physics.liquid_models:
+    if target.vessel_id in physics.models_of("liquid"):
         from chemworld.runtime.liquid_equilibrium import exchange_liquid_packet
 
         return exchange_liquid_packet(source, target, physics, amounts,
                                       fraction=fraction, fixed_source=fixed_source)
-    if target.vessel_id in physics.flash_models:
+    if target.vessel_id in physics.models_of("flash"):
         from chemworld.runtime.flash_thermal import exchange_flash_packet
 
         return exchange_flash_packet(source, target, physics, amounts,
@@ -117,38 +107,23 @@ def exchange_packet(source, target, physics, amounts, *, fraction=0.0, fixed_sou
                                          fraction=fraction,fixed_source=fixed_source)
     if source.vessel_id == target.vessel_id or source.phase != "gas" or target.phase != "gas":
         raise ValueError("gas packet requires two distinct gas vessels")
-    if target.vessel_id not in physics.thermal_models:
+    if target.vessel_id not in physics.models_of("thermal"):
         raise ValueError("receiving vessel requires declared thermodynamics")
-    model = physics.thermal_models[target.vessel_id]
+    model = physics.models_of("thermal")[target.vessel_id]
     if model.pressure_law != "ideal_gas":
         raise ValueError("gas packet requires an ideal-gas receiving boundary")
     if set(source.species_amounts) != set(target.species_amounts):
         raise ValueError("gas packet species must share the receiving inventory layout")
-    moved = source.state_slots.material().portion(fraction, target.vessel_id)
     target_phase = next(iter(target.phases.phases))
-    moved = StateSlots(
-        tuple(replace(slot, spec=replace(slot.spec, phase_id=target_phase)) for slot in moved.slots)
+    source_slots, moved = source.state_slots.split_material(
+        fraction, source.vessel_id, target.vessel_id, destination_phase_id=target_phase
     )
-    source_slots = StateSlots(
-        (
-            *source.state_slots.stationary().slots,
-            *source.state_slots.material().portion(1 - fraction, source.vessel_id).slots,
-        )
-    )
-    target_slots = StateSlots(
-        (*target.state_slots.stationary().slots, *target.state_slots.material().merge(moved).slots)
-    )
-    source_amounts = {
-        key: value - amounts.get(key, 0) for key, value in source.species_amounts.items()
-    }
-    if any(value < 0 for value in source_amounts.values()):
-        raise ValueError("material packet exceeds its source")
-    target_amounts = {
-        key: value + amounts.get(key, 0) for key, value in target.species_amounts.items()
-    }
+    target_slots = target.state_slots.receive_material(moved)
+    packet = MaterialPacket(source.vessel_id, target.vessel_id, tuple(amounts.items()))
+    source_amounts, target_amounts = packet.apply(source.species_amounts, target.species_amounts)
     # Reference state and species data must agree before transporting energy.
     if not fixed_source:
-        source_model = physics.thermal_models[source.vessel_id]
+        source_model = physics.models_of("thermal")[source.vessel_id]
         if source_model.thermodynamics.species != model.thermodynamics.species or (
             source_model.thermodynamics.reference_temperature_K
             != model.thermodynamics.reference_temperature_K
@@ -205,9 +180,7 @@ def exchange_packet(source, target, physics, amounts, *, fraction=0.0, fixed_sou
         )
     )
     receipt = {
-        "source": source.vessel_id,
-        "destination": target.vessel_id,
-        "amounts_mol": amounts,
+        **packet.to_dict(),
         "inlet_temperature_K": source.temperature_K,
         "gas_enthalpy_J": enthalpy,
         "carrier_internal_energy_J": carrier_energy,
@@ -241,30 +214,15 @@ def add_finite_feed(state, physics, action):
 
 
 def route_gas_packet(state, physics, action):
+    from chemworld.runtime.component_network import resolve_material_connection
     from chemworld.runtime.mineral_kinetics import kinetic_record, route_mineral_phase
 
     if kinetic_record(state) is not None:
         return route_mineral_phase(state, physics, action)
     from chemworld.runtime.condensed_material_routing import background_model
 
-    connections = state.metadata["component_network"]["connections"]
-    index = action.get("connection")
-    if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(connections):
-        raise ValueError("unknown material connection")
-    edge = connections[index]
-    if edge["source_vessel"] != state.vessel_id or edge["source"]["port"] != "out":
-        raise ValueError("select the source vessel's representative material outlet")
-    fraction = action.get("transfer_fraction")
-    if (
-        isinstance(fraction, bool)
-        or not isinstance(fraction, (int, float))
-        or not isfinite(fraction)
-        or not 0 < fraction <= 1
-    ):
-        raise ValueError("material fraction must be in (0, 1]")
+    edge, fraction = resolve_material_connection(state, action, source_ports={"out"})
     target = state.inactive_vessels[edge["target_vessel"]]
-    if isinstance(action.get("mixing"), bool) or action.get("mixing") not in (0, 1):
-        raise ValueError("declare empty-only or allowed mixing")
     target_occupied = (target.volume_L > 0 if background_model(target,physics) is not None
                        else fsum(target.species_amounts.values()) > 1e-12)
     if target_occupied and action["mixing"] != 1:

@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
-from math import exp, isfinite, log
+from dataclasses import asdict, dataclass
+from math import exp, isfinite
+
+from scipy.integrate import quad
 
 from chemworld.foundation.units import convert_value
+from chemworld.physchem.correlation_families import (
+    CORRELATION_FAMILIES,
+    family_value_and_slope,
+    validate_family_interval,
+    validate_heat_capacity_interval,
+)
+from chemworld.physchem.heat_capacity import PiecewiseHeatCapacity
+from chemworld.physchem.phase_change_kernels import latent_heat_derivatives
 from chemworld.physchem.property_reports import (
     R_J_PER_MOL_K,
     STANDARD_PRESSURE_PA,
@@ -12,6 +23,7 @@ from chemworld.physchem.property_reports import (
     ValidityPolicy,
 )
 from chemworld.physchem.specs import PropertyCorrelation
+from chemworld.physchem.vapor_pressure_kernels import pressure_derivatives
 
 
 def evaluate_correlation(
@@ -28,10 +40,21 @@ def evaluate_correlation(
     the units its coefficients expect; this function performs the conversion.
     """
 
-    if temperature_K <= 0:
+    if validity_policy not in {"raise", "warn", "ignore"}:
+        raise ValueError("unknown correlation validity policy")
+    if not isfinite(temperature_K) or temperature_K <= 0:
         raise ValueError("temperature_K must be positive")
-    if pressure_Pa is not None and pressure_Pa <= 0:
+    if pressure_Pa is not None and (not isfinite(pressure_Pa) or pressure_Pa <= 0):
         raise ValueError("pressure_Pa must be positive")
+    if "pressure" in correlation.input_units and pressure_Pa is None:
+        raise ValueError("pressure_Pa is required by this correlation")
+    if isinstance(correlation, PiecewiseHeatCapacity):
+        segment = correlation.segment_at(temperature_K)
+        result = evaluate_correlation(segment, temperature_K=temperature_K,
+                                      pressure_Pa=pressure_Pa, validity_policy="raise")
+        return PropertyEvaluation(correlation.property_id, correlation.correlation_id,
+            correlation.equation_id, result.to("J/(mol*K)").value, "J/(mol*K)",
+            result.inputs, result.warnings)
 
     inputs = {"temperature": _convert_input(temperature_K, "K", correlation, "temperature")}
     if pressure_Pa is not None:
@@ -70,42 +93,56 @@ def _evaluate_equation(
     equation = correlation.equation_id
     coeffs = correlation.coefficients
     T = inputs["temperature"]
-    if equation == "antoine":
-        base = coeffs.get("base", 10.0)
-        if T + coeffs["C"] <= 0:
-            raise ValueError("Antoine vapor pressure singularity: T + C must be positive")
-        return base ** (coeffs["A"] - coeffs["B"] / (T + coeffs["C"]))
-    if equation == "wagner":
-        Tc = coeffs["Tc"]
-        Pc = coeffs["Pc"]
-        if temperature_K >= Tc:
-            raise ValueError("Wagner vapor pressure requires T < Tc")
-        tau = 1.0 - temperature_K / Tc
-        exponent = (
-            coeffs["a"] * tau
-            + coeffs["b"] * tau**1.5
-            + coeffs["c"] * tau**3.0
-            + coeffs["d"] * tau**6.0
-        ) / (1.0 - tau)
-        return Pc * exp(exponent)
+    if equation == "dimensionless_source_point":
+        from chemworld.physchem.property_points import source_point_value
+
+        return source_point_value(T,coeffs["T_ref"],coeffs["value"])
+    if equation in CORRELATION_FAMILIES:
+        if CORRELATION_FAMILIES[equation].pressure_method:
+            return pressure_derivatives(equation, T, coeffs, order=0)[0]
+        if CORRELATION_FAMILIES[equation].phase_change_method:
+            return latent_heat_derivatives(equation, T, coeffs, order=0)[0]
+        if CORRELATION_FAMILIES[equation].viscosity_method:
+            from chemworld.physchem.viscosity_kernels import viscosity_derivatives
+
+            return viscosity_derivatives(
+                CORRELATION_FAMILIES[equation].viscosity_method, T, coeffs, order=0,
+            )[0]
+        if CORRELATION_FAMILIES[equation].conductivity_method:
+            from chemworld.physchem.conductivity_kernels import conductivity_derivatives
+
+            return conductivity_derivatives(
+                CORRELATION_FAMILIES[equation].conductivity_method, T, coeffs, order=0,
+            )[0]
+        if CORRELATION_FAMILIES[equation].interface_method:
+            from chemworld.physchem.interface_kernels import interface_derivatives
+
+            return interface_derivatives(
+                CORRELATION_FAMILIES[equation].interface_method, T, coeffs, order=0,
+            )[0]
+        if CORRELATION_FAMILIES[equation].volume_method:
+            from chemworld.physchem.volume_kernels import volume_derivatives
+
+            family = CORRELATION_FAMILIES[equation]
+            parameters = dict(coeffs)
+            if ("MW" in parameters and molecular_weight_g_mol is not None
+                    and abs(parameters["MW"] - molecular_weight_g_mol)
+                    > 1e-9 * molecular_weight_g_mol):
+                raise ValueError("volume correlation MW must match its component molecular weight")
+            if "pressure" in family.input_units:
+                parameters["P"] = pressure_Pa
+            return volume_derivatives(family.volume_method, T, parameters,
+                                      order=0, output=family.volume_output)[0]
+        return family_value_and_slope(equation, T, coeffs)[0]
+    if equation in {"antoine", "wagner"}:
+        return pressure_derivatives(equation, T if equation == "antoine" else temperature_K,
+                                    coeffs, order=0)[0]
     if equation == "dippr101_vapor_pressure":
-        return exp(
-            coeffs["A"]
-            + coeffs["B"] / T
-            + coeffs["C"] * log(T)
-            + coeffs["D"] * T ** coeffs["E"]
-        )
+        return family_value_and_slope("dippr101", T, coeffs)[0]
     if equation == "cp_polynomial":
         return _cp_polynomial(T, coeffs)
-    if equation == "watson_hvap":
-        Tc = coeffs["Tc"]
-        T_ref = coeffs["T_ref"]
-        if temperature_K >= Tc:
-            return 0.0
-        ratio = (1.0 - temperature_K / Tc) / (1.0 - T_ref / Tc)
-        return coeffs["Hvap_ref"] * ratio ** coeffs.get("exponent", 0.38)
-    if equation == "constant_phase_change_enthalpy":
-        return coeffs["delta_h"]
+    if equation in {"watson_hvap", "constant_phase_change_enthalpy"}:
+        return latent_heat_derivatives(equation, temperature_K, coeffs, order=0)[0]
     if equation == "linear_liquid_density":
         rho = coeffs["rho_ref"] * (1.0 - coeffs.get("alpha", 0.0) * (T - coeffs["T_ref"]))
         return rho
@@ -116,15 +153,11 @@ def _evaluate_equation(
         mw_kg_mol = molecular_weight_g_mol / 1000.0
         return pressure * mw_kg_mol / (R_J_PER_MOL_K * temperature_K)
     if equation == "rackett_liquid_molar_volume":
-        Tc = coeffs["Tc"]
-        Pc = coeffs["Pc"]
-        Zc = coeffs["Zc"]
-        if Tc <= 0 or Pc <= 0 or Zc <= 0:
-            raise ValueError("Rackett requires positive Tc, Pc, and Zc")
-        if temperature_K >= Tc:
+        from chemworld.physchem.volume_kernels import volume_value
+
+        if temperature_K >= coeffs["Tc"]:
             raise ValueError("Rackett liquid molar volume requires T < Tc")
-        exponent = 1.0 + (1.0 - temperature_K / Tc) ** (2.0 / 7.0)
-        return R_J_PER_MOL_K * Tc / Pc * Zc**exponent
+        return volume_value("Rackett", temperature_K, **coeffs)
     if equation == "crc_second_virial":
         t = 298.15 / T - 1.0
         return 1e-6 * (
@@ -171,57 +204,6 @@ def _evaluate_equation(
     raise ValueError(f"Unsupported property equation_id: {equation}")
 
 
-def _evaluate_temperature_derivative(
-    correlation: PropertyCorrelation,
-    *,
-    inputs: dict[str, float],
-    pressure_value: float,
-) -> float:
-    equation = correlation.equation_id
-    coeffs = correlation.coefficients
-    T = inputs["temperature"]
-    if equation == "antoine":
-        base = coeffs.get("base", 10.0)
-        denominator = T + coeffs["C"]
-        if denominator <= 0:
-            raise ValueError("Antoine vapor pressure singularity: T + C must be positive")
-        return pressure_value * log(base) * coeffs["B"] / denominator**2
-    if equation == "wagner":
-        Tc = coeffs["Tc"]
-        if Tc <= T:
-            raise ValueError("Wagner vapor pressure derivative requires T < Tc")
-        tau = 1.0 - T / Tc
-        reduced_temperature = T / Tc
-        numerator = (
-            coeffs["a"] * tau
-            + coeffs["b"] * tau**1.5
-            + coeffs["c"] * tau**3.0
-            + coeffs["d"] * tau**6.0
-        )
-        dnumerator_dtau = (
-            coeffs["a"]
-            + 1.5 * coeffs["b"] * tau**0.5
-            + 3.0 * coeffs["c"] * tau**2.0
-            + 6.0 * coeffs["d"] * tau**5.0
-        )
-        dnumerator_dT = -dnumerator_dtau / Tc
-        dreduced_temperature_dT = 1.0 / Tc
-        dexponent_dT = (
-            dnumerator_dT * reduced_temperature
-            - numerator * dreduced_temperature_dT
-        ) / reduced_temperature**2
-        return pressure_value * dexponent_dT
-    if equation == "dippr101_vapor_pressure":
-        return pressure_value * (
-            -coeffs["B"] / T**2
-            + coeffs["C"] / T
-            + coeffs["D"] * coeffs["E"] * T ** (coeffs["E"] - 1.0)
-        )
-    raise ValueError(
-        f"Unsupported vapor-pressure derivative equation_id: {equation}"
-    )
-
-
 def _cp_polynomial(T: float, coeffs: dict[str, float]) -> float:
     return (
         coeffs.get("a", 0.0)
@@ -230,6 +212,133 @@ def _cp_polynomial(T: float, coeffs: dict[str, float]) -> float:
         + coeffs.get("d", 0.0) * T**3
         + coeffs.get("e", 0.0) * T**4
     )
+
+
+def correlation_temperature_derivative(
+    correlation: PropertyCorrelation, *, temperature_K: float,
+    pressure_Pa: float | None = None,
+    validity_policy: ValidityPolicy = "raise",
+) -> PropertyEvaluation:
+    """Analytic first derivative; latent-heat slopes use native J/(mol*K)."""
+    if isinstance(correlation, PiecewiseHeatCapacity):
+        segment = correlation.segment_at(temperature_K)
+        result = correlation_temperature_derivative(segment, temperature_K=temperature_K,
+                                                     validity_policy=validity_policy)
+        slope = result.value * convert_value(1, segment.output_unit, correlation.output_unit)
+        boundary = any(temperature_K == c.validity_ranges["temperature"][0]
+                       for c in correlation.segments[1:])
+        return PropertyEvaluation(correlation.property_id + "_temperature_derivative",
+            correlation.correlation_id, correlation.equation_id + "_dT", slope,
+            "(J/(mol*K))/K", result.inputs,
+            ("right-sided derivative at piecewise boundary",) if boundary else result.warnings)
+    if correlation.equation_id not in {"cp_polynomial", "watson_hvap",
+                                       "constant_phase_change_enthalpy", *CORRELATION_FAMILIES}:
+        raise ValueError("generic derivative requires a declared correlation family")
+    result = evaluate_correlation(correlation, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+                                  validity_policy=validity_policy)
+    if correlation.equation_id == "cp_polynomial":
+        slope = sum(power * correlation.coefficients.get(key, 0) * result.inputs["temperature"]
+                    ** (power - 1) for power, key in enumerate("bcde", 1))
+    elif correlation.equation_id in {"watson_hvap", "constant_phase_change_enthalpy"}:
+        slope = latent_heat_derivatives(correlation.equation_id, temperature_K,
+                                       correlation.coefficients, order=1)[1]
+    else:
+        slope = family_value_and_slope(correlation.equation_id, temperature_K,
+                                       correlation.coefficients, pressure_Pa=pressure_Pa)[1]
+    unit = f"({correlation.output_unit})/K"
+    if correlation.property_id in {"heat_of_vaporization", "heat_of_fusion", "heat_of_sublimation"}:
+        slope *= convert_value(1, correlation.output_unit, "J/mol")
+        unit = "J/(mol*K)"
+    return PropertyEvaluation(
+        correlation.property_id + "_temperature_derivative", correlation.correlation_id,
+        correlation.equation_id + "_dT", slope, unit,
+        result.inputs, result.warnings)
+
+
+@dataclass(frozen=True)
+class CorrelationIntegral:
+    """QUADPACK error is a numerical estimate, not parameter uncertainty."""
+
+    correlation_id: str
+    equation_id: str
+    value: float
+    unit: str
+    initial_temperature_K: float
+    final_temperature_K: float
+    over_temperature: bool
+    absolute_error_estimate: float
+    evaluations: int
+    warnings: tuple[str, ...]
+    method: str = "adaptive_gauss_kronrod"
+    evaluation_scope: str = "quadrature_integrand_calls_only; excludes domain validation"
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def integrate_correlation(
+    correlation: PropertyCorrelation, *, initial_temperature_K: float,
+    final_temperature_K: float, over_temperature: bool = False,
+    validity_policy: ValidityPolicy = "raise", epsabs: float = 1e-10,
+    epsrel: float = 1e-10,
+    pressure_Pa: float | None = None,
+) -> CorrelationIntegral:
+    """Definite integral of a declared family; reject poles and failed quadrature.
+
+    Coefficient validity ranges are connected intervals. Their endpoint checks
+    cover the whole integration interval; mathematical poles are checked separately.
+    Every evaluated property must also satisfy its physical sign constraint.
+    """
+    if validity_policy not in {"raise", "warn", "ignore"}:
+        raise ValueError("unknown correlation validity policy")
+    if isinstance(correlation, PiecewiseHeatCapacity):
+        return correlation.integral(initial_temperature_K, final_temperature_K,
+            over_temperature=over_temperature, epsabs=epsabs, epsrel=epsrel)
+    if correlation.equation_id not in CORRELATION_FAMILIES:
+        raise ValueError("generic integration requires a declared correlation family")
+    if not all(isfinite(v) and v > 0 for v in (epsabs, epsrel)):
+        raise ValueError("quadrature tolerances must be finite and positive")
+    endpoints = [evaluate_correlation(correlation, temperature_K=T, pressure_Pa=pressure_Pa,
+                                      validity_policy=validity_policy)
+                 for T in (initial_temperature_K, final_temperature_K)]
+    warnings = tuple(dict.fromkeys(w for endpoint in endpoints for w in endpoint.warnings))
+    lower, upper = sorted((initial_temperature_K, final_temperature_K))
+    validate_family_interval(correlation.equation_id, correlation.coefficients, lower, upper,
+                             pressure_Pa=pressure_Pa)
+    if "heat_capacity" in correlation.property_id:
+        validate_heat_capacity_interval(
+            correlation.equation_id, correlation.coefficients, lower, upper,
+            allow_zero=correlation.property_id == "isochoric_heat_capacity")
+
+    def integrand(temperature):
+        result = evaluate_correlation(correlation, temperature_K=temperature,
+                                      pressure_Pa=pressure_Pa,
+                                      validity_policy=validity_policy)
+        if ("heat_capacity" in correlation.property_id and result.value == 0
+                and correlation.property_id != "isochoric_heat_capacity"):
+            raise ValueError("Cp must be positive over the integration interval")
+        return result.value / temperature if over_temperature else result.value
+
+    # Validate even a zero-width caloric interval, without invoking quadrature.
+    integrand(lower)
+    if lower == upper:
+        value, error, evaluations = 0.0, 0.0, 0
+    else:
+        result = quad(integrand, lower, upper, epsabs=epsabs, epsrel=epsrel,
+                      full_output=True, limit=150)
+        value, error, info = result[:3]
+        if (len(result) != 3 or not isfinite(value) or not isfinite(error)
+                or error > max(epsabs, epsrel * abs(value))):
+            diagnostic = result[3] if len(result) > 3 else "requested accuracy not reached"
+            raise ValueError(f"correlation quadrature failed: {diagnostic}")
+        evaluations = info["neval"]
+        if final_temperature_K < initial_temperature_K:
+            value = -value
+    return CorrelationIntegral(
+        correlation.correlation_id, correlation.equation_id, value,
+        correlation.output_unit if over_temperature else f"({correlation.output_unit})*K",
+        initial_temperature_K, final_temperature_K, over_temperature, error,
+        evaluations, warnings)
 
 
 def _convert_input(
@@ -278,7 +387,15 @@ def _choose_valid_correlation(
 def _ensure_finite_positive(value: float, correlation: PropertyCorrelation) -> None:
     if not isfinite(value):
         raise ValueError(f"Correlation returned non-finite value: {correlation.correlation_id}")
+    if correlation.property_id in {"relative_permittivity", "refractive_index"} and value <= 0:
+        raise ValueError(
+            f"Electro-optical correlation must be positive: {correlation.correlation_id}")
+    if (correlation.property_id in {"vapor_pressure", "sublimation_pressure", "henry_pressure"}
+            and value == 0):
+        raise ValueError(f"Pressure underflowed to zero: {correlation.correlation_id}")
     if correlation.property_id in {
+        "relative_permittivity", "refractive_index",
+        "henry_pressure",
         "vapor_pressure",
         "sublimation_pressure",
         "heat_capacity",
@@ -288,9 +405,14 @@ def _ensure_finite_positive(value: float, correlation: PropertyCorrelation) -> N
         "isochoric_heat_capacity",
         "heat_of_vaporization",
         "heat_of_fusion",
+        "heat_of_sublimation",
         "liquid_molar_volume",
         "gas_molar_volume",
+        "solid_molar_volume",
         "liquid_density",
+        "solid_density",
+        "liquid_molar_density",
+        "solid_molar_density",
         "gas_density",
         "liquid_viscosity",
         "gas_viscosity",
@@ -306,6 +428,8 @@ def _ensure_finite_positive(value: float, correlation: PropertyCorrelation) -> N
 
 
 def _vapor_pressure_method_family(equation_id: str) -> str:
+    if equation_id in CORRELATION_FAMILIES and CORRELATION_FAMILIES[equation_id].pressure_method:
+        return CORRELATION_FAMILIES[equation_id].pressure_method
     if equation_id == "dippr101_vapor_pressure":
         return "DIPPR101"
     if equation_id == "antoine":

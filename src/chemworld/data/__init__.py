@@ -19,10 +19,36 @@ __all__ = [
     "TRAJECTORY_ALIAS_WRITE_REMOVAL_VERSION",
     "TRAJECTORY_COMPATIBILITY_ALIASES",
     "TRAJECTORY_SCHEMA_VERSION",
+    "ChemSageDatabase",
+    "ChemSageParseError",
+    "SBMLModel",
     "SubmissionManifest",
+    "TdbDatabase",
+    "TdbParseError",
     "TrajectoryLogger",
     "TrajectoryRecordPayload",
     "load_jsonl",
     "validate_record",
     "validate_records",
 ]
+
+
+def __getattr__(name):
+    if name == "SBMLModel":
+        from chemworld.data.sbml import SBMLModel
+
+        globals()[name] = SBMLModel
+        return SBMLModel
+    if name in {"ChemSageDatabase", "ChemSageParseError"}:
+        from chemworld.data import chem_sage
+
+        value = getattr(chem_sage, name)
+        globals()[name] = value
+        return value
+    if name in {"TdbDatabase", "TdbParseError"}:
+        from chemworld.data import tdb
+
+        value = getattr(tdb, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

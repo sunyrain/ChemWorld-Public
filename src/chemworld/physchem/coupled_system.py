@@ -41,10 +41,12 @@ class CoupledStateView:
     volume_L: float
     time_s: float = 0.0
     coordinates: Mapping[str, float] = field(default_factory=dict, kw_only=True)
+    algebraic_values: Mapping[str, float] = field(default_factory=dict, kw_only=True)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "amounts_mol", _finite_mapping(self.amounts_mol))
         object.__setattr__(self, "coordinates", _finite_mapping(self.coordinates))
+        object.__setattr__(self, "algebraic_values", _finite_mapping(self.algebraic_values))
         if (
             any(
                 not isfinite(value) or value <= 0.0
@@ -70,6 +72,8 @@ class CoupledState(CoupledStateView):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if self.algebraic_values:
+            raise ValueError("algebraic values belong to solver views, not persistent inventory")
         if any(value < 0.0 for value in self.amounts_mol.values()):
             raise ValueError("state inventory cannot be negative")
         for name in ("exchanged_mol", "exchange_energy_J"):
@@ -195,10 +199,13 @@ class CoupledEvent:
     event_id: str
     value: Callable[[CoupledStateView], float]
     direction: int = -1
+    terminal: bool = True
 
     def __post_init__(self) -> None:
         if not self.event_id or self.direction not in {-1, 0, 1}:
             raise ValueError("stopping event needs an identity and crossing direction")
+        if type(self.terminal) is not bool:
+            raise ValueError("coupled event terminal flag must be boolean")
 
 
 @dataclass(frozen=True)
@@ -246,6 +253,31 @@ class CoupledThermodynamics(Protocol):
         derivatives: Mapping[str, float],
         contributions: Sequence[ProcessContribution],
     ) -> float: ...
+
+
+@dataclass(frozen=True)
+class KineticOnlyThermodynamics:
+    """Explicitly unspecified energy for formal entity coordinates.
+
+    No chemical inventory, heat capacity, reaction energy or thermostat duty
+    is inferred. The shared solver may advance coordinates while keeping its
+    external temperature coordinate fixed. Its energy residual remains None.
+    """
+
+    inventory_keys: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if self.inventory_keys:
+            raise ValueError("formal kinetics cannot replace a chemical inventory's thermodynamics")
+
+    def internal_energy_j(self, _state):
+        return None
+
+    def heat_capacity_j_k(self, _state):
+        raise ValueError("formal kinetic model has no declared heat capacity")
+
+    def chemical_energy_rate_w(self, *_args):
+        raise ValueError("formal kinetic model has no declared chemical energy")
 
 
 @dataclass(frozen=True)
@@ -418,6 +450,16 @@ def assemble_coupled_rates(
                 raise ValueError(f"duplicate energy port contribution: {port_id}")
             identities.add(f"port:{port_id}")
             port_energy[port_id] = power
+    if isinstance(thermodynamics, KineticOnlyThermodynamics):
+        thermal = heat_flux(state)
+        if (not isothermal or prescribed_temperature_rate_K_s is not None or ports or energy_ports
+                or any((thermal.heater_W, thermal.loss_W, thermal.work_W))
+                or any(c.legacy_reaction_energy_W is not None for c in contributions)):
+            raise ValueError("formal kinetics cannot execute undeclared heat/work/material ports")
+        # Numerical zero channels hold no energy receipts; the public closure
+        # residual is None and the result explicitly marks energy as undefined.
+        return CoupledRates(derivatives, 0., 0., 0., 0., 0., port_rates, port_energy,
+                            coordinate_rates)
     chemical = thermodynamics.chemical_energy_rate_w(state, derivatives, contributions)
     capacity = thermodynamics.heat_capacity_j_k(state)
     if not isfinite(capacity) or capacity <= 0.0 or not isfinite(chemical):
@@ -551,6 +593,34 @@ class CoupledCoordinate:
 
 
 @dataclass(frozen=True)
+class CoupledAlgebraic:
+    """Transient constraints declared by a physical model, never a state ledger.
+
+    Variables/equations use the common residual declarations. Initial values
+    are a numerical guess; every process/event gets the consistent solution.
+    """
+
+    variables: tuple
+    equations: tuple
+    initial_values: Callable[[CoupledStateView], Mapping[str, float]]
+    residual: Callable[[CoupledStateView], Sequence[float]]
+
+    def __post_init__(self):
+        from chemworld.physchem.residual_system import ResidualEquation, ResidualVariable
+
+        object.__setattr__(self, "variables", tuple(self.variables))
+        object.__setattr__(self, "equations", tuple(self.equations))
+        if (not self.variables or len(self.variables) != len(self.equations)
+                or any(not isinstance(v, ResidualVariable) or v.role != "algebraic"
+                       for v in self.variables)
+                or any(not isinstance(e, ResidualEquation) for e in self.equations)
+                or len({v.name for v in self.variables}) != len(self.variables)
+                or len({e.name for e in self.equations}) != len(self.equations)
+                or not callable(self.initial_values) or not callable(self.residual)):
+            raise ValueError("coupled algebraic constraints need named variable/equation pairs")
+
+
+@dataclass(frozen=True)
 class CoupledSystem:
     thermodynamics: CoupledThermodynamics
     processes: tuple[CoupledProcess, ...] = ()
@@ -565,12 +635,33 @@ class CoupledSystem:
     policy: ODESolverPolicy = DEFAULT_COUPLED_ODE_POLICY
     energy_ports: tuple[EnergyPort, ...] = ()
     coordinates: tuple[CoupledCoordinate, ...] = ()
+    numerical_form: str = "ode"
+    algebraic: CoupledAlgebraic | None = None
+    # Optional derivative of the complete packed physical RHS, followed by
+    # NEGATIVE algebraic constraints. Arguments are the current view and exact
+    # packed identities. Units are physical (not normalized solver coordinates).
+    residual_rhs_jacobian: Callable | None = None
 
     def __post_init__(self) -> None:
         for name in ("processes", "ports", "events", "energy_ports", "coordinates"):
             object.__setattr__(self, name, tuple(getattr(self, name)))
+        if isinstance(self.thermodynamics, KineticOnlyThermodynamics) and (
+                not self.isothermal or self.ports or self.energy_ports):
+            raise ValueError("formal kinetics requires fixed external temperature; "
+                             "no physical ports")
         keys = self.thermodynamics.inventory_keys
         coordinate_keys = tuple(item.name for item in self.coordinates)
+        if (self.numerical_form not in {"ode", "residual"}
+                or (self.algebraic is not None and self.numerical_form != "residual")):
+            raise ValueError("algebraic constraints require the explicit residual numerical form")
+        if self.algebraic is not None and (
+            {v.name for v in self.algebraic.variables} & {*keys, *coordinate_keys}
+        ):
+            raise ValueError("algebraic coordinates cannot shadow physical inventory")
+        if self.residual_rhs_jacobian is not None and (
+            self.numerical_form != "residual" or not callable(self.residual_rhs_jacobian)
+        ):
+            raise ValueError("a residual RHS Jacobian requires the residual formulation")
         if len({*keys, *coordinate_keys}) != len(keys) + len(coordinate_keys):
             raise ValueError("material and coordinate identities must be unique")
         if len(keys) != len(set(keys)):
@@ -649,6 +740,21 @@ class CoupledSystem:
         pattern[:, base_size:] = True
         return pattern.tocsr()
 
+    def validate_state(self, state):
+        """Validate an accepted candidate, including an atomic coordinate jump."""
+        if set(state.amounts_mol) != set(self.thermodynamics.inventory_keys):
+            raise ValueError("initial state does not match the compiled inventory")
+        if set(state.coordinates) != {item.name for item in self.coordinates}:
+            raise ValueError("initial state does not match the declared coordinates")
+        for item in self.coordinates:
+            item.validate(state.coordinates[item.name])
+        validate_thermal_state = getattr(self.thermodynamics, "validate_state", None)
+        if validate_thermal_state is not None:
+            validate_thermal_state(state)
+        for process in self.processes:
+            if process.validate_state is not None:
+                process.validate_state(state)
+
     def advance(
         self,
         state: CoupledState,
@@ -660,18 +766,7 @@ class CoupledSystem:
             raise ValueError("duration_s must be finite and nonnegative")
         keys = self.thermodynamics.inventory_keys
         coordinate_keys = tuple(item.name for item in self.coordinates)
-        if set(state.amounts_mol) != set(keys):
-            raise ValueError("initial state does not match the compiled inventory")
-        if set(state.coordinates) != set(coordinate_keys):
-            raise ValueError("initial state does not match the declared coordinates")
-        for item in self.coordinates:
-            item.validate(state.coordinates[item.name])
-        validate_thermal_state = getattr(self.thermodynamics, "validate_state", None)
-        if validate_thermal_state is not None:
-            validate_thermal_state(state)
-        for process in self.processes:
-            if process.validate_state is not None:
-                process.validate_state(state)
+        self.validate_state(state)
         port_ids = {port.port_id for port in self.ports}
         energy_ids = port_ids | {port.port_id for port in self.energy_ports}
         energy_boundaries = (*self.ports, *self.energy_ports)
@@ -730,14 +825,15 @@ class CoupledSystem:
                     trial_extensions[key] = max(trial_extensions.get(key, 0.0), -value)
             return result
 
-        def view(time: float, vector: np.ndarray) -> CoupledStateView:
+        def view(time: float, vector: np.ndarray, algebraic_values=None) -> CoupledStateView:
             return CoupledStateView(
                 amounts(vector), float(vector[count]), state.volume_L, state.time_s + time,
                 coordinates=dict(zip(coordinate_keys, vector[coordinate_offset:], strict=True)),
+                algebraic_values={} if algebraic_values is None else algebraic_values,
             )
 
-        def rhs(time: float, scaled: np.ndarray) -> np.ndarray:
-            candidate = view(time, scaled * scales)
+        def rhs(time: float, scaled: np.ndarray, algebraic_values=None) -> np.ndarray:
+            candidate = view(time, scaled * scales, algebraic_values)
             validity = getattr(self.thermodynamics, "validity_warnings", None)
             if validity is not None:
                 property_trial_warnings.update(validity(candidate))
@@ -813,26 +909,29 @@ class CoupledSystem:
         ):
             raise ValueError("evaluation times must be ordered within the requested interval")
         stopping_event = None
-        if duration_s > 0.0:
+        if duration_s > 0.0 and self.numerical_form == "ode":
             for event in self.all_events:
                 value = float(event.value(state))
                 if not isfinite(value):
                     raise ValueError("initial stopping event must be finite")
                 if (
-                    (event.direction < 0 and value <= 0.0)
-                    or (event.direction > 0 and value >= 0.0)
-                    or (event.direction == 0 and value == 0.0)
+                    event.terminal and (
+                        (event.direction < 0 and value <= 0.0)
+                        or (event.direction > 0 and value >= 0.0)
+                        or (event.direction == 0 and value == 0.0)
+                    )
                 ):
                     stopping_event = event.event_id
                     break
-        if duration_s == 0.0 or stopping_event is not None:
+        if self.numerical_form == "ode" and (duration_s == 0.0 or stopping_event is not None):
             trajectory = (state,)
             diagnostic: dict[str, Any] = {"solver_calls": 0}
         else:
             callbacks = []
             for event in self.all_events:
 
-                def callback(time: float, scaled: np.ndarray, spec: CoupledEvent = event) -> float:
+                def callback(time: float, scaled: np.ndarray, algebraic_values=None,
+                             spec: CoupledEvent = event) -> float:
                     raw = scaled * scales
                     trial = CoupledStateView(
                         dict(zip(keys, raw[:count], strict=True)),
@@ -841,43 +940,64 @@ class CoupledSystem:
                         state.time_s + time,
                         coordinates=dict(zip(
                             coordinate_keys, raw[coordinate_offset:], strict=True)),
+                        algebraic_values={} if algebraic_values is None else algebraic_values,
                     )
                     value = float(spec.value(trial))
                     if not isfinite(value):
                         raise RuntimeError(f"nonfinite stopping event: {spec.event_id}")
                     return value
 
-                callback.terminal = True  # type: ignore[attr-defined]
+                callback.terminal = event.terminal  # type: ignore[attr-defined]
                 callback.direction = event.direction  # type: ignore[attr-defined]
                 callbacks.append(callback)
             policy = replace(self.policy, event_names=tuple(e.event_id for e in self.all_events))
-            sparsity = self.jacobian_sparsity() if policy.method in {"BDF", "Radau"} else None
-            sparse_options = {} if sparsity is None else {"jac_sparsity": sparsity}
-            report = solve_ode(
-                rhs,
-                initial / scales,
-                time_span_s=(0.0, duration_s),
-                evaluation_times_s=(tuple(sorted({0.0, duration_s, *grid})) if grid else None),
-                policy=policy,
-                events=callbacks or None,
-                **sparse_options,
+            if self.numerical_form == "residual":
+                from chemworld.physchem.coupled_residual import solve_coupled_residual
+
+                points, stopping_event, solver_diagnostic = solve_coupled_residual(
+                    self, state, initial, scales, rhs, view, callbacks, duration_s, grid,
+                )
+            else:
+                # Only the ODE backend consumes this finite-difference mask.
+                # Unknown dependencies can make it dense; never allocate it
+                # for the residual path, which assembles its own Jacobian.
+                sparsity = self.jacobian_sparsity() if policy.method in {"BDF", "Radau"} else None
+                sparse_options = {} if sparsity is None else {"jac_sparsity": sparsity}
+                report = solve_ode(
+                    rhs,
+                    initial / scales,
+                    time_span_s=(0.0, duration_s),
+                    evaluation_times_s=(tuple(sorted({0.0, duration_s, *grid})) if grid else None),
+                    policy=policy,
+                    events=callbacks or None,
+                    **sparse_options,
+                )
+                report.raise_for_failure("coupled physical advance")
+                points = [(float(t), report.y[:, i] * scales) for i, t in enumerate(report.t)]
+                if report.diagnostic.status == 1:
+                    terminal = max(
+                        ((float(times[-1]), states[-1], i)
+                         for i, (event, times, states) in enumerate(zip(
+                             self.all_events, report.raw_result.t_events,
+                             report.raw_result.y_events, strict=True,
+                         )) if event.terminal and len(times)),
+                        key=lambda item: item[0], default=None,
+                    )
+                    if terminal is None:
+                        raise RuntimeError("solver stopped without an event state")
+                    terminal_time, terminal_vector, event_index = terminal
+                    stopping_event = self.all_events[event_index].event_id
+                    if points and abs(points[-1][0] - terminal_time) < 1e-12:
+                        points[-1] = (terminal_time, terminal_vector * scales)
+                    else:
+                        points.append((terminal_time, terminal_vector * scales))
+                solver_diagnostic = report.diagnostic.to_dict()
+            trajectory = (state,) if len(points) == 1 and points[0][0] == 0 else tuple(
+                snapshot(t, values) for t, values in points
             )
-            report.raise_for_failure("coupled physical advance")
-            points = [(float(t), report.y[:, i] * scales) for i, t in enumerate(report.t)]
-            if report.diagnostic.status == 1:
-                terminal = report.terminal_point
-                if terminal is None:
-                    raise RuntimeError("solver stopped without an event state")
-                terminal_time, terminal_vector, event_index = terminal
-                stopping_event = self.all_events[event_index].event_id
-                if points and abs(points[-1][0] - terminal_time) < 1e-12:
-                    points[-1] = (terminal_time, terminal_vector * scales)
-                else:
-                    points.append((terminal_time, terminal_vector * scales))
-            trajectory = tuple(snapshot(t, values) for t, values in points)
             diagnostic = {
-                **report.diagnostic.to_dict(),
-                "solver_calls": 1,
+                **solver_diagnostic,
+                "solver_calls": solver_diagnostic.get("solver_calls", 1),
                 "inventory_scales_mol": dict(zip(keys, scales[:count], strict=True)),
                 "temperature_scale_K": self.temperature_scale_K,
                 "energy_scale_J": self.energy_scale_J,
@@ -887,14 +1007,11 @@ class CoupledSystem:
             if property_trial_warnings:
                 diagnostic["property_trial_warnings"] = sorted(property_trial_warnings)
         final = trajectory[-1]
+        if isinstance(self.thermodynamics, KineticOnlyThermodynamics):
+            diagnostic["energy_scope"] = "not_declared_formal_kinetics"
+            diagnostic["chemical_inventory_scope"] = "formal_entity_coordinates_only"
         for point in trajectory:
-            for item in self.coordinates:
-                item.validate(point.coordinates[item.name])
-            if validate_thermal_state is not None:
-                validate_thermal_state(point)
-            for process in self.processes:
-                if process.validate_state is not None:
-                    process.validate_state(point)
+            self.validate_state(point)
         u_before = self.thermodynamics.internal_energy_j(state)
         u_after = self.thermodynamics.internal_energy_j(final)
         energy_residual = None

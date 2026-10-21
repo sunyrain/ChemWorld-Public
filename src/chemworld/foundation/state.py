@@ -66,6 +66,13 @@ class Ledger:
 
 @dataclass(frozen=True)
 class WorldState:
+    """Owned physical state with ledger defaults normalized at construction.
+
+    Optional ledger arguments are input conveniences. Every successfully
+    constructed state (including ``replace``) has species, phases, vessels,
+    equipment, thermal and process ledgers; consumers need no repeated None guard.
+    """
+
     species_amounts: dict[str, float]
     volume_L: float
     temperature_K: float
@@ -88,11 +95,24 @@ class WorldState:
     inactive_vessels: dict[str, WorldState] = field(default_factory=dict)
     vessel_elapsed_s: dict[str, float] = field(default_factory=dict)
     state_slots: StateSlots = field(default_factory=StateSlots)
-    liquid_heat_capacity_J_L_K: float = 4180.0
+    liquid_heat_capacity_J_L_K: float | None = 4180.0
     lab_clock: LabClockState | None = None
 
     def __post_init__(self) -> None:
-        if not isfinite(self.liquid_heat_capacity_J_L_K) or self.liquid_heat_capacity_J_L_K <= 0:
+        if self.phase == "formal":
+            if (self.liquid_heat_capacity_J_L_K is not None or self.volume_L != 0.
+                    or self.species_amounts or self.state_slots.species_amounts()
+                    or any(getattr(self.solvent_accounting, key).volume_L
+                           for key in ("initial", "added", "removed"))
+                    or (self.species is not None and self.species.initial_amounts_mol)
+                    or self.samples.samples
+                    or (self.phases is not None and any(
+                        p.species_amounts_mol or p.solvents.volume_L or p.volume_L != 0.
+                        for p in self.phases.phases.values()))):
+                raise ValueError("formal workspaces cannot own physical material or heat capacity")
+        elif (self.liquid_heat_capacity_J_L_K is None
+              or not isfinite(self.liquid_heat_capacity_J_L_K)
+              or self.liquid_heat_capacity_J_L_K <= 0):
             raise ValueError("Liquid heat capacity must be finite and positive")
         if self.vessel_id in self.inactive_vessels or any(
             key != value.vessel_id or value.inactive_vessels
@@ -245,7 +265,8 @@ class WorldState:
             "species": None if self.species is None else self.species.to_dict(),
             "phases": None if self.phases is None else self.phases.to_dict(),
             "vessels": None if self.vessels is None else self.vessels.to_dict(),
-            "equipment": None if self.equipment is None else self.equipment.to_dict(),
+            "equipment": None if self.equipment is None else self.equipment.to_dict(
+                include_hidden=include_hidden),
             "thermal": None if self.thermal is None else self.thermal.to_dict(),
             "process": None
             if self.process is None
@@ -256,6 +277,7 @@ class WorldState:
             "state_slots": self.state_slots.to_dict(include_hidden=include_hidden),
         }
         if include_hidden:
+            payload["state_slot_order"] = [slot.spec.slot_id for slot in self.state_slots.slots]
             payload["liquid_heat_capacity_J_L_K"] = self.liquid_heat_capacity_J_L_K
             payload["species_amounts"] = deepcopy(self.species_amounts)
             payload["active_reference_sources"] = deepcopy(self.samples.active_reference_sources)

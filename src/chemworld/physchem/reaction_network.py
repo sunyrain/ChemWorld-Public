@@ -19,6 +19,7 @@ from chemworld.physchem import reaction_rate_laws as rate_laws
 from chemworld.physchem import reaction_reference_cases as reference_cases
 from chemworld.physchem import reaction_sensitivity as sensitivity
 from chemworld.physchem.elements import element_matrix
+from chemworld.physchem.stoichiometric_rates import stoichiometric_amount_rates
 
 Arrow = network_specs.Arrow
 RateLawSpec = network_specs.RateLawSpec
@@ -409,12 +410,8 @@ class ReactionNetworkSpec:
         volume_L: float,
     ) -> dict[str, float]:
         """Apply the same stoichiometry to already evaluated progress rates."""
-        derivatives = dict.fromkeys(self.species_ids, 0.0)
-        for reaction in self.reactions:
-            rate_mol_L_s = rates[reaction.reaction_id]
-            for species_id, coefficient in reaction.stoichiometry.items():
-                derivatives[species_id] += coefficient * rate_mol_L_s * volume_L
-        return derivatives
+        return stoichiometric_amount_rates(self.species_ids,
+            ((r.reaction_id, r.stoichiometry) for r in self.reactions), rates, rate_scale=volume_L)
 
     def integrate_batch(
         self,

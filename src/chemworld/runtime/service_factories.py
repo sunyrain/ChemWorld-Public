@@ -55,9 +55,26 @@ def bulk_process(context):
 
     from chemworld.physchem.reactor_solvers import reaction_network_process
 
+    local_ids = {
+        species.species_id for species in context.network.species
+        if species.phase != "surface" and species.species_id in context.state.species_amounts
+    }
+    reactions = []
+    for reaction in context.network.reactions:
+        referenced = set(reaction.stoichiometry) | set(reaction.forward_orders) \
+            | set(reaction.reverse_orders)
+        if referenced <= local_ids:
+            reactions.append(reaction)
+        elif referenced & local_ids:
+            raise ValueError("local bulk reaction omits a declared participant inventory")
     network = replace(
         context.network,
-        species=tuple(species for species in context.network.species if species.phase != "surface"),
+        species=tuple(
+            species for species in context.network.species
+            if species.phase != "surface" and species.species_id in context.state.species_amounts
+        ),
+        reactions=tuple(reactions),
+        stochastic=None,
     )
     return (reaction_network_process(network, process_id=context.component.id),)
 
@@ -73,15 +90,16 @@ def surface_processes(context):
     )
 
     model_id = context.component.parameters.get("surface_id")
-    if model_id is not None and model_id not in context.physics.surface_models:
+    if model_id is not None and model_id not in context.physics.models_of("surface"):
         raise ValueError("surface component must name a declared native mechanism")
     spec = (
-        DEFAULT_SURFACE_MECHANISM if model_id is None else context.physics.surface_models[model_id]
+        DEFAULT_SURFACE_MECHANISM if model_id is None
+        else context.physics.models_of("surface")[model_id]
     )
     if isinstance(spec, MultisiteSurfaceSpec):
         from chemworld.physchem.coupled_system import ConstantCvThermodynamics
 
-        caloric = context.physics.thermal_models[context.state.vessel_id].thermodynamics
+        caloric = context.physics.models_of("thermal")[context.state.vessel_id].thermodynamics
         if (
             not isinstance(caloric, ConstantCvThermodynamics)
             or caloric.reference_temperature_K != spec.reference_temperature_K
@@ -112,7 +130,7 @@ def sorbent_processes(context):
     )
 
     model_id = context.component.parameters["sorbent_id"]
-    spec = context.physics.sorbent_models[model_id]
+    spec = context.physics.models_of("sorbent")[model_id]
     slots = tuple(
         s
         for s in context.state.state_slots.slots
@@ -171,6 +189,16 @@ def stochastic(composition):
     return StochasticRuntime(composition)
 
 
+def sbml(composition):
+    from chemworld.runtime.sbml_models import SBMLAdvanceStrategy
+
+    return SBMLAdvanceStrategy(composition)
+
+
+def formal_models(context):
+    return context.services["reaction_thermal"].formal_models
+
+
 def ro_membrane(composition):
     from chemworld.runtime.membranes import MembraneRuntime
 
@@ -181,6 +209,54 @@ def solid_solution(composition):
     from chemworld.runtime.solid_solutions import SolidSolutionRuntime
 
     return SolidSolutionRuntime(composition)
+
+
+def coupled_thermal(composition):
+    from chemworld.runtime.coupled_thermal import CoupledThermalRuntime
+
+    return CoupledThermalRuntime(composition, None if composition is None else composition.modules)
+
+
+def finite_carrier_supply(composition):
+    from chemworld.runtime.finite_supplies import FiniteCarrierSupply
+
+    return FiniteCarrierSupply(composition)
+
+
+def flash_thermal(composition):
+    from chemworld.runtime.flash_thermal import FlashThermalRuntime
+
+    return FlashThermalRuntime(composition)
+
+
+def liquid_equilibrium(composition):
+    from chemworld.runtime.liquid_equilibrium import LiquidEquilibriumRuntime
+
+    return LiquidEquilibriumRuntime(composition)
+
+
+def dynamic_column(composition):
+    from chemworld.runtime.dynamic_column import DynamicColumnRuntime
+
+    return DynamicColumnRuntime(composition)
+
+
+def concentration(composition):
+    from chemworld.runtime.concentration import ConcentrationRuntime
+
+    return ConcentrationRuntime(composition)
+
+
+def crystal_thermal(composition):
+    from chemworld.runtime.crystal_thermal import CrystalThermalRuntime
+
+    return CrystalThermalRuntime(composition)
+
+
+def legacy_liquid(composition):
+    from chemworld.runtime.legacy_liquid_advance import LegacyLiquidAdvance
+
+    return LegacyLiquidAdvance(composition)
 
 
 def configure_electrical_control(state, action):
@@ -202,7 +278,7 @@ def phase_separation(context):
         context.world,
         context.species_view,
         nominal_pair_contract=context.partition_nominal_pair_contract,
-        liquid_runtime=context.services["reaction_thermal"].liquid,
+        liquid_runtime=getattr(context.services["reaction_thermal"], "liquid", None),
         thermal=context.services["reaction_thermal"],
     )
 
@@ -257,6 +333,32 @@ def lab_schedule(context):
     from chemworld.runtime.scheduling import LabScheduleServices
 
     return LabScheduleServices(context)
+
+
+def lab_heat_choices(state, validator=None):
+    from chemworld.runtime.scheduling import lab_device_choices
+
+    return lab_device_choices(state, "heat")
+
+
+def lab_analyzer_choices(state, validator=None):
+    from chemworld.runtime.scheduling import lab_device_choices
+
+    return lab_device_choices(state, "measure", allowed_instruments=(
+        None if validator is None else validator.allowed_instruments
+    ))
+
+
+def lab_heat_selected(state, action):
+    from chemworld.runtime.scheduling import lab_device_selected
+
+    return lab_device_selected(state, action, "heat")
+
+
+def lab_analyzer_selected(state, action):
+    from chemworld.runtime.scheduling import lab_device_selected
+
+    return lab_device_selected(state, action, "measure")
 
 
 def configure_instrument(state, action):

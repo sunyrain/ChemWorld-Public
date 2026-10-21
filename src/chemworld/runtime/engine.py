@@ -17,7 +17,6 @@ from chemworld.action_codec import ActionCodec
 from chemworld.campaign_resources import (
     CampaignResourceCard,
     CampaignResourceLedger,
-    campaign_resource_event_id,
 )
 from chemworld.foundation import equipment_settings
 from chemworld.foundation.observations import Observation
@@ -51,11 +50,7 @@ from chemworld.runtime.full_process_contract import (
     FULL_PROCESS_TASKS,
     FULL_PROCESS_THERMAL_CONTRACT,
 )
-from chemworld.runtime.observation_noise import (
-    ObservationNoiseCoordinate,
-    keyed_noise_provenance,
-    keyed_observation_rng,
-)
+from chemworld.runtime.lifecycle import prepare_initialization
 from chemworld.runtime.observation_values import empty_reading, value_or_default
 from chemworld.runtime.reports import (
     annotate_constitution_rollback,
@@ -66,11 +61,12 @@ from chemworld.runtime.reports import (
     render_env,
     sanitize_agent_info,
 )
+from chemworld.runtime.resource_services import reserve_resources, settle_resources
 from chemworld.runtime.session_snapshot import (
     SessionSnapshot,
     capture_session,
-    declaration,
     restore_continuation,
+    session_configuration,
 )
 from chemworld.tasks import default_kernel_maturity, get_task
 from chemworld.world.composition import (
@@ -400,6 +396,8 @@ class ChemWorldRuntime:
             self.scoring_contract,
             self.observation_contract,
             modules=self.domain_modules,
+            composition=(None if self.compiled_composition is None
+                         else self.compiled_composition.spec),
             observation_noise_multiplier=self.world.domain_parameter(
                 "observation_noise_multiplier"
             ),
@@ -491,6 +489,8 @@ class ChemWorldRuntime:
             self.scoring_contract,
             self.observation_contract,
             modules=self.domain_modules,
+            composition=(None if self.compiled_composition is None
+                         else self.compiled_composition.spec),
             observation_noise_multiplier=self.world.domain_parameter(
                 "observation_noise_multiplier"
             ),
@@ -521,135 +521,34 @@ class ChemWorldRuntime:
 
     def _initialize_entities(self, scope, options):
         """Evaluator-only reset boundary; never an uncharged Agent operation."""
-        from chemworld.foundation.lifecycle import initialize_entities, replace_equipment
-        from chemworld.foundation.state_ledgers import EquipmentRecord
-        from chemworld.foundation.state_ownership import StateSlots
-
-        if self._state.lab_clock is not None:
-            raise ValueError(
-                "shared laboratory lifecycle requires full reset; "
-                "partial resets cannot split clocks"
-            )
-
-        if scope == "equipment":
-            replacement = options["replacement"]
-            if isinstance(replacement, Mapping):
-                replacement = EquipmentRecord(**replacement)
-            slots = options.get("slots", StateSlots())
-            if isinstance(slots, Mapping):
-                slots = StateSlots.from_dict(dict(slots))
-            transition = replace_equipment(
-                self._state,
-                options["equipment_id"],
-                replacement,
-                slots=slots,
-            )
-        else:
-            physics = (
-                self.compiled_composition.spec.physics
-                if self.compiled_composition is not None
-                else None
-            )
-            fresh_initial = self._fresh_initial_state()
-            transition = initialize_entities(
-                self._state,
-                fresh_initial,
-                scope=scope,
-                vessel_ids=options.get("vessel_ids"),
-                preserve_vessels=(set() if physics is None else physics.finite_supply_vessels)
-                | self.runtime.domain_services.reaction_thermal.advancer.preserved_source_vessels,
-            )
-            if physics is not None:
-                from chemworld.runtime.condensed_material_routing import (
-                    reconcile_condensed_initialization,
-                )
-
-                transition = reconcile_condensed_initialization(
-                    self._state, fresh_initial, transition, physics
-                )
-                from chemworld.runtime.crystal_thermal import reconcile_crystal_initialization
-
-                transition = reconcile_crystal_initialization(
-                    self._state, fresh_initial, transition, physics
-                )
-        if (
-            scope != "equipment"
-            and physics is not None
-            and (physics.column_models or physics.concentration_models)
-        ):
-            # Material replacement retains stationary body H. Re-equilibrate
-            # new fluid plus retained apparatus by the same PH closure, without
-            # advancing the experiment clock or introducing a duplicate n.
-            from chemworld.runtime.concentration import install_concentration, read_concentration
-            from chemworld.runtime.dynamic_column import install_column, read_column
-
-            active = transition.state
-            locals_ = {
-                active.vessel_id: active.replace(inactive_vessels={}),
-                **active.inactive_vessels,
-            }
-            initialized = {}
-            models = {**physics.column_models, **physics.concentration_models}
-            for name in set(transition.receipt["vessels"]) & set(models):
-                local, model = locals_[name], models[name]
-                before_h = sum(s.values["enthalpy_J"] for s in local.state_slots.slots)
-                if name in physics.column_models:
-                    local = install_column(local, model, read_column(local, model))
-                else:
-                    local = install_concentration(local, model, read_concentration(local, model))
-                locals_[name] = local
-                initialized[name] = {
-                    "total_enthalpy_before_J": before_h,
-                    "total_enthalpy_after_J": sum(
-                        s.values["enthalpy_J"] for s in local.state_slots.slots
-                    ),
-                    "temperature_K": local.temperature_K,
-                }
-            active = locals_.pop(active.vessel_id)
-            transition = replace(
-                transition,
-                state=active.replace(inactive_vessels=locals_),
-                receipt={
-                    **transition.receipt,
-                    **(
-                        {
-                            "column_equilibration": {
-                                k: v for k, v in initialized.items() if k in physics.column_models
-                            }
-                        }
-                        if physics.column_models
-                        else {}
-                    ),
-                    **(
-                        {
-                            "concentration_equilibration": {
-                                k: v
-                                for k, v in initialized.items()
-                                if k in physics.concentration_models
-                            }
-                        }
-                        if physics.concentration_models
-                        else {}
-                    ),
-                },
-            )
-        advancer = self.runtime.domain_services.reaction_thermal.advancer
-        transition = advancer.reconcile_initialization(transition)
-        report = self.constitution.check_state(transition.state)
-        if not report.passed:
-            raise ValueError("entity initialization produced an invalid physical state")
+        transition = self._prepare_initialization(scope, options)
         self._state = transition.state
-        self._lifecycle_history.append(
-            {
-                "after_operation_id": self._operation_id,
-                "experiment_index": self._experiment_index,
-                **transition.receipt,
-            }
-        )
+        self._record_initialization(transition)
         self._last_reading = empty_reading()
         self._last_operation_record = None
         self._last_info = {"lifecycle_initialization": {"scope": scope}}
         return self.observe(), self.task_info()
+
+    def _prepare_initialization(self, scope, options):
+        return prepare_initialization(
+            self._state,
+            self._fresh_initial_state() if scope != "equipment" else None,
+            scope=scope, options=options,
+            physics=(
+                self.compiled_composition.spec.physics
+                if self.compiled_composition is not None else None
+            ),
+            advancer=self.runtime.domain_services.reaction_thermal.advancer,
+            constitution=self.constitution,
+            shared_systems=self.runtime.domain_services.lab_schedule.systems,
+        )
+
+    def _record_initialization(self, transition):
+        self._lifecycle_history.append({
+            "after_operation_id": self._operation_id,
+            "experiment_index": self._experiment_index,
+            **transition.receipt,
+        })
 
     def execute(
         self,
@@ -668,33 +567,18 @@ class ChemWorldRuntime:
         except (IndexError, OverflowError, TypeError, ValueError):
             action = raw_action
         previous_state = self._state
-        resource_preflight = None
-        batch_preflight = None
-        resource_event_id: str | None = None
-        resource_starts_vessel = False
         operation_value = action.get("operation")
         is_campaign_discard = (
             isinstance(operation_value, str) and operation_value == "discard_batch"
         )
-        if self._campaign_resource_ledger is not None:
-            resource_starts_vessel = (
-                not self._campaign_resource_current_vessel_started and not is_campaign_discard
-            )
-            resource_event_id = campaign_resource_event_id(
-                self._campaign_id,
-                self._operation_id + 1,
-            )
-            resource_preflight = self._campaign_resource_ledger.preflight(
-                resource_event_id,
-                action,
-                starts_vessel=resource_starts_vessel,
-            )
-            if self._batch_resource_ledger is not None:
-                batch_preflight = self._batch_resource_ledger.preflight(
-                    resource_event_id,
-                    action,
-                    starts_vessel=resource_starts_vessel,
-                )
+        reservation = reserve_resources(
+            self._campaign_resource_ledger, self._batch_resource_ledger, action,
+            campaign_id=self._campaign_id, operation_index=self._operation_id + 1,
+            vessel_started=self._campaign_resource_current_vessel_started,
+            state=previous_state,
+        )
+        resource_preflight = reservation.campaign if reservation else None
+        batch_preflight = reservation.batch if reservation else None
         validation = self.operation_validator.validate(action, self._state)
         declared_process_preflight = self._declared_process_time_preflight(action)
         if is_campaign_discard and not self._campaign_batch_discard_available():
@@ -702,17 +586,8 @@ class ChemWorldRuntime:
                 validation,
                 "campaign_batch_discard_available",
             )
-        campaign_resource_rejected = bool(
-            resource_preflight is not None and not resource_preflight.allowed
-        )
-        resource_rejection_reasons = (
-            resource_preflight.rejection_reasons if resource_preflight is not None else ()
-        )
-        if batch_preflight is not None and not batch_preflight.allowed:
-            campaign_resource_rejected = True
-            resource_rejection_reasons += tuple(
-                "per_batch:" + reason for reason in batch_preflight.rejection_reasons
-            )
+        campaign_resource_rejected = reservation.rejected if reservation else False
+        resource_rejection_reasons = reservation.rejection_reasons if reservation else ()
         if campaign_resource_rejected:
             validation = self._campaign_resource_failure_validation(
                 validation,
@@ -772,172 +647,38 @@ class ChemWorldRuntime:
                 action,
                 validation,
             )
+        attempt = self.observation_kernel.observe_execution(
+            runtime_result, previous_state, action, self._rng,
+            noise_mode=self.observation_noise_mode,
+            noise_namespace=self.observation_noise_namespace,
+            observation_seed=self._observation_seed(self.seed),
+            experiment_index=self._experiment_index,
+            occurrences=self._observation_occurrences,
+            retain_previous_process=self.full_process_contract_id is not None,
+            debug_truth=self.debug_truth,
+        )
+        if attempt.failure_reason is not None:
+            if runtime_result.operation_record.is_instrument_measurement:
+                runtime_result = self.runtime.invalidate_measurement(
+                    runtime_result, reason=attempt.failure_reason,
+                )
+            else:
+                validation = self._domain_failure_validation(validation, "observation_domain_valid")
+                runtime_result = self.runtime.apply_invalid_transaction(
+                    previous_state, action, validation,
+                )
+        elif runtime_result.committed and runtime_result.operation_record.is_instrument_measurement:
+            runtime_result = replace(
+                runtime_result,
+                kernel_result=replace(runtime_result.kernel_result, measurement_status="valid"),
+            )
         self._state = runtime_result.state
         operation_record = runtime_result.operation_record
-        runtime_info = runtime_result.info_payload()
-        if declared_process_preflight is not None:
-            runtime_info["declared_process_time_preflight"] = deepcopy(declared_process_preflight)
-            runtime_info["declared_process_resources"] = (
-                self.public_declared_process_resource_state()
-            )
-        if campaign_resource_rejected:
-            runtime_info.update(
-                {
-                    "transaction_status": "campaign_resource_rejected",
-                    "rollback_reason": "campaign_resource_rejected",
-                    "campaign_resource_rejected": True,
-                    "campaign_resource_rejection_reasons": list(resource_rejection_reasons),
-                }
-            )
-        preconditions_passed = all(operation_record.preconditions.values())
-        operation_committed = (
-            preconditions_passed and runtime_result.kernel_result.transaction_status == "committed"
-        )
-        observation_checks: list[dict[str, object]] = []
-        observation_rng_state = deepcopy(self._rng.bit_generator.state)
-        observation_rng = self._rng
-        noise_counter_key: tuple[int, str, str] | None = None
-        noise_provenance: dict[str, Any] = {
-            "mode": self.observation_noise_mode,
-            "status": "not_observed",
-        }
-        if operation_committed and not is_campaign_discard:
-            observation_state = self._state
-            if operation_record.is_instrument_measurement:
-                # The measurement execution selects the specimen at its declared
-                # sampling time. The post-execution host can have evolved further.
-                specimen = runtime_result.kernel_result.measurement_state or previous_state
-                observation_state = specimen.replace(
-                    ledger=self._state.ledger,
-                    equipment=self._state.equipment,
-                )
-                if self.full_process_contract_id is not None:
-                    observation_state = observation_state.replace(
-                        process=previous_state.process,
-                        equipment=previous_state.equipment,
-                    )
-            if self.observation_noise_mode == "keyed":
-                operation_type = str(action.get("operation") or "unknown")
-                instrument = str(operation_record.instrument or action.get("instrument") or "none")
-                noise_counter_key = (
-                    self._experiment_index,
-                    operation_type,
-                    instrument,
-                )
-                replicate_index = self._observation_occurrences.get(
-                    noise_counter_key,
-                    0,
-                )
-                coordinate = ObservationNoiseCoordinate(
-                    namespace=self.observation_noise_namespace,
-                    base_observation_seed=self._observation_seed(self.seed),
-                    experiment_index=self._experiment_index,
-                    operation_type=operation_type,
-                    instrument=instrument,
-                    replicate_index=replicate_index,
-                )
-                observation_rng = keyed_observation_rng(coordinate)
-                noise_provenance = {
-                    **keyed_noise_provenance(coordinate),
-                    "status": "candidate",
-                }
-            try:
-                acquisition = runtime_result.kernel_result.diagnostics.get("acquisition")
-                if acquisition is not None and not acquisition["acquisition_complete"]:
-                    raise ValueError("physical acquisition stopped before readout")
-                observation = self.observation_kernel.observe(
-                    observation_state,
-                    action,
-                    observation_rng,
-                )
-                if acquisition is not None and acquisition["clock_semantics"] != (
-                    "instantaneous_snapshot"
-                ):
-                    record = observation.native_record()
-                    for channel in record["channels"]:
-                        channel.update(
-                            {
-                                key: acquisition[key]
-                                for key in ("sample_id", "sampled_at", "available_at")
-                            }
-                        )
-                    observation = type(observation).from_native_record(record)
-            except (ArithmeticError, ValueError) as exc:
-                self._rng.bit_generator.state = observation_rng_state
-                if operation_record.is_instrument_measurement:
-                    runtime_result = self.runtime.invalidate_measurement(
-                        runtime_result,
-                        reason=f"readout_domain_error: {type(exc).__name__}",
-                    )
-                else:
-                    validation = self._domain_failure_validation(
-                        validation,
-                        "observation_domain_valid",
-                    )
-                    runtime_result = self.runtime.apply_invalid_transaction(
-                        previous_state,
-                        action,
-                        validation,
-                    )
-                    self._state = runtime_result.state
-                    operation_record = runtime_result.operation_record
-                    preconditions_passed = False
-                    operation_committed = False
-                observation = self.observation_kernel.failed_observation()
-                noise_provenance["status"] = "invalid" if operation_committed else "rolled_back"
-            else:
-                candidate_observation_report = self.constitution.check_observation(
-                    observation,
-                    debug_truth=self.debug_truth,
-                )
-                if candidate_observation_report.passed:
-                    observation_checks = candidate_observation_report.to_list()
-                    noise_provenance["status"] = "committed"
-                    if noise_counter_key is not None:
-                        self._observation_occurrences[noise_counter_key] = (
-                            self._observation_occurrences.get(noise_counter_key, 0) + 1
-                        )
-                    if operation_record.is_instrument_measurement:
-                        runtime_result = replace(
-                            runtime_result,
-                            kernel_result=replace(
-                                runtime_result.kernel_result,
-                                measurement_status="valid",
-                            ),
-                        )
-                else:
-                    self._rng.bit_generator.state = observation_rng_state
-                    observation_checks = candidate_observation_report.to_list()
-                    if operation_record.is_instrument_measurement:
-                        # The packet is withheld, but actual withdrawal, instrument
-                        # use and its irreversible consumption remain committed.
-                        runtime_result = self.runtime.invalidate_measurement(
-                            runtime_result,
-                            reason="readout_contract_failed",
-                        )
-                    else:
-                        validation = self._domain_failure_validation(
-                            validation,
-                            "observation_domain_valid",
-                        )
-                        runtime_result = self.runtime.apply_invalid_transaction(
-                            previous_state,
-                            action,
-                            validation,
-                        )
-                        self._state = runtime_result.state
-                        operation_record = runtime_result.operation_record
-                        preconditions_passed = False
-                        operation_committed = False
-                    runtime_info = runtime_result.info_payload()
-                    observation = self.observation_kernel.failed_observation()
-                    noise_provenance["status"] = "invalid" if operation_committed else "rolled_back"
-        else:
-            observation = self.observation_kernel.failed_observation()
-        if runtime_result.kernel_result.measurement_status == "invalid" and noise_counter_key:
-            self._observation_occurrences[noise_counter_key] = (
-                self._observation_occurrences.get(noise_counter_key, 0) + 1
-            )
+        operation_committed = runtime_result.committed
+        observation = attempt.observation
+        if attempt.occurrence_key is not None:
+            key = attempt.occurrence_key
+            self._observation_occurrences[key] = self._observation_occurrences.get(key, 0) + 1
         if operation_committed:
             operation = str(action.get("operation", ""))
             if operation in self._declared_operation_counts:
@@ -957,17 +698,12 @@ class ChemWorldRuntime:
                     "campaign_resource_rejection_reasons": list(resource_rejection_reasons),
                 }
             )
-        self._last_observation_noise_provenance = deepcopy(noise_provenance)
-        if not observation_checks:
-            observation_checks = self.constitution.check_observation(
-                observation,
-                debug_truth=self.debug_truth,
-            ).to_list()
+        self._last_observation_noise_provenance = deepcopy(attempt.noise_provenance)
         operation_record = replace(
             operation_record,
             constitution_checks=[
                 *operation_record.constitution_checks,
-                *observation_checks,
+                *attempt.checks,
             ],
         )
         observation_values = observation.values
@@ -985,47 +721,16 @@ class ChemWorldRuntime:
         previous_process = previous_state.process or ProcessLedger()
 
         resource_outcome_delta = None
-        if self._campaign_resource_ledger is not None:
-            if resource_event_id is None or resource_preflight is None:
-                raise RuntimeError("campaign resource preflight receipt is missing")
-            resource_outcome = {
-                "operation_committed": operation_committed,
-                "transaction_status": runtime_info["transaction_status"],
-                "material_stock_consumption": dict(
-                    operation_record.material_balance.stock_consumption
-                ),
-                "campaign_resource_report_delta": (
-                    self._campaign_resource_report_delta(
-                        previous_state,
-                        self._state,
-                        observation.values,
-                    )
-                ),
-            }
-            resource_outcome_delta = self._campaign_resource_ledger.record_outcome(
-                resource_event_id,
-                action,
-                resource_outcome,
-                starts_vessel=resource_starts_vessel,
+        if reservation is not None:
+            resource_outcome_delta, self._last_campaign_resource_receipt = settle_resources(
+                reservation, self._campaign_resource_ledger, self._batch_resource_ledger, action,
+                committed=operation_committed,
+                transaction_status=runtime_info["transaction_status"],
+                stock_consumption=operation_record.material_balance.stock_consumption,
+                previous=previous_state, current=self._state, observation_values=observation.values,
             )
-            if self._batch_resource_ledger is not None:
-                self._batch_resource_ledger.record_outcome(
-                    resource_event_id,
-                    action,
-                    resource_outcome,
-                    starts_vessel=resource_starts_vessel,
-                )
             if resource_outcome_delta.vessel_starts:
                 self._campaign_resource_current_vessel_started = True
-            self._last_campaign_resource_receipt = {
-                "event_id": resource_event_id,
-                "preflight": resource_preflight.to_dict(),
-                "outcome_delta": resource_outcome_delta.to_dict(),
-                "operation_committed": operation_committed,
-                "transaction_status": runtime_info["transaction_status"],
-                "rejected": campaign_resource_rejected,
-                "rejection_reasons": list(resource_preflight.rejection_reasons),
-            }
 
         self._step_count += 1
         self._operation_id += 1
@@ -1186,30 +891,9 @@ class ChemWorldRuntime:
                 can_start_next = False
                 blockers = ["environment_budget_exhausted"]
             if can_start_next:
-                new_state = self._fresh_initial_state()
-                from chemworld.foundation.lifecycle import initialize_entities
-
-                physics = (
-                    self.compiled_composition.spec.physics
-                    if self.compiled_composition is not None
-                    else None
-                )
-                advancer = self.runtime.domain_services.reaction_thermal.advancer
-                transition = initialize_entities(
-                    self._state,
-                    new_state,
-                    preserve_vessels=(set() if physics is None else physics.finite_supply_vessels)
-                    | advancer.preserved_source_vessels,
-                )
-                transition = advancer.reconcile_initialization(transition)
+                transition = self._prepare_initialization("batch", {})
                 new_state = transition.state
-                self._lifecycle_history.append(
-                    {
-                        "after_operation_id": self._operation_id,
-                        "experiment_index": self._experiment_index,
-                        **transition.receipt,
-                    }
-                )
+                self._record_initialization(transition)
                 info["lifecycle_initialization"] = {
                     "scope": "batch",
                     "vessels": sorted(transition.receipt["vessels"]),
@@ -1294,10 +978,8 @@ class ChemWorldRuntime:
     @classmethod
     def from_snapshot(cls, snapshot, *, domain_modules=None):
         """Create a session from saved state, using explicitly installed module code."""
-        snapshot = (
-            snapshot
-            if isinstance(snapshot, SessionSnapshot)
-            else SessionSnapshot.from_dict(snapshot)
+        snapshot = SessionSnapshot.from_dict(
+            snapshot.to_dict() if isinstance(snapshot, SessionSnapshot) else snapshot
         )
         instance = cls(**deepcopy(snapshot.payload["configuration"]), domain_modules=domain_modules)
         options = (
@@ -1311,12 +993,15 @@ class ChemWorldRuntime:
 
     def restore(self, snapshot: SessionSnapshot) -> None:
         """Restore a compatible session atomically; no history is executed or charged."""
-        config = snapshot.payload["configuration"]
+        snapshot = SessionSnapshot.from_dict(
+            snapshot.to_dict() if isinstance(snapshot, SessionSnapshot) else snapshot
+        )
+        candidate = ChemWorldRuntime.from_snapshot(snapshot, domain_modules=self.domain_modules)
+        config = session_configuration(candidate)
         if {k: v for k, v in config.items() if k != "seed"} != {
-            k: v for k, v in declaration(self._initialization).items() if k != "seed"
+            k: v for k, v in session_configuration(self).items() if k != "seed"
         }:
             raise ValueError("snapshot belongs to a different experimental session configuration")
-        candidate = ChemWorldRuntime.from_snapshot(snapshot, domain_modules=self.domain_modules)
         self.__dict__.update(candidate.__dict__)
 
     def close(self) -> None:
@@ -1506,6 +1191,13 @@ class ChemWorldRuntime:
 
         return validate_action(self, action)
 
+    def sample_valid_action(self, rng, *, operation=None, max_attempts=100) -> dict[str, Any]:
+        from chemworld.agent_interface import sample_valid_action
+
+        return sample_valid_action(
+            self, rng, operation=operation, max_attempts=max_attempts
+        )
+
     def observation_view(self, mode: str = "tool_json") -> dict[str, Any]:
         from chemworld.agent_interface import observation_view
 
@@ -1668,44 +1360,6 @@ class ChemWorldRuntime:
             }
         return delta
 
-    @staticmethod
-    def _campaign_resource_report_delta(
-        previous_state: WorldState,
-        current_state: WorldState,
-        observation_values: Mapping[str, float | None],
-    ) -> dict[str, float]:
-        def positive_delta(previous: float, current: float) -> float:
-            delta = float(current) - float(previous)
-            return delta if isfinite(delta) and delta > 0.0 else 0.0
-
-        observed_risk = observation_values.get("safety_risk")
-        if observed_risk is None or isinstance(observed_risk, bool):
-            normalized_observed_risk = 0.0
-        else:
-            candidate_risk = float(observed_risk)
-            normalized_observed_risk = (
-                candidate_risk if isfinite(candidate_risk) and candidate_risk >= 0.0 else 0.0
-            )
-        return {
-            "process_time_s": positive_delta(
-                previous_state.ledger.time_s,
-                current_state.ledger.time_s,
-            ),
-            "sample_consumed_L": positive_delta(
-                previous_state.ledger.sample_consumed_L,
-                current_state.ledger.sample_consumed_L,
-            ),
-            "physical_cost": positive_delta(
-                previous_state.ledger.cost,
-                current_state.ledger.cost,
-            ),
-            "accumulated_risk": positive_delta(
-                previous_state.ledger.risk,
-                current_state.ledger.risk,
-            ),
-            "observed_risk": normalized_observed_risk,
-        }
-
     def _make_campaign_id(self) -> str:
         # Public episode identity must not be a reversible encoding of the
         # hidden-world seed. Replay identity is carried separately in private
@@ -1825,7 +1479,7 @@ class ChemWorldRuntime:
             if self.scoring_contract.contract_id == PARTITION_S0_EXTRACTION_EFFICIENCY_V3
             else None
         )
-        return OperationExecutor(
+        executor = OperationExecutor(
             world=self.world,
             constitution=self.constitution,
             task_spec=self.task_spec,
@@ -1837,6 +1491,14 @@ class ChemWorldRuntime:
             if self.compiled_composition is None
             else self.compiled_composition.spec,
         )
+        if self.compiled_composition is None or self.compiled_composition.spec.physics is None:
+            thermal = getattr(executor.domain_services, "reaction_thermal", None)
+            if thermal is not None:
+                thermal.advancer.strategy(
+                    self.scenario_instance.initial_state,
+                    required=bool({"heat", "wait"} & set(self.allowed_operations)),
+                )
+        return executor
 
     def _make_operation_validator(self) -> OperationValidator:
         species_view = MechanismSpeciesView(self.scenario_instance.compiled_mechanism)

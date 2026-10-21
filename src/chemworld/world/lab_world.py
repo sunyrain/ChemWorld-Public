@@ -61,7 +61,7 @@ def shared_lab_world():
         "physics": CompositionPhysics(
             physics.network,
             states,
-            thermal_models=models,
+            models={"thermal": models},
             lab_clock=LabClockSpec("heater", "programmed_hplc"),
         ).to_dict(),
         "task": {

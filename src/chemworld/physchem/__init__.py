@@ -12,6 +12,129 @@ from importlib import import_module
 from typing import Any
 
 _MODULE_EXPORTS: dict[str, list[str]] = {
+    "tabulated_functions": 'TabulatedScalar'.split(),
+    "battery_thevenin": 'TheveninSpec thevenin_system thevenin_fields'.split(),
+    "battery_mpm": 'BatteryMPMSpec mpm_fields'.split(),
+    "battery_particles": 'ParticleSizeDistribution lognormal_size_distribution'.split(),
+    "battery_soh": (
+        'ElectrodeSOHSpec HalfCellSOHSpec SOHResult solve_electrode_soh soh_spec_from_dict '
+        'soh_from_battery battery_spec_at_soc soh_parameter_response'
+    ).split(),
+    "root_isolation": 'IsolationPolicy IsolatedRoots isolate_roots'.split(),
+    "combustion": (
+        'CombustionData combustion_stoichiometry combustion_products_mixture combustion_data '
+        'combustion_enthalpy heating_value_convert heating_value_mass combustion_reference_heat '
+        'octane_index ignition_delay_quality'
+    ).split(),
+    "combustion_streams": (
+        'air_fuel_ratio_solver combustion_spec_solver mixture_combustion_spec'
+    ).split(),
+    "safety_environment": (
+        'ppmv_to_mass_concentration mass_concentration_to_ppmv suzuki_flammability_limit '
+        'crowl_louvar_flammability_limit flammability_estimate fire_mixture_limit '
+        'nfpa_30_classification emission_impact octanol_water_partition '
+        'gas_exposure_comparison source_flammable_mixture iso_10156_lower_limit '
+        'ISO_10156_DILUENT_COEFFICIENTS'
+    ).split(),
+    "electro_optics": (
+        'relative_permittivity_crc water_permittivity_iapws water_refractive_index_iapws '
+        'refractive_index_tde molar_refractivity refractive_index_from_molar_refractivity '
+        'polarizability_volume brix_to_refractive_index refractive_index_to_brix '
+        'brix_reading parallel_plate_capacitance'
+    ).split(),
+    "henry": (
+        'HENRY_SCALES henry_convert henry_pressure henry_pressure_derivatives '
+        'henry_log_mixture henry_pressure_mixture henry_matrix henry_raoult_flash'
+    ).split(),
+    "solubility": (
+        'HANSEN_SOURCES HansenParameters hansen_distance solid_solubility '
+        'freezing_point_depression hildebrand_parameter'
+    ).split(),
+    "interface_kernels": ('INTERFACE_METHODS interface_value interface_derivatives').split(),
+    "volume_kernels": (
+        'VOLUME_METHODS volume_value volume_derivatives volume_parameter_jacobian '
+        'volume_pressure_derivatives'
+    ).split(),
+    "volume_correlations": ['volume_correlation'],
+    "volume_mixtures": (
+        'MIXTURE_VOLUME_METHODS mixture_volume_value mixture_volume_derivatives '
+        'mixture_volume_composition_jacobian mixture_volume_evaluation mixture_volume_correlation'
+    ).split(),
+    "interfaces": (
+        'winterfeld_scriven_davis diguilio_teja weinaug_katz water_oil_interfacial_tension '
+        'mixture_surface_tension parachor_surface_tension laplace_pressure capillary_force'
+    ).split(),
+    "conductivity_mixtures": (
+        'dippr9h_conductivity dippr9i_conductivity filippov_conductivity '
+        'wassiljewa_herning_zipperer_conductivity lindsay_bromley_conductivity '
+        'mixture_conductivity_ledger'
+    ).split(),
+    "dense_conductivity": (
+        'compressed_liquid_conductivity compressed_liquid_conductivity_derivatives '
+        'compressed_liquid_conductivity_report chung_dense_conductivity'
+    ).split(),
+    "conductivity_kernels": (
+        'CONDUCTIVITY_METHODS conductivity_value conductivity_derivatives'
+    ).split(),
+    "petroleum_viscosity": (
+        'kinematic_viscosity dynamic_viscosity twu_1985_kinematic_viscosity '
+        'twu_1985_viscosity viscosity_index'
+    ).split(),
+    "viscosity_scales": ('VISCOSITY_SCALES viscosity_converter').split(),
+    "dense_viscosity": (
+        'lucas_liquid_viscosity lucas_liquid_viscosity_report przedziecki_sridhar_viscosity '
+        'przedziecki_sridhar_temperature_viscosity'
+    ).split(),
+    "water_transport": (
+        'water_viscosity_iapws water_reference_compressibility water_correlation_length_nm '
+        'water_viscosity_enhancement water_conductivity_iapws'
+    ).split(),
+    "air_transport": ['air_conductivity_lemmon'],
+    "viscosity_mixtures": (
+        'wilke_prefactors wilke_viscosity herning_zipperer_viscosity '
+        'brokaw_viscosity lorentz_bray_clarke_viscosity '
+        'gas_mixture_viscosity_ledger dense_mixture_viscosity_ledger'
+    ).split(),
+    "viscosity_kernels": (
+        'VISCOSITY_METHODS viscosity_value viscosity_derivatives '
+        'viscosity_yaws_parameter_jacobian'
+    ).split(),
+    "calphad_material": ['CefMaterialSpec', 'CefMaterialState'],
+    "mqmqa": ['MQMQAPhaseModel'],
+    "lennard_jones": (
+        'LennardJonesSpec COLLISION_PAIRS EPSILON_METHODS DIAMETER_METHODS '
+        'lennard_jones_energy lennard_jones_diameter lennard_jones_reduced_temperature '
+        'lennard_jones_collision_integral lennard_jones_viscosity_report '
+        'lennard_jones_diffusivity_report'
+    ).split(),
+    "critical_kernels": (
+        'BOILING_CRITICAL_FITS MERSMANN_KIND_RADII_ANGSTROM '
+        'MERSMANN_KIND_REGRESSED_RADII_ANGSTROM acentric_factor_from_pressure '
+        'lee_kesler_acentric_factor stiel_polar_factor critical_surface '
+        'boiling_critical_temperature mersmann_kind_volume mixture_critical_property'
+    ).split(),
+    "critical_properties": (
+        'CriticalEstimate estimate_critical_property acentric_estimate_from_correlation '
+        'eos_component_from_critical_inputs mixture_critical_estimate'
+    ).split(),
+    "vapor_pressure": (
+        'VaporPressureJacobian vapor_pressure_parameter_jacobian '
+        'antoine_coefficients_from_point dippr101_coefficients_from_point '
+        'arrhenius_pressure_extrapolation'
+    ).split(),
+    "water_saturation": (
+        'water_saturation_pressure water_saturation_temperature'
+    ).split(),
+    "stoichiometry": (
+        'stoichiometric_matrix balance_stoichiometry standard_formation_reaction '
+        'stoichiometry_molar_to_mass stoichiometry_mass_to_molar stoichiometry_mass_error'
+    ).split(),
+    "heat_capacity": (
+        'PiecewiseHeatCapacity temperature_from_caloric_change'.split()
+    ),
+    "heat_capacity_kernels": (
+        'vibrational_temperature'.split()
+    ),
     "finite_volume": (
         'ConservativeDiffusion DiffusionBoundary DiffusionCoupling DiffusionMesh DiffusionRates'
     ).split(),
@@ -52,8 +175,11 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'third_body_efficiencies troe_broadening_factor troe_falloff_rate_constant'
     ).split(),
     "properties": (
+        'CorrelationIntegral caloric_correlation_change correlation_temperature_derivative '
+        'integrate_correlation '
         'CaloricReference PropertyPackageThermodynamics SpeciesCaloricModel StatePropertyReport '
-        'caloric_polynomial_change evaluate_caloric_correlation evaluate_property_state '
+        'caloric_polynomial_change caloric_temperature evaluate_caloric_correlation '
+        'evaluate_property_state '
         'STANDARD_PRESSURE_PA ComponentPropertyPackage MixtureEnthalpyLedger '
         'MixtureTransportLedger MixtureVolumeLedger MolarVolumeReport PhaseEnthalpyReport '
         'PhaseTransitionSpec PropertyEvaluation PureSaturationReport '
@@ -193,7 +319,15 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ).split(),
     "elements": (
         'ElementSpec atom_fractions element_matrix hill_formula mass_fractions_from_formula '
-        'molecular_weight parse_formula'
+        'molecular_weight parse_formula formula_charge serialize_formula get_element get_isotope '
+        'mixture_atomic_composition similarity_variable index_hydrogen_deficiency'
+    ).split(),
+    "atomic_data": (
+        'ATOMIC_DATA_VERSION AtomicEstimate ElementData IsotopeData atomic_data_provenance '
+        'element_data isotope_data'
+    ).split(),
+    "identifiers": (
+        'validate_cas_number check_cas_number cas_to_int int_to_cas sorted_cas_key'
     ).split(),
     "equipment_specs": (
         'EquipmentCardSpec EquipmentConstraintCheck EquipmentConstraintReport '
@@ -235,7 +369,12 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ).split(),
     "thermochemistry": (
         'NASA7SpeciesThermo NASA7TemperatureSegment ReactionThermoResult SpeciesThermoState '
-        'equilibrium_constant_from_delta_g reaction_thermochemistry'
+        'equilibrium_constant_from_delta_g reaction_thermochemistry '
+        'CorrelationSpeciesThermo formation_entropy formation_gibbs_energy '
+        'formation_enthalpy_basis formation_reference_phase_change'
+    ).split(),
+    "phase_change_kernels": (
+        'boiling_vaporization_enthalpy watson_exponent'
     ).split(),
     "nmr": (
         'NMRStickLine ProtonNMRMethodSpec ProtonNMRReport ProtonNMRSignalResult '
@@ -305,6 +444,11 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ).split(),
     "transport_cards": (
         'transport_model_cards'
+    ).split(),
+    "temperature_scales": (
+        'TEMPERATURE_SCALES temperature_scale_bounds temperature_scale_conversion '
+        'temperature_convert its90_68_difference temperature_quantity '
+        'temperature_input temperature_observation'
     ).split(),
 }
 _EXPORTS = {

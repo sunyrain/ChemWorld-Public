@@ -15,7 +15,7 @@ from chemworld.world.control_contract import (
     CONTROL_NUMERIC,
     CONTROL_VECTOR_FIELDS,
 )
-from chemworld.world.domain_modules import DomainModuleRegistry
+from chemworld.world.domain_modules import DomainModuleRegistry, normalize_number_map
 from chemworld.world.operations import (
     CAMPAIGN_CONTROL_OPERATIONS,
     INSTRUMENTS,
@@ -114,15 +114,19 @@ class ActionCodec:
         ):
             spec = self.modules.operation_specs()[canonical["operation"]]
             for field in spec.fields:
+                if field.value_kind == "number_map" and field.name in canonical:
+                    canonical[field.name] = normalize_number_map(canonical[field.name])
+                    continue
                 if field.name in canonical and field.name in {"vessel", "connection"}:
                     addresses = self.vessels if field.name == "vessel" else self.connections
                     canonical[field.name] = self._index(canonical[field.name], addresses)
-                if field.name in canonical and field.choices:
+                categorical = bool(field.choices) or field.choice_provider is not None
+                if field.name in canonical and categorical:
                     values = np.asarray(canonical[field.name]).reshape(-1)
                     if values.size != 1 or values.dtype.kind == "b":
                         raise ValueError(f"{field.name} must be one declared choice")
                     canonical[field.name] = values[0].item()
-                if field.name in canonical and not field.choices:
+                if field.name in canonical and not categorical:
                     if np.asarray(canonical[field.name]).dtype.kind == "b":
                         raise ValueError(f"{field.name} must be numeric, not boolean")
                     canonical[field.name] = self._float(canonical, field.name, 0)

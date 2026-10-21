@@ -7,6 +7,7 @@ import numpy as np
 
 from chemworld.foundation.state_helpers import attached_device_record
 from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, PhaseRecord
+from chemworld.physchem.calphad_material import CefMaterialSpec
 from chemworld.physchem.phase_inventory import PhaseInventoryRates, integrate_phase_inventory
 from chemworld.physchem.solid_solutions import SolidSolutionSpec
 from chemworld.physchem.transport_devices import TransportInventory
@@ -15,21 +16,58 @@ from chemworld.runtime.coupled_thermal import connected_device
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 
 SOLID_TYPE = "binary_solid_equilibrium"
+CEF_TYPE = "calphad_material"
 
 
 def solid_record(state):
-    return attached_device_record(state, SOLID_TYPE)
+    records = [r for r in (attached_device_record(state, SOLID_TYPE),
+                           attached_device_record(state, CEF_TYPE)) if r is not None]
+    if len(records) > 1:
+        raise ValueError("one material model must own the selected phase inventory")
+    return records[0] if records else None
 
 
-def solid_model(state):
+def solid_model(state, composition=None):
     record = solid_record(state)
     if record is None:
-        raise ValueError("no binary solid model is installed")
+        raise ValueError("no material model is installed")
+    if record.equipment_type == CEF_TYPE:
+        if composition is None or composition.physics is None:
+            raise ValueError("CEF material requires its declared physical model binding")
+        model = composition.physics.models_of("calphad_material").get(state.vessel_id)
+        if not isinstance(model, CefMaterialSpec) or record.settings != {
+            "model_id": "calphad_material", "vessel": state.vessel_id,
+        }:
+            raise ValueError("CEF material record must reference its sole declared model")
+        phases = tuple(state.phases.phases.values())
+        if len(phases) == 1:
+            if "site_fractions" not in phases[0].metadata:
+                raise ValueError("CEF committed phase requires its internal site fractions")
+            return model.with_sites(phases[0].metadata["site_fractions"])
+        return model
     return SolidSolutionSpec.from_dict(record.settings["physical_model"])
 
 
 def install_solid(state, model, equilibrium):
     total = sum(equilibrium.amounts_mol.values())
+    if isinstance(model, CefMaterialSpec):
+        key = f"{model.phase_model.phase_name}:0"
+        phase = PhaseRecord(
+            key, state.vessel_id, model.phase_type, total*model.molar_volume_L_mol,
+            dict(equilibrium.amounts_mol), metadata={
+                "tdb_phase": model.phase_model.phase_name,
+                "constitutive_model": "calphad_material_v1", "molar_basis": "nonvacant_atoms",
+                "carrier_representation": "species_inventory",
+                "site_fractions": [dict(s) for s in equilibrium.constitution.site_fractions],
+            },
+        )
+        return state.replace(
+            species_amounts=dict(equilibrium.amounts_mol), phases=PhaseLedger({key: phase}),
+            phase=model.phase_type, volume_L=phase.volume_L,
+            temperature_K=equilibrium.temperature_K,
+            pressure_Pa=model.pressure_Pa,
+            process=replace(state.process, last_observation_record=None),
+        )
     phases = {}
     for i, domain in enumerate(equilibrium.phases):
         n = total * domain.fraction
@@ -59,6 +97,16 @@ def install_solid(state, model, equilibrium):
 
 
 def solid_enthalpy(state, model):
+    if isinstance(model, CefMaterialSpec):
+        if len(state.phases.phases) != 1:
+            raise ValueError("CEF material requires its one committed phase")
+        phase = next(iter(state.phases.phases.values()))
+        properties = model.phase_model.evaluate(
+            phase.metadata["site_fractions"], state.temperature_K, state.pressure_Pa,
+            pressure_derivative=False,
+        )
+        return sum(phase.species_amounts_mol.values())*properties.enthalpy_J_mol + (
+            model.support_heat_capacity_J_K*(state.temperature_K-model.reference_temperature_K))
     by_name = {p.name: p for p in model.phases}
     enthalpy = model.support_heat_capacity_J_K * (
         state.temperature_K - model.reference_temperature_K
@@ -85,9 +133,11 @@ def validate_solid(state, model):
     for key, phase in installed.phases.phases.items():
         actual = state.phases.phases[key]
         if (
-            actual.phase_type != "solid"
-            or actual.metadata != phase.metadata
-            or set(actual.species_amounts_mol) != {"A", "B"}
+            actual.phase_type != phase.phase_type
+            or set(actual.metadata) != set(phase.metadata)
+            or any(actual.metadata[k] != v for k, v in phase.metadata.items()
+                   if k != "site_fractions")
+            or set(actual.species_amounts_mol) != set(model.component_ids)
             or not isclose(actual.volume_L, phase.volume_L, rel_tol=1e-8, abs_tol=1e-12)
             or any(
                 not isclose(actual.species_amounts_mol[k], n, rel_tol=1e-7, abs_tol=1e-12)
@@ -95,6 +145,13 @@ def validate_solid(state, model):
             )
         ):
             raise ValueError("solid phase composition is not at equilibrium")
+        if isinstance(model, CefMaterialSpec):
+            actual_sites = model.phase_model._fractions(actual.metadata["site_fractions"])
+            if any(abs(actual_sites[i][s]-y) > 1e-7 for i, subl in enumerate(
+                phase.metadata["site_fractions"]) for s, y in subl.items()):
+                raise ValueError("CEF committed constitution is not internally stationary")
+    if state.phase != installed.phase:
+        raise ValueError("material phase type disagrees with its declared model")
     if not isclose(state.volume_L, installed.volume_L, rel_tol=1e-9, abs_tol=1e-12):
         raise ValueError("solid geometric volume disagrees with finite inventory")
     return expected
@@ -110,7 +167,7 @@ class SolidSolutionRuntime:
         return solid_record(state) is not None
 
     def temperature_bounds_k(self, state):
-        model = solid_model(state)
+        model = solid_model(state, self.composition)
         return model.minimum_temperature_K, model.maximum_temperature_K
 
     def reconcile_initialization(self, transition):
@@ -125,7 +182,7 @@ class SolidSolutionRuntime:
             state = locals_[name]
             if not self.supports(state):
                 continue
-            model = solid_model(state)
+            model = solid_model(state, self.composition)
             retained_heat = model.support_heat_capacity_J_K * (
                 receipt["previous_temperature_K"] - state.temperature_K
             )
@@ -151,33 +208,44 @@ class SolidSolutionRuntime:
             return
         states = self.composition.physics.initial_states
         installed = {v for v, s in states.items() if self.supports(s)}
-        declared = {c.vessel for c in self.composition.components if c.kind == "solid_solution"}
+        declared = {c.vessel for c in self.composition.components
+                    if c.kind in {"solid_solution", "calphad_phase"}}
         if installed != declared:
             raise ValueError("solid equilibrium declaration must match installed material model")
         if not installed:
             return
         network = self.composition.physics.network
-        if (
-            network.reactions
-            or any(s.phase != "solid" or s.charge != 0 for s in network.species)
-            or {s.species_id: s.formula for s in network.species}
-            != {
-                "A": "Al",
-                "B": "Cu",
-            }
-        ):
-            raise ValueError(
-                "bounded synthetic binary solid requires declared Al/Cu counters and no reaction"
-            )
         for vessel in installed:
             state = states[vessel]
-            model = solid_model(state)
+            model = solid_model(state, self.composition)
+            components = [c for c in self.composition.components if c.vessel == vessel
+                          and c.kind in {"solid_solution", "calphad_phase"}]
+            expected_kind = ("calphad_phase" if isinstance(model, CefMaterialSpec)
+                             else "solid_solution")
+            if len(components) != 1 or components[0].kind != expected_kind:
+                raise ValueError("one matching material component must own each finite specimen")
+            species = [s for s in network.species if s.species_id in state.species_amounts]
+            expected_symbols = (model.element_symbols if isinstance(model, CefMaterialSpec)
+                                else {"A": "Al", "B": "Cu"})
+            phase_type = model.phase_type if isinstance(model, CefMaterialSpec) else "solid"
+            if (
+                any(s.phase != phase_type or s.charge != 0 for s in species)
+                or {s.species_id: s.formula for s in species} != expected_symbols
+                or any(
+                    component.vessel == vessel
+                    and self.composition.modules.components()[component.kind].processes
+                    for component in self.composition.components
+                )
+            ):
+                raise ValueError(
+                    "material requires declared elemental counters and no competing reaction"
+                )
             validate_solid(state, model)
             if state.volume_L > state.vessels.vessels[vessel].max_volume_L:
                 raise ValueError("solid exceeds finite vessel capacity")
 
     def advance(self, state, action, *, heat=False, jacket_program=None):
-        model = solid_model(state)
+        model = solid_model(state, self.composition)
         record, device = connected_device(state, required=False)
         try:
             if jacket_program is not None:
@@ -223,7 +291,8 @@ class SolidSolutionRuntime:
                 temperature = equilibria[0].temperature_K
                 power = 0.0 if device is None else device.delivered_power_w(temperature)
                 return PhaseInventoryRates(
-                    np.zeros((1, 2)), np.array([power]), max(power, 0.0), max(-power, 0.0), ()
+                    np.zeros((1, len(model.component_ids))), np.array([power]),
+                    max(power, 0.0), max(-power, 0.0), ()
                 )
 
             result = integrate_phase_inventory(
@@ -237,7 +306,9 @@ class SolidSolutionRuntime:
                 # device always drives inward toward its validated setpoint.
                 # Starting on a domain boundary must not prevent inward motion.
                 stop_functions=(),
-                solver_id="binary_solid_equilibrium_enthalpy_v1",
+                constant_amounts=isinstance(model, CefMaterialSpec),
+                solver_id=("calphad_material_enthalpy_v1" if isinstance(model, CefMaterialSpec)
+                           else "binary_solid_equilibrium_enthalpy_v1"),
             )
             final = result.final_state
             equilibrium = model.at_ph(0, final.amounts_mol[0], final.enthalpies_J[0])

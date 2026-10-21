@@ -13,22 +13,30 @@ def read_aqueous_ph(state, action, rng):
     reading = aqueous_ph_observation(
         committed_speciation(state), instrument_id="aqueous_ph", rng=rng
     )
+    calibration = reading.raw_signal["calibration"]
+    potential = reading.raw_signal["electrode_mV"]
+    measured_pH = calibration["reference_pH"] - potential / calibration["slope_mV_pH"]
+    quality = reading.raw_signal["quality"]
     return Observation(
         channels=(
             ObservationChannel(
                 "pH",
                 "pH",
-                reading.processed_estimate["pH"],
+                measured_pH,
+                quality=quality,
                 uncertainty=reading.uncertainty["pH_std"],
-                role="processed",
+                role="processed", derived_from=("electrode_potential",),
+                acquisition_relation="acquired_trace_fit",
             ),
             ObservationChannel(
                 "electrode_potential",
                 "mV",
-                reading.raw_signal["electrode_mV"],
-                uncertainty=reading.uncertainty["pH_std"] * 59.16,
+                potential,
+                quality=quality,
+                uncertainty=reading.uncertainty["pH_std"] * calibration["slope_mV_pH"],
             ),
         ),
+        raw_signal={"processing_calibration": calibration},
         instrument_id="aqueous_ph",
         cost=0.02,
         sample_consumed_L=0,

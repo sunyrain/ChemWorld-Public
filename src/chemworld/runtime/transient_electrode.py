@@ -157,11 +157,11 @@ class TransientElectrodeRuntime:
         if self.composition is not None:
             physics = self.composition.physics
             others = (
-                physics.thermal_models,
-                physics.flash_models,
-                physics.liquid_models,
-                physics.column_models,
-                physics.concentration_models,
+                physics.models_of("thermal"),
+                physics.models_of("flash"),
+                physics.models_of("liquid"),
+                physics.models_of("column"),
+                physics.models_of("concentration"),
             )
             if any(state.vessel_id in model for model in others):
                 raise ValueError("isothermal electrode cannot share a competing physical strategy")

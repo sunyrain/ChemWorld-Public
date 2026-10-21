@@ -125,7 +125,7 @@ def crystal_world_spec(model, thermodynamics, component_formulas):
         condensed_background=CondensedBackgroundSpec(2000),
     )
     physics = CompositionPhysics(
-        network, {name: state}, thermal_models={name: thermal}, crystal_models={name: model}
+        network, {name: state}, models={"thermal": {name: thermal}, "crystal": {name: model}}
     )
     return WorldCompositionSpec.from_dict(
         {

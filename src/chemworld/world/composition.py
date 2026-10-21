@@ -473,7 +473,7 @@ class WorldCompositionSpec:
             physics=(
                 None
                 if payload.get("physics") is None
-                else CompositionPhysics.from_dict(payload["physics"])
+                else CompositionPhysics.from_dict(payload["physics"], modules=modules)
             ),
         )
 
@@ -714,13 +714,9 @@ def _check_native_task(
                     "missing_capability", "task.instruments",
                     f"{name} in {vessel} requires phase {required_phase}",
                 ))
-            if (contract.physical_duration_s and vessel not in spec.physics.thermal_models
-                    and vessel not in spec.physics.flash_models
-                    and vessel not in spec.physics.liquid_models
-                    and vessel not in spec.physics.column_models
-                    and vessel not in spec.physics.concentration_models
-                    and not any(factory(spec).supports(spec.physics.initial_states[vessel])
-                                for factory in spec.modules.advance_factories().values())):
+            if contract.physical_duration_s and not spec.physics.supports_measurement_clock(
+                spec.physics.initial_states[vessel], spec.modules
+            ):
                 diagnostics.append(_diagnostic(
                     "missing_capability", "task.instruments",
                     f"{name} in {vessel} requires a supported physical clock",
@@ -831,12 +827,14 @@ def _validate_connections(
             )
         else:
             seen.add(name)
-        if set(connection) != {"id", "source", "target", "unit"}:
+        required = {"id", "source", "target", "unit"}
+        if (set(connection) - {"scheduling"} != required
+                or ("scheduling" in connection and connection["scheduling"] != "manual")):
             diagnostics.append(
                 _diagnostic(
                     "invalid_connection",
                     path,
-                    "connection requires exactly id, source, target, unit",
+                    "connection requires id, source, target, unit and optional scheduling=manual",
                 )
             )
         endpoints = []
@@ -1060,8 +1058,15 @@ def _validate_component_parameters(
             # kinetics). The historical liquid range is not a universal limit.
             if (component.kind == "thermal" and spec.physics is not None
                     and parameter_name == "temperature_range_K"):
-                bounds = spec.physics.declared_temperature_bounds_k(
-                    spec.physics.initial_states[component.vessel], spec.modules)
+                try:
+                    bounds = spec.physics.declared_temperature_bounds_k(
+                        spec.physics.initial_states[component.vessel], spec.modules)
+                except ValueError as exc:
+                    diagnostics.append(_diagnostic(
+                        "invalid_advance_binding", f"components.{component.id}", str(exc),
+                        component.kind,
+                    ))
+                    continue
                 if bounds is not None:
                     rule = replace(rule, minimum=bounds[0], maximum=bounds[1])
             path = f"components.{component.kind}.parameters.{parameter_name}"
@@ -1305,11 +1310,13 @@ def check_world_composition_compatibility(
         next(iter(vessel_bounds.values()), {}) if len(vessel_bounds) == 1 else {}
     )
     if spec.physics is not None:
+        minimum = {}
         try:
             spec.physics.validate(spec)
         except (ValueError, KeyError, TypeError) as exc:
             diagnostics.append(_diagnostic("invalid_physics", "physics", str(exc)))
-        minimum = _check_native_task(spec, _native_task_defaults(spec), diagnostics)
+        else:
+            minimum = _check_native_task(spec, _native_task_defaults(spec), diagnostics)
         return WorldCompatibilityReport(
             "native-components",
             tuple(diagnostics),

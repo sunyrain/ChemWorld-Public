@@ -241,6 +241,8 @@ def decode_conditional_hybrid_action(
                 lower_inclusive=field_schema.get("lower_bound_inclusive") is not False,
                 upper_inclusive=field_schema.get("upper_bound_inclusive") is not False,
             )
+            if field_schema.get("type") == "integer":
+                payload[key] = _box_payload(space, round(_scalar(payload[key])))
         else:
             raise TypeError(f"unsupported event action component: {key}={type(space).__name__}")
     if operation_schema is not None:

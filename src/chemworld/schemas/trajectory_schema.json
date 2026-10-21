@@ -69,6 +69,21 @@
     "world_split"
   ],
   "properties": {
+    "initialization_replay": {
+      "description": "Evaluator-only committed initialization instructions and receipt digests.",
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "required": ["after_operation_id", "experiment_index", "options", "receipt_sha256"],
+        "properties": {
+          "after_operation_id": {"type": "integer", "minimum": 0},
+          "experiment_index": {"type": "integer", "minimum": 0},
+          "options": {"type": "object"},
+          "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
+        "additionalProperties": false
+      }
+    },
     "schema_version": {
       "type": "string",
       "const": "chemworld-trajectory-0.2"

@@ -484,6 +484,14 @@ def derive_campaign_resource_delta(
     is_discard = committed and operation == "discard_batch"
     is_nonfinal = committed and bool(instrument) and not is_final
     instrument_uses = {instrument: 1} if is_nonfinal else {}
+    if committed and outcome is not None and "instrument_uses" in outcome:
+        if operation != "wait":
+            raise CampaignResourceIntegrityError("queued acquisition receipt requires a wait")
+        instrument_uses = dict(_normalized_int_map(
+            outcome["instrument_uses"], name="instrument_uses",
+        ))
+        if "final_assay" in instrument_uses:
+            raise CampaignResourceIntegrityError("queued acquisition cannot be a final assay")
 
     process_time_s = 0.0
     sample_consumed_L = 0.0
@@ -537,7 +545,7 @@ def derive_campaign_resource_delta(
         vessel_starts=int(committed and starts_vessel),
         final_assays=int(is_final),
         discarded_batches=int(is_discard),
-        nonfinal_instrument_uses=int(is_nonfinal),
+        nonfinal_instrument_uses=sum(instrument_uses.values()),
         instrument_uses=instrument_uses,
         stocks=stocks,
         process_time_s=process_time_s,
@@ -603,12 +611,14 @@ class CampaignResourceLedger:
         action: Mapping[str, Any],
         *,
         starts_vessel: bool = False,
+        instrument_reservation: Mapping[str, int] | None = None,
     ) -> CampaignResourcePreflight:
         """Reserve an attempt and reject actions outside the remaining hard envelope."""
 
         normalized_action = self._normalize_action(action)
         event_id = self._normalize_event_id(event_id)
-        action_sha256 = self._action_sha256(normalized_action, starts_vessel)
+        instruments = self._instrument_reservation(normalized_action, instrument_reservation)
+        action_sha256 = self._action_sha256(normalized_action, starts_vessel, instruments)
         existing = self._events.get(event_id)
         if existing is not None:
             if existing["action_sha256"] != action_sha256:
@@ -620,6 +630,7 @@ class CampaignResourceLedger:
         proposed = self._proposed_delta(
             normalized_action,
             starts_vessel=starts_vessel,
+            instrument_reservation=instruments,
         )
         attempt_available = self.operation_attempts < self.card.operation_attempt_limit
         reasons = self._hard_rejection_reasons(
@@ -659,6 +670,8 @@ class CampaignResourceLedger:
             "preflight": preflight.to_dict(),
             "outcome": None,
         }
+        if instruments:
+            self._events[event_id]["instrument_reservation"] = instruments
         self.verify_integrity()
         return preflight
 
@@ -667,6 +680,7 @@ class CampaignResourceLedger:
         action: Mapping[str, Any],
         *,
         starts_vessel: bool = False,
+        instrument_reservation: Mapping[str, int] | None = None,
     ) -> tuple[str, ...]:
         """Return hard-envelope rejection reasons without reserving an attempt.
 
@@ -681,6 +695,7 @@ class CampaignResourceLedger:
         proposed = self._proposed_delta(
             normalized_action,
             starts_vessel=starts_vessel,
+            instrument_reservation=instrument_reservation,
         )
         attempt_charged = self.operation_attempts < self.card.operation_attempt_limit
         return tuple(
@@ -719,6 +734,7 @@ class CampaignResourceLedger:
         if event["action_sha256"] != self._action_sha256(
             normalized_action,
             starts_vessel,
+            event.get("instrument_reservation"),
         ):
             raise CampaignResourceIntegrityError(
                 "outcome action does not match its preflight reservation"
@@ -865,12 +881,14 @@ class CampaignResourceLedger:
                 raise CampaignResourceIntegrityError("campaign resource event ordinal mismatch")
             action = self._normalize_action(event.get("action", {}))
             starts_vessel = event.get("starts_vessel") is True
-            if event.get("action_sha256") != self._action_sha256(action, starts_vessel):
+            reserved = self._instrument_reservation(action, event.get("instrument_reservation"))
+            if event.get("action_sha256") != self._action_sha256(action, starts_vessel, reserved):
                 raise CampaignResourceIntegrityError("campaign resource action hash mismatch")
             preflight = self._preflight_from_event(event)
             expected_proposed = self._proposed_delta(
                 action,
                 starts_vessel=starts_vessel,
+                instrument_reservation=reserved,
             )
             expected_attempt_available = attempts < self.card.operation_attempt_limit
             expected_reasons = self._hard_rejection_reasons(
@@ -1434,12 +1452,17 @@ class CampaignResourceLedger:
         action: Mapping[str, Any],
         *,
         starts_vessel: bool,
+        instrument_reservation: Mapping[str, int] | None = None,
     ) -> CampaignResourceDelta:
         proposed = derive_campaign_resource_delta(
             action,
             starts_vessel=starts_vessel,
             reagent_charge_molar_multiplier=self.reagent_charge_molar_multiplier,
         )
+        instruments = self._instrument_reservation(action, instrument_reservation)
+        if instruments:
+            proposed = replace(proposed, instrument_uses=instruments,
+                               nonfinal_instrument_uses=sum(instruments.values()))
         if self.card.process_time_limit_s is None:
             return proposed
         operation = str(action.get("operation", "invalid"))
@@ -1505,13 +1528,19 @@ class CampaignResourceLedger:
         return normalized
 
     @staticmethod
-    def _action_sha256(action: Mapping[str, Any], starts_vessel: bool) -> str:
-        return canonical_json_sha256(
-            {
-                "action": dict(action),
-                "starts_vessel": bool(starts_vessel),
-            }
-        )
+    def _instrument_reservation(action, reservation):
+        instruments = dict(_normalized_int_map(reservation or {}, name="instrument_reservation"))
+        if instruments and (action.get("operation") != "wait" or "final_assay" in instruments):
+            raise CampaignResourceIntegrityError("instrument reservation requires an offline wait")
+        return instruments
+
+    @staticmethod
+    def _action_sha256(action: Mapping[str, Any], starts_vessel: bool,
+                       instrument_reservation: Mapping[str, int] | None = None) -> str:
+        payload = {"action": dict(action), "starts_vessel": bool(starts_vessel)}
+        if instrument_reservation:
+            payload["instrument_reservation"] = dict(instrument_reservation)
+        return canonical_json_sha256(payload)
 
     @staticmethod
     def _preflight_from_event(event: Mapping[str, Any]) -> CampaignResourcePreflight:

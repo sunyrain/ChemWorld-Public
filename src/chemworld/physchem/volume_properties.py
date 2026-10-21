@@ -37,6 +37,7 @@ class MolarVolumeReport:
         if self.evaluation.property_id not in {
             "liquid_molar_volume",
             "gas_molar_volume",
+            "solid_molar_volume",
         }:
             raise ValueError("MolarVolumeReport requires a molar-volume property")
         molar_volume = self.evaluation.to("m^3/mol").value
@@ -158,6 +159,7 @@ def molar_volume_report(
     *,
     temperature_K: float,
     phase: str,
+    pressure_Pa: float | None = None,
     molecular_weight_g_mol: float | None = None,
     validity_policy: ValidityPolicy = "warn",
 ) -> MolarVolumeReport:
@@ -167,11 +169,15 @@ def molar_volume_report(
     if correlation.property_id not in {
         "liquid_molar_volume",
         "gas_molar_volume",
+        "solid_molar_volume",
     }:
         raise ValueError("molar_volume_report requires a molar-volume property")
+    if correlation.property_id != phase + "_molar_volume":
+        raise ValueError("molar-volume correlation phase does not match requested phase")
     result = evaluate_correlation(
         correlation,
         temperature_K=temperature_K,
+        pressure_Pa=pressure_Pa,
         validity_policy=validity_policy,
     )
     density = (
@@ -201,7 +207,9 @@ def ideal_gas_molar_volume_report(
         raise ValueError("temperature_K must be positive")
     if pressure_Pa <= 0:
         raise ValueError("pressure_Pa must be positive")
-    molar_volume = R_J_PER_MOL_K * temperature_K / pressure_Pa
+    from chemworld.physchem.volume_kernels import volume_value
+
+    molar_volume = volume_value("ideal_gas", temperature_K, P=pressure_Pa)
     density = (
         molar_volume_to_density_kg_m3(molar_volume, molecular_weight_g_mol)
         if molecular_weight_g_mol is not None
@@ -315,6 +323,8 @@ def mixture_molar_volume_ledger(
 ) -> MixtureVolumeLedger:
     """Amgat-style mole-fraction mixture molar volume ledger."""
 
+    from chemworld.physchem.volume_mixtures import mixture_volume_value
+
     _validate_phase(phase)
     if not component_mole_fractions:
         raise ValueError("component_mole_fractions cannot be empty")
@@ -322,7 +332,6 @@ def mixture_molar_volume_ledger(
     if abs(total_fraction - 1.0) > 1e-9:
         raise ValueError("component mole fractions must sum to 1")
     contributions: dict[str, dict[str, float]] = {}
-    mixture_molar_volume = 0.0
     average_mw = 0.0
     for component_id, mole_fraction in component_mole_fractions.items():
         if mole_fraction < 0:
@@ -333,7 +342,6 @@ def mixture_molar_volume_ledger(
         if molar_volume <= 0:
             raise ValueError(f"molar volume must be positive for {component_id!r}")
         contribution = mole_fraction * molar_volume
-        mixture_molar_volume += contribution
         entry = {
             "mole_fraction": mole_fraction,
             "molar_volume_m3_mol": molar_volume,
@@ -350,6 +358,10 @@ def mixture_molar_volume_ledger(
             average_mw += mole_fraction * mw
             entry["molecular_weight_g_mol"] = mw
         contributions[component_id] = entry
+    mixture_molar_volume = mixture_volume_value(
+        "Amgat", 298.15, tuple(component_mole_fractions.values()),
+        Vms=tuple(component_molar_volumes_m3_mol[key] for key in component_mole_fractions),
+    )  # Pointwise rule is independent of this placeholder temperature.
     density = (
         molar_volume_to_density_kg_m3(mixture_molar_volume, average_mw)
         if component_molecular_weights_g_mol is not None

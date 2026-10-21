@@ -11,10 +11,10 @@ from chemworld.foundation.state_ownership import (
 )
 from chemworld.physchem.battery_models import (
     BATTERY_COORDINATES,
-    BatterySPMSpec,
     advance_battery,
     battery_control_current,
     battery_readout,
+    battery_spec_from_dict,
 )
 from chemworld.physchem.coupled_system import CoupledEvent, CoupledState
 from chemworld.physchem.reactor_shared import ScalarControlProgram
@@ -53,7 +53,7 @@ def initial_battery_slot(record, spec):
             StateFieldSpec("discharged_charge_C", "C", minimum=None),
             StateFieldSpec("delivered_work_J", "J", minimum=None),
         ),
-        mechanism_id="synthetic-SPM-v1",
+        mechanism_id=spec.model_id,
         batch_reset="preserve",
     )
     return StateSlot(
@@ -65,7 +65,7 @@ def unpack_battery(state):
     record = battery_record(state)
     if record is None:
         raise ValueError("no SPM battery is installed")
-    spec = BatterySPMSpec(**record.settings["physical_model"])
+    spec = battery_spec_from_dict(record.settings["physical_model"])
     slots = [
         s
         for s in state.state_slots.slots
@@ -103,6 +103,37 @@ class BatteryRuntime:
         return None if spec.thermal is None else (
             spec.thermal.minimum_temperature_K, spec.thermal.maximum_temperature_K)
 
+    def reconcile_initialization(self, transition):
+        # All active Li and lumped cell heat belong to the physical equipment;
+        # replacing surrounding material/housing cannot cool or recharge it.
+        state = transition.state
+        locals_ = {state.vessel_id: state.replace(inactive_vessels={}), **state.inactive_vessels}
+        changed = {}
+        scope = transition.receipt["scope"]
+        introduced = transition.receipt.get("introduced_device", {})
+        for identity, local in tuple(locals_.items()):
+            record = battery_record(local)
+            if record is None:
+                continue
+            if (scope == "equipment" and introduced.get("equipment_id") == record.equipment_id):
+                spec = battery_spec_from_dict(record.settings["physical_model"])
+                if local.volume_L != spec.volume_l:
+                    raise ValueError("replacement battery must fit its declared housing volume")
+                temperature = spec.temperature_K
+                source = "introduced_device_model_initial_temperature"
+            elif scope in {"material", "vessel"} and identity in transition.receipt["vessels"]:
+                temperature = transition.receipt["vessels"][identity]["previous_temperature_K"]
+                source = "retained_device"
+            else:
+                continue
+            locals_[identity] = local.replace(temperature_K=temperature)
+            changed[identity] = {"temperature_K": temperature, "temperature_source": source}
+        if not changed:
+            return transition
+        active = locals_.pop(state.vessel_id)
+        return replace(transition, state=active.replace(inactive_vessels=locals_),
+                       receipt={**transition.receipt, "battery_initialization": changed})
+
     def validate_world(self):
         declared = {c.vessel for c in self.composition.components if c.kind == "battery_spm"}
         installed = {
@@ -123,14 +154,18 @@ class BatteryRuntime:
                 any(
                     state.vessel_id in model
                     for model in (
-                        physics.thermal_models,
-                        physics.flash_models,
-                        physics.liquid_models,
-                        physics.column_models,
-                        physics.concentration_models,
+                        physics.models_of("thermal"),
+                        physics.models_of("flash"),
+                        physics.models_of("liquid"),
+                        physics.models_of("column"),
+                        physics.models_of("concentration"),
                     )
                 )
-                or physics.network.reactions
+                or any(
+                    component.vessel == state.vessel_id
+                    and self.composition.modules.components()[component.kind].processes
+                    for component in self.composition.components
+                )
             ):
                 raise ValueError("SPM cannot bind another kinetic or thermal strategy")
 
@@ -250,7 +285,7 @@ class BatteryRuntime:
                 "battery_conservation": dict(result.conservation_residuals),
                 "energy_scope": "synthetic OCV chemical energy and lumped heat capacity"
                 if spec.thermal
-                else "isothermal SPM; full cell heat balance not modelled",
+                else f"isothermal {spec.model_id}; full cell heat balance not modelled",
                 "energy_balance_residual_J": result.energy_balance_residual_J,
                 "electrical_control": {
                     "charge_C": final.coordinates["discharged_charge_C"],

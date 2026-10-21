@@ -43,7 +43,7 @@ def capture_transform(before, sampled, action, seconds):
     continuation.update(sampling_rng_state=sampling_rng, pending=None, signature=None)
     equipment = upsert_equipment_record(
         sampled.equipment,
-        equipment_id=instrument_equipment_id("molecule_capture"),
+        equipment_id=instrument_equipment_id("molecule_capture", state=before),
         equipment_type="instrument",
         attached_vessel_id=sampled.vessel_id,
         batch_reset="preserve",
@@ -62,7 +62,7 @@ def capture_outlet(before, action, injected_amounts):
         MaterialExchange(
             "sample",
             f"vessel:{before.vessel_id}",
-            "sink:instrument:molecule_capture",
+            f"sink:{instrument_equipment_id('molecule_capture', state=before)}",
             "out",
             tuple(counts_to_mol(selected).items()),
         ),
@@ -72,9 +72,8 @@ def capture_outlet(before, action, injected_amounts):
 def read_counts(state, action, rng):
     instrument = action["instrument"]
     if instrument == "molecule_capture":
-        counts = equipment_settings(state.equipment, instrument_equipment_id(instrument))[
-            "captured_counts"
-        ]
+        identity = instrument_equipment_id(instrument, state=state)
+        counts = equipment_settings(state.equipment, identity)["captured_counts"]
     else:
         counts = mol_to_counts(state.species_amounts)
     # Calibrated signed detector response, one count per molecule. Do not clip
@@ -98,7 +97,7 @@ def biochemical_instrument_specs():
             observable_keys=(),
             input_state_schema={"required_phase": "liquid"},
             axis_contract={},
-            raw_signal_schema={"count_species": {"unit": "counts"}},
+            raw_signal_schema={"count_*": {"unit": "counts"}},
             processed_estimate_schema={},
             uncertainty_model="independent Gaussian detector noise",
             noise_model={"sd_counts": NOISE_SD},

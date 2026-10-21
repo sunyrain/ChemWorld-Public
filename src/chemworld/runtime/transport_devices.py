@@ -150,6 +150,16 @@ class TransportRuntime:
     def supports(self, state):
         return transport_record(state) is not None
 
+    def shared_system(self, state, strategy_id):
+        from chemworld.foundation.lab_clock import SharedAdvanceSystem
+        from chemworld.runtime.shared_systems import connection_ids
+
+        spec = FiniteTransportSpec.from_dict(transport_record(state).settings["physical_model"])
+        return SharedAdvanceSystem(
+            state.vessel_id, strategy_id, (spec.source_vessel_id, state.vessel_id),
+            connection_ids(self.composition, ((spec.source_vessel_id, state.vessel_id),)),
+        )
+
     @property
     def preserved_source_vessels(self):
         if self.composition is None or self.composition.physics is None:

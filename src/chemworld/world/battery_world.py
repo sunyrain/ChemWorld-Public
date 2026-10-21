@@ -11,6 +11,7 @@ from chemworld.foundation.state_ledgers import (
 )
 from chemworld.foundation.state_ownership import StateSlots
 from chemworld.physchem.battery_degradation import SEI_FORMULAS
+from chemworld.physchem.battery_electrolyte import ELECTROLYTE_SPECIES
 from chemworld.physchem.battery_models import BatterySPMSpec
 from chemworld.physchem.reaction_network import ReactionNetworkSpec, SpeciesSpec
 from chemworld.physchem.reactor_shared import ScalarControlProgram
@@ -90,6 +91,7 @@ def battery_world_spec(spec=None, *, budget=80, thermal_device=None):
                 for name, formula in {
                     "Li": "Li",
                     **({} if spec.sei is None else SEI_FORMULAS),
+                    **({} if spec.electrolyte is None else {ELECTROLYTE_SPECIES: "LiPF6"}),
                 }.items()
             ),
             (),
@@ -99,7 +101,12 @@ def battery_world_spec(spec=None, *, budget=80, thermal_device=None):
     return WorldCompositionSpec.from_dict(
         {
             "schema_version": "chemworld-world-composition-0.1",
-            "composition_id": "native-battery-spm",
+            "composition_id": ("native-battery-mpm"
+                               if getattr(spec, "model_family", None) == "mpm-isothermal-v1"
+                               else "native-battery-dfn"
+                               if getattr(spec, "model_family", None) == "dfn-isothermal-v1"
+                               else "native-battery-spm" if spec.electrolyte is None
+                               else "native-battery-spme"),
             "components": [
                 {"id": "cell", "kind": "battery_spm", "vessel": vessel, "parameters": {}},
                 {

@@ -41,6 +41,7 @@ def connected_device(state: WorldState, *, required: bool = True):
         for record in state.equipment.equipment.values()
         if record.equipment_type == "thermal_device"
         and record.attached_vessel_id == state.vessel_id
+        and record.status != "parked"
     ]
     if not devices and not required:
         return None, None
@@ -53,6 +54,8 @@ def connected_device(state: WorldState, *, required: bool = True):
 def thermal_control(state: WorldState) -> ThermalDeviceSpec | None:
     if any(
         record.equipment_type == "thermal_device" and "thermal_device" in record.settings
+        and record.attached_vessel_id == state.vessel_id
+        and record.status != "parked"
         for record in state.equipment.equipment.values()
     ):
         return connected_device(state)[1]
@@ -72,7 +75,8 @@ def set_thermal_enabled(state: WorldState, enabled: bool) -> WorldState:
     return state.replace(equipment=EquipmentLedger(equipment))
 
 
-def reconnect_thermal_device(state: WorldState, device_id: str, destination: str) -> WorldState:
+def reconnect_thermal_device(state: WorldState, device_id: str, destination: str,
+                             *, park_idle=False) -> WorldState:
     """Return a zero-time candidate reconnecting one device, preserving identity.
 
     Like the material-routing helpers this is a state transform; a caller must
@@ -86,18 +90,25 @@ def reconnect_thermal_device(state: WorldState, device_id: str, destination: str
     if len(sources) != 1:
         raise ValueError("thermal device identity must have exactly one owner")
     source = sources[0]
-    if source == destination:
-        return state
     device = locals_[source].equipment.equipment[device_id]
     if device.equipment_type != "thermal_device":
         raise ValueError("reconnection requires a thermal device")
-    if any(
-        record.equipment_type == "thermal_device"
-        for record in locals_[destination].equipment.equipment.values()
+    blocking = [
+        record for record in locals_[destination].equipment.equipment.values()
+        if record.equipment_type == "thermal_device"
+        and record.attached_vessel_id == destination and record.equipment_id != device_id
+        and record.status != "parked"
+    ]
+    if blocking and (
+        not park_idle or len(blocking) != 1
+        or blocking[0].status == "busy"
+        or blocking[0].settings["thermal_device"].get("enabled", True)
     ):
         raise ValueError("destination already has its thermal controller")
     from chemworld.runtime.component_network import reconnect_device
 
+    for record in blocking:
+        state = reconnect_device(state, record.equipment_id, None)
     return reconnect_device(state, device_id, destination)
 
 
@@ -147,7 +158,7 @@ def local_thermodynamics(state, model):
 
 
 def assemble_local_system(state, physics, modules, components):
-    model = physics.thermal_models[state.vessel_id]
+    model = physics.models_of("thermal")[state.vessel_id]
     _, device = connected_device(state, required=False)
     if len(state.phases.phases) != 1:
         raise ValueError("local coupled thermal adapter requires one bulk phase")
@@ -255,6 +266,16 @@ def pressure_for_state(state, model):
 
 
 class CoupledThermalRuntime:
+    supported_operations = ("wait",)
+
+    def temperature_bounds_k(self, state):
+        model = self.composition.physics.models_of("thermal")[state.vessel_id]
+        return model.minimum_temperature_K, model.maximum_temperature_K
+
+    def reconcile_pressure(self, state):
+        model = self.composition.physics.models_of("thermal")[state.vessel_id]
+        return state.replace(pressure_Pa=pressure_for_state(state, model))
+
     def __init__(self, composition, modules):
         self.composition = composition
         self.modules = modules
@@ -263,8 +284,8 @@ class CoupledThermalRuntime:
         return (
             self.composition is not None
             and self.composition.physics is not None
-            and state.vessel_id in self.composition.physics.thermal_models
-            and state.vessel_id not in self.composition.physics.crystal_models
+            and state.vessel_id in self.composition.physics.models_of("thermal")
+            and state.vessel_id not in self.composition.physics.models_of("crystal")
         )
 
     def advance(self, state, action, *, heat, jacket_program=None):
@@ -282,7 +303,7 @@ class CoupledThermalRuntime:
                 device = replace(
                     device, setpoint_K=float(action["target_temperature_K"]), enabled=True
                 )
-            model = physics.thermal_models[state.vessel_id]
+            model = physics.models_of("thermal")[state.vessel_id]
             if (
                 device is not None
                 and not model.minimum_temperature_K
@@ -373,7 +394,7 @@ class CoupledThermalRuntime:
             ),
         )
         candidate = candidate.replace(
-            pressure_Pa=pressure_for_state(candidate, physics.thermal_models[state.vessel_id])
+            pressure_Pa=pressure_for_state(candidate, physics.models_of("thermal")[state.vessel_id])
         )
         return ModelProviderResult(
             outputs={},

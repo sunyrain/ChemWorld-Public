@@ -215,7 +215,6 @@ class ChemWorldPrimitiveOperationServices:
     def _solvent_addition_phases(
         self, state: WorldState, species: dict[str, float], volume: float, solvent: int
     ) -> PhaseLedger:
-        assert state.phases is not None
         target = self._material_destination_phase(state)
         if target is None:
             raise ValueError("Solvent addition requires a material phase")
@@ -362,7 +361,6 @@ class ChemWorldPrimitiveOperationServices:
             risk=min(1.0, state.ledger.risk + 0.04 * removal),
             energy_jacket_J=state.ledger.energy_jacket_J + sensible + latent,
         )
-        assert state.phases is not None
         target_phase = self._material_destination_phase(state)
         phases = state.phases.phases.copy()
         if target_phase is None:

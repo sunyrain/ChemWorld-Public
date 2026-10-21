@@ -161,16 +161,37 @@ def fit_packet(packet: dict[str, Any]) -> dict[str, Any]:
     axis = np.asarray(packet["axis"]["values"], dtype=float)
     y = np.asarray(packet["raw_signal"]["values"], dtype=float)
     contract = packet["calibration"]
+    dilution = contract["dilution_factor"]
+    noise = packet["noise"]["standard_deviation"]
+    if (
+        axis.ndim != 1 or axis.size < 2 or y.shape != axis.shape
+        or not np.all(np.isfinite(axis)) or not np.all(np.isfinite(y))
+        or not (np.all(np.diff(axis) > 0) or np.all(np.diff(axis) < 0))
+        or not np.isfinite(dilution) or dilution <= 0 or not np.isfinite(noise) or noise < 0
+    ):
+        raise ValueError("Public spectrum requires finite trace, dilution and noise")
     matrix = design_matrix(axis, contract)
     baseline = contract["baseline_intercept"] + contract["baseline_drift"] * (axis - axis[0]) / (
         axis[-1] - axis[0]
     )
-    fit, residual = nnls(matrix, y - baseline)
-    dilution = contract["dilution_factor"]
-    noise = packet["noise"]["standard_deviation"]
-    covariance = np.linalg.pinv(matrix.T @ matrix)
-    std = noise * np.sqrt(np.maximum(np.diag(covariance), 0)) * dilution
-    condition = float(np.linalg.cond(matrix))
+    try:
+        fit, residual = nnls(matrix, y - baseline)
+        covariance = np.linalg.pinv(matrix.T @ matrix)
+        std = noise * np.sqrt(np.maximum(np.diag(covariance), 0)) * dilution
+        condition = float(np.linalg.cond(matrix))
+    except (RuntimeError, np.linalg.LinAlgError):
+        # The detector already acquired a trace. Numerical inversion failure
+        # withholds estimates but does not erase that trace or physical sampling.
+        return {
+            "concentration_mol_L": dict.fromkeys(CHANNELS),
+            "standard_error_mol_L": dict.fromkeys(CHANNELS),
+            "missingness": dict.fromkeys(CHANNELS, "fit_failed"),
+            "detection_limit_mol_L": dict.fromkeys(CHANNELS),
+            "fit_residual_norm": None,
+            "calibration_condition_number": None,
+            "method": "nonnegative least squares after declared baseline subtraction",
+            "uncertainty_method": "unavailable after failed inversion",
+        }
     saturated = packet["raw_signal"]["saturated_points"] > 0
     estimates, uncertainty, missingness, lod = {}, {}, {}, {}
     for index, name in enumerate(CHANNELS):
@@ -193,7 +214,7 @@ def fit_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "missingness": missingness,
         "detection_limit_mol_L": lod,
         "fit_residual_norm": float(residual),
-        "calibration_condition_number": condition,
+        "calibration_condition_number": condition if np.isfinite(condition) else None,
         "method": "nonnegative least squares after declared baseline subtraction",
         "uncertainty_method": "linear covariance approximation, not empirical device uncertainty",
     }

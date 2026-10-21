@@ -212,7 +212,8 @@ class ChemWorldDistillationServices:
         self.thermal = thermal
 
     def distill(self, state: WorldState, action: dict[str, Any]) -> WorldState:
-        if self.thermal is not None and self.thermal.column.supports(state):
+        if (getattr(self.thermal, "column", None) is not None
+                and self.thermal.column.supports(state)):
             return self.thermal.advancer.batch(state,action,heat=True)
         if action.get("full_reflux",0):
             from chemworld.runtime.kernel_contracts import ModelProviderResult
@@ -406,7 +407,8 @@ class ChemWorldDistillationServices:
         )
 
     def collect_fraction(self, state: WorldState, action: dict[str, Any]) -> WorldState:
-        if self.thermal is not None and self.thermal.column.supports(state):
+        if (getattr(self.thermal, "column", None) is not None
+                and self.thermal.column.supports(state)):
             return self.thermal.column.collect_fraction(state,action)
         fraction = float(np.clip(_action_float(action, "transfer_fraction", 0.90), 0.0, 1.0))
         target_species = self.species_view.target_species_for_state(state)

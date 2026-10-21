@@ -15,7 +15,7 @@ def capability_rows(registry=None):
             "module": module.module_id,
             "dependencies": list(module.dependencies),
             "scope": list(module.scope_notes),
-            "advance_strategies": [name for name, _ in module.advance_strategies],
+            "advance_strategies": [spec.strategy_id for spec in module.advance_strategies],
             "components": {
                 name: {
                     "operations": list(component.operations),
@@ -52,9 +52,13 @@ def bound_capabilities(session):
     from chemworld.runtime.component_network import public_network
 
     return {
-        "scope": "Current bound task and active vessel; not every possible future state.",
+        "scope": "Installed, task-permitted and executable capabilities in the active vessel. "
+        "Module declarations describe installed software, not apparatus in every world.",
         "active_vessel": session._state.vessel_id,
         "actions": session.available_actions(include_invalid=True),
+        "instruments": session.action_schema("measure").get("fields", [{}])[0].get(
+            "choice_status", []
+        ),
         "connections": public_network(session._state),
         "modules": capability_rows(session.domain_modules),
     }

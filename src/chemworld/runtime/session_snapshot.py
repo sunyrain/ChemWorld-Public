@@ -13,10 +13,11 @@ import scipy
 from chemworld.campaign_resources import CampaignResourceLedger
 from chemworld.foundation.balances import MaterialExchange, TransitionBalance
 from chemworld.foundation.observations import Observation
-from chemworld.foundation.state import OperationRecord, WorldState
+from chemworld.foundation.state import OperationRecord
+from chemworld.foundation.state_serialization import restore_state
 from chemworld.runtime.semantics import RUNTIME_SEMANTICS_ID
 
-SESSION_SNAPSHOT_VERSION = "chemworld-session-v1"
+SESSION_SNAPSHOT_VERSION = "chemworld-session-v2"
 _CONTINUATION_FIELDS = (
     "_step_count", "_experiment_index", "_operation_id", "_done", "_last_info",
     "_campaign_id", "_experiment_summaries", "_campaign_resource_current_vessel_started",
@@ -24,6 +25,12 @@ _CONTINUATION_FIELDS = (
     "_campaign_terminal", "_campaign_terminal_reason", "_right_censored_open_batch",
     "_declared_operation_counts", "_last_observation_noise_provenance", "_lifecycle_history",
 )
+_RESOURCE_FIELDS = ("_campaign_resource_ledger", "_batch_resource_ledger")
+_SNAPSHOT_FIELDS = frozenset({
+    "schema_version", "configuration", "execution", "scenario_id", "world_state",
+    "observation", "operation_record", "continuation", "rng_state",
+    "observation_occurrences", "resource_ledgers",
+})
 
 
 def declaration(value):
@@ -55,6 +62,15 @@ def execution_binding(session):
     }
 
 
+def session_configuration(session):
+    """Canonical installed model codecs define configuration equivalence."""
+    config = declaration(session._initialization)
+    if session.compiled_composition is not None:
+        config["composition"] = declaration(session.compiled_composition.spec.to_dict())
+    config["seed"] = session.seed
+    return config
+
+
 @dataclass(frozen=True)
 class SessionSnapshot:
     payload: dict
@@ -64,13 +80,31 @@ class SessionSnapshot:
 
     @classmethod
     def from_dict(cls, payload):
+        if not isinstance(payload, Mapping):
+            raise ValueError("session snapshot must be a declared mapping")
         if payload.get("schema_version") != SESSION_SNAPSHOT_VERSION:
             raise ValueError("unsupported session snapshot version; explicit migration required")
+        if set(payload) != _SNAPSHOT_FIELDS:
+            raise ValueError("session snapshot fields differ from the declared schema")
+        for name in ("configuration", "execution", "world_state", "continuation",
+                     "rng_state", "resource_ledgers"):
+            if not isinstance(payload[name], Mapping):
+                raise ValueError(f"session snapshot {name} must be a mapping")
+        if set(payload["continuation"]) != set(_CONTINUATION_FIELDS):
+            raise ValueError(
+                "session snapshot continuation fields differ from the declared contract"
+            )
+        if set(payload["resource_ledgers"]) != set(_RESOURCE_FIELDS):
+            raise ValueError("session snapshot resource fields differ from the declared contract")
+        for name in ("_step_count", "_experiment_index", "_operation_id"):
+            value = payload["continuation"][name]
+            if type(value) is not int or value < 0:
+                raise ValueError("session continuation counters require exact nonnegative integers")
         return cls(deepcopy(dict(payload)))
 
     def save(self, path):
         Path(path).write_text(
-            json.dumps(self.payload, ensure_ascii=False, allow_nan=False, indent=2),
+            json.dumps(self.payload, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2),
             encoding="utf-8",
         )
 
@@ -78,10 +112,52 @@ class SessionSnapshot:
     def load(cls, path):
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
+    @classmethod
+    def migrate_v1(cls, payload):
+        """Explicit encoding-only migration when no assembly order was lost.
+
+        Execution bindings still have to match at restoration. Multi-record
+        inventories without stored order cannot be reconstructed by guessing.
+        """
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("schema_version") != "chemworld-session-v1"
+        ):
+            raise ValueError("explicit migration requires a v1 session snapshot")
+        raw = deepcopy(dict(payload))
+        if raw.get("execution", {}).get("runtime") != RUNTIME_SEMANTICS_ID:
+            raise ValueError("legacy execution semantics changed; format migration is insufficient")
+        raw["schema_version"] = SESSION_SNAPSHOT_VERSION
+        raw = cls.from_dict(raw).payload
+
+        def add_order(record, inventory_key, order_key):
+            if order_key in record:
+                return
+            inventory = record.get(inventory_key, {})
+            if len(inventory) > 1:
+                raise ValueError("legacy snapshot omitted assembly order; source order is required")
+            record[order_key] = list(inventory)
+
+        def upgrade_state(state):
+            add_order(state, "state_slots", "state_slot_order")
+            for sample in state.get("samples", {}).values():
+                contents = sample.get("contents")
+                if contents is not None:
+                    add_order(contents, "phases", "phase_order")
+                    add_order(contents, "state_slots", "state_slot_order")
+            for local in state.get("inactive_vessels", {}).values():
+                upgrade_state(local)
+
+        upgrade_state(raw["world_state"])
+        composition = raw["configuration"].get("composition")
+        if isinstance(composition, Mapping) and composition.get("physics") is not None:
+            for state in composition["physics"]["initial_states"].values():
+                upgrade_state(state)
+        return cls.from_dict(raw)
+
 
 def capture_session(session):
-    config = declaration(session._initialization)
-    config["seed"] = session.seed
+    config = session_configuration(session)
     record = session._last_operation_record
     return SessionSnapshot({
         "schema_version": SESSION_SNAPSHOT_VERSION,
@@ -98,7 +174,7 @@ def capture_session(session):
         ],
         "resource_ledgers": {
             name: None if getattr(session, name) is None else getattr(session, name).snapshot()
-            for name in ("_campaign_resource_ledger", "_batch_resource_ledger")
+            for name in _RESOURCE_FIELDS
         },
     })
 
@@ -107,12 +183,13 @@ def restore_continuation(session, snapshot):
     payload = SessionSnapshot.from_dict(snapshot.to_dict()).payload
     if execution_binding(session) != payload["execution"]:
         raise ValueError("session execution contracts changed; explicit migration required")
-    state = WorldState.from_dict(payload["world_state"])
+    state = restore_state(payload["world_state"], require_order=True)
     # State readers migrate historical equipment/material representations at
     # their existing boundary; no legacy truth copy is retained in the session.
     report = session.constitution.check_state(state)
     if not report.passed:
         raise ValueError("session snapshot contains an invalid physical state")
+    session.runtime.domain_services.reaction_thermal.advancer.validate_snapshot_state(state)
     values = deepcopy(payload["continuation"])
     for name, value in payload["resource_ledgers"].items():
         values[name] = None if value is None else CampaignResourceLedger.from_snapshot(value)

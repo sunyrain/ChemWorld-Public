@@ -56,6 +56,21 @@ def public_trace_basis(axis, profile):
 
 def fit_public_trace(axis, signal, basis, resolved, calibration, *, saturated=False):
     """No material, equipment truth or physical gain enters this inverse fit."""
+    axis, signal, basis = (np.asarray(value, dtype=float) for value in (axis, signal, basis))
+    if (
+        axis.ndim != 1 or len(axis) < 5 or signal.shape != axis.shape
+        or basis.shape != (len(axis), 3)
+        or not all(np.all(np.isfinite(value)) for value in (axis, signal, basis))
+        or not np.all(np.diff(axis) > 0) or axis[-1] <= 0
+        or len(resolved) != 3 or len(calibration) != 3
+        or any(
+            not np.isfinite(c["slope"]) or c["slope"] <= 0 or not np.isfinite(c["intercept"])
+            for c in calibration
+        )
+    ):
+        raise ValueError(
+            "Public chromatogram requires finite trace, basis and positive calibration"
+        )
     # Finite three-peak nonnegative least squares, with unrestricted affine
     # baseline: enumerate the eight active sets and choose the lowest residual.
     # No hidden physical baseline or gain is used by the inverse problem.
@@ -132,14 +147,19 @@ def read_chromatography(state, action, rng):
         "resolved": [bool(value) for value in resolved],
         "response": calibration,
     }
-    areas, concentrations, valid = fit_public_trace(
-        axis,
-        signal,
-        public_trace_basis(axis, profile),
-        profile["resolved"],
-        profile["response"],
-        saturated=saturated,
-    )
+    fit_failed = False
+    try:
+        areas, concentrations, valid = fit_public_trace(
+            axis,
+            signal,
+            public_trace_basis(axis, profile),
+            profile["resolved"],
+            profile["response"],
+            saturated=saturated,
+        )
+    except np.linalg.LinAlgError:
+        areas, concentrations, valid = [None] * 3, [None] * 3, [False] * 3
+        fit_failed = True
     channels = [
         ObservationChannel(
             "chromatogram",
@@ -153,7 +173,11 @@ def read_chromatography(state, action, rng):
     for i, (area, concentration, ok) in enumerate(
         zip(areas, concentrations, valid, strict=True), 1
     ):
-        quality = "valid" if ok else "invalid"
+        quality = (
+            "valid" if ok else "saturated" if saturated else "fit_failed" if fit_failed
+            else "out_of_range" if profile["peaks"][i - 1]["retention_s"] is None
+            else "fit_failed"
+        )
         channels.extend(
             (
                 ObservationChannel(
@@ -195,14 +219,17 @@ def chromatography_instrument_specs():
             input_state_schema={"required_phase": "liquid", "sample_consumption_L": SAMPLE_L},
             axis_contract={"unit": "s", "points": 2401},
             raw_signal_schema={"chromatogram": {"unit": "AU"}},
-            processed_estimate_schema={"peak_area": "AU*s", "concentration": "mol/L"},
+            processed_estimate_schema={
+                **{f"peak_{i}_area": {"unit": "AU*s"} for i in range(1, 4)},
+                **{f"peak_{i}_concentration": {"unit": "mol/L"} for i in range(1, 4)},
+            },
             uncertainty_model="Gaussian detector noise; no fitted uncertainty claim",
             noise_model={},
             calibration_contract={"method": "public standard trace regression"},
             detection_contract={},
             saturation_contract={"policy": "clip trace, invalidate fits"},
             baseline_drift_contract={"owner": "instrument"},
-            missingness_contract={"overlap_or_uneluted": "invalid concentration"},
+            missingness_contract={"overlap": "fit_failed", "uneluted": "out_of_range"},
             cost=COST,
             latency_s=0,
             sample_consumption_L=SAMPLE_L,

@@ -57,8 +57,11 @@ class TransientElectrodeSpec:
     oxidized_species: str = "O"
     reduced_species: str = "R"
     provenance: str = "synthetic-planar-supported-electrolyte-v1"
+    numerical_form: str = "residual"
 
     def __post_init__(self):
+        if self.numerical_form not in {"ode", "residual"}:
+            raise ValueError("electrode numerical form must be ode or residual")
         for name in (
             "area_m2",
             "thickness_m",
@@ -263,6 +266,7 @@ def electrode_system(spec: TransientElectrodeSpec, program: ScalarControlProgram
         _IsothermalElectrolyte(spec),
         tuple(processes),
         isothermal=True,
+        numerical_form=spec.numerical_form,
         coordinates=coordinates,
         inventory_scales_mol=dict.fromkeys(
             spec.inventory_keys, spec.area_m2 * spec.thickness_m / spec.cells

@@ -1,0 +1,178 @@
+"""Formal-model adapter of the existing native coordinator and transaction.
+
+The installed EquipmentRecord owns all live formal coordinates and queue data.
+The adapter has configuration references only; the world ledger owns time.
+"""
+
+from math import ulp
+
+from chemworld.foundation import upsert_equipment_record
+from chemworld.physchem.coordinate_events import CoordinateEventError, _check_memory, _finite_real
+from chemworld.physchem.coordinate_hybrid import CoordinateHybridMemory, advance_coordinate_events
+from chemworld.physchem.coupled_system import CoupledState
+from chemworld.physchem.sbml_system import SBML_ENTITY_TYPE, SBMLSystemSpec
+from chemworld.runtime.advance_paths import advance_ledger
+from chemworld.runtime.kernel_contracts import ModelProviderResult
+
+STATE_FORMAT = "chemworld_formal_model_state_v1"
+
+
+def model_record(state):
+    records = [r for r in state.equipment.equipment.values()
+               if r.equipment_type == SBML_ENTITY_TYPE and r.attached_vessel_id == state.vessel_id]
+    if len(records) > 1:
+        raise ValueError("one native entity must own each formal model state")
+    return records[0] if records else None
+
+
+def _view(state, model, coordinates):
+    _, volumes = model.frame.quantities(coordinates, state.ledger.time_s)
+    # Required legacy coupled geometry is a transient reference only. Formal
+    # equations use their explicitly owned V coordinates, not this field.
+    return CoupledState({}, state.temperature_K, next(iter(volumes.values())),
+                        time_s=state.ledger.time_s, coordinates=coordinates)
+
+
+def _install(state, identity, coordinates, continuation):
+    return state.replace(equipment=upsert_equipment_record(state.equipment,
+        equipment_id=identity, equipment_type=SBML_ENTITY_TYPE, attached_vessel_id=state.vessel_id,
+        settings={"format": STATE_FORMAT, "model_binding": state.vessel_id,
+                  "coordinates": dict(coordinates), "continuation": continuation.to_dict()},
+        batch_reset="preserve", private_settings=("coordinates", "continuation")))
+
+
+def _advance_candidate(state, model, coordinates, memory, duration):
+    return advance_coordinate_events(model.continuous_system(), _view(state, model, coordinates),
+        duration, memory, model.events, roots=model.roots.roots,
+        trigger_values=model.roots.trigger_values, max_events=model.maximum_events,
+        max_segments=model.maximum_segments, max_pending=model.maximum_pending_events)
+
+
+def install_initial_model(state, model, *, equipment_id="formal_model"):
+    if not isinstance(model, SBMLSystemSpec) or state.phase != "formal" or state.ledger.time_s != 0:
+        raise ValueError("formal initialization needs a model and empty initial workspace")
+    memory = CoordinateHybridMemory.initialize(model.events)
+    result = _advance_candidate(state, model, model.frame.initial_values, memory, 0.)
+    return _install(state, equipment_id, result.final_state.coordinates, result.memory)
+
+
+def validate_model_state(state, model):
+    record = model_record(state)
+    if record is None or not isinstance(model, SBMLSystemSpec) or state.phase != "formal":
+        raise ValueError("formal model binding and its unique native state owner must agree")
+    payload = record.settings
+    if (set(record.private_settings) != {"coordinates", "continuation"}
+            or set(payload) != {"format", "model_binding", "coordinates", "continuation"}
+            or payload["format"] != STATE_FORMAT or payload["model_binding"] != state.vessel_id
+            or not isinstance(payload["coordinates"], dict)
+            or any(not _finite_real(v) for v in payload["coordinates"].values())):
+        raise ValueError("unknown or invalid formal model state fields")
+    coordinates = payload["coordinates"]
+    model.frame.validate_values(coordinates, state.ledger.time_s)
+    memory = CoordinateHybridMemory.from_dict(payload["continuation"])
+    _check_memory(memory.events, {event.event_id: event for event in model.events})
+    if (set(memory.root_values)-{r.root_id for r in model.roots.roots}
+            or len(memory.events.pending) > model.maximum_pending_events):
+        raise ValueError("formal continuation differs from declared roots or pending budget")
+    for pending in memory.events.pending:
+        tolerance = 8*max(ulp(state.ledger.time_s), ulp(pending.due_time_s))
+        if pending.due_time_s < state.ledger.time_s-tolerance:
+            raise ValueError("formal snapshot contains an overdue unexecuted event")
+    view = _view(state, model, coordinates)
+    for root in model.roots.roots:
+        if (root.root_id in memory.root_values
+                and root.value(view) != memory.root_values[root.root_id]):
+            raise ValueError("formal root continuation does not describe the saved candidate")
+    return record, coordinates, memory
+
+
+class SBMLAdvanceStrategy:
+    supported_operations = ("wait",)
+
+    def __init__(self, composition=None):
+        self.composition = composition
+
+    def supports(self, state):
+        return model_record(state) is not None
+
+    def model(self, state):
+        if self.composition is None or self.composition.physics is None:
+            raise ValueError("formal model requires its native composition declaration")
+        model = self.composition.physics.models_of("sbml").get(state.vessel_id)
+        if not isinstance(model, SBMLSystemSpec):
+            raise ValueError("formal native entity has no matching model declaration")
+        return model
+
+    def validate_state(self, state):
+        validate_model_state(state, self.model(state))
+
+    def apply_parameters(self, state, action):
+        if state.terminated:
+            return ModelProviderResult({}, {}, success=False, outcome="rejected",
+                failure_reason="formal_model_terminated")
+        try:
+            model = self.model(state)
+            record, coordinates, memory = validate_model_state(state, model)
+            coordinates = model.frame.controlled_values(coordinates, state.ledger.time_s,
+                                                         action["values"])
+        except (ValueError, KeyError, ArithmeticError) as exc:
+            return ModelProviderResult({}, {"control_error": str(exc)},
+                success=False, outcome="rejected",
+                failure_reason="invalid_formal_parameter_control")
+        try:
+            result = _advance_candidate(state, model, coordinates, memory, 0.)
+            candidate = _install(state, record.equipment_id,
+                result.final_state.coordinates, result.memory)
+            validate_model_state(candidate, model)
+        except (ValueError, ArithmeticError, RuntimeError) as exc:
+            return ModelProviderResult({}, {"solver_error": str(exc)}, success=False,
+                outcome="numerical_failure",
+                failure_reason="formal_control_event_settlement_failed")
+        return ModelProviderResult({}, {"events_executed": len(result.events),
+            "parameter_basis": "declared_source_units"}, state=candidate, actual_duration_s=0.)
+
+    def validate_world(self):
+        if self.composition is None or self.composition.physics is None:
+            return
+        physics = self.composition.physics
+        declared = {c.vessel for c in self.composition.components if c.kind == "sbml_model"}
+        installed = {v for v, s in physics.initial_states.items() if self.supports(s)}
+        if declared != installed or installed != set(physics.models_of("sbml")):
+            raise ValueError("formal components, model declarations and native state owners differ")
+        if installed and physics.lab_clock is None:
+            raise ValueError("formal workspaces require the existing shared laboratory clock")
+        for vessel in installed:
+            state = physics.initial_states[vessel]
+            validate_model_state(state, self.model(state))
+            allowed = {"sbml_model", "observation", "lab_schedule"}
+            if any(c.vessel == vessel and c.kind not in allowed
+                   for c in self.composition.components):
+                raise ValueError("formal workspace cannot enable physical material/thermal acts")
+            if any(vessel in bindings for key, bindings in physics.models.items() if key != "sbml"):
+                raise ValueError("formal entity cannot also bind a competing physical model")
+
+    def advance(self, state, action, *, heat=False, jacket_program=None):
+        if heat or jacket_program is not None or state.quenched or state.terminated:
+            return ModelProviderResult({}, {}, success=False, outcome="rejected",
+                failure_reason="formal_model_boundary_only")
+        try:
+            model = self.model(state)
+            record, coordinates, memory = validate_model_state(state, model)
+            result = _advance_candidate(state, model, coordinates, memory,
+                                        float(action["duration_s"]))
+            candidate = _install(state, record.equipment_id,
+                                  result.final_state.coordinates, result.memory)
+            candidate = candidate.replace(ledger=advance_ledger(state.ledger,
+                                                                result.actual_duration_s))
+            validate_model_state(candidate, model)
+        except (ValueError, ArithmeticError, RuntimeError) as exc:
+            return ModelProviderResult({}, {"solver_error": str(exc),
+                "attempted_events": (len(exc.executed_prefix)
+                    if isinstance(exc, CoordinateEventError) else 0)},
+                success=False, outcome="numerical_failure",
+                failure_reason="formal_model_advance_failed")
+        return ModelProviderResult({}, {"solver": "shared_coupled_formal_kinetics",
+            "events_executed": len(result.events), "segments": len(result.segment_diagnostics),
+            "energy_scope": "not_declared_formal_kinetics",
+            "chemical_inventory_scope": "formal_entity_coordinates_only"},
+            state=candidate, actual_duration_s=result.actual_duration_s)

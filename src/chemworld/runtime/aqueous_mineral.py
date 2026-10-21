@@ -8,6 +8,7 @@ from dataclasses import replace
 from math import fsum, isclose
 
 from chemworld.foundation import species_with_added_initial_amounts
+from chemworld.foundation.balances import MaterialPacket
 from chemworld.foundation.state_ledgers import PhaseLedger, PhaseRecord
 from chemworld.physchem.aqueous_mineral import (
     CHARGES,
@@ -122,8 +123,8 @@ def exchange_aqueous_packet(source, target, physics, amounts, *, fraction=0, fix
         for k, v in source.species_amounts.items()
     ):
         raise ValueError("aqueous packet must leave positive finite source water")
-    remaining = {k: v - amounts.get(k, 0) for k, v in source.species_amounts.items()}
-    received = {k: v + amounts.get(k, 0) for k, v in target.species_amounts.items()}
+    packet = MaterialPacket(source.vessel_id, target.vessel_id, tuple(amounts.items()))
+    remaining, received = packet.apply(source.species_amounts, target.species_amounts)
     source_candidate = source.replace(
         species_amounts=remaining,
         volume_L=source.volume_L * (1 - fraction),
@@ -184,9 +185,7 @@ def exchange_aqueous_packet(source, target, physics, amounts, *, fraction=0, fix
         source_candidate,
         target_candidate,
         {
-            "source": source.vessel_id,
-            "destination": target.vessel_id,
-            "amounts_mol": amounts,
+            **packet.to_dict(),
             "model": "finite_isothermal_carbonate",
             "not_covered": ["mixing_heat", "PV_work", "mineral_advection"],
         },
@@ -207,12 +206,12 @@ def validate_aqueous_vessel(state, physics):
     if any(
         state.vessel_id in m
         for m in (
-            physics.thermal_models,
-            physics.flash_models,
-            physics.liquid_models,
-            physics.column_models,
-            physics.concentration_models,
-            physics.crystal_models,
+            physics.models_of("thermal"),
+            physics.models_of("flash"),
+            physics.models_of("liquid"),
+            physics.models_of("column"),
+            physics.models_of("concentration"),
+            physics.models_of("crystal"),
         )
     ):
         raise ValueError("carbonate constants do not declare thermal or other phase coupling")

@@ -114,12 +114,15 @@ class StoredSample:
         if self.contents:
             payload["contents"] = {
                 "phases": self.contents.phases.to_dict(),
+                "phase_order": list(self.contents.phases.phases),
                 "species": self.contents.species.to_dict(),
                 "properties": deepcopy(self.contents.properties),
                 "metrics": dict(self.contents.metrics),
                 "reference_sources": deepcopy(self.contents.reference_sources),
                 "reference_shares": dict(self.contents.reference_shares),
                 "state_slots": self.contents.state_slots.to_dict(),
+                "state_slot_order": [slot.spec.slot_id
+                                     for slot in self.contents.state_slots.slots],
                 "liquid_heat_capacity_J_L_K": self.contents.liquid_heat_capacity_J_L_K,
                 "mechanism_id": self.contents.mechanism_id,
             }

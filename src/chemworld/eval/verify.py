@@ -323,9 +323,28 @@ def verify_records(
 
     mismatches: list[dict[str, Any]] = list(early_mismatches)
     max_abs_error = 0.0
+    checked_steps = 0
     try:
         for record in records:
+            commands = record.get("initialization_replay")
+            if commands is not None:
+                from chemworld.runtime.lifecycle import replay_initializations
+
+                try:
+                    replay_initializations(replay_env, commands)
+                except (KeyError, IndexError, TypeError, ValueError) as exc:
+                    mismatches.append({"step": record["step"],
+                                       "field": "initialization_replay", "reason": str(exc)})
+                    break
             observation, reward, terminated, truncated, info = env.step(record["action"])
+            checked_steps += 1
+            if commands is not None:
+                try:
+                    replay_initializations(replay_env, commands)
+                except (KeyError, IndexError, TypeError, ValueError) as exc:
+                    mismatches.append({"step": record["step"],
+                                       "field": "initialization_replay", "reason": str(exc)})
+                    break
             replay_audit_info = {**info, **replay_provenance}
             replay_observation = _scalar_observation(observation)
             recorded_observation = record["observation"]
@@ -541,7 +560,7 @@ def verify_records(
 
     return VerificationResult(
         verified=not mismatches,
-        checked_steps=len(records),
+        checked_steps=checked_steps,
         max_abs_error=max_abs_error,
         mismatches=mismatches,
     )

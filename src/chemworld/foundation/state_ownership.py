@@ -193,7 +193,7 @@ class StateSlot:
     def portion(self, fraction: float, location_id: str) -> StateSlot:
         if self.spec.owner_kind != "material":
             raise ValueError("Only material state can be split or carried by a sample")
-        if not isfinite(fraction) or not 0 <= fraction <= 1:
+        if isinstance(fraction, bool) or not isfinite(fraction) or not 0 <= fraction <= 1:
             raise ValueError("Material fraction must be in [0, 1]")
 
         def scaled(values: dict[str, float]) -> dict[str, float]:
@@ -304,6 +304,45 @@ class StateSlots:
     def portion(self, fraction: float, location_id: str) -> StateSlots:
         return StateSlots(tuple(s.portion(fraction, location_id) for s in self.slots))
 
+    def split_material(
+        self, fraction: float, source: str, destination: str, *,
+        phase_id: str | None = None, destination_phase_id: str | None = None,
+        phase_ids: tuple[str | None, ...] | None = None,
+    ) -> tuple[StateSlots, StateSlots]:
+        """Split only the declared material selection; stationary owners stay put.
+
+        Unselected phases retain their exact state. Phase rebinding belongs to
+        this ownership boundary; field scaling and mixing use the slot rules.
+        """
+        if (
+            isinstance(fraction, bool) or not isfinite(fraction) or not 0 <= fraction <= 1
+            or not source or not destination or source == destination
+        ):
+            raise ValueError("material split requires a valid fraction and distinct locations")
+        retained, moved = [], []
+        for slot in self.slots:
+            if slot.spec.owner_kind != "material" or (
+                phase_id is not None and slot.spec.phase_id != phase_id
+            ) or (
+                phase_ids is not None and slot.spec.phase_id not in phase_ids
+            ):
+                retained.append(slot)
+                continue
+            if slot.location_id != source:
+                raise ValueError("material selection is not owned by the source location")
+            retained.append(slot.portion(1 - fraction, source))
+            portion = slot.portion(fraction, destination)
+            if destination_phase_id is not None:
+                portion = replace(
+                    portion, spec=replace(portion.spec, phase_id=destination_phase_id)
+                )
+            moved.append(portion)
+        return StateSlots(tuple(retained)), StateSlots(tuple(moved))
+
+    def receive_material(self, incoming: StateSlots) -> StateSlots:
+        """Merge carried material while retaining each stationary entity once."""
+        return StateSlots((*self.stationary().slots, *self.material().merge(incoming).slots))
+
     def merge(self, other: StateSlots) -> StateSlots:
         mechanisms: dict[str, str] = {}
         result = {s.spec.slot_id: s for s in self.slots}
@@ -370,8 +409,15 @@ class StateSlots:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> StateSlots:
-        slots = tuple(StateSlot.from_dict(value) for value in payload.values())
+    def from_dict(cls, payload: dict[str, Any], *, order=None) -> StateSlots:
+        if order is not None and (
+            not isinstance(order, list | tuple) or any(not isinstance(key, str) for key in order)
+        ):
+            raise ValueError("serialized material slot order must be an identity sequence")
+        keys = tuple(payload) if order is None else tuple(order)
+        if len(set(keys)) != len(keys) or set(keys) != set(payload):
+            raise ValueError("serialized material slot order must match its declared identities")
+        slots = tuple(StateSlot.from_dict(payload[key]) for key in keys)
         if set(payload) != {s.spec.slot_id for s in slots}:
             raise ValueError("Serialized slot identities disagree")
         return cls(slots)

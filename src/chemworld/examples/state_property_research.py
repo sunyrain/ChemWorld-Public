@@ -20,7 +20,7 @@ def variable_caloric_world():
     """Retain the existing apparatus/chemistry and declare a synthetic caloric model."""
     spec = surface_world_spec(include_surface=False, include_bulk=True)
     models = {}
-    for vessel, model in spec.physics.thermal_models.items():
+    for vessel, model in spec.physics.models_of("thermal").items():
         old = model.thermodynamics
         species = {
             key: SpeciesCaloricModel(
@@ -41,7 +41,9 @@ def variable_caloric_world():
         }
         models[vessel] = replace(model, thermodynamics=PropertyPackageThermodynamics(
             species, old.support_heat_capacity_J_K, old.reference_temperature_K))
-    return replace(spec, physics=replace(spec.physics, thermal_models=models))
+    return replace(
+        spec, physics=replace(spec.physics, models={**spec.physics.models, "thermal": models})
+    )
 
 
 def run_example():

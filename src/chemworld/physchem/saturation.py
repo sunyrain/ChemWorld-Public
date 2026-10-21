@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite, log
+from math import isfinite, log, nextafter
 
 from chemworld.foundation.units import convert_value
 from chemworld.physchem.property_reports import (
@@ -146,14 +146,22 @@ def pure_saturation_temperature_report(
     tolerance_log_pressure: float = 1e-10,
     max_iterations: int = 100,
 ) -> PureSaturationReport:
-    """Solve `P_sat(T) = pressure_Pa` with a bracketed log-pressure residual."""
+    """Find a root of P_sat(T)=P in the selected bracket, without uniqueness claims.
 
-    if pressure_Pa <= 0 or not isfinite(pressure_Pa):
+    A source interval is a permissible default bracket. Sanjari's known
+    nonmonotonic behavior requires an explicit caller-selected bracket.
+    """
+
+    if isinstance(pressure_Pa, bool) or pressure_Pa <= 0 or not isfinite(pressure_Pa):
         raise ValueError("pressure_Pa must be positive and finite")
-    if tolerance_K <= 0 or tolerance_log_pressure <= 0:
+    if any(isinstance(v, bool) or not isfinite(v) or v <= 0
+           for v in (tolerance_K, tolerance_log_pressure)):
         raise ValueError("saturation tolerances must be positive")
-    if max_iterations <= 0:
+    if (isinstance(max_iterations, bool) or not isinstance(max_iterations, int)
+            or max_iterations <= 0):
         raise ValueError("max_iterations must be positive")
+    if correlation.equation_id == "sanjari_pressure" and temperature_bounds_K is None:
+        raise ValueError("Sanjari inversion requires an explicit temperature bracket")
     _check_critical_bounds(
         temperature_K=None,
         pressure_Pa=pressure_Pa,
@@ -306,7 +314,13 @@ def _temperature_solve_report(
         bracket_temperature_K=bracket_temperature_K,
         critical_temperature_K=critical_temperature_K,
         critical_pressure_Pa=critical_pressure_Pa,
-        warnings=tuple(dict.fromkeys(warnings)),
+        warnings=tuple(dict.fromkeys((*warnings, "bracketed_root_only_uniqueness_not_certified",
+            *(("open_critical_endpoint_uses_next_representable_temperature",)
+              if ((correlation.equation_id == "wagner"
+                   and bracket_temperature_K[1] == nextafter(correlation.coefficients["Tc"], 0))
+                  or (critical_temperature_K is not None
+                      and bracket_temperature_K[1] == nextafter(critical_temperature_K, 0)))
+              else ())))),
     )
 
 
@@ -375,23 +389,28 @@ def _temperature_bounds_k(
     temperature_bounds_K: tuple[float, float] | None,
     critical_temperature_K: float | None,
 ) -> tuple[float, float]:
+    source_bounds = correlation.validity_ranges.get("temperature")
+    if source_bounds is not None:
+        unit = correlation.input_units.get("temperature", "K")
+        source_bounds = tuple(convert_value(v, unit, "K") for v in source_bounds)
     if temperature_bounds_K is None:
-        bounds = correlation.validity_ranges.get("temperature")
-        if bounds is None:
-            if critical_temperature_K is None:
-                raise ValueError(
-                    "temperature_bounds_K or correlation temperature validity range "
-                    "is required for saturation temperature solves"
-                )
-            lower, upper = 1.0, critical_temperature_K * 0.999999
-        else:
-            unit = correlation.input_units.get("temperature", "K")
-            lower = convert_value(bounds[0], unit, "K")
-            upper = convert_value(bounds[1], unit, "K")
+        if source_bounds is None:
+            raise ValueError(
+                "temperature_bounds_K or correlation temperature validity range "
+                "is required for saturation temperature solves")
+        lower, upper = source_bounds
+        if correlation.equation_id == "wagner" and upper == correlation.coefficients["Tc"]:
+            upper = nextafter(upper, 0)
+        if critical_temperature_K is not None and upper >= critical_temperature_K:
+            upper = nextafter(critical_temperature_K, 0)
     else:
         lower, upper = temperature_bounds_K
-    if lower <= 0 or upper <= lower:
+    if (any(isinstance(v, bool) or not isfinite(v) for v in (lower, upper))
+            or lower <= 0 or upper <= lower):
         raise ValueError("temperature_bounds_K must be positive and increasing")
+    if source_bounds is not None and (lower < source_bounds[0] or upper > source_bounds[1]):
+        raise ValueError(
+            "saturation bracket exceeds source domain; select an explicit extrapolation")
     if critical_temperature_K is not None:
         _check_critical_bounds(
             temperature_K=lower,
@@ -399,9 +418,8 @@ def _temperature_bounds_k(
             critical_temperature_K=critical_temperature_K,
             critical_pressure_Pa=None,
         )
-        upper = min(upper, critical_temperature_K * 0.999999)
-        if upper <= lower:
-            raise ValueError("temperature bracket is above the critical temperature")
+        if upper >= critical_temperature_K:
+            raise ValueError("select a temperature bracket below critical_temperature_K")
     return lower, upper
 
 

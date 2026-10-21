@@ -75,7 +75,7 @@ class ChemWorldInstrumentCostServices:
         advancement = ModelProviderResult(outputs={}, diagnostics={}, state=state)
         if duration:
             if self.thermal is None or not (
-                self.thermal.advancer.supports(state)
+                self.thermal.advancer.supports_measurement_clock(state)
             ):
                 return ModelProviderResult(
                     outputs={}, diagnostics={}, success=False, outcome="rejected",
@@ -103,7 +103,7 @@ class ChemWorldInstrumentCostServices:
             sample_consumed_L=state.ledger.sample_consumed_L + volume,
             analysis_time_s=state.ledger.analysis_time_s + seconds,
         )
-        equipment_id = instrument_equipment_id(instrument_id)
+        equipment_id = instrument_equipment_id(instrument_id, state=state)
         previous_settings = equipment_settings(state.equipment, equipment_id)
         use_count = int(previous_settings.get("use_count", 0)) + 1
         native_clock = contract.clock_semantics != "instantaneous_snapshot"
@@ -135,7 +135,12 @@ class ChemWorldInstrumentCostServices:
             }
         )
         acquisition = {
+            "device_id": equipment_id,
             "clock_semantics": contract.clock_semantics,
+            "sample_time_s": initial.ledger.time_s + (
+                advancement.actual_duration_s if contract.clock_semantics == "in_situ_end" else 0.0
+            ),
+            "result_time_s": state.ledger.time_s,
             "sampled_at": sampled_at,
             "available_at": available_at,
             "sample_id": f"{state.vessel_id}:{instrument_id}:acquisition:{use_count}",
@@ -187,8 +192,10 @@ class ChemWorldInstrumentCostServices:
         )
         if native_spec is not None and native_spec.sample_transform is not None:
             sampled = native_spec.sample_transform(state, sampled, action, seconds)
-        if native_spec is not None and native_spec.native_observer is not None:
-            observer = native_spec.native_observer
+        if native_spec is not None and (
+                native_spec.native_observer is not None
+                or native_spec.observer_factory is not None):
+            observer = native_spec.native_observer or native_spec.observer_factory
             provider = getattr(observer, "__qualname__", type(observer).__qualname__)
             module = getattr(observer, "__module__", type(observer).__module__)
             execution.update(

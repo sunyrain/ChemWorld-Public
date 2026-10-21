@@ -140,21 +140,31 @@ class EquipmentRecord:
     status: str = "idle"
     settings: dict[str, Any] = field(default_factory=dict)
     batch_reset: str = "initial"
+    private_settings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.batch_reset not in {"initial", "preserve"}:
             raise ValueError("Equipment batch_reset must be initial or preserve")
         object.__setattr__(self, "settings", deepcopy(self.settings))
+        private = tuple(self.private_settings)
+        if (len(set(private)) != len(private)
+                or any(not isinstance(key, str) or key not in self.settings for key in private)):
+            raise ValueError("private equipment fields must name distinct owned settings")
+        object.__setattr__(self, "private_settings", private)
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, *, include_hidden: bool = True) -> dict[str, Any]:
+        payload = {
             "equipment_id": self.equipment_id,
             "equipment_type": self.equipment_type,
             "attached_vessel_id": self.attached_vessel_id,
             "status": self.status,
-            "settings": deepcopy(self.settings),
+            "settings": {key: deepcopy(value) for key, value in self.settings.items()
+                         if include_hidden or key not in self.private_settings},
             "batch_reset": self.batch_reset,
         }
+        if include_hidden and self.private_settings:
+            payload["private_settings"] = list(self.private_settings)
+        return payload
 
 
 @dataclass(frozen=True)
@@ -164,9 +174,10 @@ class EquipmentLedger:
     def __post_init__(self) -> None:
         object.__setattr__(self, "equipment", deepcopy(self.equipment))
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_hidden: bool = True) -> dict[str, Any]:
         return {
-            equipment_id: equipment.to_dict() for equipment_id, equipment in self.equipment.items()
+            equipment_id: equipment.to_dict(include_hidden=include_hidden)
+            for equipment_id, equipment in self.equipment.items()
         }
 
 

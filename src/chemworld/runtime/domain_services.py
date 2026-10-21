@@ -130,11 +130,11 @@ class ChemWorldDomainServices:
         if method is None:
             raise ValueError(f"Unsupported operation: {operation}")
         if state.lab_clock is not None:
-            from chemworld.runtime.scheduling import ALLOWED
+            from chemworld.runtime.scheduling import shared_operation_allowed
 
-            if operation not in ALLOWED:
+            if not shared_operation_allowed(operation, state, self.modules, action):
                 return ModelProviderResult(
-                    {}, diagnostics={}, state=None, success=False,
+                    {"preconditions": preconditions}, diagnostics={}, state=None, success=False,
                     outcome="rejected", failure_reason="unsupported_shared_clock_action",
                 )
             evaluated = (
@@ -165,6 +165,13 @@ class ChemWorldDomainServices:
                 actual_duration_s=next_state.ledger.time_s - before.ledger.time_s,
             )
 
+        if (state.lab_clock is not None and operation != "wait"
+                and next_state.ledger.time_s != state.ledger.time_s):
+            return ModelProviderResult(
+                {"preconditions": preconditions}, diagnostics={}, state=None,
+                success=False, outcome="rejected",
+                failure_reason="shared_event_must_not_advance_a_second_clock",
+            )
         if not (state.lab_clock is not None and operation == "wait"):
             next_state = finish_solvent_transition(state, next_state, action)
         context_thermal = getattr(self, "reaction_thermal", None)
@@ -176,7 +183,6 @@ class ChemWorldDomainServices:
                 state.vessel_elapsed_s[state.vessel_id]
                 + next_state.ledger.time_s - state.ledger.time_s
             )
-            assert next_state.thermal is not None
             thermal = next_state.thermal.vessels[next_state.vessel_id]
             if operation != "select_vessel":
                 thermal = replace(

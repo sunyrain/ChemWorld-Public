@@ -146,7 +146,6 @@ def stream_error(state: WorldState, operation: str, action: dict[str, Any]) -> s
                 )
             target = state.inactive_vessels[name]
             _liquid(target)
-            assert target.vessels is not None
             if (
                 target.volume_L + rate * action["duration_s"]
                 > target.vessels.vessels[name].max_volume_L + 1e-12
@@ -160,7 +159,6 @@ def stream_error(state: WorldState, operation: str, action: dict[str, Any]) -> s
             state.volume_L
             + (sum(q for _, q in inputs) - sum(q for _, q in outputs)) * action["duration_s"]
         )
-        assert state.vessels is not None
         if not 1e-6 < final_volume <= state.vessels.vessels[state.vessel_id].max_volume_L + 1e-12:
             raise ValueError("Tank volume would leave the declared capacity domain")
     except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
@@ -261,7 +259,6 @@ class ContinuousStreamServices:
             feed_settings = _contents(feed).properties.get("batch_reactor", {})
             if feed_settings.get("catalyst_amount_mol", 0) > 0:
                 catalyst_index = int(feed_settings["catalyst"])
-        assert state.species is not None
         catalyst_ids = [
             i for i, s in enumerate(ids) if "catalyst" in state.species.species_roles.get(s, ())
         ]
@@ -456,7 +453,6 @@ class ContinuousStreamServices:
             inactive[name] = _install_sample(inactive[name], collected)
 
         def measured_process(local: WorldState) -> WorldState:
-            assert local.species is not None
             reactant = self.species_view.reactant_species(local)
             reference = local.species.initial_amounts_mol.get(reactant, 0)
             conversion = (

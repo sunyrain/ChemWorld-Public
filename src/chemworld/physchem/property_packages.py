@@ -8,11 +8,21 @@ from math import isfinite, log
 from types import MappingProxyType
 
 from chemworld.foundation.units import convert_value
-from chemworld.physchem.enthalpy import caloric_polynomial_change
+from chemworld.physchem.enthalpy import (
+    _validate_correlation_phase,
+    caloric_correlation_change,
+    caloric_polynomial_change,
+)
+from chemworld.physchem.heat_capacity import (
+    PiecewiseHeatCapacity,
+    heat_capacity_from_dict,
+    validate_capacity_curve,
+)
 from chemworld.physchem.property_equations import (
     _choose_valid_correlation,
     _validity_warnings,
     evaluate_correlation,
+    integrate_correlation,
 )
 from chemworld.physchem.property_reports import (
     R_J_PER_MOL_K,
@@ -63,13 +73,7 @@ def evaluate_caloric_correlation(
     }:
         raise ValueError("caloric requests require a declared Cp or Cv correlation")
     phase = reference.phase
-    property_phase = {
-        "ideal_gas_heat_capacity": "gas", "liquid_heat_capacity": "liquid",
-        "solid_heat_capacity": "solid",
-    }.get(correlation.property_id)
-    for declared_phase in (correlation.metadata.get("phase"), property_phase):
-        if declared_phase is not None and phase != declared_phase:
-            raise ValueError("caloric phase disagrees with the selected correlation")
+    _validate_correlation_phase(correlation, phase)
     # Permissive evaluation still retains the validity record in this new API.
     evaluation_policy = "warn" if validity_policy == "ignore" else validity_policy
     capacity = evaluate_correlation(correlation, temperature_K=temperature_K,
@@ -91,7 +95,7 @@ def evaluate_caloric_correlation(
     if energy_needed:
         if phase in {"solid", "liquid"} and pressure != reference.pressure_Pa:
             raise ValueError("non-gas caloric pressure dependence needs an additional model")
-        change = caloric_polynomial_change(
+        change = caloric_correlation_change(
             correlation, initial_temperature_K=reference.temperature_K,
             final_temperature_K=temperature_K, validity_policy=evaluation_policy)
         energy_warnings = tuple(dict.fromkeys((*capacity.warnings, *change.warnings)))
@@ -108,15 +112,30 @@ def evaluate_caloric_correlation(
         if phase != "gas" and pressure != reference.pressure_Pa:
             raise ValueError("non-gas entropy pressure dependence needs an additional model")
         cp_correlation = correlation
-        if basis == "internal_energy":
-            factor = convert_value(1, correlation.output_unit, "J/(mol*K)")
-            coefficients = {key: value * factor for key, value in correlation.coefficients.items()}
-            coefficients["a"] = coefficients.get("a", 0.0) + R_J_PER_MOL_K
-            cp_correlation = replace(correlation, property_id="ideal_gas_heat_capacity",
-                                     coefficients=coefficients, output_unit="J/(mol*K)")
-        entropy_change = caloric_polynomial_change(
-            cp_correlation, initial_temperature_K=reference.temperature_K,
-            final_temperature_K=temperature_K, entropy=True, validity_policy=evaluation_policy)
+        if basis == "internal_energy" and correlation.equation_id != "cp_polynomial":
+            # Integrate Cv/T unchanged, then add the declared ideal-gas R term.
+            # Cv=0 remains valid. Shape parameters cannot be scaled or shifted.
+            integral = integrate_correlation(
+                correlation, initial_temperature_K=reference.temperature_K,
+                final_temperature_K=temperature_K, over_temperature=True,
+                validity_policy=evaluation_policy)
+            change = convert_value(integral.value, correlation.output_unit, "J/(mol*K)")
+            change += R_J_PER_MOL_K * log(temperature_K / reference.temperature_K)
+            entropy_change = PropertyEvaluation(
+                "entropy_change", correlation.correlation_id, "ideal_gas_Cv_over_T_quadrature",
+                change, "J/(mol*K)", {"temperature": temperature_K}, integral.warnings)
+        else:
+            if basis == "internal_energy":
+                # Preserve the existing polynomial's analytic path and semantics.
+                factor = convert_value(1, correlation.output_unit, "J/(mol*K)")
+                coefficients = {key: value * factor
+                                for key, value in correlation.coefficients.items()}
+                coefficients["a"] = coefficients.get("a", 0.0) + R_J_PER_MOL_K
+                cp_correlation = replace(correlation, property_id="ideal_gas_heat_capacity",
+                                         coefficients=coefficients, output_unit="J/(mol*K)")
+            entropy_change = caloric_correlation_change(
+                cp_correlation, initial_temperature_K=reference.temperature_K,
+                final_temperature_K=temperature_K, entropy=True, validity_policy=evaluation_policy)
         warning_groups["entropy"] = tuple(dict.fromkeys(
             (*capacity.warnings, *entropy_change.warnings)))
         entropy = reference.entropy_J_mol_K + entropy_change.value
@@ -143,22 +162,21 @@ def evaluate_caloric_correlation(
 
 @dataclass(frozen=True)
 class SpeciesCaloricModel:
-    """One existing inventory's polynomial caloric data and explicit reference.
+    """One existing inventory's declared caloric curve and explicit reference.
 
     Generic inventory labels need no invented chemical formula or registry entry.
     This model is T-dependent/additive; nonideal mixture EOS closure remains a
     separate, explicitly requested state evaluation.
     """
 
-    heat_capacity: PropertyCorrelation
+    heat_capacity: PropertyCorrelation | PiecewiseHeatCapacity
     reference: CaloricReference
 
     def __post_init__(self):
-        if (self.heat_capacity.equation_id != "cp_polynomial"
-                or self.heat_capacity.input_units.get("temperature", "K") != "K"
+        if (self.heat_capacity.input_units.get("temperature", "K") != "K"
                 or set(self.heat_capacity.validity_ranges) - {"temperature"}
                 or set(self.heat_capacity.input_units) - {"temperature"}):
-            raise ValueError("native caloric inventory requires a T-only Kelvin polynomial")
+            raise ValueError("native caloric inventory requires a T-only Kelvin capacity")
         self.evaluate(self.reference.temperature_K, ("cv", "internal_energy"))
 
     def evaluate(self, temperature_K, quantities, *, strict=True):
@@ -167,6 +185,12 @@ class SpeciesCaloricModel:
             quantities=quantities, validity_policy="raise" if strict else "warn")
 
     def validate_interval(self, lower_K, upper_K):
+        if self.heat_capacity.equation_id != "cp_polynomial":
+            for temperature in (lower_K, upper_K):
+                self.evaluate(temperature, ("cv", "internal_energy"))
+            validate_capacity_curve(self.heat_capacity, lower_K, upper_K, allow_zero=True,
+                minimum=R_J_PER_MOL_K if self.reference.energy_basis == "enthalpy" else 0)
+            return
         factor = convert_value(1, self.heat_capacity.output_unit, "J/(mol*K)")
         coefficients = {key: value * factor
                         for key, value in self.heat_capacity.coefficients.items()}
@@ -184,7 +208,7 @@ class SpeciesCaloricModel:
 
     @classmethod
     def from_dict(cls, payload):
-        return cls(PropertyCorrelation(**payload["heat_capacity"]),
+        return cls(heat_capacity_from_dict(payload["heat_capacity"]),
                    CaloricReference(**payload["reference"]))
 
 
@@ -193,7 +217,8 @@ class PropertyPackageThermodynamics:
     """Additive U(n,T) and its derivatives from the same caloric evaluations.
 
     The common integrator owns solver trials and acceptance. Polynomial trial
-    extension retains warnings; accepted states are checked strictly. No state,
+    extension retains warnings; piecewise gaps never extrapolate and accepted
+    states are checked strictly. No state,
     clock, resource or upstream backend is owned here.
     """
 
@@ -278,13 +303,15 @@ def evaluate_property_state(
     packages: Sequence[ComponentPropertyPackage], component_amounts_mol: Mapping[str, float], *,
     temperature_K: float, pressure_Pa: float, phase: str, quantities: Sequence[str],
     references: Mapping[str, CaloricReference] | None = None, eos=None,
-    validity_policy: ValidityPolicy = "raise",
+    validity_policy: ValidityPolicy = "raise", volume_model: PropertyCorrelation | None = None,
 ) -> StatePropertyReport:
     """Evaluate a single-phase state using existing identities/correlations.
 
     Gas states declare ideal-gas behavior unless an existing cubic EOS is given.
     Cubic liquid states use the same ideal-gas caloric reference plus their
     governed departure. No phase split or missing transport data is invented.
+    An explicit mixture volume_model uses the original liquid correlation at
+    actual T/P and binds its fixed composition to the component inventory.
     """
     from chemworld.physchem.eos import (
         cubic_state_derivatives,
@@ -294,6 +321,8 @@ def evaluate_property_state(
     from chemworld.physchem.property_reports import _validate_phase
 
     _validate_phase(phase)
+    if volume_model is not None and (phase != "liquid" or eos is not None):
+        raise ValueError("explicit liquid volume model cannot be combined with a fluid EOS")
     if (validity_policy not in {"raise", "warn", "ignore"}
             or any(not isfinite(v) or v <= 0 for v in (temperature_K, pressure_Pa))):
         raise ValueError("property state requires finite positive T/P and a declared policy")
@@ -316,7 +345,9 @@ def evaluate_property_state(
     caloric = {"cp", "cv", "enthalpy", "internal_energy", "entropy", "chemical_potential",
                "dH_dT_P", "dU_dT_V"}
     volume_quantities = {"molar_volume", "density", "dV_dT_P", "dV_dP_T"}
-    transport_quantities = {"viscosity", "thermal_conductivity"}
+    transport_quantities = {"viscosity", "thermal_conductivity", "surface_tension"}
+    if "surface_tension" in requested and phase != "liquid":
+        raise ValueError("surface tension requires the liquid side of a liquid-gas interface")
     if not requested or requested - (caloric | volume_quantities | transport_quantities
                                      | {"fugacity_coefficient"}):
         raise ValueError("unsupported or empty state-property request")
@@ -360,6 +391,23 @@ def evaluate_property_state(
     cp_needed = requested & {"cp", "cv", "dH_dT_P", "dU_dT_V"}
     energy_needed = requested & {"enthalpy", "internal_energy", "chemical_potential"}
     entropy_needed = requested & {"entropy", "chemical_potential"}
+    # A condensed Cv/U declaration is already an energy model. It does not
+    # need a fictitious Cp/H or density calculation to return its own pair.
+    direct_internal = state is None and any(
+        reference_map.get(key, CaloricReference()).energy_basis == "internal_energy"
+        for key in active
+    )
+    if direct_internal and requested & caloric:
+        if any(
+            key not in reference_map or reference_map[key].energy_basis != "internal_energy"
+            for key in active
+        ):
+            raise ValueError("condensed caloric inventory cannot mix H and U reference bases")
+        if requested & (caloric - {"cv", "internal_energy", "dU_dT_V"}):
+            raise ValueError(
+                "condensed Cv/U needs an additional closure to provide Cp/H or entropy"
+            )
+        model_details["caloric_basis"] = "internal_energy"
     if requested & caloric:
         base_phase = "gas" if eos is not None else phase
         for key in active:
@@ -381,6 +429,10 @@ def evaluate_property_state(
                                                      pressure_Pa=pressure_Pa)
             needs = ((["cp"] if cp_needed else []) + (["enthalpy"] if energy_needed else [])
                      + (["entropy"] if entropy_needed else []))
+            if direct_internal:
+                needs = (
+                    (["cv"] if cp_needed else []) + (["internal_energy"] if energy_needed else [])
+                )
             pure[key] = evaluate_caloric_correlation(
                 correlation, reference=reference, temperature_K=temperature_K,
                 pressure_Pa=pressure_Pa, quantities=needs, validity_policy=policy)
@@ -390,7 +442,7 @@ def evaluate_property_state(
              "dH_dT_P": "J/(mol*K)", "dU_dT_V": "J/(mol*K)",
              "molar_volume": "m^3/mol", "density": "kg/m^3", "dV_dT_P": "m^3/(mol*K)",
              "dV_dP_T": "m^3/(mol*Pa)", "viscosity": "Pa*s",
-             "thermal_conductivity": "W/(m*K)"}
+             "thermal_conductivity": "W/(m*K)", "surface_tension": "N/m"}
     source_ids = tuple(dict.fromkeys(value.correlation_id
                                     for component in pure.values() for value in component.values()))
 
@@ -402,7 +454,14 @@ def evaluate_property_state(
                                    for warning in values[quantity].warnings))
 
     molar_volume = None if state is None else state.molar_volume_m3_mol
-    if cp_needed:
+    if direct_internal:
+        if cp_needed:
+            values.update(cv=weighted("cv"), dU_dT_V=weighted("cv"))
+            warnings_by_property.update(cv=warnings_for("cv"), dU_dT_V=warnings_for("cv"))
+        if energy_needed:
+            values["internal_energy"] = weighted("internal_energy")
+            warnings_by_property["internal_energy"] = warnings_for("internal_energy")
+    if cp_needed and not direct_internal:
         cp = weighted("cp") + derivatives.get("cp_departure_J_mol_K", 0.0)
         values.update(cp=cp, dH_dT_P=cp)
         for quantity in ("cp", "cv", "dH_dT_P", "dU_dT_V"):
@@ -414,7 +473,7 @@ def evaluate_property_state(
             if cv < 0 or cp <= 0:
                 raise ValueError("state heat capacity is outside the stable caloric domain")
             values.update(cv=cv, dU_dT_V=cv)
-    if energy_needed:
+    if energy_needed and not direct_internal:
         values["enthalpy"] = weighted("enthalpy") + (
             state.molar_residual_enthalpy_J_mol if state else 0.0)
         for quantity in ("enthalpy", "internal_energy"):
@@ -430,7 +489,7 @@ def evaluate_property_state(
         if len(active) != 1:
             raise ValueError("mixture transport requires an explicitly selected mixing model")
         package = by_id[next(iter(active))]
-        property_id = f"{phase}_viscosity" if quantity == "viscosity" else "thermal_conductivity"
+        property_id = f"{phase}_viscosity" if quantity == "viscosity" else quantity
         candidates = tuple(c for c in package.by_property(property_id)
                            if c.metadata.get("phase", phase) == phase)
         if not candidates:
@@ -440,23 +499,60 @@ def evaluate_property_state(
         properties[quantity] = replace(evaluate_correlation(
             correlation, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
             validity_policy=policy).to(units[quantity]), property_id=quantity)
-    if state is None and requested & (volume_quantities | {"internal_energy"}):
-        if len(active) != 1:
+    requires_volume = requested & volume_quantities or (
+        "internal_energy" in requested and not direct_internal
+    )
+    if state is None and requires_volume:
+        if volume_model is not None:
+            from chemworld.physchem.specs import MixtureSpec
+            from chemworld.physchem.volume_mixtures import mixture_volume_evaluation
+
+            declared = volume_model.metadata.get("mixture")
+            if phase != "liquid" or not isinstance(declared, dict):
+                raise ValueError("explicit mixture volume model requires its liquid composition")
+            mixture = MixtureSpec.from_dict(declared)
+            if set(mixture.component_ids) != set(by_id) or any(
+                abs(fractions.get(key, 0) - x) > 1e-9 or
+                abs(by_id[key].component.molecular_weight_g_mol - mw) > 1e-9 * mw
+                for key, x, mw in zip(mixture.component_ids, mixture.mole_fractions,
+                                     mixture.molecular_weights_g_mol, strict=True)
+            ):
+                raise ValueError("fixed volume-model composition/MW must match the state")
+            current = replace(mixture, temperature_K=temperature_K, pressure_Pa=pressure_Pa)
+            expected = mixture_volume_evaluation(
+                current, method=volume_model.metadata["mixture_method"],
+                component_parameters=volume_model.metadata["component_parameters"],
+                **volume_model.metadata["pressure_parameters"])
+            evaluated = evaluate_correlation(volume_model, temperature_K=temperature_K,
+                                            pressure_Pa=pressure_Pa, validity_policy=policy)
+            molar_mass = mixture.average_molecular_weight_g_mol / 1000
+            molar_volume = (evaluated.to("m^3/mol").value
+                            if volume_model.property_id == "liquid_molar_volume"
+                            else molar_mass / evaluated.to("kg/m^3").value)
+            if abs(molar_volume - expected.value) > 1e-9 * expected.value:
+                raise ValueError("mixture volume declaration disagrees with its original inputs")
+            source_ids = (*source_ids, evaluated.correlation_id)
+            for quantity in ("molar_volume", "density", "internal_energy"):
+                warnings_by_property[quantity] = tuple(dict.fromkeys(
+                    (*warnings_by_property.get(quantity, ()), *evaluated.warnings)))
+            model_details["volume_mixing"] = volume_model.to_dict()
+        elif len(active) != 1:
             raise ValueError("non-gas mixture volume requires an explicit volume-mixing model")
-        key = next(iter(active))
-        density = by_id[key].evaluate(f"{phase}_density", temperature_K=temperature_K,
+        else:
+            key = next(iter(active))
+            density = by_id[key].evaluate(f"{phase}_density", temperature_K=temperature_K,
                                       pressure_Pa=pressure_Pa, validity_policy=policy).to("kg/m^3")
-        molar_volume = by_id[key].component.molecular_weight_g_mol / 1000 / density.value
-        for quantity in ("molar_volume", "density", "internal_energy"):
-            warnings_by_property[quantity] = tuple(dict.fromkeys(
-                (*warnings_by_property.get(quantity, ()), *density.warnings)))
-        source_ids = (*source_ids, density.correlation_id)
+            molar_volume = by_id[key].component.molecular_weight_g_mol / 1000 / density.value
+            for quantity in ("molar_volume", "density", "internal_energy"):
+                warnings_by_property[quantity] = tuple(dict.fromkeys(
+                    (*warnings_by_property.get(quantity, ()), *density.warnings)))
+            source_ids = (*source_ids, density.correlation_id)
     if molar_volume is not None:
         values["molar_volume"] = molar_volume
         molar_mass = sum(x * by_id[key].component.molecular_weight_g_mol / 1000
                          for key, x in fractions.items())
         values["density"] = molar_mass / molar_volume
-        if "internal_energy" in requested:
+        if "internal_energy" in requested and not direct_internal:
             values["internal_energy"] = values["enthalpy"] - pressure_Pa * molar_volume
     for quantity, derivative in (("dV_dT_P", "d_molar_volume_dT_P"),
                                   ("dV_dP_T", "d_molar_volume_dP_T")):

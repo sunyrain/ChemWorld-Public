@@ -262,7 +262,9 @@ def test_timed_instrument_requires_physical_clock_at_world_binding():
     from chemworld.world.composition import WorldCompositionError, compile_world_composition
 
     spec = surface_world_spec()
-    with pytest.raises(WorldCompositionError, match="physical clock"):
+    # A timed instrument cannot bind when its physical system has no solver;
+    # the shared owner check now diagnoses this before task capability checks.
+    with pytest.raises(WorldCompositionError, match="no declared physical advance strategy"):
         compile_world_composition(replace(spec, physics=replace(spec.physics, thermal_models={})))
 
 

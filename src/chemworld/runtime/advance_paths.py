@@ -59,19 +59,63 @@ class ControlStageAdvance:
     exchanges: tuple[dict, ...] = ()
 
 
+def select_advance_strategy(strategies, state, *, bindings=None, required=False):
+    """Shared compile/query/runtime selection. A binding cannot hide a conflict."""
+    candidates = [
+        (key, strategy) for key, strategy in strategies.items() if strategy.supports(state)
+    ]
+    if len(candidates) > 1:
+        raise ValueError(
+            f"multiple physical advance strategies claim {state.vessel_id!r}: "
+            f"{[key for key, _ in candidates]}"
+        )
+    expected = (bindings or {}).get(state.vessel_id)
+    if expected is not None and (not candidates or candidates[0][0] != expected):
+        raise ValueError(
+            f"advance binding {expected!r} does not own physical system {state.vessel_id!r}"
+        )
+    if required and not candidates:
+        raise ValueError(f"no declared physical advance strategy for {state.vessel_id!r}")
+    return candidates[0] if candidates else None
+
+
 class PhysicalAdvanceCoordinator:
     def __init__(self, thermal: Any, *, modules=None, composition=None):
         self.thermal = thermal
-        self.declared = tuple(
-            (key, factory(composition))
-            for key, factory in (modules.advance_factories().items() if modules is not None else ())
+        self.specs = {} if modules is None else modules.advance_specs()
+        self.strategies = (
+            {} if modules is None
+            else modules.build_advance_strategies(composition, thermal=thermal)
         )
+        self.bindings = (
+            {} if composition is None or composition.physics is None
+            else composition.physics.advance_bindings
+        )
+
+    @property
+    def declared(self):
+        return tuple(self.strategies.items())
+
+    def validate_snapshot_state(self, state):
+        """Check installed state owners before accepting saved continuation data."""
+        for local in (state, *state.inactive_vessels.values()):
+            selected = select_advance_strategy(self.strategies, local, bindings=self.bindings)
+            validator = None if selected is None else getattr(selected[1], "validate_state", None)
+            if validator is not None:
+                validator(local)
 
     @property
     def preserved_source_vessels(self):
         """Finite sources owned by declared strategies keep their actual stock."""
         return set().union(
             *(getattr(s, "preserved_source_vessels", set()) for _, s in self.declared)
+        )
+
+    @property
+    def protected_lifecycle_vessels(self):
+        """Consumed supplies cannot be replenished by a local entity boundary."""
+        return set().union(
+            *(getattr(s, "protected_lifecycle_vessels", set()) for _, s in self.declared)
         )
 
     def reconcile_initialization(self, transition):
@@ -82,27 +126,17 @@ class PhysicalAdvanceCoordinator:
                 transition = reconcile(transition)
         return transition
 
-    def strategy(self, state):
-        candidates = [
-            (key, strategy) for key, strategy in self.declared if strategy.supports(state)
-        ]
-        for attribute, key in (
-            ("crystal", "finite-crystal-population-temperature"),
-            ("concentration", "finite-vacuum-concentration-enthalpy"),
-            ("column", "finite-equilibrium-column"),
-            ("liquid", "isothermal-liquid-equilibrium"),
-            ("flash", "constant-pressure-flash-enthalpy"),
-            ("coupled", "owned-inventory-temperature"),
-        ):
-            strategy = getattr(self.thermal, attribute, None)
-            if strategy is not None and strategy.supports(state):
-                candidates.append((key, strategy))
-        if len(candidates) > 1:
-            raise ValueError("multiple physical advance strategies claim the same local system")
-        return candidates[0] if candidates else None
+    def strategy(self, state, *, required=False):
+        return select_advance_strategy(
+            self.strategies, state, bindings=self.bindings, required=required
+        )
 
     def supports(self, state):
         return self.strategy(state) is not None
+
+    def supports_measurement_clock(self, state):
+        selected = self.strategy(state)
+        return selected is not None and self.specs[selected[0]].timed_measurements
 
     def batch(self, state, action, *, heat, jacket_program=None):
         from chemworld.runtime.control_program import advance_electrical_program
@@ -132,23 +166,13 @@ class PhysicalAdvanceCoordinator:
         return self._batch_interval(state, action, heat=heat, jacket_program=jacket_program)
 
     def _batch_interval(self, state, action, *, heat, jacket_program=None, control_stage=None):
-        selected = self.strategy(state)
-        if selected is not None:
-            strategy, runner = selected
-            if control_stage is None:
-                result = runner.advance(state, action, heat=heat, jacket_program=jacket_program)
-            else:
-                result = runner.advance_controlled(
-                    state, action, control_stage, heat=heat, jacket_program=jacket_program
-                )
+        strategy, runner = self.strategy(state, required=True)
+        if control_stage is None:
+            result = runner.advance(state, action, heat=heat, jacket_program=jacket_program)
         else:
-            result = self.thermal._integrate_legacy(
-                state,
-                action,
-                heat=heat,
-                jacket_program=jacket_program,
+            result = runner.advance_controlled(
+                state, action, control_stage, heat=heat, jacket_program=jacket_program
             )
-            strategy = "legacy-liquid-enthalpy"
         return replace(result, diagnostics={**result.diagnostics, "advance_strategy": strategy})
 
     def control_stage(

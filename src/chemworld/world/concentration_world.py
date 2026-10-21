@@ -79,7 +79,7 @@ def concentration_world_spec(spec, initial, *, heater=None, capacity_L=0.1):
         ),
     )
     state = install_concentration(state, spec, initial)
-    physics = CompositionPhysics(network, {vessel: state}, concentration_models={vessel: spec})
+    physics = CompositionPhysics(network, {vessel: state}, models={"concentration": {vessel: spec}})
     return WorldCompositionSpec.from_dict(
         {
             "schema_version": "chemworld-world-composition-0.1",

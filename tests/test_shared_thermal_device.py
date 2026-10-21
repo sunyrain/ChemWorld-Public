@@ -233,9 +233,8 @@ def test_device_reconnection_preserves_calibration_and_leaves_material_in_place(
         "reactor": after.replace(inactive_vessels={}).to_dict(),
         "receiver": after.inactive_vessels["receiver"].to_dict(),
     }
-    payload["physics"]["thermal_models"]["receiver"] = payload["physics"]["thermal_models"][
-        "reactor"
-    ]
+    bindings = payload["physics"]["models"]["thermal"]["bindings"]
+    bindings["receiver"] = bindings["reactor"]
     payload["vessels"].append({**payload["vessels"][0], "id": "receiver"})
     payload["components"].append(
         {"id": "receiver-thermal", "kind": "thermal", "vessel": "receiver", "parameters": {}}

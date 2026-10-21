@@ -68,6 +68,7 @@ def integrate_phase_inventory(
     diagnostic_counters=None,
     operating_limit_error=ValueError,
     initial_boundary="reject",
+    constant_amounts=False,
 ):
     """One solve for retained n/H, utility heat and explicit outlet integrals.
 
@@ -84,6 +85,8 @@ def integrate_phase_inventory(
         or initial_boundary not in {"reject", "stop"}
         or any(set(n) != set(ids) for n in state.amounts_mol)
         or len(state.enthalpies_J) != count
+        or type(constant_amounts) is not bool
+        or (constant_amounts and open_outlet)
     ):
         raise ValueError("phase integration needs matching finite inventories, H and duration")
     initial_n = np.array([[n[k] for k in ids] for n in state.amounts_mol])
@@ -91,15 +94,21 @@ def integrate_phase_inventory(
     # material inlet. A species absent everywhere is an invariant zero, not
     # a physical direction for finite-difference Jacobian perturbations.
     absent = np.sum(initial_n, axis=0) == 0
-    n_end, h_end = count * width, count * (width + 1)
+    # In a closed heat-only slice n_dot is identically zero. Eliminate these
+    # coordinates from the numerical solve: even a Jacobian trial must not
+    # move a line compound off its fixed stoichiometry. The accepted inventory
+    # remains the original physical stock, never a projected/repaired trial.
+    n_end = 0 if constant_amounts else count*width
+    h_end = n_end+count
     q_end = h_end + 2
     scales = np.r_[
-        np.maximum(initial_n, 1e-3).ravel(),
+        np.empty(0) if constant_amounts else np.maximum(initial_n, 1e-3).ravel(),
         np.maximum(np.abs(state.enthalpies_J), 10),
         100.0,
         100.0,
     ]
-    initial = np.r_[initial_n.ravel(), state.enthalpies_J, 0.0, 0.0]
+    initial = np.r_[np.empty(0) if constant_amounts else initial_n.ravel(),
+                    state.enthalpies_J, 0.0, 0.0]
     if open_outlet:
         scales = np.r_[scales, np.maximum(np.sum(initial_n, axis=0), 1e-3), 100.0]
         initial = np.r_[initial, np.zeros(width + 1)]
@@ -111,7 +120,7 @@ def integrate_phase_inventory(
     evaluations = [0]
 
     def unpack(vector, *, accepted=False, time=0):
-        raw = vector[:n_end].reshape((count, width))
+        raw = initial_n if constant_amounts else vector[:n_end].reshape((count, width))
         if accepted and np.min(raw) < -1e-12:
             raise RuntimeError("accepted phase state has a negative inventory")
         amounts = tuple(
@@ -177,10 +186,12 @@ def integrate_phase_inventory(
     def rhs(time, scaled):
         candidate, flashes = evaluate(scaled, time)
         contribution = rates(candidate, flashes)
+        if constant_amounts and np.any(contribution.amounts_mol_s != 0):
+            raise ValueError("constant-inventory heat integration requires zero matter rates")
         if np.any(contribution.amounts_mol_s[:, absent] != 0):
             raise ValueError("closed-input phase contribution creates an absent component")
         derivative = np.r_[
-            contribution.amounts_mol_s.ravel(),
+            np.empty(0) if constant_amounts else contribution.amounts_mol_s.ravel(),
             contribution.enthalpy_W,
             contribution.heater_W,
             contribution.condenser_W,
@@ -300,6 +311,7 @@ def integrate_phase_inventory(
         stopping,
         {
             **report.diagnostic.to_dict(),
+            "constant_amounts": constant_amounts,
             **counters,
             "invariant_zero_components": [key for j, key in enumerate(ids) if absent[j]],
             "minimum_trial_utility_integrals_J": minimum_trial_counters,

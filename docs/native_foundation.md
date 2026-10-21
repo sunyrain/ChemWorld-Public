@@ -92,6 +92,20 @@ calibration. Partial initialization retains clocks, budgets and RNG state; it is
 not a free Agent operation.
 `SessionSnapshot` is also exported from `chemworld.runtime`.
 
+Current private sessions use `chemworld-session-v2`. Their phase identities and
+material coordinate order survive sorted JSON, including retained samples;
+pending events, apparatus queues, RNG and resource events remain part of the
+same continuation. Configuration comparison uses the installed model codecs.
+Supply the same `domain_modules` registry when restoring a local extension;
+callable names in a saved binding describe installed code and are never imports.
+
+Older v1 sessions require an explicit `SessionSnapshot.migrate_v1(payload)` call.
+This converts the encoding only when runtime semantics match and omitted
+assembly order is unambiguous. Multiple records without saved order require
+the original ordering information. Restoration still checks the complete
+execution binding. Older physical-world inputs retain their supported boundary
+conversions; this does not authorize reinterpretation of frozen session evidence.
+
 ## Model and acceptance boundaries
 
 The gas reaction, five-step surface rates, finite material transfers, shared
@@ -108,7 +122,7 @@ checks build both archives and run the installed modules outside the checkout,
 with Cantera absent and model keys removed from the child environment. Reported
 platform results apply only to actual runs; this is development acceptance, not a
 formal release or a claim of general chemical validity. See
-[contribution guide](../CONTRIBUTING.md) for packaging and frozen releases.
+[contribution guide](https://github.com/sunyrain/ChemWorld-Public/blob/main/CONTRIBUTING.md) for packaging and frozen releases.
 
 ## Properties at the current state
 
@@ -914,6 +928,76 @@ rounded gas constant with the native constant. No upstream solver is required
 by the runtime. The fixed 33-unit development block and all attempts are in
 `workstreams/world_foundation/NATIVE_SOLID_SOLUTION_ACCEPTANCE.md` and its JSON.
 
+## Selected native TDB/CEF material
+
+`TdbDatabase` accepts declarative TDB text with an explicit `InputSource`.
+`CefPhaseModel` evaluates the selected phase's sublattices, vacancies, charged
+constituents, ordering, magnetic and caloric contributions without an upstream
+runtime dependency. `CefMaterialSpec` adds an authored temperature interval,
+fixed pressure, holder heat capacity and mechanical atom-molar volume.
+`calphad_world_spec(model, element_amounts_mol=..., temperature_K=...)` installs
+that material on the existing solid/thermal strategy and finite-power device.
+
+Inventory keys are real TDB elements and amounts are mol of nonvacant atoms.
+Charged constituents and vacancies belong to the committed phase's site
+fractions; they do not create another material inventory. The model is stored
+once in the versioned `calphad_material` physical declaration. Its equipment
+record only references that binding. `calphad_phase_meter` reads committed
+temperature, element amounts and site fractions. It does not synthesize a
+diffraction spectrum or pretend that real elements are the old A/B counters.
+
+`heat`/`wait` integrate the same finite-inventory total enthalpy. Internal
+constitution and relaxed heat capacity come from the common constrained root;
+temperature comes from the common caloric root. Constant element amounts are
+eliminated from numerical unknowns in this heat-only process, and every
+contribution must have zero matter rate. Holder heat is retained on material
+replacement; snapshot continuation, history replay, failure settlement and
+thermal controls retain their existing contracts.
+
+This consumer holds one explicitly selected solid or liquid phase at a local
+internal minimum. It does not select a globally stable multiphase assemblage.
+Line compounds may have valid thermal response but underdetermined individual
+element potentials; no arbitrary multiplier is reported as a determined
+chemical potential. Nonpositive effective heat capacity, failed constraints
+and unsupported derivative boundaries reject the closure. Gas EOS and general
+phase selection require their separately declared models. The mechanical
+volume is authored geometry, not a pressure derivative inferred from TDB.
+
+`ChemSageDatabase.from_file(path, source=...)` accepts original declarative
+ChemSage DAT input on that same Gibbs/material interface. The immutable input
+retains source provenance, phase occurrences, suppression flags, original
+stoichiometry, all intervals and model metadata. Repeated labels use
+`NAME#OCCURRENCE1`, etc.; `phase_records` exposes the original labels and records.
+G and Cp descriptions compile to the common caloric evaluator, including
+reference H/S, latent heat, extended powers and magnetic terms. QKTO uses the
+declared chemical groups and directional Kohler/Toop exponents. Auxiliary
+electron balances constrain CEF internal constitution without adding atoms.
+
+Source suppression requires explicit `activate_suppressed=True`. Nonzero
+excess pressure coefficients require an explicit `excess_pressure_unit="Pa"`
+or `"bar"`. Select `MQMQAPhaseModel` for SUBG/SUBQ quadruplet phases. It consumes
+source coordination numbers and their mixed/reciprocal recurrences, reference
+pair energies, both entropy models, and directional G/Q/R interactions with
+chemical groups and ternary terms. Quadruplet fractions are internal
+constitution; actual atom amounts remain in the existing material inventory.
+It shares Gibbs responses, constrained constitution and `CefMaterialSpec` with
+CEF. Original pair atoms and quadruplet charge must be consistent; the model
+rejects contradictory input and preserves its original declarations.
+Legacy annotations with no defined energy effect remain visible in diagnostics.
+Nonzero MQMQA source auxiliary balances need a separately declared consumer.
+The CEF consumer rejects MQMQA input. Unsupported real-gas, aqueous, volume and group
+override physics are also rejected explicitly. JSON stores original input
+and declared options, then recompiles through known native codecs.
+
+The complete seven-file ChemSage qualification covers 114 original phase
+declarations: 111 valid phases pass 666 response points; three inconsistent
+source phases are explicitly rejected, leaving 18 original numerical points
+unexecuted. A separate 96-input, 576-point synthetic block covers additional-ion
+chemical groups on both ionic lattices. These are software development
+qualifications, not a claim of measured accuracy for every imported material.
+The fixed coverage, independent reference and preserved failures are documented
+in `workstreams/world_foundation/NATIVE_CONV41D3_EXPERIMENT.md`.
+
 ## Two-site surface interactions
 
 Pass `MultisiteSurfaceSpec` to the existing `surface_world_spec(surface_spec=...)`.
@@ -953,3 +1037,367 @@ The installed [native domain workflows](native_domains.md) exercise shared
 equipment, finite process inventories, delayed stochastic readouts, and replay.
 The [capability table](native_capabilities.md) is generated from the installed
 module declarations; supported composition domains remain explicitly bounded.
+
+## Parameter and measurement inputs
+
+Run `uv run --no-sync python -m chemworld.examples.scientific_inputs` for a complete
+import example: an existing water property package, six synthetic cooling-curve
+records in two experiment groups, and two heat-loss parameters applied through
+the native model declaration. The example emits JSON with sources, uncertainties,
+train/validation counts and public pressure readings. It performs no fitting.
+
+`chemworld.data.scientific_inputs.ScientificTable.from_json(text)` reads either
+parameter or measurement tables. Columns declare a quantity, unit, role, finite
+valid range and reference state. Each cell contains `value`, `unit`, standard
+`uncertainty`, `uncertainty_note` and `quality`. A source has an explicit citation,
+version, licence declaration and `synthetic`, `measured` or `literature` label.
+Unknown uncertainty stays `None`; it must have an explanatory note. Celsius
+values receive the temperature offset, while uncertainty uses the scale only.
+
+Each row supplies `row_id`, `source_id`, `group_id`, `sample_id`, `split` and all
+declared cells. `sample_id` identifies one acquisition, including all its channels;
+repeat acquisitions need separate IDs. Measurement splits are `train`,
+`validation`, `test` or `unused`. All rows in one experiment group must share a
+split. Parameter rows use `parameters`. Missing or invalid observations remain
+in the table with their quality flags; conditions and parameters must be valid.
+The importer rejects duplicate identities, unknown columns, incompatible units
+and valid values outside their declared range.
+
+`table.to_csv()` writes a wide CSV with the row identifiers and five cell fields
+per quantity, for example `pressure.value` and `pressure.uncertainty`.
+`ScientificTable.from_csv(text, metadata)` reads it using the same contract;
+`metadata` is `table.to_dict()` with the `rows` entry removed. No split is inferred
+or randomized. `table.summary()` reports complete counts, and
+`table.rows_for("validation")` selects the declared holdout.
+
+`chemworld.physchem.property_inputs.PropertyInputCard` imports the existing
+component/correlation format with per-correlation source and uncertainty records.
+Its `evaluate_state` method uses the existing property evaluator. Energy and
+entropy requests require an explicit imported caloric reference. The curated
+example preserves unknown upstream table redistribution terms and unquantified
+uncertainty; successful parsing does not establish a licence or calibration.
+
+`chemworld.world.parameter_inputs.bind_parameter_row(physics, table, row_id, targets)`
+applies one parameter row to new model configuration. The application supplies
+`ModelParameterTarget` objects independently of the input, defining the installed
+model/version, binding, numeric field path and quantity contract. The function
+returns new `physics` and an import `receipt`; pass that configuration through
+the usual composition/session constructor. Model codecs validate coupled changes
+together. Measurement tables cannot be bound as parameters, and imports never
+write observations or inventory into a running world.
+
+### Finite native calibration
+
+`chemworld.data.calibration.NativeCalibration` fits a finite parameter whitelist
+by executing fixed histories in fresh native sessions. Supply a `ScientificTable`,
+`CalibrationParameter` declarations and one `NativeCalibrationExperiment` per
+data group. Each `CalibrationReadout` binds an observation column to an actual
+measurement step and public channel, with an optional sampling-time column.
+Parameter paths may address existing continuous model configuration fields;
+network structure, task targets and live inventory cannot be fitted.
+
+Only training rows enter uncertainty-weighted, bounded least squares. Successful
+fits execute the validation groups separately and report errors in original
+units, weighted errors, active bounds and local Jacobian rank. Non-valid input
+observations remain in the exclusion counts; valid observations require positive
+declared standard uncertainties. Failed forward histories retain actual readings,
+operation outcomes, time, cost and sampling. They stop the fit instead of becoming
+artificial residual penalties. The forward limit counts actual group executions,
+including finite-difference evaluations.
+
+Run the fixed synthetic thermal, SPM and confounded thermal examples with:
+
+```powershell
+uv run --no-sync python -m chemworld.examples.native_calibration --output $env:TEMP/chemworld-calibration.json
+```
+
+The thermal example uses an explicitly ideal synthetic pressure gauge and fixed
+data perturbations. The SPM example fits one diffusion coefficient from public
+terminal voltage. Joint heat-loss/heat-capacity fitting demonstrates that a good
+curve fit can still leave parameters unidentifiable. These examples establish a
+calibration workflow; empirical material validation requires separately sourced
+data and a fixed validation design.
+
+### DIPPR correlations and caloric requests
+
+`PropertyCorrelation` accepts `dippr100`, `101`, `102`, `104`, `105`, `106`,
+`107`, `114`, `115`, `116`, `127` (each with the `dippr` prefix), plus
+`dippr100_reciprocal`, `dippr105_reciprocal`, and `dippr106_reciprocal`.
+Declare a supported `property_id`, output unit, absolute-K input, coefficients
+and a material validity interval. `property_equation_contracts()` exposes the
+required/optional parameters, property dimensions, equation source and domains.
+Material parameters still need their own source and uncertainty metadata.
+
+The existing `evaluate_correlation` and property package use these declarations.
+`correlation_temperature_derivative` returns the analytic first derivative;
+`integrate_correlation` returns a definite integral or, with
+`over_temperature=True`, its integral divided by T. Its numerical error estimate
+and quadrature evaluation count describe the adaptive integration only, excluding
+domain checks. Failed quadrature and intervals crossing poles are rejected.
+
+`caloric_correlation_change`, `evaluate_caloric_correlation` and the existing
+phase-path enthalpy reports consume these same equations. Output-unit conversion
+scales the result while retaining characteristic temperatures and exponents.
+Gas Cv-to-entropy conversion uses the declared ideal-gas reference. Other phases
+still need an explicit closure before H and U can be interchanged.
+
+The fixed development block compares 142 cases with chemicals 1.5.2; production
+evaluation does not import chemicals. This covers formula behavior, not a new
+material database. Polynomial inventory admission stays unchanged pending the
+later process-integration task; the full chemicals expansion remains in progress.
+
+### Read-only battery impedance (development)
+
+The existing isothermal SPM, SPMe and DFN expose local rest-point analysis through
+`chemworld.physchem.battery_impedance.battery_impedance`. It consumes their actual
+inventory rates and electrical constraints, not an independently fitted circuit:
+
+```python
+from chemworld.physchem.battery_models import BatterySPMSpec
+from chemworld.physchem.battery_impedance import battery_impedance
+
+cell = BatterySPMSpec()
+state = cell.initial_state()
+spectrum = battery_impedance(cell, [1e-4, 1e-3, 1e-2], state=state)
+report = spectrum.to_dict()  # per-frequency real/imaginary ohm and failures
+```
+
+This does not advance time, spend experimental resources, expose a new agent
+instrument, or modify a snapshot. Positive current means discharge; passive
+impedance is `-delta_V/delta_I`, with `exp(+i*2*pi*f*t)` phasors. Frequency must be
+strictly positive. A nonstationary concentration profile or a stopping boundary
+is rejected rather than silently relaxed. Thermal and side-reaction combinations
+are not yet supported. The present quasi-static BV models have no double-layer
+capacitance, so their spectra must not be interpreted as including its RC arc.
+
+The shared `residual_frequency_response` in `physchem.residual_frequency` also
+supports general declared residuals, non-diagonal mass matrices and algebraic
+feedthrough. It uses the existing derivative modes and sparse linear solver,
+retaining singular-frequency failures rather than substituting a least-squares
+answer. Physical input/output units and derivative provenance remain in the
+report. This is local response, not a nonlinear stability certificate.
+
+The first independent development block compares six SPM cases against continuous
+spherical diffusion, including four radial resolutions and a flat-OCV limit.
+The subsequent SPMe/DFN block checks terminal impedance and the complex mean salt
+concentration response in each of the three electrolyte regions against released
+PyBaMM 25.4.2 equations, independently differentiated with CasADi and solved with
+SciPy. Ten cases, each at 13 frequencies, pass the fixed comparison and native /
+reference refinement bounds. The original uniform-radial reference was insufficiently
+resolved for five SPMe cases (5/10 overall); that result is retained separately.
+Changing only the reference radial mesh to boundary refinement gives 10/10 without
+changing native physics or error bounds. This is a finite, synthetic, constant-property
+domain, not validation for arbitrary materials, nonstationary points or wet experiments.
+Other model families in NATIVE-CONV-45 remain outstanding. The fixed inputs, limits and
+all attempts are linked from `NATIVE_CONV45_IMPEDANCE_EXPERIMENT.md` in the workstream.
+
+### Sourced nonlinear electrode OCV
+
+`physchem.battery_materials.ElectrodeOCV` represents a bounded polynomial plus
+exponential and tanh terms. It stores the material, source, model compatibility and
+stoichiometry domain. Use `from_parameter_row` to bind explicitly named columns from
+the existing `ScientificTable`; amplitudes use V and scales/shifts use `dimensionless`.
+The original parameter values, units and uncertainty notes remain in its JSON.
+
+```python
+from chemworld.physchem.battery_materials import ElectrodeOCV
+from chemworld.physchem.battery_models import BatterySPMSpec
+
+# table is a validated ScientificTable of kind "parameters".
+ocv = ElectrodeOCV.from_parameter_row(
+    table, "electrode-row", material_id="my-electrode",
+    polynomial=("constant_V", "linear_V"),
+    tanh_terms=(("transition_V", "transition_scale", "transition_center"),),
+)
+spec = BatterySPMSpec(negative_ocv=ocv)
+```
+
+An explicit curve replaces that electrode's linear OCV fields. The actual SPM,
+SPMe and DFN voltage laws consume it, and DFN uses its analytic slope in the coupled
+Jacobian. Chemical potential and integrated electrode energy derive from the same
+expression. Public curve evaluation rejects a point outside its declared domain;
+solver trials may explicitly evaluate its analytic continuation while the battery's
+physical stopping surfaces still govern accepted states.
+
+The fixed eight-unit development block compares two Chen2020 OCV relationships,
+three continuous discharge/rest/charge trajectories and three local spectra against
+released PyBaMM 25.4.2 functions and models: 8/8 passed. Geometry and transport remain
+synthetic in that block. It is not a complete LGM50 parameterization. Nonlinear OCV
+with thermal or side-reaction models is currently rejected; the full material,
+transport, thermal and other model-family scope of CONV-45 remains open. Inputs and
+all outcomes are in `workstreams/world_foundation/NATIVE_CONV45_OCV_EXPERIMENT.md` and
+`NATIVE_CONV45_OCV_RESULTS.json`.
+
+### Equilibrium electrode SOH (development)
+
+`physchem.battery_soh` solves the voltage-window geometry using those same OCV
+functions. `ElectrodeSOHSpec` accepts known electrode capacities and either
+`known="cyclable_lithium"` (active electrode Li charge) or `known="cell_capacity"`.
+`HalfCellSOHSpec` is explicitly a positive working electrode versus Li/Li+ at 0 V;
+this is an equilibrium analysis, not yet a native half-cell dynamical process.
+Capacities are C; `ScientificTable` parameter bindings can explicitly convert Ah
+or mAh while retaining original units, uncertainty and source. No estimator is
+added: native public-observation calibration remains the existing data calibration
+workflow, and local implicit sensitivities do not prove parameter identifiability.
+
+```python
+from chemworld.physchem import soh_from_battery, battery_spec_at_soc
+from chemworld.physchem.battery_models import BatterySPMSpec
+
+cell = BatterySPMSpec(minimum_voltage_V=3.38, maximum_voltage_V=3.92)
+state = cell.initial_state()
+soh = soh_from_battery(cell, state)  # active Li only, not electrolyte salt or locked SEI
+if soh.status == "unique":
+    solution = soh.branch()
+    energy_J = soh.theoretical_energy_j()  # reversible OCV integral, not loaded work
+    fresh_cell = battery_spec_at_soc(cell, soh, .5)  # a NEW initial configuration
+```
+
+This does not advance time, spend resources, relax a live concentration profile,
+or reset an existing device. SPM, SPMe and DFN read their actual electrode bins.
+`at_soc()` and `soc_at_voltage()` use the selected equilibrium branch. Complete
+multiple results require an explicit branch index; incomplete isolation retains
+unresolved boxes and cannot be treated as unique. Known capacity at a declared
+electrode face is handled without widening the domain. Impossible inventory,
+no voltage-window solution, and numerical/rank uncertainty have distinct statuses.
+The shared bounded interval/Krawczyk search uses the existing point-root solver;
+outward floating-point enclosures are not a formal exact-real proof. Cutoff roots
+must delimit a complete physical path, not merely solve two endpoint equations.
+
+Offline example: `uv run --no-sync python examples/native_battery_soh.py`.
+The fixed 12-unit development block compares released PyBaMM 25.4.2 SOH equations,
+hand algebra and independent polynomial roots, including multiple/infeasible/
+nonidentifiable cases. Inputs and all attempts are in
+`workstreams/world_foundation/NATIVE_CONV45_SOH_EXPERIMENT.md` and the matching
+`NATIVE_CONV45_SOH_RESULTS*.json`. MSMR-specific SOH, ageing inference, wet-cell
+accuracy and the remaining task-45 model families are not covered by this block.
+
+### Many-particle electrodes (development; scientific qualification pending)
+
+`BatteryMPMSpec` is an explicit ideal-uniform-electrolyte MPM. Each electrode
+retains its total active volume and material coefficients in `ParticleSpec`.
+Optional `ParticleSizeDistribution` declarations allocate that volume across
+positive radii. Every size has its own actual radial inventory, diffusion and
+interfacial current; currents are solved together at the shared electrode
+potentials, never assigned in advance from the volume fractions. With no size
+distribution, the declared particle radius gives the monodisperse SPM limit.
+
+```python
+from chemworld.physchem import BatteryMPMSpec, ParticleSizeDistribution, mpm_fields
+from chemworld.world.battery_world import battery_world_spec
+
+# source is the common InputSource for this distribution.
+sizes = ParticleSizeDistribution((5e-6, 15e-6), (.5, .5), source)
+cell = BatteryMPMSpec(negative_distribution=sizes, positive_distribution=sizes)
+fields = mpm_fields(cell, cell.initial_state(), current_A=.2)
+world = battery_world_spec(cell)
+```
+
+Direct weights are normalized volume fractions. `from_weights(..., basis=...)`
+explicitly converts and normalizes positive relative number, area or volume
+weights. `from_parameter_table` retains original common source rows, units and
+uncertainty; `um` is an explicit length conversion, not an inferred unit.
+`lognormal_size_distribution` discretizes a stated truncated density in the
+specified input basis, preserving median, log-standard-deviation, bounds and
+quadrature count. It does not recover unobserved distribution tails.
+
+All sizes use the existing battery equipment slot, source controls, shared
+clock, native measurements, snapshot and replay. Surface readouts are area
+averages; bulk stoichiometry is volume weighted. Stops check every size, not
+only an average. Rest can redistribute Li between sizes at zero terminal
+current. Electrode chemical energy, dissipation, SOH totals and read-only local
+impedance consume the same bins. A sourced nonlinear OCV must explicitly declare
+`MPM` compatibility; stored older material compatibility lists are not widened.
+
+Offline workflow: `uv run --no-sync python -m chemworld.examples.battery_mpm --output /tmp/mpm.jsonl`.
+Functional checks include true CC/CV/source limits,
+analytic derivatives, conservation, energy balance, both measurement noise modes
+and cross-process continuation. The fixed nine-unit released-model comparison is
+prepared in `workstreams/world_foundation/NATIVE_CONV45_MPM_EXPERIMENT.md` but has
+**not yet run**. Do not infer qualified mesh resolution, measured-cell accuracy,
+composite electrodes or thermal/ageing capability from these functional checks.
+
+### Historical temperature calibration
+
+`temperature_convert(value_K, current, desired)` supports ITS-90 and the complete
+tabulated ITS-68, ITS-48, ITS-27 and ITS-76 ranges. Historical IPTS/EPT aliases are
+accepted explicitly. Each historical scale uses one cubic calibration and the
+shared bounded root solver for its inverse; domains use actual mapped endpoints.
+`temperature_scale_conversion` also returns the derivative of that same mapping.
+The Kelvin/Celsius unit system and world temperature semantics remain unchanged.
+
+```python
+from chemworld.foundation.units import Quantity
+from chemworld.physchem import temperature_quantity, water_refractive_index_iapws
+
+calibrated = temperature_quantity(Quantity(26.85, "degC"), "IPTS-68", "ITS-90")
+index = water_refractive_index_iapws(calibrated.value, 997)
+```
+
+`temperature_input` preserves original input and scale provenance in the existing
+InputValue note. `temperature_observation` retains the raw scalar channel and adds
+a derived channel in the original Observation, with sample/timestamps and native
+JSON roundtrip. Measurement uncertainty uses first-order derivative propagation;
+unknown calibration uncertainty stays unknown. Invalid numeric readings and curves
+requiring per-point uncertainty are explicitly rejected by this scalar adapter.
+
+`its90_68_difference` is a separate approximate polynomial method. Its default
+`published_overlap` fills the old documentation's low-temperature gap with the
+published middle polynomial. Explicit `convention="chemicals_1_5_2"` reproduces
+the older API's zero correction in that gap and its junction choices. Such zeros
+are compatibility behavior, not evidence that the scales coincide. Neither method
+asserts thermodynamic-temperature accuracy or silently modifies caloric references.
+Full node/interval, cross-function and source-inventory development evidence is
+recorded in the foundation acceptance document; earlier source failures and the
+285 unresolved primary-CAS component mappings remain visible.
+
+### Formal SBML models on the native world
+
+Given a provenance-bearing `SBMLModel`, declare its numerical profile and the
+quantities that an instrument may observe:
+
+```python
+from chemworld.physchem.sbml_system import SBMLObservable
+from chemworld.runtime import ChemWorldRuntime
+from chemworld.world.sbml_world import sbml_world
+
+world = sbml_world(model, maximum_step_s=0.02,
+                   observables=(SBMLObservable("amount", "A"),))
+runtime = ChemWorldRuntime(composition=world, observation_noise_mode="keyed")
+runtime.reset(seed=4)
+runtime.execute({"operation": "wait", "duration_s": 0.25})
+runtime.execute({"operation": "measure", "instrument": "formal_quantity_meter"})
+reading = runtime.observe()  # declared mol channel with detector uncertainty
+saved = runtime.snapshot().to_dict()  # private continuation; keep outside agent payloads
+restored = ChemWorldRuntime.from_snapshot(saved)
+```
+
+The bounded Level 3 Version 2 profile supports explicit 3D compartments, source
+units, kinetic laws, initial/assignment/rate rules and transverse inequality
+events with delays, cancellation, captured assignments and execution priorities.
+Unsupported semantics are rejected. Events require an authored finite maximum
+step; arbitrarily fast crossings and tangencies have no general guarantee.
+
+One existing equipment entity owns all live amounts, compartment volumes,
+parameters and pending events. The existing shared laboratory clock owns time.
+`numerical_form="residual"` selects the common residual solver. Source quantities
+become mol, L and seconds at explicit boundaries; model formulas retain their
+source basis. A concentration rate rule includes the volume chain term, and an
+event concentration assignment uses the volume immediately before execution.
+
+The workspace has no physical chemical stock or liquid heat capacity. Formal
+coordinates do not establish elemental, charge, energy or carrier-mass closure,
+and heat/material sampling operations are unavailable. The gauge is instantaneous
+and consumes no sample; its allowed amount/concentration/volume channels carry
+mol, mol/L or L with declared Gaussian uncertainty. Public state omits evolving
+coordinates and queues. Material preparation preserves the formal entity; a full
+experiment reset initializes it again. A failed event cascade rolls back the
+complete advance. Full private snapshots preserve pending events and detector
+continuation across processes.
+
+The fixed native-world block passed all 36 runtime contracts and 770 independent
+closed-form comparisons. Full SDK parity remains explicitly false: the 18-model
+COPASI block has three retained differences, and RoadRunner has one source-model
+initialization difference. Official SBML volume/event cases and all raw failed
+attempts are retained in the foundation evidence records. SED-ML/COMBINE protocols
+and complete entry-point qualification remain separate tasks.

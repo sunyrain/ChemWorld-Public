@@ -1,3 +1,5 @@
+> **[Open the new capability website →](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en)** · [中文版](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh)
+
 > Current main: [October foundation update](current-foundation.md). Existing figures and numerical evidence below describe the frozen August runtime.
 
 <section class="cw-studio-hero" data-cw-autoplay data-source="assets/data/representative-behavior-and-forks.json" data-locale="en">

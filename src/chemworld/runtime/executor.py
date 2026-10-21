@@ -26,6 +26,13 @@ class RuntimeStepResult:
     operation_record: OperationRecord
     kernel_result: KernelResult
 
+    @property
+    def committed(self) -> bool:
+        return (
+            all(self.operation_record.preconditions.values())
+            and self.kernel_result.transaction_status == "committed"
+        )
+
     def info_payload(self) -> dict[str, Any]:
         return {
             "kernel_id": self.kernel_result.kernel_id,

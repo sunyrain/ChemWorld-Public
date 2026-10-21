@@ -344,6 +344,13 @@ def _optional_int(value: object) -> int | None:
     return None
 
 
+def solve_residual(system, initial, **kwargs):
+    """Residual/index-1 entry sharing this module's ODE backend and diagnostics."""
+    from chemworld.physchem.residual_solver import solve_residual as solve
+
+    return solve(system, initial, **kwargs)
+
+
 __all__ = [
     "DEFAULT_REACTION_ODE_POLICY",
     "DEFAULT_REACTOR_ODE_POLICY",
@@ -355,4 +362,5 @@ __all__ = [
     "ODESolverDiagnostic",
     "ODESolverPolicy",
     "solve_ode",
+    "solve_residual",
 ]

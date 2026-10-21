@@ -126,9 +126,20 @@ def equipment_status(
     return equipment.equipment[equipment_id].status
 
 
-def instrument_equipment_id(instrument_id: str) -> str:
-    """Return the canonical typed-equipment id for an instrument."""
+INSTRUMENT_DEVICE_SELECTION = "_instrument_device_selection"
 
+
+def instrument_equipment_id(instrument_id: str, *, state=None) -> str:
+    """Resolve an explicitly bound real instance, or the legacy single instance."""
+
+    selection = {} if state is None else state.metadata.get(INSTRUMENT_DEVICE_SELECTION, {})
+    if selection.get("instrument") == instrument_id:
+        identity = selection.get("device_id")
+        record = state.equipment.equipment.get(identity)
+        if (record is None or record.equipment_type != "instrument"
+                or record.settings.get("lab_analyzer_instrument") != instrument_id):
+            raise ValueError("selected analyzer does not own the declared instrument contract")
+        return identity
     return f"instrument:{instrument_id}"
 
 
@@ -150,6 +161,7 @@ def upsert_equipment_record(
     status: str = "configured",
     settings: dict[str, Any] | None = None,
     batch_reset: str | None = None,
+    private_settings: tuple[str, ...] | None = None,
 ) -> EquipmentLedger:
     """Insert or update a typed equipment record with merged settings."""
 
@@ -165,6 +177,8 @@ def upsert_equipment_record(
         status=status,
         settings=merged_settings,
         batch_reset=batch_reset or (previous.batch_reset if previous else "initial"),
+        private_settings=(private_settings if private_settings is not None
+                          else previous.private_settings if previous else ()),
     )
     return EquipmentLedger(records)
 

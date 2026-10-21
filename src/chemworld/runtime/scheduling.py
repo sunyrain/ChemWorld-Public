@@ -7,20 +7,83 @@ sampling, queue changes and RNG draws. Completion is the publication boundary.
 
 from copy import deepcopy
 from dataclasses import replace
-from math import isclose, isfinite
+from math import fsum, isclose, isfinite
 
 import numpy as np
 
-from chemworld.foundation import Observation, instrument_equipment_id
-from chemworld.foundation.balances import MaterialExchange, TransitionBalance
+from chemworld.foundation.balances import (
+    MaterialExchange,
+    TransitionBalance,
+    formal_inventory_exclusions,
+)
 from chemworld.foundation.lab_clock import LabClockState
-from chemworld.foundation.solvents import SolventInventory
+from chemworld.foundation.solvents import SolventInventory, total_solvents
+from chemworld.foundation.state_helpers import INSTRUMENT_DEVICE_SELECTION
 from chemworld.foundation.state_ledgers import EquipmentLedger
 from chemworld.runtime.component_network import _local, reconnect_device
 from chemworld.runtime.kernel_contracts import ModelProviderResult
+from chemworld.runtime.shared_systems import declared_shared_systems
 from chemworld.runtime.solvent_transport import finish_solvent_transition, initialize_solvents
 
-ALLOWED = {"queue_lab_heat", "queue_lab_measure", "wait", "select_vessel", "terminate"}
+ALLOWED = {"queue_lab_heat", "queue_lab_measure", "wait", "select_vessel", "terminate",
+           "set_flow_rate", "configure_electrical_control", "queue_electrical_stage",
+           "add_solvent", "route_material", "create_container", "transfer_material"}
+
+
+def shared_operation_allowed(operation, state, modules, action=None):
+    if operation in ALLOWED:
+        return True
+    if operation == "set_model_parameters":
+        return state.phase == "formal"
+    if operation != "measure" or state.phase != "formal":
+        return False
+    from chemworld.world.operations import instrument_name
+
+    specs = modules.instrument_specs()
+    selected = (None if action is None
+                else instrument_name(action.get("instrument"), modules=modules))
+    return any(
+        (selected is None or identity == selected)
+        and spec.contract.input_state_schema.get("required_phase") == "formal"
+        and spec.contract.clock_semantics == "instantaneous_snapshot"
+        and spec.contract.sample_consumption_L == 0
+        and not spec.contract.destructive
+        and (spec.native_observer is not None or spec.observer_factory is not None)
+        for identity, spec in specs.items()
+    )
+
+
+def lab_device_choices(state, kind, *, allowed_instruments=None):
+    if state.lab_clock is None:
+        return ()
+    available = state.metadata.get("component_network", {}).get("instruments", {}).get(
+        state.vessel_id, (),
+    )
+    records = [record for local in (state, *state.inactive_vessels.values())
+               for record in local.equipment.equipment.values()]
+    if kind == "heat":
+        return tuple(sorted(r.equipment_id for r in records
+                            if r.equipment_type == "thermal_device"))
+    return tuple(sorted(
+        record.equipment_id for record in records
+        if record.settings.get("lab_analyzer_instrument") in available
+        and (allowed_instruments is None
+             or record.settings.get("lab_analyzer_instrument") in allowed_instruments)
+    ))
+
+
+def lab_device_selected(state, action, kind):
+    choices = lab_device_choices(state, kind)
+    return (len(choices) == 1 if "device" not in action
+            else isinstance(action["device"], str) and action["device"] in choices)
+
+
+def device_record(state, identity):
+    records = [record for local in (state, *state.inactive_vessels.values())
+               for record in local.equipment.equipment.values() if record.equipment_id == identity]
+    if len(records) != 1:
+        raise ValueError("laboratory device must have exactly one physical owner")
+    return records[0]
 
 
 def validate_lab(composition):
@@ -33,33 +96,12 @@ def validate_lab(composition):
     services = {factory.service_id for factory in composition.modules.service_order()}
     if "lab_schedule" not in services:
         raise ValueError("shared clock requires its declared scheduling service")
-    if not 1 <= len(physics.initial_states) <= 2 or composition.connections or physics.feed_sources:
-        raise ValueError("shared lab supports one or two independent closed vessels")
-    kinds = {c.kind for c in composition.components}
-    if kinds - {
-        "thermal",
-        "reaction",
-        "surface_reaction",
-        "stochastic",
-        "observation",
-        "lab_schedule",
-    }:
-        raise ValueError("component has no declared shared-clock advance strategy")
+    if not 1 <= len(physics.initial_states) <= spec.vessel_capacity:
+        raise ValueError("shared lab exceeds its declared vessel capacity")
+    if physics.feed_sources:
+        raise ValueError("shared lab does not accept undeclared external feed operations")
     states = physics.initial_states
-    discrete = {key for key, state in states.items() if state.process.stochastic_continuation}
-    if set(physics.thermal_models) | discrete != set(states):
-        raise ValueError("every shared-clock vessel needs a native thermal or SSA strategy")
-    if any(
-        (
-            physics.flash_models,
-            physics.liquid_models,
-            physics.column_models,
-            physics.concentration_models,
-            physics.crystal_models,
-            physics.sorbent_models,
-        )
-    ):
-        raise ValueError("shared lab excludes interconnected/open and alternate phase strategies")
+    declared_shared_systems(composition)
     if any(
         state.lab_clock or state.ledger.time_s or state.inactive_vessels
         for state in states.values()
@@ -67,17 +109,17 @@ def validate_lab(composition):
         raise ValueError("lab initial states must be independent, zero-time physical states")
     equipment = [r for state in states.values() for r in state.equipment.equipment.values()]
     heaters = [r for r in equipment if r.equipment_type == "thermal_device"]
-    if [r.equipment_id for r in heaters] != ([] if spec.heater_id is None else [spec.heater_id]):
-        raise ValueError("lab declares exactly its one physical heater identity")
-    if heaters and heaters[0].settings["thermal_device"].get("enabled", True):
+    if sorted(r.equipment_id for r in heaters) != list(spec.heater_ids):
+        raise ValueError("lab declares exactly its physical heater identities")
+    if any(record.settings["thermal_device"].get("enabled", True) for record in heaters):
         raise ValueError("shared heater starts disabled; queue owns its activation")
-    if spec.analyzer is not None:
-        instrument = composition.modules.instrument_specs().get(spec.analyzer)
+    for analyzer in spec.analyzers:
+        instrument = composition.modules.instrument_specs().get(analyzer.instrument)
         if instrument is None:
             raise ValueError("shared analyzer must be an installed native instrument")
         contract = instrument.contract
         if (
-            instrument.native_observer is None
+            instrument.observer_for(composition) is None
             or contract.clock_semantics != "offline_snapshot"
             or contract.host_evolves_during_analysis
             or contract.latency_s
@@ -85,8 +127,11 @@ def validate_lab(composition):
             or contract.requires_terminated
         ):
             raise ValueError("lab analyzer needs a nonterminal native offline snapshot contract")
-        if sum(r.equipment_id == instrument_equipment_id(spec.analyzer) for r in equipment) != 1:
+        matches = [r for r in equipment if r.equipment_id == analyzer.device_id]
+        if len(matches) != 1 or matches[0].equipment_type != "instrument":
             raise ValueError("lab analyzer must have exactly one physical owner")
+        if matches[0].settings.get("instrument_id", analyzer.instrument) != analyzer.instrument:
+            raise ValueError("analyzer identity and installed instrument type disagree")
 
 
 def initialize_lab(state, composition, rng, *, detector_noise=None):
@@ -94,9 +139,27 @@ def initialize_lab(state, composition, rng, *, detector_noise=None):
         return state
     # Shared systems are all enabled from t=0. Initialize declared carrier
     # stocks for every vessel now, not lazily when it is selected later.
+    roles = {analyzer.device_id: analyzer.instrument
+             for analyzer in composition.physics.lab_clock.analyzers}
     for local in local_states(state).values():
+        equipment = {
+            identity: replace(record, settings={**record.settings,
+                                               "lab_analyzer_instrument": roles[identity]})
+            if identity in roles else record
+            for identity, record in local.equipment.equipment.items()
+        }
+        local = local.replace(equipment=EquipmentLedger(equipment))
         state = install_local(state, initialize_solvents(local))
+    # Establish the one laboratory basis from every actual initial stock.
+    # Summing active-first would change its last bit when declaration order
+    # chooses a different initially active vessel.
+    records = {state.vessel_id: state.replace(inactive_vessels={}), **state.inactive_vessels}
+    stocks = [total_solvents(records[key]).volumes_L for key in sorted(records)]
     return state.replace(
+        solvent_accounting=replace(
+            state.solvent_accounting,
+            initial=SolventInventory(tuple(fsum(values[i] for values in stocks) for i in range(4))),
+        ),
         lab_clock=LabClockState(
             detector_rng=deepcopy(rng.bit_generator.state),
             detector_noise=detector_noise or {},
@@ -111,7 +174,10 @@ def public_lab(state):
 
 
 def local_states(state):
-    return {state.vessel_id: _local(state), **state.inactive_vessels}
+    # Numerical assembly and resource accumulation must not depend on the
+    # selected vessel or on input/JSON mapping enumeration order.
+    states = {state.vessel_id: _local(state), **state.inactive_vessels}
+    return {key: states[key] for key in sorted(states)}
 
 
 def install_local(state, local):
@@ -124,6 +190,12 @@ def install_local(state, local):
             samples=state.samples,
             solvent_accounting=state.solvent_accounting,
         )
+    # Resource and carrier accounting belongs to the global inventory. Callers
+    # consume the local candidate's actual deltas before installation. Retain
+    # the same local thermal basis regardless of which vessel is selected.
+    local = _local(local.replace(
+        vessel_elapsed_s={local.vessel_id: local.ledger.time_s},
+    ))
     return state.replace(inactive_vessels={**state.inactive_vessels, local.vessel_id: local})
 
 
@@ -138,6 +210,33 @@ def fail(reason, *, outcome="rejected", **diagnostics):
     )
 
 
+def ready_lab_jobs(state):
+    """One FIFO/device admission rule, also used by resource preflight."""
+    if state.lab_clock is None or state.lab_clock.stopped:
+        return ()
+    occupied = list(state.lab_clock.running)
+    ready = []
+    for job in sorted(state.lab_clock.queued, key=lambda item: item["sequence"]):
+        if any(item["device"] == job["device"] or (
+            item["kind"] == job["kind"] == "heat" and item["vessel"] == job["vessel"]
+        ) for item in occupied):
+            continue
+        ready.append(job)
+        occupied.append(job)
+    return tuple(ready)
+
+
+def lab_instrument_reservation(state, action):
+    """Waiting costs no acquisition; reserve only this slice's actual starts."""
+    if state is None or action.get("operation") != "wait":
+        return {}
+    counts = {}
+    for job in ready_lab_jobs(state):
+        if job["kind"] == "measure":
+            counts[job["instrument"]] = counts.get(job["instrument"], 0) + 1
+    return counts
+
+
 class LabScheduleServices:
     def __init__(self, context):
         self.composition = context.composition
@@ -150,6 +249,7 @@ class LabScheduleServices:
         self.constitution = context.constitution
         self.thermal = context.services["reaction_thermal"]
         self.instrument_cost = context.services["instrument_cost"]
+        self.systems = () if self.spec is None else declared_shared_systems(self.composition)
 
     def queue(self, state, action):
         lab = state.lab_clock
@@ -158,33 +258,43 @@ class LabScheduleServices:
         if lab.next_sequence >= self.spec.capacity:
             return fail("finite_lab_job_capacity")
         kind = "heat" if action["operation"] == "queue_lab_heat" else "measure"
+        devices = lab_device_choices(state, kind)
+        identity = action.get("device", devices[0] if len(devices) == 1 else None)
+        if identity not in devices:
+            return fail("select_one_installed_lab_device")
         job = {
             "sequence": lab.next_sequence,
             "kind": kind,
             "vessel": state.vessel_id,
             "queued_at": state.ledger.time_s,
+            "device": identity,
         }
         if kind == "heat":
+            from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
+
             target, duration = float(action["target_temperature_K"]), float(action["duration_s"])
-            model = self.composition.physics.thermal_models.get(state.vessel_id)
-            if self.spec.heater_id is None or model is None:
+            selected = self.thermal.advancer.strategy(state, required=True)
+            temperature_bounds = getattr(selected[1], "temperature_bounds_k", None)
+            bounds = None if temperature_bounds is None else temperature_bounds(state)
+            if bounds is None:
                 return fail("shared_heater_not_supported")
+            equipment = device_record(state, identity)
+            device = ThermalDeviceSpec.from_dict(equipment.settings["thermal_device"])
             if not (
                 isfinite(duration)
                 and 0 < duration <= 14400
                 and isfinite(target)
-                and model.minimum_temperature_K <= target <= model.maximum_temperature_K
+                and bounds[0] <= target <= bounds[1]
+                and device.minimum_setpoint_K <= target <= device.maximum_setpoint_K
             ):
                 return fail("lab_heat_outside_declared_domain")
             job.update(duration_s=duration, target_temperature_K=target)
         else:
-            instrument = self.spec.analyzer
-            allowed = self.composition.task.instruments
+            instrument = device_record(state, identity).settings["lab_analyzer_instrument"]
             available = state.metadata["component_network"]["instruments"][state.vessel_id]
             if (
                 instrument is None
                 or instrument not in available
-                or (allowed is not None and instrument not in allowed)
             ):
                 return fail("shared_analyzer_not_allowed")
             job.update(instrument=instrument)
@@ -197,8 +307,14 @@ class LabScheduleServices:
         from chemworld.runtime.material_balance import ServiceMaterialBoundary
 
         instrument = job["instrument"]
-        state = reconnect_device(state, instrument_equipment_id(instrument), job["vessel"])
-        before = initialize_solvents(local_states(state)[job["vessel"]])
+        identity = job["device"]
+        state = reconnect_device(state, identity, job["vessel"])
+        local = local_states(state)[job["vessel"]]
+        before = initialize_solvents(local.replace(metadata={
+            **local.metadata, INSTRUMENT_DEVICE_SELECTION: {
+                "device_id": identity, "instrument": instrument,
+            },
+        }))
         action = {"operation": "measure", "instrument": instrument}
         result = self.instrument_cost.apply_measurement_cost(before, action)
         if result.outcome != "success":
@@ -223,7 +339,7 @@ class LabScheduleServices:
             # Queue identity is persistent and cannot be affected by polling.
             # The laboratory namespace separates deferred and direct readings.
             coordinate = ObservationNoiseCoordinate(
-                namespace=noise["namespace"] + ":lab",
+                namespace=noise["namespace"] + ":lab:" + identity,
                 base_observation_seed=noise["seed"],
                 experiment_index=noise["experiment_index"],
                 operation_type="measure",
@@ -234,14 +350,9 @@ class LabScheduleServices:
             job = {**job, "noise_provenance": keyed_noise_provenance(coordinate)}
         specimen = result.measurement_state.replace(equipment=after.equipment, ledger=after.ledger)
         try:
-            reading = spec.native_observer(specimen, action, rng)
-            if (
-                not isinstance(reading, Observation)
-                or reading.instrument_id != instrument
-                or reading.cost != spec.definition.cost
-                or reading.sample_consumed_L != spec.definition.sample_volume_L
-                or not self.constitution.check_observation(reading).passed
-            ):
+            reading = spec.observer_for(self.composition)(specimen, action, rng)
+            spec.contract.validate_native_readout(reading)
+            if not self.constitution.check_observation(reading).passed:
                 raise ValueError("queued native observer violates its declared contract")
         except (ValueError, ArithmeticError) as exc:
             # Detector failure is not a failed physical sample. Keep executed
@@ -260,23 +371,27 @@ class LabScheduleServices:
             "sampled_at": {"clock_id": "lab", "time_s": now},
             "available_at": {"clock_id": "lab", "time_s": now + duration},
         }
+        acquisition = {
+            **result.diagnostics["acquisition"], **timing,
+            "sample_time_s": now, "result_time_s": now + duration, "reactor_advance_s": 0.0,
+        }
         if reading is not None:
-            native = reading.native_record()
+            native = reading.with_acquisition(acquisition).native_record()
+            # Queue envelope fields remain for the existing lab publication API.
             native.update(timing)
-            native["channels"] = [{**channel, **timing} for channel in native["channels"]]
             job["observation"] = native
         equipment = after.equipment.equipment.copy()
-        identity = instrument_equipment_id(instrument)
         device = equipment[identity]
         settings = deepcopy(device.settings)
         settings["elapsed_time_s"] -= duration
-        acquisition = settings["diagnostics"]["acquisition"]
-        acquisition.update(timing, reactor_advance_s=0.0)
+        settings["diagnostics"]["acquisition"] = deepcopy(acquisition)
         settings["execution_history"][-1]["diagnostics"]["acquisition"] = deepcopy(acquisition)
         equipment[identity] = replace(device, settings=settings, status="busy")
         after = after.replace(
             equipment=EquipmentLedger(equipment),
             ledger=after.ledger.with_updates(analysis_time_s=before.ledger.analysis_time_s),
+            metadata={key: value for key, value in after.metadata.items()
+                      if key != INSTRUMENT_DEVICE_SELECTION},
         )
         state = install_local(state, after)
         state = state.replace(
@@ -324,15 +439,20 @@ class LabScheduleServices:
             return fail("lab_stopped_requires_full_reset")
         original = state
         running = list(state.lab_clock.running)
-        queued = []
+        ready = ready_lab_jobs(state)
+        sequences = {job["sequence"] for job in ready}
+        queued = [job for job in state.lab_clock.queued if job["sequence"] not in sequences]
         # Start at most one request per device. Global sequence breaks ties;
         # waiting jobs do not reserve specimens from a changing reactor.
-        for job in state.lab_clock.queued:
-            if any(item["kind"] == job["kind"] for item in running):
-                queued.append(job)
-                continue
+        for job in ready:
             if job["kind"] == "heat":
-                state = reconnect_thermal_device(state, self.spec.heater_id, job["vessel"])
+                state = reconnect_thermal_device(
+                    state, job["device"], job["vessel"], park_idle=True,
+                )
+                local = local_states(state)[job["vessel"]]
+                records = dict(local.equipment.equipment)
+                records[job["device"]] = replace(records[job["device"]], status="busy")
+                state = install_local(state, local.replace(equipment=EquipmentLedger(records)))
                 job = {
                     **job,
                     "started_at": state.ledger.time_s,
@@ -353,10 +473,18 @@ class LabScheduleServices:
             min((job["available_at"] - now for job in running), default=float("inf")),
         )
         locals_ = local_states(state)
+        groups = {
+            system.system_id: locals_[system.system_id].replace(
+                inactive_vessels={key: locals_[key] for key in system.vessels
+                                  if key != system.system_id},
+                vessel_elapsed_s=dict.fromkeys(system.vessels, now),
+                lab_clock=None,
+            ) for system in self.systems
+        }
 
         def solve(duration):
             results = {}
-            for key, local in locals_.items():
+            for key, local in groups.items():
                 heat = next(
                     (job for job in running if job["kind"] == "heat" and job["vessel"] == key), None
                 )
@@ -400,25 +528,25 @@ class LabScheduleServices:
         ledger = base.ledger.to_dict()
         ledger["time_s"] = now + dt
         for key, result in results.items():
-            before, after = locals_[key], result.state
-            thermal = after.thermal.vessels[key]
-            after = after.replace(
-                thermal=replace(
-                    after.thermal,
-                    vessels={
-                        key: replace(
-                            thermal,
-                            **{
-                                name: getattr(after.ledger, name)
-                                for name in ("energy_jacket_J", "heat_reaction_J", "heat_loss_J")
-                            },
-                        )
-                    },
-                )
-            )
+            before, after = groups[key], result.state
+            members = {key: after, **after.inactive_vessels}
+            system = next(system for system in self.systems if system.system_id == key)
+            if set(members) != set(system.vessels):
+                return fail("lab_system_candidate_ownership_changed", outcome="numerical_failure")
             for name in ledger.keys() - {"time_s", "risk"}:
                 ledger[name] += getattr(after.ledger, name) - getattr(before.ledger, name)
-            state = install_local(state, after)
+            for name in sorted(members):
+                local = members[name]
+                thermal = local.thermal.vessels[name]
+                local = local.replace(
+                    inactive_vessels={}, vessel_elapsed_s={}, lab_clock=None,
+                    thermal=replace(local.thermal, vessels={name: replace(
+                        thermal, **{field: getattr(local.ledger, field) for field in (
+                            "energy_jacket_J", "heat_reaction_J", "heat_loss_J",
+                        )},
+                    )}),
+                )
+                state = install_local(state, local)
         state = state.replace(
             ledger=replace(base.ledger, **ledger),
             vessel_elapsed_s=dict.fromkeys(locals_, now + dt),
@@ -428,7 +556,7 @@ class LabScheduleServices:
             if job["kind"] == "measure":
                 local = local_states(state)[job["vessel"]]
                 equipment = local.equipment.equipment.copy()
-                identity = instrument_equipment_id(job["instrument"])
+                identity = job["device"]
                 device = equipment[identity]
                 equipment[identity] = replace(
                     device,
@@ -449,11 +577,14 @@ class LabScheduleServices:
                 completed.append({**job, "status": "completed"})
                 if job["kind"] == "heat":
                     local = local_states(state)[job["vessel"]]
-                    state = install_local(state, set_thermal_enabled(local, False))
+                    local = set_thermal_enabled(local, False)
+                    records = dict(local.equipment.equipment)
+                    records[job["device"]] = replace(records[job["device"]], status="used")
+                    state = install_local(state, local.replace(equipment=EquipmentLedger(records)))
                 else:
                     local = local_states(state)[job["vessel"]]
                     equipment = dict(local.equipment.equipment)
-                    identity = instrument_equipment_id(job["instrument"])
+                    identity = job["device"]
                     equipment[identity] = replace(equipment[identity], status="used")
                     state = install_local(
                         state, local.replace(equipment=EquipmentLedger(equipment))
@@ -477,7 +608,15 @@ class LabScheduleServices:
             diagnostics={
                 "clock_mode": "shared",
                 "stopping_events": stopping_events,
-                "vessels_advanced": len(results),
+                "vessels_advanced": len(locals_),
+                "systems_advanced": len(results),
+                "shared_systems": {
+                    system.system_id: {
+                        "strategy": system.strategy_id,
+                        "vessels": list(system.vessels),
+                        "connections": list(system.connections),
+                    } for system in self.systems
+                },
                 "local_outcomes": {
                     key: {"outcome": r.outcome, **r.diagnostics} for key, r in results.items()
                 },
@@ -496,5 +635,5 @@ class LabScheduleServices:
             tuple(
                 MaterialExchange(**{**record, "amounts": tuple(record["amounts"].items())})
                 for record in current[len(previous) :]
-            )
+            ), unmodeled_quantities=formal_inventory_exclusions(before)
         )

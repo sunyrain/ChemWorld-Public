@@ -1,59 +1,44 @@
-# 认识操作语言
+# Operations and instruments
 
-Operation 是 Agent 在 ChemWorld 中真正能做的事：投料、改变条件、测量、分离或结束实验。
-它刻意保持在人类可读的实验动作与机器可验证的 Gym action 之间。
-
-## 一条操作长什么样
-
-每个操作都有一个 `operation` 名称，并按需携带参数：
+Use the current public schema, not guessed laboratory verbs:
 
 ```python
-{"operation": "heat", "temperature_K": 350.0, "duration_s": 1200.0}
+{"operation": "heat", "target_temperature_K": 350.0,
+ "duration_s": 1200.0, "stirring_speed_rpm": 800.0}
 ```
 
-常见参数包括：
+`target_temperature_K` is the jacket setpoint, not an instantaneous measured
+sample temperature. `heat`/`wait` continue the current vessel's process. `quench`
+does not create a new batch. `cool`, `stir`, `crystallize` and `filter` are not
+standalone action IDs: use the task's actual operations, such as
+`cool_crystallize` and `filter_crystals`.
 
-| 字段 | 表示什么 |
-| --- | --- |
-| `volume_L` | 加入或处理的体积 |
-| `amount_mol` | 物质的量 |
-| `temperature_K` | 目标温度 |
-| `duration_s` | 持续时间 |
-| `stirring_rpm` | 搅拌速率 |
-| `phase` | `organic`、`aqueous` 等相选择 |
-| `instrument` | 要调用的测量工具 |
+`add_solvent` can accumulate allowed finite-catalog mixtures; some task contracts
+restrict pure media. `add_reagent` is the declared premixed feed; `add_component`
+selects a public `feed_catalog` component. Resources use actual molar input.
+Do not infer hidden species names or assume every first material choice locks all
+future additions. New vessel/port and persistent-control operations are available
+only under their declared task/composition contracts.
 
-字段名保持英文，因为它们属于稳定 API；界面和文档负责提供中文解释与单位。
+For every state, inspect `task_info()`, `action_schema(operation)`,
+`available_actions()` and `validate_action(action)`. Registry membership is not
+task permission, and task permission is not current-state legality. Never
+hard-code the action vector length or silently clip out-of-range values.
 
-## 从投料到终检
+Base instrument IDs are `hplc`, `gc`, `uvvis`, `ph_meter`, `final_assay`.
+Current core also supports explicitly declared `nmr`, `ir`, `ms`; some
+full-process contracts permit `particle_size`. Read the task's
+`allowed_instruments`: registry membership alone is not permission.
+`configure_instrument` sets scans, resolution and dilution before `measure`.
+These are finite anonymous calibrated reporters, not structure-identification
+models. IR/NMR-like features inside an existing synthetic packet do not by
+themselves authorize a standalone acquisition.
 
-| 阶段 | 常用操作 | 会改变什么 |
-| --- | --- | --- |
-| 准备 | `add_solvent`、`add_reagent`、`add_catalyst` | 物料、体积与配方身份 |
-| 反应 | `heat`、`cool`、`stir`、`wait` | 时间、温度、转化、能耗与风险 |
-| 测量 | `measure` | 公开观测、样品量、成本与预算 |
-| 分相 | `add_extractant`、`mix`、`settle`、`separate_phase` | 相组成、夹带与回收 |
-| 后处理 | `wash`、`dry`、`concentrate`、`crystallize`、`filter`、`distill` | 纯度、回收率与物流账本 |
-| 结束 | `terminate`、`final_assay` | 阶段切换或最终评分 |
+End a process with `terminate`, then request
+`{"operation": "measure", "instrument": "final_assay"}`. Neither an open record,
+a cancelled session nor a budget truncation is a completed final assay. Missing
+values remain null; read masks. A negative result is retained as an assay, not
+deleted. Native replay reconstructs actions and observations, not reasoning.
 
-操作是有状态的。连续两次 `heat` 会从当前温度与组成继续推进；没有形成两相时调用
-`separate_phase` 会被拒绝，而不是假装成功。
-
-## 执行前先问环境
-
-```python
-available = env.unwrapped.available_actions()
-schema = env.unwrapped.action_schema("heat")
-check = env.unwrapped.validate_action(
-    {"operation": "heat", "temperature_K": 350.0, "duration_s": 1200.0}
-)
-```
-
-这三个接口分别回答：现在能做什么、参数应该怎么写、这条具体动作是否合法。Agent 不需要通过
-反复失败来猜规则。
-
-## 这套语言刻意不做什么
-
-Operation 不是现实实验室 SOP，也不是设备控制协议。它优先保证四件事：含义清楚、失败可解释、
-状态变化可审计、轨迹可以确定性回放。需要具体字段时继续查看
-[Action 与 Recipe](action_schema.md)。
+Start with [the executable examples](current-foundation.md#source-synchronization). These virtual model
+operations are not physical laboratory instructions.

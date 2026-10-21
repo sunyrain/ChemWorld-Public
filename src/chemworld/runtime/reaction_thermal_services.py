@@ -59,29 +59,14 @@ class ChemWorldReactionThermalServices:
     ) -> None:
         self.world = world
         self.species_view = species_view
-        from chemworld.runtime.coupled_thermal import CoupledThermalRuntime
+        from chemworld.world.domain_modules import DomainModuleRegistry
 
-        self.coupled = CoupledThermalRuntime(composition, modules)
-        from chemworld.runtime.flash_thermal import FlashThermalRuntime
-
-        self.flash = FlashThermalRuntime(composition)
-        from chemworld.runtime.liquid_equilibrium import LiquidEquilibriumRuntime
-
-        self.liquid = LiquidEquilibriumRuntime(composition)
-        from chemworld.runtime.dynamic_column import DynamicColumnRuntime
-
-        self.column = DynamicColumnRuntime(composition)
-        from chemworld.runtime.concentration import ConcentrationRuntime
-
-        self.concentration = ConcentrationRuntime(composition)
-        from chemworld.runtime.crystal_thermal import CrystalThermalRuntime
-
-        self.crystal = CrystalThermalRuntime(
-            composition, legacy_world=world, species_view=species_view
-        )
+        self.modules = modules if modules is not None else DomainModuleRegistry.default()
         from chemworld.runtime.advance_paths import PhysicalAdvanceCoordinator
 
-        self.advancer = PhysicalAdvanceCoordinator(self, modules=modules, composition=composition)
+        self.advancer = PhysicalAdvanceCoordinator(
+            self, modules=self.modules, composition=composition
+        )
 
     def _quenched_thermal_hold(
         self,
@@ -323,8 +308,6 @@ class ChemWorldReactionThermalServices:
         phases = working_state.phases
         species_amounts = result.species_amounts
         if active_phase is not None and active_phase_id != "reactor_liquid":
-            assert active_phase_id is not None
-            assert working_state.phases is not None
             phase_records = working_state.phases.phases.copy()
             phase_records[active_phase_id] = replace(
                 phase_records[active_phase_id],
@@ -349,33 +332,13 @@ class ChemWorldReactionThermalServices:
         )
 
     def with_risk_and_pressure(self, state: WorldState) -> WorldState:
-        if self.crystal.is_native(state):
-            return state  # Its declared fixed pressure is already the current pressure.
-        if self.concentration.supports(state):
-            return state.replace(pressure_Pa=self.concentration.model(state).pressure_Pa)
-        if self.column.supports(state):
-            return state.replace(pressure_Pa=self.column.model(state).pressure_Pa)
-        if self.liquid.supports(state):
-            return state.replace(pressure_Pa=self.liquid.model(state).pressure_Pa)
-        if self.flash.supports(state):
-            return state.replace(
-                pressure_Pa=self.flash.composition.physics.flash_models[state.vessel_id].pressure_Pa
-            )
-        if self.coupled.supports(state):
-            from chemworld.runtime.coupled_thermal import pressure_for_state
+        selected = self.advancer.strategy(state)
+        if selected is None:
+            return state
+        reconcile = getattr(selected[1], "reconcile_pressure", None)
+        return state if reconcile is None else reconcile(state)
 
-            model = self.coupled.composition.physics.thermal_models[state.vessel_id]
-            return state.replace(pressure_Pa=pressure_for_state(state, model))
-        if any(strategy.supports(state) for _, strategy in self.advancer.declared):
-            # A module's accepted physical state already contains its pressure
-            # closure. Do not apply the legacy liquid-reactor proxy a second time.
-            return state
-        if (
-            self.coupled.composition is not None
-            and self.coupled.composition.physics is not None
-            and state.phase != "liquid"
-        ):
-            return state
+    def _legacy_risk_and_pressure(self, state: WorldState) -> WorldState:
         flow_settings = equipment_settings(state.equipment, "flow_reactor")
         pressure_override = flow_settings.get("outlet_pressure_Pa")
         controller = equipment_settings(state.equipment, "process_controller")

@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
 from chemworld.foundation import Observation, PhysicalConstitution, WorldState, equipment_settings
-from chemworld.foundation.observations import ObservationTime, legacy_scalar_projection
-from chemworld.foundation.state import ProcessLedger, instrument_equipment_id, selected_phase_id
+from chemworld.foundation.observations import (
+    ObservationChannel,
+    ObservationTime,
+    legacy_scalar_projection,
+)
+from chemworld.foundation.state import ProcessLedger, selected_phase_id
 from chemworld.physchem.configurable_spectra import SPECTRAL_MODEL_ID, acquire_spectrum
 from chemworld.physchem.equilibrium_chemistry import (
     SolubilityProductSpec,
@@ -24,6 +31,11 @@ from chemworld.physchem.spectroscopy_adapter_manifest import (
 )
 from chemworld.runtime.full_process_contract import unrecoverable_crystallization_result
 from chemworld.runtime.mechanisms import CompiledMechanism
+from chemworld.runtime.observation_noise import (
+    ObservationNoiseCoordinate,
+    keyed_noise_provenance,
+    keyed_observation_rng,
+)
 from chemworld.runtime.phase_ledger_services import ChemWorldPhaseLedgerServices
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.runtime.spectral_settings import spectral_settings
@@ -45,8 +57,21 @@ from chemworld.world.species_roles import PHASE_PRODUCT_AMOUNT_KEY
 from chemworld.world.spectral_contract import (
     SPECTRAL_INSTRUMENTS,
     acquisition_cost,
-    acquisition_seconds,
 )
+
+if TYPE_CHECKING:
+    from chemworld.runtime.executor import RuntimeStepResult
+
+
+@dataclass(frozen=True)
+class ObservationAttempt:
+    """Readout resolution, without ownership of session state or counters."""
+
+    observation: Observation
+    checks: list[dict[str, object]]
+    noise_provenance: dict[str, Any]
+    occurrence_key: tuple[int, str, str] | None = None
+    failure_reason: str | None = None
 
 
 class ChemWorldObservationKernel:
@@ -63,9 +88,11 @@ class ChemWorldObservationKernel:
         observation_noise_multiplier: float = 1.0,
         instrument_provider: ValidatedInstrumentRuntimeProvider | None = None,
         modules=None,
+        composition=None,
     ) -> None:
         self.constitution = constitution
         self.modules = modules
+        self.composition = composition
         self.objective = objective
         self.compiled_mechanism = compiled_mechanism
         self.scoring_contract = scoring_contract or TaskScoringContract.from_success_metrics(
@@ -79,6 +106,111 @@ class ChemWorldObservationKernel:
         self.phase_ledgers = ChemWorldPhaseLedgerServices(self.species_view)
         self.instrument_provider = instrument_provider or ValidatedInstrumentRuntimeProvider()
         self.last_provider_execution: dict[str, Any] = {}
+
+    def observe_execution(
+        self,
+        result: RuntimeStepResult,
+        previous_state: WorldState,
+        action: dict[str, Any],
+        rng: np.random.Generator,
+        *,
+        noise_mode: str,
+        noise_namespace: str,
+        observation_seed: int,
+        experiment_index: int,
+        occurrences: Mapping[tuple[int, str, str], int],
+        retain_previous_process: bool,
+        debug_truth: bool,
+    ) -> ObservationAttempt:
+        """Plan the specimen/noise coordinate and resolve one public readout.
+
+        A failed instrument readout still consumes its keyed occurrence because
+        physical sampling happened. Other failed observations restore the RNG
+        without consuming a coordinate. The executor decides physical rollback.
+        """
+        provenance = {"mode": noise_mode, "status": "not_observed"}
+        if not result.committed or action.get("operation") == "discard_batch":
+            observation = self.failed_observation()
+            return ObservationAttempt(
+                observation,
+                self.constitution.check_observation(
+                    observation, debug_truth=debug_truth,
+                ).to_list(),
+                provenance,
+            )
+
+        record = result.operation_record
+        observation_state = result.state
+        if record.is_instrument_measurement:
+            specimen = result.kernel_result.measurement_state or previous_state
+            observation_state = specimen.replace(
+                ledger=result.state.ledger, equipment=result.state.equipment,
+            )
+            if retain_previous_process:
+                observation_state = observation_state.replace(
+                    process=previous_state.process, equipment=previous_state.equipment,
+                )
+        rng_state = deepcopy(rng.bit_generator.state)
+        observation_rng = rng
+        counter_key = None
+        if noise_mode == "keyed":
+            operation = str(action.get("operation") or "unknown")
+            instrument = str(record.instrument or action.get("instrument") or "none")
+            counter_key = (experiment_index, operation, instrument)
+            coordinate = ObservationNoiseCoordinate(
+                namespace=noise_namespace,
+                base_observation_seed=observation_seed,
+                experiment_index=experiment_index,
+                operation_type=operation,
+                instrument=instrument,
+                replicate_index=occurrences.get(counter_key, 0),
+            )
+            observation_rng = keyed_observation_rng(coordinate)
+            provenance = {**keyed_noise_provenance(coordinate), "status": "candidate"}
+
+        failure = None
+        checks = []
+        try:
+            acquisition = result.kernel_result.diagnostics.get("acquisition")
+            if acquisition is not None and not acquisition["acquisition_complete"]:
+                raise ValueError("physical acquisition stopped before readout")
+            observation = self.observe(observation_state, action, observation_rng)
+            if acquisition is not None:
+                observation = observation.with_acquisition(acquisition)
+        except (ArithmeticError, ValueError) as exc:
+            failure = f"readout_domain_error: {type(exc).__name__}"
+        else:
+            report = self.constitution.check_observation(observation, debug_truth=debug_truth)
+            checks = report.to_list()
+            if not report.passed:
+                failure = "readout_contract_failed"
+
+        if failure is not None:
+            rng.bit_generator.state = rng_state
+            observation = self.failed_observation()
+            provenance["status"] = "invalid" if record.is_instrument_measurement else "rolled_back"
+            if not record.is_instrument_measurement:
+                counter_key = None
+        else:
+            provenance["status"] = "committed"
+            if record.is_final_assay:
+                instrument = self.constitution.instruments[record.instrument]
+                required = instrument.observable_keys
+                if self.observation_contract is not None:
+                    required = self.observation_contract.observable_keys_for_instrument(
+                        record.instrument, required,
+                    )
+                if observation.terminal_quality_errors(tuple(required)):
+                    # This is a well-formed acquired packet, including its
+                    # failure flags. Preserve it and its noise; do not award a
+                    # successful terminal assay or cache it as a valid result.
+                    failure = "terminal_readout_quality_failed"
+                    provenance["status"] = "invalid"
+        if not checks:
+            checks = self.constitution.check_observation(
+                observation, debug_truth=debug_truth,
+            ).to_list()
+        return ObservationAttempt(observation, checks, provenance, counter_key, failure)
 
     def observe(
         self,
@@ -122,18 +254,10 @@ class ChemWorldObservationKernel:
         instrument_id = instrument_name(action.get("instrument", "hplc"), modules=self.modules)
         instrument = self.constitution.instruments[instrument_id]
         spec = None if self.modules is None else self.modules.instrument_specs().get(instrument_id)
-        if spec is not None and spec.native_observer is not None:
-            observation = spec.native_observer(state, action, rng)
-            if (
-                not isinstance(observation, Observation)
-                or observation.instrument_id != instrument_id
-            ):
-                raise ValueError("Native instrument must return its own Observation")
-            if (
-                observation.cost != instrument.cost
-                or observation.sample_consumed_L != instrument.sample_volume_L
-            ):
-                raise ValueError("Native instrument accounting differs from its declaration")
+        observer = None if spec is None else spec.observer_for(self.composition)
+        if observer is not None:
+            observation = observer(state, action, rng)
+            spec.contract.validate_native_readout(observation)
             return observation
         if instrument_id in SPECTRAL_INSTRUMENTS:
             return self._spectral_observation(state, instrument_id, rng)
@@ -189,11 +313,6 @@ class ChemWorldObservationKernel:
         raw_signal = self._raw_signal(
             instrument_id, noisy, state, rng, species_amounts_mol=public_species_amounts
         )
-        raw_signal["acquisition"] = {
-            "clock_semantics": "instantaneous_snapshot",
-            "sample_time_s": state.ledger.time_s,
-            "result_time_s": state.ledger.time_s,
-        }
         if empty_crystals and instrument_id in {"particle_size", "final_assay"}:
             raw_signal["sample_outcome"] = {
                 "status": "negative_result",
@@ -215,8 +334,6 @@ class ChemWorldObservationKernel:
             instrument_id=instrument_id,
             cost=instrument.cost,
             sample_consumed_L=instrument.sample_volume_L,
-            sampled_at=ObservationTime(time_s=state.ledger.time_s),
-            sample_id=self._sample_id(state, instrument_id),
         )
 
     def _spectral_observation(
@@ -234,15 +351,6 @@ class ChemWorldObservationKernel:
             rng,
             noise_multiplier=self.observation_noise_multiplier,
         )
-        seconds = acquisition_seconds(instrument_id, configuration)
-        packet["acquisition"] = {
-            "clock_semantics": "instantaneous_snapshot",
-            "sample_time_s": state.ledger.time_s,
-            "result_time_s": state.ledger.time_s,
-            "analysis_effort_s": seconds,
-            "effort_ledger": "analysis_time_s",
-            "reactor_advance_s": 0.0,
-        }
         values, mask = self._base_public_values(state), self._base_observed_mask()
         fit = packet["processed_estimates"]["concentration_mol_L"]
         a, p, b = (
@@ -278,7 +386,7 @@ class ChemWorldObservationKernel:
             "failure_reason": None,
             "provenance": ["finite anonymous reporter calibration; acquired-trace NNLS"],
         }
-        return Observation(
+        observation = Observation(
             values=values,
             units=self._observation_units(),
             observed_mask=mask,
@@ -288,9 +396,58 @@ class ChemWorldObservationKernel:
             instrument_id=instrument_id,
             cost=acquisition_cost(instrument_id, configuration),
             sample_consumed_L=instrument.sample_volume_L,
-            sampled_at=ObservationTime(time_s=state.ledger.time_s),
-            sample_id=self._sample_id(state, instrument_id),
         )
+        # Native fitted concentrations own their values and uncertainties.
+        # The public packet refers to them, rather than storing a second copy.
+        native = observation.native_record()
+        result = packet["processed_estimates"]
+        template = native["raw_template"]["processed_estimates"]
+        quality_for_reason = {
+            None: "valid", "saturation": "saturated", "below_lod": "below_detection",
+            "unidentifiable": "fit_failed", "fit_failed": "fit_failed",
+        }
+        reporters = {}
+        for reporter, value in result["concentration_mol_L"].items():
+            cid = f"concentration:{reporter}"
+            channel = ObservationChannel(
+                cid, "mol/L", value,
+                quality=quality_for_reason[result["missingness"][reporter]],
+                detection_limit=result["detection_limit_mol_L"][reporter],
+                uncertainty=result["standard_error_mol_L"][reporter],
+                role="processed", derived_from=("acquired_trace",),
+                acquisition_relation="acquired_trace_fit",
+            )
+            reporters[reporter] = channel
+            native["channels"].append(channel.to_dict())
+            native["processed_links"].append([cid, cid])
+            if channel.uncertainty is not None:
+                native["uncertainty_links"].append([f"{cid}_std", cid])
+            template["concentration_mol_L"][reporter] = {"$channel_value": cid}
+            template["standard_error_mol_L"][reporter] = {"$channel_uncertainty": cid}
+        dependencies = {
+            "selectivity": ("target_reporter", "impurity_reporter"),
+            "purity": tuple(reporters), "byproduct_signal": tuple(reporters),
+        }
+        for channel in native["channels"]:
+            key = channel["channel_id"]
+            if key not in allowed:
+                continue
+            sources = [reporters[name] for name in dependencies[key]]
+            channel.update(
+                role="processed", derived_from=[c.channel_id for c in sources],
+                acquisition_relation="acquired_trace_fit",
+            )
+            if channel["value"] is None:
+                # A ratio has no scalar LOD merely because a concentration is
+                # below its LOD. Its source channels retain the actual limits.
+                channel["quality"] = next(
+                    (
+                        q for q in ("saturated", "fit_failed")
+                        if any(c.quality == q for c in sources)
+                    ),
+                    "missing",
+                )
+        return Observation.from_native_record(native)
 
     def failed_observation(self) -> Observation:
         """Return a non-informative observation for failed action preconditions."""
@@ -382,14 +539,6 @@ class ChemWorldObservationKernel:
     @staticmethod
     def _observation_units() -> dict[str, str]:
         return observation_units()
-
-    @staticmethod
-    def _sample_id(state: WorldState, instrument_id: str) -> str:
-        count = equipment_settings(state.equipment, instrument_equipment_id(instrument_id)).get(
-            "use_count",
-            0,
-        )
-        return f"{state.vessel_id}:{instrument_id}:acquisition:{count}"
 
     @staticmethod
     def _base_public_values(state: WorldState) -> dict[str, float | None]:

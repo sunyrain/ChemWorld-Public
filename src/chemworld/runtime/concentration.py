@@ -81,6 +81,11 @@ def validate_concentration_state(state, spec):
 
 
 class ConcentrationRuntime:
+    supported_operations = ("wait",)
+
+    def reconcile_pressure(self, state):
+        return state.replace(pressure_Pa=self.model(state).pressure_Pa)
+
     def __init__(self, composition):
         self.composition = composition
 
@@ -88,11 +93,11 @@ class ConcentrationRuntime:
         return (
             self.composition is not None
             and self.composition.physics is not None
-            and state.vessel_id in self.composition.physics.concentration_models
+            and state.vessel_id in self.composition.physics.models_of("concentration")
         )
 
     def model(self, state):
-        return self.composition.physics.concentration_models[state.vessel_id]
+        return self.composition.physics.models_of("concentration")[state.vessel_id]
 
     def advance(self, state, action, *, heat, jacket_program=None):
         spec = self.model(state)

@@ -148,9 +148,8 @@ def surface_world_spec(
     physics = CompositionPhysics(
         network,
         states,
-        thermal_models=models,
+        models={"thermal": models, "surface": {surface_spec.mechanism_id: surface_spec}},
         feed_sources={"CO-feed": "co_supply", "O2-feed": "oxygen_supply"},
-        surface_models={surface_spec.mechanism_id: surface_spec},
     )
     payload = {
         "schema_version": "chemworld-world-composition-0.1",

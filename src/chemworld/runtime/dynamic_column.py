@@ -106,6 +106,11 @@ def validate_column_state(state, spec):
 
 
 class DynamicColumnRuntime:
+    supported_operations = ("wait",)
+
+    def reconcile_pressure(self, state):
+        return state.replace(pressure_Pa=self.model(state).pressure_Pa)
+
     def __init__(self, composition):
         self.composition = composition
 
@@ -113,11 +118,11 @@ class DynamicColumnRuntime:
         return (
             self.composition is not None
             and self.composition.physics is not None
-            and state.vessel_id in self.composition.physics.column_models
+            and state.vessel_id in self.composition.physics.models_of("column")
         )
 
     def model(self, state):
-        return self.composition.physics.column_models[state.vessel_id]
+        return self.composition.physics.models_of("column")[state.vessel_id]
 
     def advance(self, state, action, *, heat, jacket_program=None):
         spec = self.model(state)

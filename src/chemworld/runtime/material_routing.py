@@ -87,7 +87,6 @@ def _scale(contents: MaterialContents, fraction: float, vessel_id: str) -> Mater
 
 
 def _active(state: WorldState) -> StoredSample:
-    assert state.phases is not None and state.species is not None
     settings = equipment_settings(state.equipment, "batch_reactor")
     crystal = equipment_settings(state.equipment, "crystallizer")
     lineage = state.samples.active_lineage or (
@@ -334,6 +333,8 @@ def _install(state: WorldState, sample: StoredSample) -> WorldState:
 
 def _available_samples(state: WorldState) -> dict[str, StoredSample]:
     samples = state.samples.samples.copy()
+    if state.phase == "formal":
+        return samples
     try:
         samples["active"] = _active(state)
     except ValueError:
@@ -463,8 +464,8 @@ class ChemWorldMaterialRoutingServices:
         return self.physics is not None and (
             state.phase == "gas"
             or aqueous_record(state) is not None
-            or state.vessel_id in self.physics.flash_models
-            or state.vessel_id in self.physics.liquid_models
+            or state.vessel_id in self.physics.models_of("flash")
+            or state.vessel_id in self.physics.models_of("liquid")
             or background_model(state, self.physics) is not None
         )
 
@@ -472,6 +473,26 @@ class ChemWorldMaterialRoutingServices:
         from chemworld.runtime.thermal_material_routing import feed_packet
 
         return feed_packet(state, self.physics, action)[1]
+
+    def executed_feed(self, before, after, action):
+        from chemworld.foundation.balances import MaterialPacket
+
+        source_id = self.physics.feed_sources[action["component"]]
+        receipt = after.metadata.get("last_material_packet")
+        if not isinstance(receipt, dict):
+            raise ValueError("finite feed requires its executed material packet")
+        packet = MaterialPacket.from_dict(receipt)
+        if (packet.source, packet.destination) != (source_id, before.vessel_id):
+            raise ValueError("executed feed packet has the wrong endpoints")
+        packet.validate_representative(
+            before.inactive_vessels[source_id].species_amounts,
+            requested_mol=action["amount_mol"],
+        )
+        packet.check_debit(
+            before.inactive_vessels[source_id].species_amounts,
+            after.inactive_vessels[source_id].species_amounts,
+        )
+        return packet
 
     def add_finite_feed(self, state, action):
         from chemworld.runtime.kernel_contracts import ModelProviderResult
@@ -540,7 +561,7 @@ class ChemWorldMaterialRoutingServices:
         a, b = samples[source], samples[target]
         if (
             self.physics is not None
-            and state.vessel_id in self.physics.crystal_models
+            and state.vessel_id in self.physics.models_of("crystal")
             and (_occupied(b) or target == "active")
             and abs(a.temperature_K - b.temperature_K) > 1e-9
         ):
@@ -573,7 +594,6 @@ class ChemWorldMaterialRoutingServices:
         reference_sources = state.samples.active_reference_sources
         reference_shares = state.samples.active_reference_shares
         if touches_active:
-            assert active is not None
             next_state = _install(state, active)
             active_lineage = active.lineage if _occupied(active) else ()
             reference_sources = _contents(active).reference_sources

@@ -170,7 +170,7 @@ def test_single_vessel_matches_local_mode_without_contention():
     payload["vessels"] = payload["vessels"][:1]
     payload["components"] = [c for c in payload["components"] if c["vessel"] == "reactor"]
     del payload["physics"]["initial_states"]["sample"]
-    del payload["physics"]["thermal_models"]["sample"]
+    del payload["physics"]["models"]["thermal"]["bindings"]["sample"]
     payload["task"]["operations"].remove("select_vessel")
     shared = make(WorldCompositionSpec.from_dict(payload))
     del payload["physics"]["lab_clock"]
@@ -198,8 +198,12 @@ def test_bounds_capacity_and_partial_reset_do_not_corrupt_pending_jobs():
     before = r._state.lab_clock
     assert r.execute({"operation": "queue_lab_measure"}).info["operation_outcome"] == "rejected"
     assert r._state.lab_clock == before
-    with pytest.raises(ValueError, match="full reset"):
+    pending = r.snapshot().to_dict()
+    with pytest.raises(
+        ValueError, match="queued/running jobs 0:instrument:programmed_hplc:reactor",
+    ):
         r._initialize_entities("material", {})
+    assert r.snapshot().to_dict() == pending
     r.reset(seed=17)
     assert r._state.lab_clock.next_sequence == 0
 

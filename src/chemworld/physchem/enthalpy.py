@@ -2,25 +2,179 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
 
 import numpy as np
+from scipy.optimize import brentq
 
+from chemworld.physchem.correlation_families import CORRELATION_FAMILIES
 from chemworld.physchem.property_cards import _HEAT_ENTHALPY_REFERENCE_READING
 from chemworld.physchem.property_equations import (
     _convert_input,
     _cp_polynomial,
     _validity_warnings,
     evaluate_correlation,
+    integrate_correlation,
 )
 from chemworld.physchem.property_reports import (
     PropertyEvaluation,
     ValidityPolicy,
     _validate_phase,
 )
+from chemworld.physchem.residual_system import (
+    ResidualDerivatives,
+    ResidualDomainError,
+    ResidualEquation,
+    ResidualNumericalError,
+    ResidualSystem,
+    ResidualVariable,
+    RootPolicy,
+    solve_steady_residual,
+    vector,
+)
 from chemworld.physchem.specs import PropertyCorrelation
+
+
+def caloric_residual_system(
+    energy_at_temperature,
+    heat_capacity_at_temperature,
+    target_energy_J,
+    temperature_bounds_K,
+    *,
+    energy_basis,
+    parameters=(),
+    parameter_values=(),
+    energy_parameter_jacobian=None,
+):
+    """Declare E(T,p)-E_target=0 with native analytic caloric derivatives.
+
+    Energy/capacity callbacks take (temperature_K, physical_parameters).
+    The first residual parameter is the target energy (J); remaining parameter
+    responses hold that target fixed. Missing physical parameter derivatives
+    remain unavailable. H/U and the energy datum are supplied by the caller.
+    """
+    lower, upper = temperature_bounds_K
+    if (energy_basis not in {"enthalpy", "internal_energy"}
+            or not all(isfinite(v) for v in (lower, upper, target_energy_J))
+            or not 0 < lower < upper):
+        raise ValueError("caloric closure requires an explicit H/U basis and finite T/energy")
+    parameters = tuple(parameters)
+    values = vector(parameter_values, len(parameters), "caloric parameters")
+    values.setflags(write=False)
+
+    def energy(t, p):
+        value = energy_at_temperature(t, p)
+        if value is None or not isfinite(value):
+            raise ResidualDomainError(
+                f"{energy_basis} is unavailable or nonfinite in caloric closure"
+            )
+        return float(value)
+
+    def capacity(t, p):
+        value = heat_capacity_at_temperature(t, p)
+        if value is None or not isfinite(value) or value <= 0:
+            raise ResidualDomainError("caloric residual requires positive finite heat capacity")
+        return float(value)
+
+    low, high = energy(lower, values), energy(upper, values)
+    if high <= low:
+        raise ValueError(f"{energy_basis} has no increasing caloric temperature closure")
+    if not low <= target_energy_J <= high:
+        raise ValueError(f"prescribed {energy_basis} is outside the caloric temperature domain")
+
+    def parameter_jacobian(t, y, v, p):
+        physical = np.empty(0) if not parameters else vector(
+            energy_parameter_jacobian(y[0], p[1:]), len(parameters), "caloric parameter Jacobian",
+        )
+        return np.r_[-1.0, physical][None, :]
+
+    return ResidualSystem(
+        f"caloric:{energy_basis}",
+        (ResidualVariable("temperature", "K", upper - lower, "algebraic", lower, upper),),
+        (ResidualEquation(energy_basis, "J", high - low),),
+        lambda t, y, v, p: [energy(y[0], p[1:]) - p[0]],
+        ResidualDerivatives(
+            "analytic", state=lambda t, y, v, p: [[capacity(y[0], p[1:])]],
+            rate=lambda t, y, v, p: [[0.0]], time=lambda t, y, v, p: [0.0],
+            parameter=parameter_jacobian if not parameters or energy_parameter_jacobian else None,
+        ),
+        (ResidualVariable("target_energy", "J", high - low, "parameter"), *parameters),
+        (target_energy_J, *values),
+    )
+
+
+def caloric_temperature(
+    energy_at_temperature: Callable[[float], float],
+    target_energy_J: float,
+    temperature_bounds_K: tuple[float, float],
+    *,
+    energy_basis: str,
+    xtol: float = 1e-10,
+    rtol: float = 4 * np.finfo(float).eps,
+    algorithm: str = "brentq",
+    heat_capacity_at_temperature: Callable[[float], float] | None = None,
+) -> float:
+    """Invert a caller's continuous, increasing H(T) or U(T) at fixed inventory.
+
+    The caller supplies its actual phase/caloric model and energy datum. This
+    algebraic closure owns no state or clock, does not convert H to U, and
+    never clips an unreachable target. Pure saturation plateaus require their
+    separate phase-fraction closure, rather than this temperature inversion.
+    ``residual`` explicitly selects the common Newton solver and requires the
+    matching analytic heat capacity. It never falls back to ``brentq``.
+    """
+    lower, upper = temperature_bounds_K
+    if (
+        energy_basis not in {"enthalpy", "internal_energy"}
+        or not all(isfinite(v) for v in (lower, upper, target_energy_J))
+        or not 0 < lower < upper
+    ):
+        raise ValueError("caloric closure requires an explicit H/U basis and finite T/energy")
+
+    def residual(temperature):
+        value = energy_at_temperature(temperature)
+        if value is None or not isfinite(value):
+            raise ValueError(f"{energy_basis} is unavailable or nonfinite in caloric closure")
+        return value - target_energy_J
+
+    low, high = residual(lower), residual(upper)
+    if high <= low:
+        raise ValueError(f"{energy_basis} has no increasing caloric temperature closure")
+    if low > 0 or high < 0:
+        raise ValueError(f"prescribed {energy_basis} is outside the caloric temperature domain")
+    if algorithm not in {"brentq", "residual"}:
+        raise ValueError("caloric algorithm must be brentq or residual")
+    if not isfinite(xtol) or xtol <= 0 or not isfinite(rtol) or rtol < 4 * np.finfo(float).eps:
+        raise ValueError("caloric temperature tolerances must be finite and valid")
+    if algorithm == "residual":
+        if heat_capacity_at_temperature is None:
+            raise ValueError("residual caloric closure requires an analytic heat capacity")
+        system = caloric_residual_system(
+            lambda t, p: energy_at_temperature(t),
+            lambda t, p: heat_capacity_at_temperature(t),
+            target_energy_J, temperature_bounds_K, energy_basis=energy_basis,
+        )
+        capacities = [heat_capacity_at_temperature(t) for t in (lower, upper)]
+        if any(c is None or not isfinite(c) or c <= 0 for c in capacities):
+            raise ResidualDomainError("caloric residual requires positive finite heat capacity")
+        energy_tolerance = (xtol + rtol * lower) * min(*capacities, (high - low) / (upper - lower))
+        result = solve_steady_residual(
+            system, [lower - low * (upper - lower) / (high - low)],
+            policy=RootPolicy(tolerance=energy_tolerance / (high - low)),
+        )
+        if not result.root.success:
+            raise ResidualNumericalError("caloric:" + result.root.failure_reason)
+        temperature = float(result.root.value[0])
+        capacity = heat_capacity_at_temperature(temperature)
+        if (capacity is None or not isfinite(capacity) or capacity <= 0
+                or abs(residual(temperature)) / capacity > xtol + rtol * abs(temperature)):
+            raise ResidualNumericalError("caloric:temperature_tolerance_not_met")
+        return temperature
+    if heat_capacity_at_temperature is not None:
+        raise ValueError("select residual to consume the declared caloric derivative")
+    return float(brentq(residual, lower, upper, xtol=xtol, rtol=rtol))
 
 
 @dataclass(frozen=True)
@@ -41,16 +195,25 @@ class PhaseTransitionSpec:
         _validate_phase(self.to_phase)
         if self.from_phase == self.to_phase:
             raise ValueError("phase transition must connect different phases")
-        if self.transition_temperature_K <= 0:
+        if not isfinite(self.transition_temperature_K) or self.transition_temperature_K <= 0:
             raise ValueError("transition_temperature_K must be positive")
         if self.enthalpy_correlation.property_id not in {
             "heat_of_vaporization",
             "heat_of_fusion",
+            "heat_of_sublimation",
         }:
             raise ValueError(
                 "PhaseTransitionSpec requires heat_of_vaporization or "
-                "heat_of_fusion correlation"
+                "heat_of_fusion or heat_of_sublimation correlation"
             )
+        direction = {
+            "heat_of_vaporization": ("liquid", "gas"),
+            "heat_of_fusion": ("solid", "liquid"),
+            "heat_of_sublimation": ("solid", "gas"),
+        }[self.enthalpy_correlation.property_id]
+        if (self.from_phase, self.to_phase) != direction:
+            raise ValueError(
+                "latent heat must declare its positive phase direction: " + str(direction))
 
     def connects(self, phase_a: str, phase_b: str) -> bool:
         return {phase_a, phase_b} == {self.from_phase, self.to_phase}
@@ -201,6 +364,10 @@ def sensible_enthalpy_change(
 
     if heat_capacity_correlation.property_id == "isochoric_heat_capacity":
         raise ValueError("Cv integrates internal energy; use caloric_polynomial_change")
+    if heat_capacity_correlation.equation_id in {*CORRELATION_FAMILIES, "piecewise_heat_capacity"}:
+        return caloric_correlation_change(
+            heat_capacity_correlation, initial_temperature_K=initial_temperature_K,
+            final_temperature_K=final_temperature_K, validity_policy=validity_policy)
     if heat_capacity_correlation.equation_id != "cp_polynomial":
         raise ValueError("Only cp_polynomial supports analytic enthalpy integration")
     T0 = _convert_input(initial_temperature_K, "K", heat_capacity_correlation, "temperature")
@@ -462,6 +629,37 @@ def _cp_polynomial_integral(T: float, coeffs: dict[str, float]) -> float:
     )
 
 
+def caloric_correlation_change(
+    correlation: PropertyCorrelation, *, initial_temperature_K: float,
+    final_temperature_K: float, entropy: bool = False,
+    validity_policy: ValidityPolicy = "raise",
+) -> PropertyEvaluation:
+    """Integrate the declared caloric model; retain polynomial analytic behavior."""
+    if correlation.equation_id == "cp_polynomial":
+        return caloric_polynomial_change(
+            correlation, initial_temperature_K=initial_temperature_K,
+            final_temperature_K=final_temperature_K, entropy=entropy,
+            validity_policy=validity_policy)
+    from chemworld.foundation.units import convert_value
+
+    _validate_heat_capacity_correlation(correlation)
+    if entropy and correlation.property_id == "isochoric_heat_capacity":
+        raise ValueError("entropy needs Cp or a declared phase/EOS conversion from Cv")
+    result = integrate_correlation(
+        correlation, initial_temperature_K=initial_temperature_K,
+        final_temperature_K=final_temperature_K, over_temperature=entropy,
+        validity_policy=validity_policy)
+    factor = convert_value(1, correlation.output_unit, "J/(mol*K)")
+    basis = ("internal_energy" if correlation.property_id == "isochoric_heat_capacity"
+             else "enthalpy")
+    return PropertyEvaluation(
+        "entropy_change" if entropy else f"{basis}_change", correlation.correlation_id,
+        correlation.equation_id + ("_over_T_quadrature" if entropy else "_quadrature"),
+        result.value * factor, "J/(mol*K)" if entropy else "J/mol",
+        {"initial_temperature": initial_temperature_K, "final_temperature": final_temperature_K},
+        result.warnings)
+
+
 def caloric_polynomial_change(
     correlation: PropertyCorrelation, *, initial_temperature_K: float,
     final_temperature_K: float, entropy: bool = False,
@@ -523,8 +721,10 @@ def caloric_polynomial_change(
 
 
 def _validate_heat_capacity_correlation(correlation: PropertyCorrelation) -> None:
-    if correlation.equation_id != "cp_polynomial":
-        raise ValueError("Only cp_polynomial supports analytic heat-capacity reports")
+    if correlation.equation_id not in {
+        "cp_polynomial", "piecewise_heat_capacity", *CORRELATION_FAMILIES,
+    }:
+        raise ValueError("unsupported heat-capacity correlation")
     if correlation.property_id not in {
         "heat_capacity",
         "ideal_gas_heat_capacity",
@@ -539,6 +739,8 @@ def _validate_heat_capacity_correlation(correlation: PropertyCorrelation) -> Non
 
 
 def _validate_correlation_phase(correlation: PropertyCorrelation, phase: str) -> None:
+    from chemworld.physchem.heat_capacity import capacity_phases
+
     declared_phase = correlation.metadata.get("phase")
     if declared_phase is not None and declared_phase != phase:
         raise ValueError(
@@ -555,6 +757,9 @@ def _validate_correlation_phase(correlation: PropertyCorrelation, phase: str) ->
             f"Correlation {correlation.correlation_id!r} is for "
             f"{property_phase!r}, not {phase!r}"
         )
+    if phase is not None and phase not in capacity_phases(correlation):
+        raise ValueError(f"Correlation {correlation.correlation_id!r} formula phase "
+                         f"does not support {phase!r}")
 
 
 def _ensure_positive_heat_capacity_interval(
@@ -563,6 +768,8 @@ def _ensure_positive_heat_capacity_interval(
     final_temperature: float,
 ) -> None:
     _validate_heat_capacity_correlation(correlation)
+    if correlation.equation_id != "cp_polynomial":
+        raise ValueError("polynomial interval validation requires cp_polynomial")
     if initial_temperature <= 0 or final_temperature <= 0:
         raise ValueError("Heat-capacity integration temperatures must be positive")
     lower = min(initial_temperature, final_temperature)

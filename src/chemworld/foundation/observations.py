@@ -16,7 +16,8 @@ from chemworld.foundation.units import unit_spec
 
 LEGACY_PROJECTION_VERSION = "chemworld-gym-scalars-v1"
 QUALITIES = frozenset(
-    {"valid", "not_observed", "missing", "below_detection", "saturated", "out_of_range", "invalid"}
+    {"valid", "not_observed", "missing", "below_detection", "saturated", "out_of_range",
+     "invalid", "fit_failed"}
 )
 
 
@@ -67,7 +68,9 @@ class ObservationChannel:
         if (
             isinstance(self.value, float)
             and isnan(self.value)
-            and self.quality in {"missing", "not_observed", "below_detection", "invalid"}
+            and self.quality in {
+                "missing", "not_observed", "below_detection", "invalid", "fit_failed",
+            }
         ):
             object.__setattr__(self, "value", None)
         if isinstance(self.value, (list, tuple)):
@@ -84,12 +87,21 @@ class ObservationChannel:
 
     @property
     def observed(self) -> bool:
-        return self.quality not in {"not_observed", "missing", "invalid"}
+        return self.quality not in {"not_observed", "missing", "invalid", "fit_failed"}
+
+    @property
+    def projectable(self) -> bool:
+        """Legacy scalar availability; native censoring flags remain intact."""
+        return self.value is not None and self.quality in {"valid", "saturated"}
 
     def errors(self) -> list[str]:
         errors: list[str] = []
         if not self.channel_id or self.quality not in QUALITIES:
             errors.append("identity_or_quality")
+        if self.sample_id is not None and (
+            not isinstance(self.sample_id, str) or not self.sample_id.strip()
+        ):
+            errors.append("sample_identity")
         try:
             unit_spec(self.unit)
         except ValueError:
@@ -97,7 +109,10 @@ class ObservationChannel:
         values = self.value if isinstance(self.value, tuple) else (self.value,)
         missing = self.value is None or (isinstance(self.value, float) and isnan(self.value))
         if missing:
-            if self.quality not in {"missing", "not_observed", "below_detection", "invalid"}:
+            nullable = {"missing", "not_observed", "below_detection", "invalid", "fit_failed"}
+            if self.role == "processed":
+                nullable |= {"saturated", "out_of_range"}
+            if self.quality not in nullable:
                 errors.append("missing_quality")
         elif not values or not all(isinstance(v, (int, float)) and isfinite(v) for v in values):
             errors.append("finite_values")
@@ -132,6 +147,7 @@ class ObservationChannel:
             "acquired_trace_fit",
             "legacy_parallel_readout",
             "legacy_public_estimate",
+            "temperature_scale_conversion",
         }:
             errors.append("acquisition_relation")
         if isinstance(self.value, tuple):
@@ -209,11 +225,7 @@ class ScalarProjection:
     def project(self, channel: ObservationChannel) -> float | None:
         if isinstance(channel.value, tuple):
             raise ValueError("A finite curve requires an explicit scalar reduction")
-        if (
-            not channel.observed
-            or channel.quality in {"below_detection", "out_of_range"}
-            or channel.value is None
-        ):
+        if not channel.projectable:
             return None
         value = float(channel.value)
         # Invalid finite contracts remain visible to validation, never clipped clean.
@@ -439,10 +451,7 @@ class Observation:
     @property
     def observed_mask(self) -> dict[str, bool]:
         by_key = {
-            p.key: (
-                self.channel(p.channel_id).observed
-                and self.channel(p.channel_id).quality not in {"below_detection", "out_of_range"}
-            )
+            p.key: self.channel(p.channel_id).projectable
             for p in self.projection
         }
         return {key: by_key.get(key, False) for key in self._mask_keys}
@@ -464,6 +473,8 @@ class Observation:
                     return list(reading) if isinstance(reading, tuple) else reading
                 if set(value) == {"$channel_axis"}:
                     return list(self.channel(value["$channel_axis"]).axis.values)
+                if set(value) == {"$channel_uncertainty"}:
+                    return self.channel(value["$channel_uncertainty"]).uncertainty
                 return {key: expand(item) for key, item in value.items()}
             if isinstance(value, list):
                 return [expand(item) for item in value]
@@ -483,6 +494,18 @@ class Observation:
         for c in self.channels:
             if any(source not in ids or source == c.channel_id for source in c.derived_from):
                 errors.append(f"{c.channel_id}:source")
+            elif c.acquisition_relation == "acquired_trace_fit":
+                if not c.derived_from:
+                    errors.append(f"{c.channel_id}:fit_source")
+                for source in c.derived_from:
+                    raw = self.channel(source)
+                    if (raw.sample_id, raw.sampled_at) != (c.sample_id, c.sampled_at):
+                        errors.append(f"{c.channel_id}:source_acquisition")
+                    if (
+                        raw.available_at.clock_id == c.available_at.clock_id
+                        and raw.available_at.time_s > c.available_at.time_s
+                    ):
+                        errors.append(f"{c.channel_id}:source_availability")
         remaining = {c.channel_id: set(c.derived_from) for c in self.channels}
         while remaining:
             ready = {key for key, sources in remaining.items() if not sources}
@@ -503,6 +526,44 @@ class Observation:
             elif self.channel(p.channel_id).shape:
                 errors.append(f"{p.key}:curve_projection")
         return errors
+
+    def with_acquisition(self, acquisition: dict[str, Any]) -> Observation:
+        """Bind the executed receipt once, including instantaneous instruments.
+
+        The physical transaction (or shared-clock queue) owns timing and sample
+        identity. Instrument callbacks own signals, never these execution facts.
+        """
+        native = self.native_record()
+        timing = {
+            key: deepcopy(acquisition[key])
+            for key in ("sample_id", "sampled_at", "available_at")
+        }
+        native["channels"] = [{**channel, **timing} for channel in native["channels"]]
+        native["raw_template"]["acquisition"] = deepcopy(acquisition)
+        return type(self).from_native_record(native)
+
+    def terminal_quality_errors(self, required: tuple[str, ...]) -> list[str]:
+        """Detection-limit censoring is evidence; failed or absent assays are not.
+
+        A declared negative crystal recovery can legitimately leave size/purity
+        undefined; its explicit outcome remains visible alongside the assay.
+        """
+        negative = self.raw_signal.get("sample_outcome", {})
+        undefined = (
+            set(negative.get("undefined_observables", ()))
+            if negative.get("status") == "negative_result" else set()
+        )
+        channels = {channel.channel_id: channel for channel in self.channels}
+        keys = required or tuple(
+            c.channel_id for c in self.channels if c.role == "processed"
+        ) or tuple(channels)
+        if not keys:
+            return ["terminal:empty"]
+        return [
+            f"{key}:{channels[key].quality if key in channels else 'absent'}"
+            for key in keys if key not in undefined
+            and (key not in channels or channels[key].quality not in {"valid", "below_detection"})
+        ]
 
     def native_record(self) -> dict[str, Any]:
         return {

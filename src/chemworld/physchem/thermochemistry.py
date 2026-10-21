@@ -9,11 +9,12 @@ constants from species Gibbs energies.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import pairwise
-from math import exp, isfinite, log
+from math import exp, fsum, isfinite, log
 from typing import Any
 
+from chemworld.physchem.property_reports import CaloricReference
 from chemworld.physchem.reaction_network import R_J_PER_MOL_K
 from chemworld.physchem.thermochemistry_cards import thermochemistry_model_cards
 
@@ -318,11 +319,136 @@ class ReactionThermoResult:
         }
 
 
+@dataclass(frozen=True)
+class CorrelationSpeciesThermo:
+    """Existing Cp/H/S correlations and an explicit datum in the reaction API.
+
+    NASA7 and source-derived caloric curves produce the same SpeciesThermoState.
+    This adapter owns neither a second thermal inventory nor a reaction solver.
+    """
+
+    species_id: str
+    heat_capacity: Any
+    reference: CaloricReference
+    composition: dict[str, float] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if (not self.species_id or self.reference.phase is None
+                or self.reference.energy_basis != "enthalpy"
+                or self.reference.entropy_J_mol_K is None):
+            raise ValueError("species thermochemistry requires explicit phase, H datum and S datum")
+        self.evaluate(self.reference.temperature_K)
+
+    @property
+    def reference_pressure_Pa(self):  # noqa: N802 -- existing species thermochemistry protocol
+        return self.reference.pressure_Pa
+
+    def evaluate(self, temperature_K):
+        from chemworld.physchem.property_packages import evaluate_caloric_correlation
+
+        values = evaluate_caloric_correlation(self.heat_capacity, reference=self.reference,
+            temperature_K=temperature_K,
+            quantities=("cp", "enthalpy", "entropy", "chemical_potential"))
+        cp, enthalpy, entropy, gibbs = (values[key].value
+            for key in ("cp", "enthalpy", "entropy", "chemical_potential"))
+        return SpeciesThermoState(self.species_id, temperature_K, cp/R_J_PER_MOL_K,
+            enthalpy/(R_J_PER_MOL_K*temperature_K), entropy/R_J_PER_MOL_K,
+            cp, enthalpy, entropy, gibbs, self.heat_capacity.correlation_id)
+
+    def to_dict(self):
+        return {"model": "correlation-species-thermo-v1", "species_id": self.species_id,
+                "heat_capacity": self.heat_capacity.to_dict(),
+                "reference": self.reference.to_dict(),
+                "composition": dict(self.composition)}
+
+    @classmethod
+    def from_dict(cls, payload):
+        from chemworld.physchem.heat_capacity import heat_capacity_from_dict
+
+        if payload["model"] != "correlation-species-thermo-v1":
+            raise ValueError("unsupported species thermochemistry model")
+        return cls(payload["species_id"], heat_capacity_from_dict(payload["heat_capacity"]),
+                   CaloricReference(**payload["reference"]), dict(payload["composition"]))
+
+
+def formation_entropy(*, formation_enthalpy_J_mol, formation_gibbs_J_mol, temperature_K=298.15):
+    """(Hf-Gf)/T: formation entropy, distinct from absolute standard entropy."""
+    _positive(temperature_K, "temperature_K")
+    _finite(formation_enthalpy_J_mol, "formation_enthalpy_J_mol")
+    _finite(formation_gibbs_J_mol, "formation_gibbs_J_mol")
+    return (formation_enthalpy_J_mol-formation_gibbs_J_mol)/temperature_K
+
+
+def formation_gibbs_energy(reference, elemental_references, elemental_coefficients):
+    """Gibbs energy of one mole formed from explicit elemental reference species.
+
+    All H/S data must share temperature, pressure and enthalpy basis. Nonzero
+    elemental reference enthalpies remain explicit; absolute entropy is not Sf.
+    Elemental coefficients can come from standard_formation_reaction, divided
+    by its compound coefficient when integer stoichiometry was requested.
+    """
+    references, coefficients = tuple(elemental_references), tuple(elemental_coefficients)
+    if not references or len(references) != len(coefficients):
+        raise ValueError("elemental references and coefficients must align")
+    if any(not isfinite(v) or v <= 0 or isinstance(v, bool) for v in coefficients):
+        raise ValueError("elemental coefficients must be finite and positive")
+    for item in (reference, *references):
+        if (item.energy_basis != "enthalpy" or item.entropy_J_mol_K is None
+                or item.phase is None or item.temperature_K != reference.temperature_K
+                or item.pressure_Pa != reference.pressure_Pa):
+            raise ValueError("formation references require matching T/P and explicit phase/H/S")
+    delta_h = reference.energy_J_mol-fsum(c*r.energy_J_mol
+                                        for c, r in zip(coefficients, references, strict=True))
+    delta_s = reference.entropy_J_mol_K-fsum(c*r.entropy_J_mol_K
+                                           for c, r in zip(coefficients, references, strict=True))
+    return delta_h-reference.temperature_K*delta_s
+
+
+def formation_enthalpy_basis(*, vaporization_enthalpy_J_mol,
+                             liquid_formation_enthalpy_J_mol=None,
+                             gas_formation_enthalpy_J_mol=None, temperature_K=298.15):
+    """Convert liquid/gas Hf using Hvap at the SAME explicitly declared temperature."""
+    _positive(temperature_K, "temperature_K")
+    _finite(vaporization_enthalpy_J_mol, "vaporization_enthalpy_J_mol")
+    if vaporization_enthalpy_J_mol < 0:
+        raise ValueError("vaporization enthalpy must be nonnegative")
+    if (liquid_formation_enthalpy_J_mol is None) == (gas_formation_enthalpy_J_mol is None):
+        raise ValueError("supply exactly one liquid or gas formation enthalpy")
+    if liquid_formation_enthalpy_J_mol is not None:
+        _finite(liquid_formation_enthalpy_J_mol, "liquid_formation_enthalpy_J_mol")
+        return liquid_formation_enthalpy_J_mol+vaporization_enthalpy_J_mol
+    _finite(gas_formation_enthalpy_J_mol, "gas_formation_enthalpy_J_mol")
+    return gas_formation_enthalpy_J_mol-vaporization_enthalpy_J_mol
+
+
+def formation_reference_phase_change(reference, *, component_id, target_phase,
+                                     heat_capacity_correlations, transitions):
+    """Convert the phase of Hf at the same T using the existing Cp/latent-heat path.
+
+    Entropy of a new phase is not inferred from enthalpy. Its datum is left absent
+    until supplied; returning the same phase preserves the original full datum.
+    """
+    from chemworld.physchem.enthalpy import phase_path_enthalpy_report
+
+    if reference.energy_basis != "enthalpy" or reference.phase is None:
+        raise ValueError("phase conversion requires a declared enthalpy/phase reference")
+    if target_phase == reference.phase:
+        return reference
+    path = phase_path_enthalpy_report(component_id=component_id,
+        heat_capacity_correlations=heat_capacity_correlations, transitions=transitions,
+        initial_phase=reference.phase, final_phase=target_phase,
+        initial_temperature_K=reference.temperature_K, final_temperature_K=reference.temperature_K,
+        reference_temperature_K=reference.temperature_K, validity_policy="raise")
+    return replace(reference, phase=target_phase,
+        energy_J_mol=reference.energy_J_mol+path.total_enthalpy_J_mol, entropy_J_mol_K=None,
+        source_note=reference.source_note+f"; same-T phase path {path.transition_ids}")
+
+
 def reaction_thermochemistry(
     *,
     reaction_id: str,
     stoichiometry: Mapping[str, float],
-    species_thermo: Mapping[str, NASA7SpeciesThermo],
+    species_thermo: Mapping[str, NASA7SpeciesThermo | CorrelationSpeciesThermo],
     temperature_K: float,
 ) -> ReactionThermoResult:
     """Evaluate reaction Delta H, Delta S, Delta G, and K from species thermo."""
@@ -332,6 +458,10 @@ def reaction_thermochemistry(
     _positive(temperature_K, "temperature_K")
     if not stoichiometry:
         raise ValueError("stoichiometry cannot be empty")
+    pressures = {species_thermo[key].reference_pressure_Pa
+                 for key in stoichiometry if key in species_thermo}
+    if len(pressures) > 1:
+        raise ValueError("reaction standard states require the same reference pressure")
     species_states: dict[str, SpeciesThermoState] = {}
     delta_h = 0.0
     delta_s = 0.0
@@ -341,7 +471,7 @@ def reaction_thermochemistry(
         if coefficient == 0.0:
             raise ValueError("zero stoichiometric coefficients are not stored")
         if species_id not in species_thermo:
-            raise KeyError(f"missing NASA7 thermochemistry for species {species_id!r}")
+            raise KeyError(f"missing species thermochemistry for species {species_id!r}")
         state = species_thermo[species_id].evaluate(temperature_K)
         species_states[species_id] = state
         delta_h += coefficient * state.enthalpy_J_mol
@@ -399,11 +529,16 @@ def _positive(value: float, name: str) -> None:
 
 
 __all__ = [
+    "CorrelationSpeciesThermo",
     "NASA7SpeciesThermo",
     "NASA7TemperatureSegment",
     "ReactionThermoResult",
     "SpeciesThermoState",
     "equilibrium_constant_from_delta_g",
+    "formation_enthalpy_basis",
+    "formation_entropy",
+    "formation_gibbs_energy",
+    "formation_reference_phase_change",
     "reaction_thermochemistry",
     "thermochemistry_model_cards",
 ]

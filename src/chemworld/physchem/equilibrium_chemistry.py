@@ -1218,6 +1218,7 @@ def aqueous_ph_observation(
     measured_pH = result.pH + calibration_offset_pH + noise
     if resolution_pH > 0.0:
         measured_pH = round(measured_pH / resolution_pH) * resolution_pH
+    saturated = measured_pH < 0.0 or measured_pH > 14.0
     measured_pH = max(0.0, min(14.0, measured_pH))
     temperature_raw = result.metadata.get("temperature_K", 298.15)
     temperature_K = (
@@ -1238,6 +1239,8 @@ def aqueous_ph_observation(
             "electrode_mV": electrode_mV,
             "temperature_K": temperature_K,
             "resolution_pH": resolution_pH,
+            "quality": "saturated" if saturated else "valid",
+            "calibration": {"reference_pH": 7.0, "slope_mV_pH": nernst_slope_mV_pH},
         },
         processed_estimate={
             "pH": measured_pH,
@@ -1513,24 +1516,13 @@ def solid_solubility_mole_fraction(
     solid_heat_capacity_J_mol_K: float = 0.0,
     activity_coefficient: float = 1.0,
 ) -> float:
-    """Return a eutectic-style ideal solid solubility mole fraction."""
+    """Shared eutectic kernel; impossible mole fractions are no longer clipped."""
+    from chemworld.physchem.solubility import solid_solubility
 
-    _positive(temperature_K, "temperature_K")
-    _positive(melting_temperature_K, "melting_temperature_K")
-    _positive(enthalpy_fusion_J_mol, "enthalpy_fusion_J_mol")
-    _positive(activity_coefficient, "activity_coefficient")
-    _finite(liquid_heat_capacity_J_mol_K, "liquid_heat_capacity_J_mol_K")
-    _finite(solid_heat_capacity_J_mol_K, "solid_heat_capacity_J_mol_K")
-    delta_cp = liquid_heat_capacity_J_mol_K - solid_heat_capacity_J_mol_K
-    exponent = -(
-        (
-            enthalpy_fusion_J_mol * (1.0 - temperature_K / melting_temperature_K)
-            - delta_cp * (melting_temperature_K - temperature_K)
-        )
-        / (R_J_PER_MOL_K * temperature_K)
-        + delta_cp / R_J_PER_MOL_K * log(melting_temperature_K / temperature_K)
+    return solid_solubility(
+        temperature_K, melting_temperature_K, enthalpy_fusion_J_mol,
+        liquid_heat_capacity_J_mol_K, solid_heat_capacity_J_mol_K, activity_coefficient,
     )
-    return _clip01(exp(exponent) / activity_coefficient)
 
 
 def _element_totals(

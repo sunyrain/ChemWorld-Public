@@ -49,3 +49,32 @@ def solid_instrument_spec():
         synthetic_boundary="committed solid phases; no crystallographic spectrum",
     )
     return InstrumentSpec(definition, contract, native_observer=read_solid)
+
+
+def read_calphad(state, action, rng):
+    phases = tuple(state.phases.phases.values())
+    values = {"temperature": ("K", state.temperature_K),
+              "phase_count": ("dimensionless", len(phases))}
+    for phase in phases:
+        for element, amount in phase.species_amounts_mol.items():
+            values[f"amount:{element}"] = ("mol", amount)
+        for i, subl in enumerate(phase.metadata["site_fractions"]):
+            for species, fraction in subl.items():
+                values[f"site:{i}:{species}"] = ("dimensionless", fraction)
+    return Observation(
+        channels=tuple(ObservationChannel(key, unit, value, uncertainty=0, quality="valid")
+                       for key, (unit, value) in values.items()),
+        instrument_id="calphad_phase_meter", cost=0.01, sample_consumed_L=0,
+    )
+
+
+def calphad_instrument_spec():
+    definition = Instrument("calphad_phase_meter", "Committed CEF phase inventory gauge",
+                            (), 0.01, 0, {})
+    contract = replace(
+        transport_instrument_spec().contract, instrument_id=definition.id,
+        raw_signal_schema={"temperature": {"unit": "K"}},
+        calibration_profile="native-cef-inventory-v1",
+        synthetic_boundary="committed elemental amounts and site fractions; no diffraction",
+    )
+    return InstrumentSpec(definition, contract, native_observer=read_calphad)

@@ -4,7 +4,9 @@ from chemworld.physchem.enthalpy import (
     MixtureEnthalpyLedger,
     PhaseEnthalpyReport,
     PhaseTransitionSpec,
+    caloric_correlation_change,
     caloric_polynomial_change,
+    caloric_temperature,
     heat_capacity_report,
     mixture_enthalpy_ledger,
     phase_path_enthalpy_report,
@@ -17,7 +19,12 @@ from chemworld.physchem.hazard_properties import (
     volatility_risk_from_psat,
 )
 from chemworld.physchem.property_cards import property_correlation_model_cards
-from chemworld.physchem.property_equations import evaluate_correlation
+from chemworld.physchem.property_equations import (
+    CorrelationIntegral,
+    correlation_temperature_derivative,
+    evaluate_correlation,
+    integrate_correlation,
+)
 from chemworld.physchem.property_packages import (
     ComponentPropertyPackage,
     PropertyPackageThermodynamics,
@@ -75,6 +82,7 @@ __all__ = [
     "STANDARD_PRESSURE_PA",
     "CaloricReference",
     "ComponentPropertyPackage",
+    "CorrelationIntegral",
     "MixtureEnthalpyLedger",
     "MixtureTransportLedger",
     "MixtureVolumeLedger",
@@ -91,7 +99,10 @@ __all__ = [
     "ValidityPolicy",
     "VaporPressureReport",
     "binary_gas_diffusivity_fuller_report",
+    "caloric_correlation_change",
     "caloric_polynomial_change",
+    "caloric_temperature",
+    "correlation_temperature_derivative",
     "density_to_molar_volume_m3_mol",
     "evaluate_caloric_correlation",
     "evaluate_correlation",
@@ -100,6 +111,7 @@ __all__ = [
     "gas_thermal_conductivity_dippr9b_report",
     "heat_capacity_report",
     "ideal_gas_molar_volume_report",
+    "integrate_correlation",
     "liquid_mixture_thermal_conductivity_dippr9h_ledger",
     "mixture_density",
     "mixture_enthalpy_ledger",

@@ -1,0 +1,16 @@
+{
+  "version": "chemworld-atomic-data-1",
+  "reference_distribution": "periodictable 2.1.0",
+  "data_file_license": "Public domain (mass.py: Paul Kienzle)",
+  "identity_reference": "chemicals 1.5.2 public periodic_table identity facts",
+  "mass_reference": "Wang et al. (2021), AME2020, DOI:10.1088/1674-1137/abddaf",
+  "weight_reference": "Prohaska et al. (2022), CIAAW 2021, DOI:10.1515/pac-2019-0603",
+  "abundance_reference": "CIAAW 2021; representative N/Ar/U/Pb entries as stated by source",
+  "abundance_notes": "Intervals retained; no midpoint normalization. Missing stays missing.",
+  "standard_weight_notes": "Missing standard weights remain unknown, not mass numbers.",
+  "compatibility_notes": "Original 26 default weights retain their separate native source.",
+  "elements": 118,
+  "isotopes": 2939,
+  "standard_weight_records": 84,
+  "abundance_records": 289
+}

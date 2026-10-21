@@ -8,6 +8,7 @@ uv run --no-sync ruff check src tests scripts examples
 uv run --no-sync mypy src/chemworld
 uv run --no-sync pytest -q
 uv run --no-sync mkdocs build --strict
+uv run --no-sync python scripts/build_explorer_site.py --output site/explore
 ```
 
 Use focused tests while implementing. For packaging changes, run
@@ -31,3 +32,10 @@ a concise question, coverage, measurements and fixed acceptance rules before exe
 Proposed external-model work starts with documented equations and interface
 behavior, then bounded independent implementations checked against reference
 calculations. Preserve licensing and provenance for any reused code or data.
+
+The static explorer source lives in `web/`; its guide prose lives in `docs/`.
+Chinese native guides marked as preview translations should be checked against
+the English source when editing scientific terms. Build outputs stay in ignored
+`site/` and are published only on the separate `gh-pages` hosting branch.
+The player exports observed public fields from the committed historical test
+fixture. It does not execute experiments or provide exact-replay submissions.

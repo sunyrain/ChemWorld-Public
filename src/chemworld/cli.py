@@ -377,6 +377,13 @@ def _render(args: argparse.Namespace) -> None:
     from chemworld.data.logging import TrajectoryLogger, to_builtin
     from chemworld.envs.spaces import to_observation
     from chemworld.runtime import ChemWorldRuntime
+    from chemworld.runtime.lifecycle import initialization_boundaries
+
+    boundaries = initialization_boundaries(
+        _load_json_file(args.initializations) if args.initializations else None
+    )
+    if any(index >= len(args.actions) for index in boundaries):
+        raise ValueError("initialization boundary must precede a recorded action")
 
     outputs = [Path(output).resolve() for output in (args.trajectory, args.snapshot) if output]
     if len(outputs) != len(set(outputs)):
@@ -397,11 +404,13 @@ def _render(args: argparse.Namespace) -> None:
         task_info = {**env.task_info(), **env.evaluator_provenance()}
         logger = TrajectoryLogger(args.trajectory) if args.trajectory else None
         for step, action_path in enumerate(args.actions, start=1):
+            if step - 1 in boundaries:
+                env.reset(options=boundaries[step - 1])
             action = _load_json_file(action_path)
             result = env.execute(action)
             if logger is not None:
                 logger.log(
-                    task_info=task_info, step=step, action=action,
+                    task_info={**task_info, **env.evaluator_provenance()}, step=step, action=action,
                     observation=to_observation(result.observation.values), reward=result.reward,
                     terminated=result.terminated, truncated=result.truncated, info=result.info,
                     agent_metadata={"agent_id": "cli-event-sequence"},
@@ -684,6 +693,8 @@ def build_parser() -> argparse.ArgumentParser:
     render_parser.add_argument("--format", choices=("ansi", "json"), default="ansi")
     render_parser.add_argument("--trajectory", help="Write a replayable JSONL event history.")
     render_parser.add_argument("--snapshot", help="Save private simulator state for continuation.")
+    render_parser.add_argument("--initializations",
+                               help="Evaluator JSON: entity initialization options after actions.")
     render_parser.set_defaults(func=_render)
 
     submission_parser = subparsers.add_parser("submission", help="Manage submission bundles.")

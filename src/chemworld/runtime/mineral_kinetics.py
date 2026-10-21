@@ -1,7 +1,7 @@
 """Material-owned calcite surface geometry and one shared-clock kinetic owner."""
 
 from dataclasses import replace
-from math import isclose, isfinite
+from math import isclose
 
 from chemworld.foundation import species_with_added_initial_amounts
 from chemworld.foundation.state_ledgers import PhaseLedger
@@ -158,23 +158,14 @@ class MineralKineticsRuntime:
 
 def route_mineral_phase(state, physics, action):
     """Move the selected material phase, its original provenance and its geometry."""
-    edges = state.metadata["component_network"]["connections"]
-    index, fraction = action.get("connection"), action.get("transfer_fraction")
-    if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(edges):
-        raise ValueError("unknown mineral phase connection")
-    if (
-        isinstance(fraction, bool)
-        or not isinstance(fraction, int | float)
-        or not isfinite(fraction)
-        or not 0 < fraction <= 1
-    ):
-        raise ValueError("mineral phase fraction must be in (0,1]")
-    edge = edges[index]
+    from chemworld.runtime.component_network import resolve_material_connection
+
+    edge, fraction = resolve_material_connection(
+        state, action, source_ports={"aqueous", "calcite"}
+    )
     phase_id = edge["source"]["port"]
     if (
-        edge["source_vessel"] != state.vessel_id
-        or phase_id not in {"aqueous", "calcite"}
-        or edge["target"]["port"] != phase_id
+        edge["target"]["port"] != phase_id
     ):
         raise ValueError("select a matching aqueous or calcite material outlet")
     target = state.inactive_vessels[edge["target_vessel"]]
@@ -214,17 +205,10 @@ def route_mineral_phase(state, physics, action):
                 raise ValueError(
                     "mineral portions with different size histories require separate families"
                 )
-        portion = state.state_slots.material(phase_id="calcite").portion(fraction, target.vessel_id)
-        remaining = state.state_slots.material(phase_id="calcite").portion(
-            1 - fraction, state.vessel_id
+        source_slots, portion = state.state_slots.split_material(
+            fraction, state.vessel_id, target.vessel_id, phase_id="calcite"
         )
-        source_slots = StateSlots((*state.state_slots.stationary().slots, *remaining.slots))
-        target_slots = StateSlots(
-            (
-                *target.state_slots.stationary().slots,
-                *target.state_slots.material().merge(portion).slots,
-            )
-        )
+        target_slots = target.state_slots.receive_material(portion)
 
     def candidate(local, sign, slots):
         amounts = {k: n + sign * moved.get(k, 0) for k, n in local.species_amounts.items()}

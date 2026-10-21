@@ -162,7 +162,7 @@ def sorbent_world_spec(spec, thermodynamics, component_formulas, *, mobile=False
             },
         ]
     physics = CompositionPhysics(
-        network, states, thermal_models=models, sorbent_models={spec.sorbent_id: spec}
+        network, states, models={"thermal": models, "sorbent": {spec.sorbent_id: spec}}
     )
     return WorldCompositionSpec.from_dict(
         {

@@ -1,5 +1,35 @@
 # Current foundation
 
+## Source synchronization {#source-synchronization}
+
+The 21 October update imports committed foundation work through source revision
+`8dc31912`. Uncommitted development changes are outside this snapshot. This is a
+development source update, not a new PyPI release or a rerun of frozen scientific evidence.
+
+- Module declarations now drive model codecs, advancement, state ownership and snapshot continuation.
+- Shared time supports finite heterogeneous vessel groups, declared open flow systems,
+  multiple devices, FIFO measurement queues, maintenance and retained equipment state.
+- Native parameter/measurement inputs and finite calibration use public observations.
+- Scientific additions include residual/DAE infrastructure, bounded SPMe/DFN and particle
+  distributions, expanded property/data methods, selected CALPHAD/ChemSage models,
+  and supported SBML/SED-ML experiment contracts. Each retains its documented limits.
+- The [new website](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en)
+  adds a capability atlas, searchable index, bilingual domain reader and saved-record player.
+
+Repository tests and runnable examples are distributed with their implementations.
+References to development qualification notes describe their original source context;
+those research-workspace records are not a new public evidence release. Historical
+public evidence below remains tied to its original runtime.
+
+Local synchronization checks on Windows/Python 3.11: test collection found 3,468
+cases. The focused 710-case run initially passed 708 and failed two archive-import
+checks before newly synchronized modules were added to Git's packaging selection.
+After inclusion, both affected checks and the atomic-data archive check passed
+(3/3); the packaging progress/error-reporting checks passed separately (6/6).
+The strict bilingual documentation build and all 17 browser checks passed, including
+five viewport widths, language preservation, observed-only plotting and downloads.
+These focused checks do not claim a new full-suite or cross-platform qualification.
+
 The October 2026 development snapshot brings the public runtime up to the current
 ChemWorld foundation. Package metadata is `0.5.0.dev0`; this is a source update,
 not a new frozen benchmark or a PyPI release.

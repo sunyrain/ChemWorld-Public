@@ -11,9 +11,14 @@ from math import fsum, isclose
 from typing import TYPE_CHECKING, Any
 
 from chemworld.foundation import WorldState, equipment_settings
-from chemworld.foundation.balances import MaterialExchange, TransitionBalance
+from chemworld.foundation.balances import (
+    MaterialExchange,
+    MaterialPacket,
+    TransitionBalance,
+    formal_inventory_exclusions,
+)
 from chemworld.foundation.solvents import SOLVENT_IDS
-from chemworld.runtime.full_process_contract import sample_domain
+from chemworld.runtime.full_process_contract import sample_withdrawal
 from chemworld.runtime.phase_ledger_services import action_float
 from chemworld.runtime.solvent_transport import solvent_input, solvent_outputs
 from chemworld.world.operations import MATERIAL_STOCK_FIELDS, instrument_name
@@ -34,7 +39,7 @@ class ServiceMaterialBoundary:
             return self.services.lab_schedule.boundary(before, after)
         exchanges: list[MaterialExchange] = []
         stocks: dict[str, float] = {}
-        unmodeled: list[str] = []
+        unmodeled: list[str] = list(formal_inventory_exclusions(before))
         vessel = f"vessel:{before.vessel_id}"
 
         def exchange(
@@ -47,23 +52,14 @@ class ServiceMaterialBoundary:
             )
 
         if operation in {"add_reagent", "add_component"}:
-            amounts = self.services.primitive.feed_additions(before, action)
             router = self.services.material_routing
             if router.uses_native_packets(before):
-                source_id = router.physics.feed_sources[action["component"]]
-                old_source = before.inactive_vessels[source_id].species_amounts
-                new_source = after.inactive_vessels[source_id].species_amounts
-                for key in old_source.keys() | new_source.keys() | amounts.keys():
-                    if not isclose(
-                        old_source.get(key, 0) - new_source.get(key, 0),
-                        amounts.get(key, 0),
-                        rel_tol=1e-10,
-                        abs_tol=1e-12,
-                    ):
-                        raise ValueError("finite source debit disagrees with executed feed")
+                packet = router.executed_feed(before, after, action)
+                amounts = dict(packet.amounts_mol)
                 # Both vessels are inside the existing elemental boundary.
                 unmodeled.append("fixed_temperature_feed_source_utility_heat_and_work")
             else:
+                amounts = self.services.primitive.feed_additions(before, action)
                 exchange("supply:reagent", vessel, "in", amounts, "feed")
             stocks["reagent_mol"] = fsum(amounts.values())
             # The charge counter is a consumer of the same actual additions,
@@ -122,22 +118,20 @@ class ServiceMaterialBoundary:
                     after.inactive_vessels[source_id],
                 )
                 receipt = after.metadata["last_liquid_wash"]
+                packet = MaterialPacket.from_dict(receipt["packet"])
                 volume = receipt["wash_volume_L"]
                 if (
-                    receipt["source"] != source_id
+                    (packet.source, packet.destination) != (source_id, before.vessel_id)
                     or not isclose(volume, float(action["wash_volume_L"]), abs_tol=1e-12)
                     or not isclose(source.volume_L - new_source.volume_L, volume, abs_tol=1e-12)
                 ):
                     raise ValueError("finite wash source debit differs from its actual volume")
+                packet.check_debit(source.species_amounts, new_source.species_amounts)
+                amounts = dict(packet.amounts_mol)
                 for key, amount in source.species_amounts.items():
                     expected = amount * volume / source.volume_L
                     if not isclose(
-                        amount - new_source.species_amounts[key],
-                        expected,
-                        abs_tol=1e-12,
-                        rel_tol=1e-10,
-                    ) or not isclose(
-                        receipt["amounts_mol"][key], expected, abs_tol=1e-12, rel_tol=1e-10
+                        amounts[key], expected, abs_tol=1e-12, rel_tol=1e-10
                     ):
                         raise ValueError("finite wash molecular debit disagrees with its receipt")
                 stocks["wash_solvent_L"] = volume
@@ -161,17 +155,33 @@ class ServiceMaterialBoundary:
                 abs_tol=1e-12,
             ):
                 raise ValueError("sample debit disagrees with executed withdrawal")
-            if before.phases is None:
-                raise ValueError("sampling requires phase-resolved source inventory")
-            domain = sample_domain(before)
-            available = sum(before.phases.phases[key].volume_L for key in domain)
-            if volume < 0 or volume > available:
-                raise ValueError("withdrawal exceeds source inventory")
             amounts: dict[str, float] = {}
+            entity_quantities = []
             if volume:
-                for key in domain:
-                    for species, amount in before.phases.phases[key].species_amounts_mol.items():
-                        amounts[species] = amounts.get(species, 0) + amount * volume / available
+                receipt = after.metadata.get("last_sample_packet")
+                if not isinstance(receipt, dict):
+                    raise ValueError("sampling requires the executed phase withdrawal packet")
+                packet = MaterialPacket.from_dict(receipt)
+                if (packet.source, packet.destination) != (before.vessel_id, "sink:sample") or (
+                    receipt.get("volume_L") != volume
+                ):
+                    raise ValueError("sample packet has mismatched endpoints or volume")
+                amounts = dict(packet.amounts_mol)
+                entity_quantities = receipt.get("entity_quantities", [])
+                # No host advance separates the pre-state and actual sampling
+                # point here. Timed acquisition instead retains its executed
+                # packet after the selected strategy has evolved the host.
+                if before.ledger.time_s == after.ledger.time_s:
+                    domain, _, expected, _, carried = sample_withdrawal(before, volume)
+                    expected_entities = [
+                        {"quantity": key, "unit": unit, "amount": value}
+                        for (key, unit), value in sorted(carried.conserved().items())
+                    ]
+                    if (packet != expected or receipt.get("phase_ids") != list(domain)
+                            or entity_quantities != expected_entities):
+                        raise ValueError(
+                            "sample receipt differs from the selected phase withdrawal"
+                        )
             sample_receipts = None
             if operation == "measure" and self.services.modules is not None:
                 spec = self.services.modules.instrument_specs().get(instrument)
@@ -183,6 +193,11 @@ class ServiceMaterialBoundary:
                 exchange(vessel, destination, "out", amounts, "sample")
             else:
                 exchanges.extend(sample_receipts)
+            for index, quantity in enumerate(entity_quantities):
+                exchanges.append(MaterialExchange(
+                    f"sample:entity:{index}", vessel, destination, "out",
+                    ((quantity["quantity"], quantity["amount"]),), quantity["unit"], "entity",
+                ))
 
         old_history = before.metadata.get("removed_phase_inventory_history", [])
         new_history = after.metadata.get("removed_phase_inventory_history", [])

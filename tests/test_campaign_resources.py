@@ -246,6 +246,25 @@ def test_instrument_vessel_and_final_assay_resources_are_separate() -> None:
     assert state["report_only"]["sample_consumed_L"] == pytest.approx(0.0007)
 
 
+def test_offline_start_reservation_is_bound_to_idempotent_event_and_snapshot() -> None:
+    ledger = CampaignResourceLedger(_small_card())
+    action = {"operation": "wait", "duration_s": 60}
+    counts = {"programmed_hplc": 2}
+    receipt = ledger.preflight("offline-start", action, instrument_reservation=counts)
+    assert receipt.allowed
+    assert ledger.nonfinal_instrument_uses == 0
+    assert ledger.preflight("offline-start", action, instrument_reservation=counts) == receipt
+    with pytest.raises(CampaignResourceIntegrityError, match="different action"):
+        ledger.preflight("offline-start", action, instrument_reservation={"programmed_hplc": 1})
+    outcome = _committed(instrument_uses=counts)
+    ledger.record_outcome("offline-start", action, outcome)
+    ledger.record_outcome("offline-start", action, outcome)
+    restored = CampaignResourceLedger.from_snapshot(ledger.snapshot())
+    assert restored.snapshot() == ledger.snapshot()
+    assert restored.nonfinal_instrument_uses == 2
+    assert restored.operation_attempts == 1
+
+
 def test_discard_batch_is_a_committed_lifecycle_debit_without_refunds() -> None:
     ledger = CampaignResourceLedger(_small_card())
     start_id = campaign_resource_event_id("campaign-discard", 1)

@@ -43,7 +43,13 @@ def valid_operations(env: gym.Env[Any, Any]) -> list[str]:
 
 def action_mask(env: gym.Env[Any, Any]) -> list[bool]:
     base = _base_env(env)
-    return list(base.operation_validator.action_mask(base._state))
+    validator = base.operation_validator
+    installed = dict(zip(
+        validator.operation_types, validator.action_mask(base._state), strict=True,
+    ))
+    # Fixed RL coordinates retain their published identities when native
+    # declarations add operations outside that transport representation.
+    return [installed.get(operation, False) for operation in OPERATION_TYPES]
 
 
 def validate_event_action(action: dict[str, Any], env: gym.Env[Any, Any]) -> dict[str, Any]:
@@ -348,6 +354,14 @@ class RLObservationWrapper(gym.Wrapper[Any, Any, Any, Any], RecordConstructorArg
         vector_values = [*values, *mask] if self.include_mask else values
         payload = dict(info)
         self.last_audit_metadata = {"campaign_id": payload.pop("campaign_id", None)}
+        # Gym recursively batches dictionaries but cannot merge None and a
+        # dictionary at the same path. Missing values use its absent-key mask;
+        # the base environment retains the complete audit payload.
+        def present(values):
+            return {key: present(value) if isinstance(value, dict) else value
+                    for key, value in values.items() if value is not None}
+
+        payload = present(payload)
         payload["rl_view"] = view
         payload["observation_mask"] = np.asarray(mask, dtype=np.float32)
         payload["cost_signal"] = float(view["cost"])

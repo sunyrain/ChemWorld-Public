@@ -53,6 +53,9 @@ def check_operation_preconditions(
         instruments = list(constitution.instruments.values())
         instrument = instruments[int(instrument_id) % len(instruments)]
     requires_terminated = bool(instrument.requires_terminated) if instrument is not None else False
+    if (operation_type == "measure" and state.phase == "formal"
+            and instrument is not None and instrument.sample_volume_L == 0):
+        has_volume = True
     final_assay_done = instrument is not None and instrument_completed(
         state.equipment, instrument.id
     )

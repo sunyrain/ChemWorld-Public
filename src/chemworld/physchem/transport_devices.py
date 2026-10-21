@@ -7,10 +7,11 @@ The utility is an explicit fixed-temperature thermal boundary.
 
 from dataclasses import asdict, dataclass, field
 from math import isfinite
+from types import MappingProxyType
 
 import numpy as np
-from scipy.optimize import brentq
 
+from chemworld.physchem.enthalpy import caloric_temperature
 from chemworld.physchem.phase_inventory import PhaseInventoryRates, integrate_phase_inventory
 from chemworld.physchem.property_packages import ComponentPropertyPackage, evaluate_property_state
 from chemworld.physchem.property_reports import CaloricReference
@@ -35,6 +36,7 @@ class LiquidTransportProperties:
     packages: tuple[ComponentPropertyPackage, ...]
     temperature_bounds_K: tuple[float, float] = (280.0, 340.0)
     pressure_Pa: float = 101325.0
+    caloric_references: dict[str, CaloricReference] | None = None
 
     def __post_init__(self):
         if not self.packages or len(set(self.component_ids)) != len(self.packages):
@@ -46,6 +48,16 @@ class LiquidTransportProperties:
             or self.pressure_Pa <= 0
         ):
             raise ValueError("liquid transport requires finite positive T/P bounds")
+        references = self.caloric_references
+        if references is None:
+            references = {k: CaloricReference(phase="liquid") for k in self.component_ids}
+        if set(references) != set(self.component_ids) or any(
+            ref.phase != "liquid" or ref.energy_basis != "enthalpy"
+            or ref.pressure_Pa != self.pressure_Pa
+            for ref in references.values()
+        ):
+            raise ValueError("liquid transport needs matching liquid H references at its pressure")
+        object.__setattr__(self, "caloric_references", MappingProxyType(dict(references)))
 
     @property
     def component_ids(self):
@@ -53,9 +65,22 @@ class LiquidTransportProperties:
 
     @property
     def references(self):
-        return {k: CaloricReference(phase="liquid") for k in self.component_ids}
+        return self.caloric_references
 
     def enthalpy(self, amounts, temperature):
+        return self._caloric_quantity(amounts, temperature, "enthalpy")
+
+    def heat_capacity(self, amounts, temperature):
+        """dH/dT at fixed liquid amounts and the same declared pressure/reference."""
+        return self._caloric_quantity(amounts, temperature, "cp")
+
+    def _caloric_quantity(self, amounts, temperature, quantity):
+        if (
+            set(amounts) != set(self.component_ids)
+            or any(not isfinite(n) or n < 0 for n in amounts.values())
+            or not self.temperature_bounds_K[0] <= temperature <= self.temperature_bounds_K[1]
+        ):
+            raise ValueError("liquid caloric request leaves its inventory or temperature domain")
         if not sum(amounts.values()):
             return 0.0
         report = evaluate_property_state(
@@ -64,12 +89,14 @@ class LiquidTransportProperties:
             temperature_K=temperature,
             pressure_Pa=self.pressure_Pa,
             phase="liquid",
-            quantities=("enthalpy",),
+            quantities=(quantity,),
             references=self.references,
         )
-        return sum(amounts.values()) * report.properties["enthalpy"].value
+        return sum(amounts.values()) * report.properties[quantity].value
 
     def evaluate(self, amounts, temperature):
+        if not self.temperature_bounds_K[0] <= temperature <= self.temperature_bounds_K[1]:
+            raise ValueError("liquid transport request leaves its temperature domain")
         return liquid_transport_state(
             self.packages, amounts, temperature, self.pressure_Pa, self.references
         )
@@ -79,6 +106,7 @@ class LiquidTransportProperties:
             "packages": [p.to_dict() for p in self.packages],
             "temperature_bounds_K": list(self.temperature_bounds_K),
             "pressure_Pa": self.pressure_Pa,
+            "caloric_references": {key: ref.to_dict() for key, ref in self.references.items()},
         }
 
     @classmethod
@@ -93,6 +121,8 @@ class LiquidTransportProperties:
             ),
             tuple(value["temperature_bounds_K"]),
             value["pressure_Pa"],
+            ({key: CaloricReference(**ref) for key, ref in value["caloric_references"].items()}
+             if "caloric_references" in value else None),
         )
 
 
@@ -195,6 +225,8 @@ class FiniteTransportSpec:
     capacities_j_k: tuple[float, float] = (5.0, 5.0)
     receiver_capacity_L: float = 0.1
     pickup_volume_L: float = 1e-6
+    support_reference_temperature_K: float = 298.15
+    caloric_algorithm: str = "residual"
 
     def __post_init__(self):
         if (
@@ -205,6 +237,9 @@ class FiniteTransportSpec:
             or self.receiver_capacity_L <= 0
             or not isfinite(self.pickup_volume_L)
             or self.pickup_volume_L <= 0
+            or not isfinite(self.support_reference_temperature_K)
+            or self.support_reference_temperature_K <= 0
+            or self.caloric_algorithm not in {"residual", "brentq"}
         ):
             raise ValueError("finite tank geometry and heat capacities are required")
         lo, hi = self.properties.temperature_bounds_K
@@ -213,12 +248,20 @@ class FiniteTransportSpec:
 
     def enthalpy(self, index, amounts, temperature):
         return self.properties.enthalpy(amounts, temperature) + self.capacities_j_k[index] * (
-            temperature - 298.15
+            temperature - self.support_reference_temperature_K
         )
 
     def at_ph(self, index, amounts, enthalpy):
-        lo, hi = self.properties.temperature_bounds_K
-        return brentq(lambda t: self.enthalpy(index, amounts, t) - enthalpy, lo, hi, xtol=1e-10)
+        options = {} if self.caloric_algorithm == "brentq" else {
+            "heat_capacity_at_temperature": lambda t: (
+                self.properties.heat_capacity(amounts, t) + self.capacities_j_k[index]
+            ),
+        }
+        return caloric_temperature(
+            lambda t: self.enthalpy(index, amounts, t), enthalpy,
+            self.properties.temperature_bounds_K, energy_basis="enthalpy",
+            algorithm=self.caloric_algorithm, **options,
+        )
 
     def to_dict(self):
         return {
@@ -226,9 +269,11 @@ class FiniteTransportSpec:
             "pump": self.pump.to_dict(),
             "path": self.path.to_dict(),
             "source_vessel_id": self.source_vessel_id,
+            "support_reference_temperature_K": self.support_reference_temperature_K,
             "capacities_j_k": list(self.capacities_j_k),
             "receiver_capacity_L": self.receiver_capacity_L,
             "pickup_volume_L": self.pickup_volume_L,
+            "caloric_algorithm": self.caloric_algorithm,
         }
 
     @classmethod
@@ -288,13 +333,15 @@ def transport_rates(spec, state, temperatures, requested_flow_m3_s):
         # Only trial property evaluation is bounded. An independent event
         # stops an unsupported outlet before any inventory/work is committed;
         # the derivative below always retains the full hydraulic energy.
-        stream_temperature = brentq(
-            lambda t: (
-                spec.properties.enthalpy(n, t) / sum(n.values()) - min(max(target_h, low_h), high_h)
-            ),
-            lo,
-            hi,
-            xtol=1e-10,
+        stream_temperature = caloric_temperature(
+            lambda t: spec.properties.enthalpy(n, t) / sum(n.values()),
+            min(max(target_h, low_h), high_h), (lo, hi), energy_basis="enthalpy",
+            algorithm=spec.caloric_algorithm,
+            **({} if spec.caloric_algorithm == "brentq" else {
+                "heat_capacity_at_temperature": lambda t: (
+                    spec.properties.heat_capacity(n, t) / sum(n.values())
+                ),
+            }),
         )
     stream_fluid, _, stream_volume = spec.properties.evaluate(n, stream_temperature)
     stream_flow = flow * stream_volume / volume

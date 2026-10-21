@@ -6,7 +6,7 @@ from chemworld.physchem.maturity import MaturityLevel, ModelCard, ValidationEvid
 
 
 def thermochemistry_model_cards() -> tuple[ModelCard, ...]:
-    """Return model-card metadata for the NASA7 thermochemistry slice."""
+    """Return metadata for native NASA7 and source-derived thermochemistry."""
 
     return (
         ModelCard(
@@ -102,6 +102,64 @@ def thermochemistry_model_cards() -> tuple[ModelCard, ...]:
                 "Reversible Arrhenius detailed-balance checks.",
                 "Reactor energy-balance validation when species thermochemistry is supplied.",
             ),
+        ),
+        ModelCard(
+            model_id="native_caloric_data_formation_stoichiometry",
+            module_id="thermochemistry",
+            title="Caloric source data, formation references and exact stoichiometry",
+            maturity=MaturityLevel.REFERENCE_VALIDATED,
+            summary=("Explicit external caloric data become existing Cp/H/S curves, scientific "
+                     "input cards and species/reaction states; exact atom/isotope/charge "
+                     "balance and formation-reference conversions share native contracts."),
+            equations=("ChemSep16: Cp = A + exp(B/T + C + D*T + E*T^2)",
+                       "Sf = (Hf-Gf)/T; Gf = Delta H - T Delta S",
+                       "Hf(g) = Hf(l) + Hvap at the same temperature",
+                       "M nu = 0 with exact rational atom/isotope/charge coefficients"),
+            assumptions=("Source selection, pressure, phase, missing Tc and molecular shape "
+                         "are explicit; no data or reference-library runtime is vendored.",
+                         "ChemSep coefficients retain their declared amount/output units.",
+                         "Tabular interpolation is an explicit linear model; source values "
+                         "and uncertainty availability remain distinguishable."),
+            validity_limits=("Source reproduction does not establish experimental accuracy.",
+                             "Zero-K data are queryable but are not positive-T caloric datums.",
+                             "Repeated table temperatures retain both limits; only a selected "
+                             "one-sided interval is usable without transition information.",
+                             "The reaction mechanism importer remains NASA7-only until task 34."),
+            failure_modes=("Missing coefficients, undeclared ranges and ambiguous phases fail.",
+                           "Table gaps, implicit extrapolation and crossed discontinuities fail.",
+                           "Underdetermined balances require additional fixed coefficients.",
+                           "Absolute entropy cannot substitute for formation entropy."),
+            units={"temperature": "K", "capacity": "J/(mol*K)", "enthalpy": "J/mol",
+                   "entropy": "J/(mol*K)", "molecular_weight": "g/mol"},
+            reference_reading=("chemicals 1.5.2 public heat_capacity and reaction interfaces",
+                               "ChemSep Help, Table 3, equation 16: "
+                               "https://studylib.es/doc/9235141/chemsep-help"),
+            validation_evidence=(
+                ValidationEvidence(evidence_id="caloric-complete-source-84230",
+                    evidence_type="same_equation_reference", status="implemented",
+                    description="All 25 selected sources; records, scalar data, nested curves "
+                                "and table intervals counted separately, all failures retained.",
+                    command_or_path="tests/reference/run_caloric_data_block.py",
+                    reference_backend="chemicals 1.5.2 and independent Gauss quadrature",
+                    tolerance="Cp 2e-10 relative/2e-8 absolute; H/S 2e-8/2e-6 SI"),
+                ValidationEvidence(evidence_id="chemsep-formation-stoichiometry-23",
+                    evidence_type="same_equation_reference", status="implemented",
+                    description="ChemSep16 values/slopes/integrals, six exact balances, "
+                                "molar/mass conversion and formation Gibbs data.",
+                    command_or_path="tests/reference/run_formation_reference_block.py",
+                    tolerance="exact rational balances; slope 3e-7 relative/2e-9 absolute"),
+                ValidationEvidence(evidence_id="source-native-caloric-runtime",
+                    evidence_type="unit_test", status="implemented",
+                    description="Source to input, species/reaction thermo, heat/wait and snapshot.",
+                    command_or_path="tests/test_caloric_data.py",
+                    tolerance="explicit synthetic data; exact resumed snapshot equality"),
+            ),
+            model_limit_notes=("Synthetic Tc/shape/ranges in reference checks are not "
+                               "material parameter estimates.",
+                               "Source licensing and runtime data access remain separate "
+                               "from the clean-room formula implementation."),
+            intended_use=("Explicit-source property inputs and native caloric consumers.",
+                          "Formation/reaction thermochemistry and conserved reaction balancing."),
         ),
     )
 

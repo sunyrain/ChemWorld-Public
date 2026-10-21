@@ -302,6 +302,7 @@ class TrajectoryLogger:
             "physics_maturity": task_info.get("physics_maturity"),
             "proxy_allowed": bool(task_info.get("proxy_allowed", False)),
             "composition_request": to_builtin(task_info.get("composition_request")),
+            "initialization_replay": to_builtin(task_info.get("initialization_replay") or None),
             "world_id": task_info["world_id"],
             "seed": int(task_info["seed"]),
             "step": step,

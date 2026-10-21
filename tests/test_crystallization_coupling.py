@@ -455,6 +455,14 @@ def test_empty_crystal_population_remains_a_valid_formal_recooling_state() -> No
             env.step(action)
         base: Any = env.unwrapped
 
+        # The preparation ends below 330 K. Establish a real warmer history so
+        # this is a legal cooling request, without rewriting temperature state.
+        warm = env.step({"operation": "heat", "target_temperature_K": 340.0, "duration_s": 300.0})[
+            -1
+        ]
+        assert warm["transaction_status"] == "committed"
+        assert base._state.temperature_K > 330.0
+
         _, _, _, _, first_info = env.step(
             {
                 "operation": "cool_crystallize",
@@ -466,10 +474,12 @@ def test_empty_crystal_population_remains_a_valid_formal_recooling_state() -> No
         assert first_info["transaction_status"] == "committed"
         assert empty_settings["csd_total_particle_count"] == pytest.approx(0.0)
         assert empty_settings["csd_d50_m"] == pytest.approx(0.0)
+        assert not empty_settings["population_cohorts"]
         assert "cool_crystallize" in {action["operation"] for action in base.available_actions()}
 
         provider = RecordingProvider()
         base.runtime.domain_services.crystallization.runtime_provider = provider
+        before = base._state
         _, _, _, _, second_info = env.step(
             {
                 "operation": "cool_crystallize",
@@ -480,10 +490,11 @@ def test_empty_crystal_population_remains_a_valid_formal_recooling_state() -> No
 
         assert second_info["transaction_status"] == "committed"
         assert second_info["preconditions"].get("runtime_domain_valid") is None
-        assert provider.calls[-1]["case"].seed_mass_g == pytest.approx(0.0)
-        assert provider.calls[-1]["case"].seed_diameter_m == pytest.approx(100.0e-6)
+        assert provider.calls == []
         settings = equipment_settings(base._state.equipment, "crystallizer")
         assert len(settings["execution_history"]) == 2
+        assert settings["execution_history"][-1]["prior_solid_target_mol"] == 0.0
+        _assert_recooling_history(base, before)
     finally:
         env.close()
 
@@ -495,6 +506,11 @@ def test_seeding_after_empty_population_remains_a_valid_formal_path() -> None:
         for action in REACTION_STEPS:
             env.step(action)
         base: Any = env.unwrapped
+        warm = env.step({"operation": "heat", "target_temperature_K": 340.0, "duration_s": 300.0})[
+            -1
+        ]
+        assert warm["transaction_status"] == "committed"
+        assert base._state.temperature_K > 330.0
         _, _, _, _, first_info = env.step(
             {
                 "operation": "cool_crystallize",
@@ -508,9 +524,23 @@ def test_seeding_after_empty_population_remains_a_valid_formal_path() -> None:
         ] == pytest.approx(0.0)
 
         _, _, _, _, assay_info = env.step({"operation": "measure", "instrument": "hplc"})
+        before_seed = base._state
         _, _, _, _, seed_info = env.step({"operation": "seed_crystals", "seed_mass_g": 0.006})
         assert assay_info["transaction_status"] == "committed"
         assert seed_info["transaction_status"] == "committed"
+        before = base._state
+        seeded = equipment_settings(before.equipment, "crystallizer")
+        assert seeded["crystal_seed_mass_g"] == pytest.approx(0.006)
+        assert len(seeded["population_cohorts"]) == 1
+        count, diameter = seeded["population_cohorts"][0]
+        assert count > 0.0
+        assert diameter == pytest.approx(100.0e-6)
+        target = base.runtime.domain_services.crystallization.species_view.primary_target_species
+        seed_mol = seeded["seed_target_mol"]
+        assert seed_mol > 0.0
+        assert before.species_amounts[target] - before_seed.species_amounts[target] == (
+            pytest.approx(seed_mol)
+        )
 
         provider = RecordingProvider()
         base.runtime.domain_services.crystallization.runtime_provider = provider
@@ -522,17 +552,39 @@ def test_seeding_after_empty_population_remains_a_valid_formal_path() -> None:
             }
         )
 
-        case = provider.calls[-1]["case"]
         assert second_info["transaction_status"] == "committed"
         assert second_info["preconditions"].get("runtime_domain_valid") is None
-        assert case.seed_mass_g > 0.0
-        assert case.seed_diameter_m == pytest.approx(100.0e-6)
-        assert (
-            equipment_settings(base._state.equipment, "crystallizer")["csd_total_particle_count"]
-            > 0.0
+        assert provider.calls == []
+        settings = equipment_settings(base._state.equipment, "crystallizer")
+        assert settings["execution_history"][-1]["prior_solid_target_mol"] == (
+            pytest.approx(seed_mol)
         )
+        assert settings["seed_charge_count"] == seeded["seed_charge_count"]
+        assert settings["seed_target_mol"] + settings["dissolved_seed_target_mol"] == (
+            pytest.approx(seed_mol)
+        )
+        assert len(settings["execution_history"]) == 2
+        _assert_recooling_history(base, before)
     finally:
         env.close()
+
+
+def _assert_recooling_history(base: Any, before: Any) -> None:
+    state = base._state
+    settings = equipment_settings(state.equipment, "crystallizer")
+    receipt = settings["execution_history"][-1]
+    assert receipt["model_id"] == "finite-crystal-cohorts-temperature-v1"
+    assert receipt["actual_duration_s"] == state.ledger.time_s - before.ledger.time_s == 1800.0
+    assert receipt["initial_temperature_K"] == before.temperature_K
+    assert 280.0 < state.temperature_K < before.temperature_K
+    assert settings["csd_total_particle_count"] > 0.0
+    assert receipt["final_solid_target_mol"] > 0.0
+    assert abs(receipt["energy_balance_residual_J"]) < 1e-6
+    assert settings["material_balance_error_mol"] <= 1e-10
+    assert settings["particle_target_balance_error_mol"] <= 1e-10
+    assert state.species_amounts == pytest.approx(before.species_amounts)
+    assert state.phases.total_amounts_mol() == pytest.approx(state.species_amounts)
+    assert base.constitution.check_state(state).passed
 
 
 def test_provider_fails_closed_for_no_population_no_transfer_and_nonconvergence() -> None:

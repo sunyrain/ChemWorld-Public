@@ -26,6 +26,13 @@ class Quantity:
         return {"value": self.value, "unit": self.unit}
 
 
+# A finite, declared set of registered coherent SI readout units. The native
+# canonical table also includes non-SI choices such as litres and grams/mole.
+COHERENT_SI_UNITS = ("dimensionless", "s", "m", "m^3", "mol", "kg", "K", "A", "Pa", "J", "W",
+    "V", "C", "Ohm", "F", "Hz", "mol/m^3", "mol/s", "J/mol", "J/(mol*K)", "kg/m^3",
+    "Pa*s", "N/m", "m/s", "m^2/s", "V/K")
+
+
 _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "K": ("temperature", "K", 1.0, 0.0),
     "degC": ("temperature", "K", 1.0, 273.15),
@@ -34,10 +41,12 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "h": ("time", "s", 3600.0, 0.0),
     "L": ("volume", "L", 1.0, 0.0),
     "mL": ("volume", "L", 0.001, 0.0),
+    "m^3": ("volume", "L", 1000.0, 0.0),
     "m^3/s": ("volume_flow", "m^3/s", 1.0, 0.0),
     "L/s": ("volume_flow", "m^3/s", 0.001, 0.0),
     "mL/min": ("volume_flow", "m^3/s", 1e-6 / 60.0, 0.0),
     "mol": ("amount", "mol", 1.0, 0.0),
+    "mol/s": ("amount_rate", "mol/s", 1.0, 0.0),
     "mmol": ("amount", "mol", 0.001, 0.0),
     "mol/L": ("concentration", "mol/L", 1.0, 0.0),
     "mol/m^3": ("concentration", "mol/L", 0.001, 0.0),
@@ -48,6 +57,10 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "kJ": ("energy", "J", 1000.0, 0.0),
     "W": ("power", "W", 1.0, 0.0),
     "kW": ("power", "W", 1000.0, 0.0),
+    "J/K": ("heat_capacity", "J/K", 1.0, 0.0),
+    "kJ/K": ("heat_capacity", "J/K", 1000.0, 0.0),
+    "W/K": ("thermal_conductance", "W/K", 1.0, 0.0),
+    "mW/K": ("thermal_conductance", "W/K", 0.001, 0.0),
     "J/mol": ("molar_enthalpy", "J/mol", 1.0, 0.0),
     "kJ/mol": ("molar_enthalpy", "J/mol", 1000.0, 0.0),
     "J/(mol*K)": ("molar_heat_capacity", "J/(mol*K)", 1.0, 0.0),
@@ -55,18 +68,38 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "g/mol": ("molecular_weight", "g/mol", 1.0, 0.0),
     "m^3/mol": ("molar_volume", "m^3/mol", 1.0, 0.0),
     "m^3/(mol*K)": ("molar_volume_per_temperature", "m^3/(mol*K)", 1.0, 0.0),
+    "(m^3/mol)/K": ("molar_volume_per_temperature", "m^3/(mol*K)", 1.0, 0.0),
+    "L/(mol*K)": ("molar_volume_per_temperature", "m^3/(mol*K)", 0.001, 0.0),
+    "(L/mol)/K": ("molar_volume_per_temperature", "m^3/(mol*K)", 0.001, 0.0),
     "m^3/(mol*Pa)": ("molar_volume_per_pressure", "m^3/(mol*Pa)", 1.0, 0.0),
     "L/mol": ("molar_volume", "m^3/mol", 0.001, 0.0),
     "kg/m^3": ("mass_density", "kg/m^3", 1.0, 0.0),
+    "mg/m^3": ("mass_density", "kg/m^3", 1e-6, 0.0),
     "g/mL": ("mass_density", "kg/m^3", 1000.0, 0.0),
+    "kg/(m^3*K)": ("mass_density_per_temperature", "kg/(m^3*K)", 1.0, 0.0),
+    "(kg/m^3)/K": ("mass_density_per_temperature", "kg/(m^3*K)", 1.0, 0.0),
+    "g/(mL*K)": ("mass_density_per_temperature", "kg/(m^3*K)", 1000.0, 0.0),
+    "(g/mL)/K": ("mass_density_per_temperature", "kg/(m^3*K)", 1000.0, 0.0),
     "Pa*s": ("dynamic_viscosity", "Pa*s", 1.0, 0.0),
     "mPa*s": ("dynamic_viscosity", "Pa*s", 0.001, 0.0),
+    "Pa*s/K": ("viscosity_per_temperature", "Pa*s/K", 1.0, 0.0),
+    "(Pa*s)/K": ("viscosity_per_temperature", "Pa*s/K", 1.0, 0.0),
+    "mPa*s/K": ("viscosity_per_temperature", "Pa*s/K", 0.001, 0.0),
+    "(mPa*s)/K": ("viscosity_per_temperature", "Pa*s/K", 0.001, 0.0),
     "W/(m*K)": ("thermal_conductivity", "W/(m*K)", 1.0, 0.0),
     "mW/(m*K)": ("thermal_conductivity", "W/(m*K)", 0.001, 0.0),
+    "W/(m*K^2)": ("conductivity_per_temperature", "W/(m*K^2)", 1.0, 0.0),
+    "(W/(m*K))/K": ("conductivity_per_temperature", "W/(m*K^2)", 1.0, 0.0),
+    "mW/(m*K^2)": ("conductivity_per_temperature", "W/(m*K^2)", 0.001, 0.0),
+    "(mW/(m*K))/K": ("conductivity_per_temperature", "W/(m*K^2)", 0.001, 0.0),
     "m^2/s": ("diffusivity", "m^2/s", 1.0, 0.0),
     "cm^2/s": ("diffusivity", "m^2/s", 0.0001, 0.0),
     "N/m": ("surface_tension", "N/m", 1.0, 0.0),
     "mN/m": ("surface_tension", "N/m", 0.001, 0.0),
+    "N/(m*K)": ("surface_tension_per_temperature", "N/(m*K)", 1.0, 0.0),
+    "(N/m)/K": ("surface_tension_per_temperature", "N/(m*K)", 1.0, 0.0),
+    "mN/(m*K)": ("surface_tension_per_temperature", "N/(m*K)", 0.001, 0.0),
+    "(mN/m)/K": ("surface_tension_per_temperature", "N/(m*K)", 0.001, 0.0),
     "W/(m^2*K)": ("heat_transfer_coefficient", "W/(m^2*K)", 1.0, 0.0),
     "Pa": ("pressure", "Pa", 1.0, 0.0),
     "bar": ("pressure", "Pa", 100000.0, 0.0),
@@ -76,8 +109,13 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "uA": ("electrical_current", "A", 1e-6, 0.0),
     "V": ("electric_potential", "V", 1.0, 0.0),
     "mV": ("electric_potential", "V", 0.001, 0.0),
+    "V/K": ("electric_potential_per_temperature", "V/K", 1.0, 0.0),
+    "mV/K": ("electric_potential_per_temperature", "V/K", 0.001, 0.0),
     "pH": ("acidity", "pH", 1.0, 0.0),
     "C": ("electric_charge", "C", 1.0, 0.0),
+    "Ah": ("electric_charge", "C", 3600.0, 0.0),
+    "mAh": ("electric_charge", "C", 3.6, 0.0),
+    "Wh": ("energy", "J", 3600.0, 0.0),
     "mC": ("electric_charge", "C", 0.001, 0.0),
     "Ohm": ("electrical_resistance", "Ohm", 1.0, 0.0),
     "kOhm": ("electrical_resistance", "Ohm", 1000.0, 0.0),
@@ -85,7 +123,28 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "uF": ("capacitance", "F", 1e-6, 0.0),
     "Hz": ("frequency", "Hz", 1.0, 0.0),
     "ppm": ("chemical_shift", "ppm", 1.0, 0.0),
+    "ppmv": ("gas_volume_fraction", "gas_volume_fraction", 1e-6, 0.0),
+    "gas_volume_fraction": ("gas_volume_fraction", "gas_volume_fraction", 1.0, 0.0),
     "nm": ("length", "nm", 1.0, 0.0),
+    "m": ("length", "nm", 1e9, 0.0),
+    "um": ("length", "nm", 1e3, 0.0),
+    "angstrom": ("length", "nm", 0.1, 0.0),
+    "1/K": ("thermal_expansivity", "1/K", 1.0, 0.0),
+    "(dimensionless)/K": ("thermal_expansivity", "1/K", 1.0, 0.0),
+    "degBx": ("brix", "degBx", 1.0, 0.0),
+    "C*m": ("electric_dipole_moment", "C*m", 1.0, 0.0),
+    "Debye": ("electric_dipole_moment", "C*m", 1e-21 / 299792458.0, 0.0),
+    "Pa^0.5": ("solubility_parameter", "Pa^0.5", 1.0, 0.0),
+    "MPa^0.5": ("solubility_parameter", "Pa^0.5", 1000.0, 0.0),
+    "kg/kmol": ("molecular_weight", "g/mol", 1.0, 0.0),
+    "m^3/kmol": ("molar_volume", "m^3/mol", 0.001, 0.0),
+    "J/kmol": ("molar_enthalpy", "J/mol", 0.001, 0.0),
+    "J/(kmol*K)": ("molar_heat_capacity", "J/(mol*K)", 0.001, 0.0),
+    "m^2/mol": ("molar_area", "m^2/mol", 1.0, 0.0),
+    "m^2/kmol": ("molar_area", "m^2/mol", 0.001, 0.0),
+    "kg^0.25*m^3/(s^0.5*mol)": ("parachor", "kg^0.25*m^3/(s^0.5*mol)", 1.0, 0.0),
+    "kg^0.25*m^3/(s^0.5*kmol)": ("parachor", "kg^0.25*m^3/(s^0.5*mol)", 0.001, 0.0),
+    "eV": ("energy", "J", 1.602176634e-19, 0.0),
     "cm^-1": ("wavenumber", "cm^-1", 1.0, 0.0),
     "cm-1": ("wavenumber", "cm^-1", 1.0, 0.0),
     "relative_signal": ("relative_signal", "relative_signal", 1.0, 0.0),
@@ -102,6 +161,17 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "risk": ("risk", "risk", 1.0, 0.0),
     "dimensionless": ("dimensionless", "dimensionless", 1.0, 0.0),
 }
+
+
+# Temperature derivatives use intervals in kelvin (no absolute-temperature offset).
+# Derive pressure scales from the same table used by the original scalar quantity.
+_UNIT_TABLE.update({
+    name: (f"pressure_temperature_derivative_{order}", f"Pa/{suffix}", scale, 0.0)
+    for pressure_unit, (dimension, _, scale, _) in tuple(_UNIT_TABLE.items())
+    if dimension == "pressure"
+    for order, suffix in ((1, "K"), (2, "K^2"), (3, "K^3"))
+    for name in (f"{pressure_unit}/{suffix}", f"({pressure_unit})/{suffix}")
+})
 
 
 def unit_spec(unit: str) -> UnitSpec:

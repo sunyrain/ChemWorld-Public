@@ -1,4 +1,4 @@
-"""Seven finite integration workflows, using the existing native session only.
+"""Ten finite integration workflows, using the existing native session only.
 
 Run ``python -m chemworld.examples.native_domains --output /tmp/native-domains``.
 These authored synthetic examples are not autonomous agents or fitted chemistry.
@@ -46,7 +46,8 @@ def mixed_clock_world():
         units=state.units,
         equipment=EquipmentLedger({}),
     ).to_dict()
-    physics.setdefault("thermal_models", {})["continuous"] = ThermalSystemSpec(
+    thermal = physics["models"].setdefault("thermal", {"version": "1", "bindings": {}})
+    thermal["bindings"]["continuous"] = ThermalSystemSpec(
         ConstantCvThermodynamics({key: SpeciesInternalEnergy(0, 30) for key in ("A", "B")}, 20),
         pressure_law="fixed_pressure",
     ).to_dict()
@@ -102,7 +103,7 @@ def connected_heater_world():
     gas["vessels"] = [v for v in gas["vessels"] if v["id"] != "receiver"]
     physics = gas["physics"]
     del physics["initial_states"]["receiver"]
-    del physics["thermal_models"]["receiver"]
+    del physics["models"]["thermal"]["bindings"]["receiver"]
     heater = physics["initial_states"]["reactor"]["equipment"]["reactor:heater"]
     heater["settings"]["thermal_device"]["calibration_factor"] = 1.07
     sorbent = synthetic_sorbent_spec()
@@ -137,14 +138,14 @@ def connected_heater_world():
             if c["vessel"] == name and c["kind"] != "material_input"
         ]
         physics["network"]["species"] += fragment["physics"]["network"]["species"]
-    model = adsorption["physics"]["thermal_models"]["adsorber"]
+    model = adsorption["physics"]["models"]["thermal"]["bindings"]["adsorber"]
     physics["initial_states"]["wash_supply"] = adsorption["physics"]["initial_states"][
         "wash_supply"
     ]
     gas["vessels"] += [v for v in adsorption["vessels"] if v["id"] == "wash_supply"]
     gas["components"] += [c for c in adsorption["components"] if c["vessel"] == "wash_supply"]
-    physics["thermal_models"]["adsorber"] = model
-    physics["sorbent_models"] = adsorption["physics"]["sorbent_models"]
+    physics["models"]["thermal"]["bindings"]["adsorber"] = model
+    physics["models"]["sorbent"] = adsorption["physics"]["models"]["sorbent"]
     gas["components"] += [
         {"id": name + ":heater-port", "kind": "heater_connection", "vessel": name, "parameters": {}}
         for name in ("reactor", "adsorber", "cell")
@@ -303,12 +304,72 @@ def workflow(name):
                 {"operation": "measure", "instrument": "solid_phase_meter"},
             )
         ]
+    elif name == "heterogeneous":
+        from chemworld.examples.closed_shared_labs import reactive_closed_lab
+
+        spec = reactive_closed_lab()
+        actions = [
+            {"operation": "select_vessel", "vessel": "adsorber"},
+            {"operation": "queue_lab_heat",
+             "target_temperature_K": 350, "duration_s": 2},
+            {"operation": "select_vessel", "vessel": "ssa"},
+            {"operation": "queue_lab_measure"},
+            {"operation": "wait", "duration_s": 1},
+            {"operation": "wait", "duration_s": 2},
+            {"operation": "select_vessel", "vessel": "cell"},
+            {"operation": "wait", "duration_s": 2},
+        ]
+    elif name == "open-closed":
+        from chemworld.examples.open_shared_labs import open_shared_lab
+
+        spec = open_shared_lab("transport", feed_volume_L=.001)
+        actions = [
+            {"operation": "set_flow_rate", "flow_rate_mL_min": 20},
+            {"operation": "select_vessel", "vessel": "bottle"},
+            {"operation": "queue_lab_measure"},
+            {"operation": "wait", "duration_s": 1},
+            {"operation": "wait", "duration_s": 1000},
+        ]
+    elif name == "device-lifecycle":
+        from chemworld.examples.multi_device_lab import multi_device_lab_world
+
+        spec = multi_device_lab_world()
+        actions = [
+            {"operation": "queue_lab_heat", "device": "heater-a",
+             "target_temperature_K": 320, "duration_s": 2},
+            {"operation": "queue_lab_measure", "device": "hplc-a"},
+            {"operation": "select_vessel", "vessel": "vial-c"},
+            {"operation": "queue_lab_measure", "device": "hplc-a"},
+            {"operation": "select_vessel", "vessel": "sample"},
+            {"operation": "queue_lab_measure", "device": "hplc-b"},
+            {"operation": "wait", "duration_s": 2},
+            {"operation": "wait", "duration_s": 100},
+            {"operation": "wait", "duration_s": 100},
+            {"operation": "wait", "duration_s": 100},
+            {"operation": "select_vessel", "vessel": "vial-d"},
+            {"operation": "queue_lab_heat", "device": "heater-b",
+             "target_temperature_K": 325, "duration_s": 2},
+            {"operation": "select_vessel", "vessel": "reactor"},
+            {"operation": "queue_lab_measure", "device": "hplc-a"},
+            {"operation": "wait", "duration_s": 100},
+            {"operation": "wait", "duration_s": 100},
+        ]
     else:
         raise ValueError(f"Unknown integration workflow: {name}")
     return spec, [*actions, {"operation": "terminate"}]
 
 
-WORKFLOWS = ("heater", "membrane", "mineral", "shared-clock", "distillation", "crystal", "solid")
+WORKFLOWS = (
+    "heater", "membrane", "mineral", "shared-clock", "distillation", "crystal", "solid",
+    "heterogeneous", "open-closed", "device-lifecycle",
+)
+
+
+def workflow_initializations(name):
+    """Evaluator boundaries after numbered actions, separate from Agent actions."""
+    return {10: {"scope": "material", "vessel_ids": ["reactor"]}} if (
+        name == "device-lifecycle"
+    ) else {}
 
 
 def run_workflow(name, output, *, noise_mode="sequential"):
@@ -325,6 +386,7 @@ def run_workflow(name, output, *, noise_mode="sequential"):
             {
                 "composition": spec.to_dict(),
                 "actions": actions,
+                "initializations_after_action": workflow_initializations(name),
                 "world_seed": 7,
                 "observation_seed": 12,
                 "noise_mode": noise_mode,
@@ -342,6 +404,9 @@ def run_workflow(name, output, *, noise_mode="sequential"):
     try:
         with TrajectoryLogger(path) as logger:
             for index, action in enumerate(actions, 1):
+                boundary = workflow_initializations(name).get(index - 1)
+                if boundary is not None:
+                    session.reset(options=boundary)
                 result = session.execute(action)
                 if result.info["transaction_status"] != "committed":
                     raise RuntimeError(

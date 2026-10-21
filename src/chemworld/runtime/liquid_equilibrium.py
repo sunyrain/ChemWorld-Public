@@ -4,6 +4,7 @@ from dataclasses import replace
 from math import isclose, isfinite
 
 from chemworld.foundation import species_with_added_initial_amounts
+from chemworld.foundation.balances import MaterialPacket
 from chemworld.foundation.state_ledgers import PhaseLedger, PhaseRecord
 from chemworld.physchem.equilibrium import entrain_liquid_amounts
 from chemworld.runtime.advance_paths import advance_ledger
@@ -55,10 +56,10 @@ def validate_liquid_state(state, model, *, require_equilibrium=True):
 
 
 def exchange_liquid_packet(source, target, physics, amounts, *, fraction=0, fixed_source=False):
-    model = physics.liquid_models[target.vessel_id]
+    model = physics.models_of("liquid")[target.vessel_id]
     validate_liquid_state(source, model, require_equilibrium=False)
     validate_liquid_state(target, model, require_equilibrium=False)
-    if not fixed_source and physics.liquid_models.get(source.vessel_id) != model:
+    if not fixed_source and physics.models_of("liquid").get(source.vessel_id) != model:
         raise ValueError("liquid packet endpoints require identical material/reference models")
     available = sum(source.species_amounts.values())
     moved = sum(amounts.values())
@@ -66,8 +67,8 @@ def exchange_liquid_packet(source, target, physics, amounts, *, fraction=0, fixe
     if not 0 <= fraction <= 1 or any(abs(amounts[k] - fraction * source.species_amounts[k])
                                     > 1e-12 for k in amounts):
         raise ValueError("liquid packet must be a representative finite source withdrawal")
-    remaining = {k: v - amounts.get(k, 0) for k, v in source.species_amounts.items()}
-    received = {k: v + amounts.get(k, 0) for k, v in target.species_amounts.items()}
+    packet = MaterialPacket(source.vessel_id, target.vessel_id, tuple(amounts.items()))
+    remaining, received = packet.apply(source.species_amounts, target.species_amounts)
     target_candidate = install_liquids(target, model, model.solve(received))
     if fixed_source:
         source_candidate = source.replace(
@@ -85,20 +86,25 @@ def exchange_liquid_packet(source, target, physics, amounts, *, fraction=0, fixe
         initial_amounts_mol={k: v * (1 - fraction)
                             for k, v in source.species.initial_amounts_mol.items()}))
     return source_candidate, target_candidate, {
-        "source": source.vessel_id, "destination": target.vessel_id, "amounts_mol": amounts,
+        **packet.to_dict(),
         "model": "strict_isothermal_liquid", "not_covered": ["mixing_heat", "PV_work"]}
 
 
 class LiquidEquilibriumRuntime:
+    supported_operations = ("wait",)
+
+    def reconcile_pressure(self, state):
+        return state.replace(pressure_Pa=self.model(state).pressure_Pa)
+
     def __init__(self, composition):
         self.composition = composition
 
     def supports(self, state):
         return (self.composition is not None and self.composition.physics is not None
-                and state.vessel_id in self.composition.physics.liquid_models)
+                and state.vessel_id in self.composition.physics.models_of("liquid"))
 
     def model(self, state):
-        return self.composition.physics.liquid_models[state.vessel_id]
+        return self.composition.physics.models_of("liquid")[state.vessel_id]
 
     def advance(self, state, action, *, heat=False, jacket_program=None, mixing=False):
         if heat or jacket_program is not None:
@@ -152,6 +158,6 @@ class LiquidEquilibriumRuntime:
             inactive_vessels={**state.inactive_vessels, source_id: source_candidate},
             ledger=advance_ledger(state.ledger, 0, cost_delta=.02 + .25 * volume),
             metadata={**candidate.metadata, "removed_phase_inventory_history": history,
-                      "last_liquid_wash": {"source": source_id, "amounts_mol": additions,
+                      "last_liquid_wash": {"source": source_id,
                                            "wash_volume_L": volume, "removed_mol": removed,
                                            "packet": receipt}})

@@ -1,3 +1,5 @@
+<p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
+
 <p align="center">
   <img src="docs/assets/chemworld-readme-banner.png" alt="ChemWorld — Programmable worlds. Autonomous experiments. A conceptual modular laboratory with a reactor, membrane cell, battery and crystals." width="1200">
 </p>
@@ -19,7 +21,8 @@
   <a href="docs/native_domains.md">Examples</a> ·
   <a href="docs/native_foundation.md">Native API</a> ·
   <a href="docs/agents.md">Connect an agent</a> ·
-  <a href="docs/extension-roadmap.zh.md">中文说明</a>
+  <a href="https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en">Interactive website</a> ·
+  <a href="README.zh-CN.md">中文 README</a>
 </p>
 
 ## Build a world. Let an agent explore it.
@@ -116,15 +119,15 @@ same state, operation, measurement and transaction contracts.
 | Reactions and catalysis | Bulk kinetics, gas mechanisms, finite surface sites, reversible two-site interactions and coupled heat | [Surface example](src/chemworld/examples/native_surface_research.py), [mechanism import](docs/native_mechanisms.md) |
 | Thermodynamics and phase processes | State-dependent properties, TP/PH flash, liquid–liquid equilibrium, finite distillation, concentration, adsorption and crystallization | [Physical models guide](docs/native_foundation.md#properties-at-the-current-state) |
 | Transport and separation | Finite tanks, pressure/power-limited pumps, heat exchange, reverse osmosis, persistent fouling and rinsing | [Transport example](src/chemworld/examples/native_liquid_transport.py), [membrane example](src/chemworld/examples/native_membrane_fouling.py) |
-| Electrochemistry and batteries | Conservative diffusion, finite electrodes, single-particle batteries, CC/CV/rest cycling, thermal response and SEI | [Battery example](src/chemworld/examples/native_battery_degradation.py) |
+| Electrochemistry and batteries | Conservative diffusion, finite electrodes, SPM/SPMe/DFN and particle-distribution models, CC/CV/rest cycling, thermal response and SEI | [Battery examples](docs/native_domains.md) |
 | Water and minerals | Dilute carbonate equilibrium, finite calcite dissolution/precipitation and phase-owned surface geometry | [Mineral example](src/chemworld/examples/native_mineral_research.py) |
 | Stochastic biochemistry | Gillespie events, reversible/enzyme networks, integer inventories and separate process/measurement randomness | [Biochemical worlds](docs/native_biochemical.md) |
-| Solid phases | Finite binary substitutional equilibrium and heating/cooling paths | [Solid-solution example](src/chemworld/examples/native_solid_solution.py) |
+| Solid phases | Finite substitutional equilibrium, selected TDB/CEF and ChemSage inputs, supported multi-sublattice and quasichemical models | [Native foundation guide](docs/native_foundation.md) |
 | Instruments and scheduling | Programmed chromatography, persistent instrument history, shared heater/analyzer queues and timed readouts | [Shared laboratory guide](docs/native_shared_lab.md) |
 
 These are bounded models with explicit equations, parameters and operating ranges.
-For example, the battery model is a single-particle model, the membrane model covers
-dilute isothermal reverse osmosis, and the solid model covers finite binary equilibrium.
+For example, each battery family has its own declared discretization and material
+contract; membrane and solid-phase models retain their documented finite scope.
 See [model ranges](docs/extension-roadmap.md) and the
 [module declarations](docs/native_capabilities.md) before composing a new system.
 
@@ -209,6 +212,12 @@ catalog is a starting point; the Python examples expose the broader native domai
 
 ## Documentation
 
+**[Explore the website in English](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en)** ·
+**[浏览中文版网站](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh)**
+
+The capability atlas, index and domain guides share one navigation. Recorded examples
+play saved public test observations; they do not start a live laboratory or run new physics.
+
 | I want to… | Read |
 | --- | --- |
 | Build and run a native world | [Native foundation guide](docs/native_foundation.md) |
@@ -217,7 +226,7 @@ catalog is a starting point; the Python examples expose the broader native domai
 | Check a model's assumptions and limits | [Model ranges and extensions](docs/extension-roadmap.md) |
 | Inspect registered operations and ownership | [Native capability declarations](docs/native_capabilities.md) |
 | Use queues and delayed measurements | [Shared laboratory time](docs/native_shared_lab.md) |
-| Read the foundation overview in Chinese | [中文基座与扩展说明](docs/extension-roadmap.zh.md) |
+| Read this introduction in Chinese | [完整中文 README](README.zh-CN.md) |
 
 ## Develop and extend
 
@@ -247,7 +256,7 @@ bug, a proposed model or an interface improvement. For a new domain, include the
 experiment, governing equations and expected operating range.
 
 **Development status.** Current source is `0.5.0.dev0`. Integration checks exercise
-seven workflows through four entry points, both detector-noise modes and continuation
+ten workflows through four entry points, both detector-noise modes and continuation
 in a fresh process. Independent wheel/sdist checks run the examples and replay their
 trajectories outside the checkout. Supported combinations and model limits are
 documented in the guides above. The historical results below belong to their pinned runtime.

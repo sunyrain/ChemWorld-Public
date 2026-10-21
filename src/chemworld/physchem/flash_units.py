@@ -297,6 +297,29 @@ class VLEPropertyPackage:
             eos=self.vapor_eos).properties["enthalpy"].value
         return liquid_h, vapor_h
 
+    def inventory_enthalpies(self, temperature, pressure, liquid_amounts, vapor_amounts):
+        """H of the actual phase inventories, including pure saturation plateaus.
+
+        This does not reflash n/T or change the supplied phase split. Both
+        standalone closures and runtime inventory readers use the same datum.
+        """
+        self._check_temperature(temperature)
+        if not isfinite(pressure) or pressure <= 0:
+            raise ValueError("phase inventory enthalpy requires finite positive pressure")
+        ids = set(self.component_ids)
+        for amounts in (liquid_amounts, vapor_amounts):
+            if set(amounts) != ids or any(not isfinite(n) or n < 0 for n in amounts.values()):
+                raise ValueError("phase inventory must match the declared finite component layout")
+        nl, nv = sum(liquid_amounts.values()), sum(vapor_amounts.values())
+        if not nl and not nv:
+            return 0.0, 0.0
+        liquid = {k: n / nl for k, n in liquid_amounts.items()} if nl else None
+        vapor = {k: n / nv for k, n in vapor_amounts.items()} if nv else None
+        hl, hv = self.phase_enthalpies(temperature, pressure, liquid or vapor, vapor or liquid)
+        if nv and hv is None:
+            raise ValueError("nonvolatile liquid material cannot own gas-phase enthalpy")
+        return nl * hl, nv * hv if nv else 0.0
+
     @cached_property
     def _ideal_endpoint_data(self):
         if (self.activity_model.model != "ideal" or self.vapor_eos is not None
@@ -405,10 +428,8 @@ def tp_flash(
                                 if liquid_total else phase.liquid_composition),
             vapor_composition=({k:v/vapor_total for k,v in vapor.items()}
                                if vapor_total else phase.vapor_composition))
-    hl, hv = properties.phase_enthalpies(
-        temperature_K, pressure_Pa, phase.liquid_composition, phase.vapor_composition)
-    liquid_h = liquid_total*hl
-    vapor_h = 0.0 if vapor_total == 0 else vapor_total*hv
+    liquid_h, vapor_h = properties.inventory_enthalpies(
+        temperature_K, pressure_Pa, liquid, vapor)
     if feed_enthalpy_J is not None and not isfinite(feed_enthalpy_J):
         raise ValueError("feed enthalpy must be finite")
     support_h = support_heat_capacity_J_K * (temperature_K - support_reference_temperature_K)

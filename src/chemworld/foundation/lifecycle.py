@@ -45,6 +45,11 @@ def initialize_entities(current, initial, *, scope="batch", vessel_ids=None, pre
     """
     if scope not in {"batch", "material", "vessel"}:
         raise ValueError("unknown entity initialization scope")
+    shared = current.lab_clock is not None
+    if shared and scope == "batch":
+        raise ValueError(
+            "shared initialization requires explicit material, vessel or equipment scope"
+        )
     old, templates = _local_states(current), _local_states(initial)
     selected = set(old) - set(preserve_vessels) if vessel_ids is None else set(vessel_ids)
     if not selected <= old.keys() or not selected <= templates.keys():
@@ -64,8 +69,12 @@ def initialize_entities(current, initial, *, scope="batch", vessel_ids=None, pre
             ))
         result[name] = template.replace(
             state_slots=slots,
-            equipment=_batch_equipment(previous.equipment, template.equipment),
+            equipment=(_batch_equipment(previous.equipment, template.equipment)
+                       if scope == "batch" else previous.equipment),
             process=ProcessLedger(),
+            **({"ledger": previous.ledger, "thermal": previous.thermal,
+                "vessels": previous.vessels if scope == "material" else template.vessels}
+               if shared else {}),
         )
         receipts[name] = {
             "removed_bulk_mol": dict(previous.species_amounts),
@@ -79,8 +88,13 @@ def initialize_entities(current, initial, *, scope="batch", vessel_ids=None, pre
     active = result.pop(active_id)
     generation = current.samples.batch_generation + 1
     samples = replace(
-        current.samples, active_lineage=(), active_reference_sources={},
-        active_reference_shares={}, batch_generation=generation,
+        current.samples,
+        active_lineage=() if active_id in selected else current.samples.active_lineage,
+        active_reference_sources=({} if active_id in selected
+                                  else current.samples.active_reference_sources),
+        active_reference_shares=({} if active_id in selected
+                                 else current.samples.active_reference_shares),
+        batch_generation=generation,
     )
     state = active.replace(
         samples=samples,
@@ -100,6 +114,7 @@ def initialize_entities(current, initial, *, scope="batch", vessel_ids=None, pre
         state = state.replace(
             ledger=current.ledger, thermal=current.thermal,
             vessel_elapsed_s=current.vessel_elapsed_s,
+            lab_clock=current.lab_clock,
         )
     return LifecycleTransition(state, {
         "scope": scope,
@@ -130,6 +145,16 @@ def replace_equipment(state, equipment_id, replacement, *, slots=None):
     ):
         raise ValueError("replacement slots must belong to the new device")
     local = locals_[name]
+    removed = local.equipment.equipment[equipment_id]
+    if replacement.equipment_type != removed.equipment_type:
+        raise ValueError("replacement must retain the installed equipment type")
+    role = removed.settings.get("lab_analyzer_instrument")
+    if role is not None:
+        if replacement.settings.get("instrument_id", role) != role:
+            raise ValueError("replacement analyzer must support its declared instrument contract")
+        replacement = replace(replacement, settings={
+            **replacement.settings, "lab_analyzer_instrument": role,
+        })
     records = {k: v for k, v in local.equipment.equipment.items() if k != equipment_id}
     records[replacement.equipment_id] = replacement
     retained = tuple(s for s in local.state_slots.slots if not (

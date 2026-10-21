@@ -127,6 +127,34 @@ def sample_domain(state: WorldState) -> tuple[str, ...]:
     return (selected,) if selected is not None else tuple(phases)
 
 
+def sample_withdrawal(state: WorldState, volume_L: float):
+    """Select a real phase aliquot and its carried owners before removing it."""
+    from math import fsum, isfinite
+
+    from chemworld.foundation.balances import MaterialPacket
+
+    if state.phases is None:
+        raise ValueError("phase-resolved sampling requires a typed inventory")
+    domain = sample_domain(state)
+    available = fsum(state.phases.phases[k].volume_L for k in domain)
+    if isinstance(volume_L, bool) or not isfinite(volume_L) or not 0 <= volume_L <= available:
+        raise ValueError("insufficient volume in selected sampling domain")
+    fraction = volume_L / available if available else 0.0
+    selected = (*domain, None) if set(domain) == set(state.phases.phases) else domain
+    retained, carried = state.state_slots.split_material(
+        fraction, state.vessel_id, "sink:sample", phase_ids=selected
+    )
+    species = set().union(*(state.phases.phases[k].species_amounts_mol for k in domain))
+    bound = carried.species_amounts()
+    amounts = {
+        key: fsum(state.phases.phases[k].species_amounts_mol.get(key, 0) * fraction
+                  for k in domain) + bound.get(key, 0)
+        for key in species | bound.keys()
+    }
+    packet = MaterialPacket(state.vessel_id, "sink:sample", tuple(amounts.items()))
+    return domain, fraction, packet, retained, carried
+
+
 def withdraw_sample(state: WorldState, volume_L: float) -> WorldState:
     """Conserve unselected inventories under the current measurement contract.
 
@@ -134,15 +162,9 @@ def withdraw_sample(state: WorldState, volume_L: float) -> WorldState:
     uses a sample-normalized reference so a withdrawal alone does not look like
     chemical conversion. These are measurement modes, not historical replay engines.
     """
-    if state.phases is None:
-        raise ValueError("phase-resolved sampling requires a typed inventory")
-    domain = sample_domain(state)
-    available = sum(state.phases.phases[k].volume_L for k in domain)
-    if volume_L < 0.0 or volume_L > available:
-        raise ValueError("insufficient volume in selected sampling domain")
+    domain, fraction, packet, retained, carried = sample_withdrawal(state, volume_L)
     if volume_L == 0.0:
         return state
-    fraction = volume_L / available
     phases = {
         key: replace(
             phase,
@@ -224,6 +246,7 @@ def withdraw_sample(state: WorldState, volume_L: float) -> WorldState:
         volume_L=state.volume_L - volume_L,
         equipment=equipment,
         process=process,
+        state_slots=retained,
         species=(
             state.species
             if active(state)
@@ -233,5 +256,12 @@ def withdraw_sample(state: WorldState, volume_L: float) -> WorldState:
             **state.metadata,
             "last_sample_domain": list(domain),
             "last_sample_fraction": fraction,
+            "last_sample_packet": {
+                **packet.to_dict(), "volume_L": volume_L, "phase_ids": list(domain),
+                "entity_quantities": [
+                    {"quantity": key, "unit": unit, "amount": value}
+                    for (key, unit), value in sorted(carried.conserved().items())
+                ],
+            },
         },
     )

@@ -1,4 +1,4 @@
-"""Fixed item-41 histories across actual public adapters, not surrogate solvers."""
+"""Fixed ten-history convergence block through the actual public adapters."""
 
 import io
 import json
@@ -15,7 +15,7 @@ from chemworld.envs.chemworld_env import ChemWorldEnv
 from chemworld.envs.spaces import to_observation
 from chemworld.eval.runner import run_agent
 from chemworld.eval.verify import verify_records
-from chemworld.examples.native_domains import WORKFLOWS, workflow
+from chemworld.examples.native_domains import WORKFLOWS, workflow, workflow_initializations
 from chemworld.runtime import ChemWorldRuntime
 
 
@@ -28,6 +28,7 @@ def trace(session, result):
             "outcome": result.info["operation_outcome"],
             "duration_s": result.info["actual_duration_s"],
             "balance": result.info["material_balance"],
+            "initializations": session._lifecycle_history,
         }
     )
 
@@ -134,13 +135,51 @@ def check_domain_transition(name, spec, before, after, action):
             assert [job["started_at"] for job in jobs] == [2, 3]
             assert [job["available_at"] for job in jobs] == [3, 4]
             assert after.ledger.analysis_time_s == 2
+    elif name in {"heterogeneous", "open-closed", "device-lifecycle"}:
+        from chemworld.runtime.scheduling import local_states
+
+        assert after.vessel_elapsed_s == dict.fromkeys(local_states(after), after.ledger.time_s)
+        if name == "open-closed" and after.lab_clock.stopped:
+            assert local_states(after)["feed"].volume_L == pytest.approx(1e-6, abs=1e-12)
+            assert local_states(after)["bottle"].temperature_K < 330
+            if action["operation"] == "wait":
+                assert after.ledger.time_s - before.ledger.time_s < action["duration_s"]
+        if action["operation"] == "terminate":
+            if name == "heterogeneous":
+                local = local_states(after)
+                assert local["reactor"].species_amounts["B"] > 0
+                assert local["ssa"].process.stochastic_continuation["events_committed"] > 0
+                assert any(s.values.get("discharged_charge_C", 0) > 0
+                           for s in local["cell"].state_slots.slots)
+                assert len(after.lab_clock.completed) == 2
+            elif name == "open-closed":
+                assert after.lab_clock.stopped
+                assert after.ledger.sample_consumed_L == pytest.approx(.0002)
+            else:
+                assert len(after.lab_clock.completed) == 6
+                records = {key: record for state in local_states(after).values()
+                           for key, record in state.equipment.equipment.items()}
+                assert set(records) == {"heater-a", "heater-b", "hplc-a", "hplc-b"}
+                assert records["hplc-a"].settings["use_count"] == 3
+                assert records["hplc-b"].settings["use_count"] == 1
 
 
 @pytest.mark.parametrize("name", WORKFLOWS)
 @pytest.mark.parametrize("noise", ("sequential", "keyed"))
-def test_native_gym_cli_agent_and_all_logged_replays(name, noise, tmp_path, monkeypatch):
+def test_native_gym_cli_agent_and_all_logged_replays(
+    name, noise, tmp_path, monkeypatch, record_property,
+):
     spec, actions = workflow(name)
     histories, paths = {}, []
+    boundaries = workflow_initializations(name)
+    completed = {"trajectories": [], "replays": []}
+
+    def progress(kind, category):
+        completed[category].append(kind)
+        record_property("coverage", json.dumps(completed))
+        (tmp_path / "coverage.json").write_text(json.dumps(
+            {"name": name, "noise": noise, **completed}, allow_nan=False,
+        ))
 
     def capture(kind):
         def factory(*args, **kwargs):
@@ -154,6 +193,10 @@ def test_native_gym_cli_agent_and_all_logged_replays(name, noise, tmp_path, monk
                     for key in ("error_message", "rollback_reason", "outcome_diagnostics")
                 }
                 assert result.info["measurement_status"] not in {"invalid", "failed"}
+                if result.terminated and session._state.lab_clock is not None:
+                    assert all(job["measurement_status"] == "valid"
+                               for job in session._state.lab_clock.completed
+                               if job["kind"] == "measure")
                 histories[kind].append(trace(session, result))
                 return result
 
@@ -183,6 +226,8 @@ def test_native_gym_cli_agent_and_all_logged_replays(name, noise, tmp_path, monk
             path = tmp_path / f"{name}-{kind}.jsonl"
             with TrajectoryLogger(path) as logger:
                 for step, action in enumerate(actions, 1):
+                    if step - 1 in boundaries:
+                        session.reset(options=boundaries[step - 1])
                     if kind == "native":
                         before = session._state
                         result = session.execute(action)
@@ -209,7 +254,9 @@ def test_native_gym_cli_agent_and_all_logged_replays(name, noise, tmp_path, monk
                         agent_metadata={"agent_id": "fixed-integration"},
                     )
             assert ended and not truncated
+            assert len(session._lifecycle_history) == len(boundaries)
             paths.append(path)
+            progress(kind, "trajectories")
             session.close()
     expected = histories["native"]
 
@@ -221,6 +268,8 @@ def test_native_gym_cli_agent_and_all_logged_replays(name, noise, tmp_path, monk
         path.write_text(json.dumps(action))
         action_paths.append(str(path))
     cli_log = tmp_path / "cli.jsonl"
+    initialization_path = tmp_path / "initializations.json"
+    initialization_path.write_text(json.dumps(boundaries))
     with monkeypatch.context() as patch:
         patch.setattr(runtime_module, "ChemWorldRuntime", capture("cli"))
         with redirect_stdout(io.StringIO()):
@@ -241,9 +290,12 @@ def test_native_gym_cli_agent_and_all_logged_replays(name, noise, tmp_path, monk
                     "json",
                     "--trajectory",
                     str(cli_log),
+                    "--initializations",
+                    str(initialization_path),
                 ]
             )
     paths.append(cli_log)
+    progress("cli", "trajectories")
 
     import chemworld.eval.runner as runner
 
@@ -261,29 +313,42 @@ def test_native_gym_cli_agent_and_all_logged_replays(name, noise, tmp_path, monk
             observation_noise_mode=noise,
             observation_seed=12,
             output_path=agent_log,
+            initialization_after_action=boundaries,
         )
     paths.append(agent_log)
+    progress("agent", "trajectories")
     for kind, history in histories.items():
         assert history == expected, kind
     for path in paths:
         replay = verify_records(load_jsonl(path), tolerance=1e-8)
         assert replay.verified, (path.name, replay.mismatches)
         assert replay.checked_steps == len(actions)
+        progress(path.stem, "replays")
 
 
 @pytest.mark.parametrize("name", WORKFLOWS)
 @pytest.mark.parametrize("noise", ("sequential", "keyed"))
-def test_snapshot_resume_in_middle_of_real_workflow(name, noise, tmp_path):
+def test_snapshot_resume_in_middle_of_real_workflow(
+    name, noise, tmp_path, *, recipe=None, sort_keys=False
+):
     import subprocess
     import sys
 
-    spec, actions = workflow(name)
+    spec, actions = workflow(name) if recipe is None else recipe
     original = ChemWorldRuntime(
         composition=spec, observation_noise_mode=noise, observation_seed_override=12
     )
     original.reset(seed=7)
-    middle = 4 if name == "shared-clock" else len(actions) // 2
-    for action in actions[:middle]:
+    checkpoints = {"heater": 8, "membrane": 9, "mineral": 4, "shared-clock": 4,
+                   "distillation": 3, "crystal": 5, "solid": 2, "heterogeneous": 6,
+                   "open-closed": 4, "device-lifecycle": 11}
+    middle = checkpoints[name] if recipe is None else (
+        4 if name == "shared-clock" else len(actions) // 2
+    )
+    boundaries = workflow_initializations(name) if recipe is None else {}
+    for index, action in enumerate(actions[:middle]):
+        if index in boundaries:
+            original.reset(options=boundaries[index])
         assert original.execute(action).info["transaction_status"] == "committed"
     snapshot = original.snapshot().to_dict()
     if name == "shared-clock":
@@ -291,7 +356,10 @@ def test_snapshot_resume_in_middle_of_real_workflow(name, noise, tmp_path):
         assert original._state.process.stochastic_continuation
         assert all("observation" not in job for job in original.lab_status()["running"])
     source, destination = tmp_path / "resume.json", tmp_path / "continued.json"
-    source.write_text(json.dumps({"snapshot": snapshot, "actions": actions[middle:]}))
+    source.write_text(json.dumps(
+        {"snapshot": snapshot, "actions": actions[middle:],
+         "offset": middle, "boundaries": boundaries}, sort_keys=sort_keys
+    ))
     code = """
 import json, sys
 from pathlib import Path
@@ -300,19 +368,23 @@ from chemworld.data.logging import to_builtin
 payload = json.loads(Path(sys.argv[1]).read_text())
 session = ChemWorldRuntime.from_snapshot(payload['snapshot'])
 history = []
-for action in payload['actions']:
+for index, action in enumerate(payload['actions'], payload['offset']):
+    if str(index) in payload['boundaries']:
+        session.reset(options=payload['boundaries'][str(index)])
     result = session.execute(action)
     assert result.info['transaction_status'] == 'committed'
     history.append(to_builtin({'state': session._state.to_dict(),
         'reading': result.info['native_observation'], 'queue': result.info['lab_clock'],
         'outcome': result.info['operation_outcome'], 'duration_s': result.info['actual_duration_s'],
-        'balance': result.info['material_balance']}))
+        'balance': result.info['material_balance'], 'initializations':session._lifecycle_history}))
 Path(sys.argv[2]).write_text(json.dumps(history, allow_nan=False))
 session.close()
 """
     try:
         expected = []
-        for action in actions[middle:]:
+        for index, action in enumerate(actions[middle:], middle):
+            if index in boundaries:
+                original.reset(options=boundaries[index])
             result = original.execute(action)
             assert result.info["transaction_status"] == "committed"
             expected.append(trace(original, result))
@@ -413,14 +485,13 @@ def test_invalid_compositions_do_not_silently_fallback(case):
     elif case == "missing-local-species":
         state["species_amounts"].pop("CO2")
     elif case == "missing-caloric-parameter":
-        payload["physics"]["thermal_models"]["reactor"]["thermodynamics"]["species"].pop("CO")
+        payload["physics"]["models"]["thermal"]["bindings"]["reactor"]["thermodynamics"]["species"].pop("CO")
     else:
         payload["components"].append(
             {"id": "bad-heat", "kind": "thermal", "vessel": "reactor", "parameters": {}}
         )
-        payload["physics"]["thermal_models"]["reactor"] = payload["physics"]["thermal_models"][
-            "continuous"
-        ]
+        bindings = payload["physics"]["models"]["thermal"]["bindings"]
+        bindings["reactor"] = bindings["continuous"]
     with pytest.raises(ValueError):
         ChemWorldRuntime(composition=payload)
 

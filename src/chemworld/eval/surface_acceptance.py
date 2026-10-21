@@ -254,7 +254,7 @@ def compare_thermal(case):
         _, _, _, _, info = env.step(
             {"operation": "wait", "duration_s": 600, "stirring_speed_rpm": 600}
         )
-        _, actual = local_thermodynamics(env._state, spec.physics.thermal_models["reactor"])
+        _, actual = local_thermodynamics(env._state, spec.physics.models_of("thermal")["reactor"])
         endpoint_error = max(
             *(
                 abs(actual.amounts_mol[k] - native.final_state.amounts_mol[k]) / scales[k]

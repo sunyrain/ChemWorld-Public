@@ -3,23 +3,32 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 from chemworld.foundation.units import supported_units, unit_spec
 
 
 @dataclass(frozen=True)
 class DimensionVector:
-    """Integer exponents over ChemWorld's physical and semantic base axes."""
+    """Finite exponents over ChemWorld's physical and semantic base axes.
 
-    mass: int = 0
-    length: int = 0
-    time: int = 0
-    temperature: int = 0
-    amount: int = 0
-    current: int = 0
-    signal: int = 0
-    currency: int = 0
-    risk: int = 0
+    Integral exponents retain their original JSON representation. Fractional
+    powers support quantities such as solubility parameters and parachor.
+    """
+
+    mass: int | float = 0
+    length: int | float = 0
+    time: int | float = 0
+    temperature: int | float = 0
+    amount: int | float = 0
+    current: int | float = 0
+    signal: int | float = 0
+    currency: int | float = 0
+    risk: int | float = 0
+
+    def __post_init__(self) -> None:
+        for name, value in self.to_dict().items():
+            object.__setattr__(self, name, _exponent(value))
 
     def __mul__(self, other: DimensionVector) -> DimensionVector:
         return self._combine(other, 1)
@@ -27,9 +36,8 @@ class DimensionVector:
     def __truediv__(self, other: DimensionVector) -> DimensionVector:
         return self._combine(other, -1)
 
-    def __pow__(self, exponent: int) -> DimensionVector:
-        if not isinstance(exponent, int):
-            raise TypeError("dimension exponent must be an integer")
+    def __pow__(self, exponent: int | float) -> DimensionVector:
+        exponent = _exponent(exponent)
         return DimensionVector(**{name: value * exponent for name, value in self.to_dict().items()})
 
     def _combine(self, other: DimensionVector, sign: int) -> DimensionVector:
@@ -39,7 +47,7 @@ class DimensionVector:
         right = other.to_dict()
         return DimensionVector(**{name: left[name] + sign * right[name] for name in left})
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, int | float]:
         return {
             "mass": self.mass,
             "length": self.length,
@@ -54,7 +62,16 @@ class DimensionVector:
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> DimensionVector:
-        return cls(**{name: int(str(payload.get(name, 0))) for name in cls().to_dict()})
+        values = {name: payload.get(name, 0) for name in cls().to_dict()}
+        return cls(**{name: float(v) if isinstance(v, str) else v for name, v in values.items()})
+
+
+def _exponent(value: int | float) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError("dimension exponent must be a finite number")
+    if not isfinite(value):
+        raise ValueError("dimension exponent must be finite")
+    return int(value) if value == int(value) else value
 
 
 @dataclass(frozen=True)
@@ -193,15 +210,32 @@ def _definition(
 _DIMENSIONS = (
     _definition("dimensionless", "dimensionless", DimensionVector(), "physical", "Pure ratio."),
     _definition("amount", "mol", N, "physical", "Amount of substance."),
+    _definition("amount_rate", "mol/s", N / T, "physical", "Amount or formal extent per time."),
     _definition("mass", "kg", M, "physical", "Mass."),
     _definition("volume", "L", L**3, "physical", "Volume."),
+    _definition("volume_flow", "m^3/s", L**3 / T, "transport", "Volumetric flow rate."),
+    _definition("velocity", "m/s", L / T, "transport", "Linear flow velocity."),
+    _definition("viscosity_per_temperature", "Pa*s/K", M / L / T / THETA, "transport",
+                "Dynamic-viscosity derivative per kelvin temperature interval."),
+    _definition("conductivity_per_temperature", "W/(m*K^2)", M * L / T**3 / THETA**2,
+                "transport", "Temperature derivative of thermal conductivity."),
     _definition("temperature", "K", THETA, "physical", "Thermodynamic temperature."),
+    _definition("thermal_expansivity", "1/K", THETA**-1, "physical",
+                "Fractional volume change per temperature interval."),
     _definition("time", "s", T, "physical", "Elapsed time."),
     _definition("pressure", "Pa", M / L / T**2, "physical", "Mechanical pressure."),
+    *(_definition(f"pressure_temperature_derivative_{order}", f"Pa/{suffix}",
+                  M/L/T**2/THETA**order, "physical",
+                  f"Order-{order} pressure derivative per kelvin temperature interval.")
+      for order, suffix in ((1, "K"), (2, "K^2"), (3, "K^3"))),
     _definition("energy", "J", M * L**2 / T**2, "physical", "Energy or heat."),
     _definition("power", "W", M * L**2 / T**3, "physical", "Energy rate."),
     _definition("concentration", "mol/L", N / L**3, "physical", "Amount concentration."),
     _definition("molar_enthalpy", "J/mol", M * L**2 / T**2 / N, "physical", "Energy per amount."),
+    _definition("heat_capacity", "J/K", M * L**2 / T**2 / THETA, "physical",
+                "Energy per temperature interval."),
+    _definition("thermal_conductance", "W/K", M * L**2 / T**3 / THETA, "transport",
+                "Heat flow per temperature difference."),
     _definition(
         "molar_heat_capacity",
         "J/(mol*K)",
@@ -211,11 +245,18 @@ _DIMENSIONS = (
     ),
     _definition("molecular_weight", "g/mol", M / N, "physical", "Mass per amount."),
     _definition("molar_volume", "m^3/mol", L**3 / N, "physical", "Volume per amount."),
+    _definition("molar_area", "m^2/mol", L**2 / N, "physical", "Area per amount."),
+    _definition("solubility_parameter", "Pa^0.5", (M / L / T**2)**0.5, "physical",
+                "Square root of cohesive energy density."),
+    _definition("parachor", "kg^0.25*m^3/(s^0.5*mol)", M**0.25 * L**3 / T**0.5 / N,
+                "physical", "Molar volume times the fourth root of surface tension."),
     _definition("molar_volume_per_temperature", "m^3/(mol*K)", L**3 / N / THETA,
                 "physical", "Temperature derivative of molar volume."),
     _definition("molar_volume_per_pressure", "m^3/(mol*Pa)", L**4 * T**2 / M / N,
                 "physical", "Pressure derivative of molar volume."),
     _definition("mass_density", "kg/m^3", M / L**3, "physical", "Mass per volume."),
+    _definition("mass_density_per_temperature", "kg/(m^3*K)", M / L**3 / THETA,
+                "physical", "Temperature derivative of mass density on a declared path."),
     _definition("dynamic_viscosity", "Pa*s", M / L / T, "transport", "Dynamic viscosity."),
     _definition(
         "thermal_conductivity",
@@ -226,6 +267,8 @@ _DIMENSIONS = (
     ),
     _definition("diffusivity", "m^2/s", L**2 / T, "transport", "Molecular or thermal diffusivity."),
     _definition("surface_tension", "N/m", M / T**2, "transport", "Surface tension."),
+    _definition("surface_tension_per_temperature", "N/(m*K)", M / T**2 / THETA,
+                "transport", "Temperature derivative of surface tension."),
     _definition(
         "heat_transfer_coefficient",
         "W/(m^2*K)",
@@ -242,6 +285,13 @@ _DIMENSIONS = (
         "Electric potential.",
     ),
     _definition("electric_charge", "C", CURRENT * T, "instrument", "Electric charge."),
+    _definition("electric_potential_per_temperature", "V/K",
+                M * L**2 / T**3 / CURRENT / THETA, "physical",
+                "Potential derivative per kelvin temperature interval."),
+    _definition("electric_dipole_moment", "C*m", CURRENT * T * L, "physical",
+                "Electric dipole moment."),
+    _definition("brix", "degBx", L**0, "instrument",
+                "Sucrose reference refractometer scale, not arbitrary-solution mass fraction."),
     _definition(
         "electrical_resistance",
         "Ohm",
@@ -257,11 +307,15 @@ _DIMENSIONS = (
         "Electrical capacitance.",
     ),
     _definition("frequency", "Hz", T**-1, "instrument", "Frequency."),
-    _definition("length", "nm", L, "instrument", "Spectral wavelength."),
+    _definition("length", "nm", L, "instrument", "Spectral wavelength or molecular geometry."),
     _definition("wavenumber", "cm^-1", L**-1, "instrument", "Infrared coordinate."),
     _definition("relative_signal", "relative_signal", DimensionVector(), "instrument",
                 "Relative spectral detector signal."),
     _definition("chemical_shift", "ppm", DimensionVector(), "instrument", "NMR chemical shift."),
+    _definition("gas_volume_fraction", "gas_volume_fraction", DimensionVector(), "physical",
+                "Gas volumetric concentration; distinct from NMR chemical shift."),
+    _definition("acidity", "pH", DimensionVector(), "physical",
+                "Negative logarithm of hydrogen-ion activity; a distinct semantic scale."),
     _definition(
         "mass_to_charge",
         "m/z",

@@ -675,7 +675,6 @@ class ChemWorldCrystallizationServices:
         This operation does not force dissolution. Subsequent heating uses the
         solubility curve, particle shrinkage and dissolution-energy model.
         """
-        assert state.phases is not None
         liquor = state.phases.phases["mother_liquor"]
         solid = state.phases.phases["solid"]
         cake_liquor = state.phases.phases["cake_liquor"]

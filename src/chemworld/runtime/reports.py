@@ -211,6 +211,8 @@ def build_public_mechanism_summary(compiled_mechanism: Any) -> dict[str, Any]:
 def build_evaluator_provenance(env: Any) -> dict[str, Any]:
     """Return replay identity that must never be passed to an Agent."""
 
+    from chemworld.runtime.lifecycle import initialization_replay
+
     mechanism = env.scenario_instance.compiled_mechanism
     metadata = env.scenario_instance.initial_state.metadata
     return {
@@ -231,6 +233,7 @@ def build_evaluator_provenance(env: Any) -> dict[str, Any]:
         "observation_noise_mode": env.observation_noise_mode,
         "observation_noise_namespace": env.observation_noise_namespace,
         "last_observation_noise": env.observation_noise_provenance(),
+        "initialization_replay": initialization_replay(env._lifecycle_history),
         "campaign_resource_card_sha256": (
             None if env.campaign_resource_card is None else env.campaign_resource_card.card_sha256
         ),
@@ -293,6 +296,7 @@ _PRIVATE_AGENT_IDENTITY_KEYS = frozenset(
         "mechanism_id",
         "mechanism_version",
         "last_observation_noise",
+        "initialization_replay",
         "observation_noise_mode",
         "observation_noise_namespace",
         "world_family_intervention_hash",

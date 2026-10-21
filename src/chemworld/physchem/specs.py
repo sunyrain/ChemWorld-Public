@@ -9,12 +9,18 @@ from math import isfinite
 from typing import Any, ClassVar
 
 from chemworld.foundation.units import unit_spec
+from chemworld.physchem.correlation_families import (
+    CORRELATION_FAMILIES,
+    validate_family_parameters,
+)
 from chemworld.physchem.elements import (
+    explicit_formula_charge,
     hill_formula,
     mass_fractions_from_formula,
     molecular_weight,
     parse_formula,
 )
+from chemworld.physchem.identifiers import validate_cas_number
 
 _VALID_PHASES = {"gas", "liquid", "solid", "aqueous", "organic", "unknown"}
 _FRACTION_TOL = 1e-9
@@ -106,6 +112,12 @@ _EQUATION_CONTRACTS: dict[str, dict[str, object]] = {
         "output_dimension": "surface_tension",
     },
 }
+_EQUATION_CONTRACTS.update({
+    key: {"required_coefficients": set(family.required),
+          "input_dimensions": family.input_dimensions,
+          "output_dimension": "property_declared"}
+    for key, family in CORRELATION_FAMILIES.items()
+})
 
 
 @dataclass(frozen=True)
@@ -383,7 +395,7 @@ class ComponentSpec:
     identifier: str
     formula: str
     molecular_weight_g_mol: float | None = None
-    charge: int = 0
+    charge: int | None = None
     default_phase: str = "liquid"
     safety_tags: tuple[str, ...] = ()
     allowed_property_correlations: tuple[str, ...] = ()
@@ -406,7 +418,7 @@ class ComponentSpec:
                 "Component identifier cannot contain leading, trailing, or internal whitespace"
             )
         if self.cas_number:
-            object.__setattr__(self, "cas_number", _validate_cas_number(self.cas_number))
+            object.__setattr__(self, "cas_number", validate_cas_number(self.cas_number))
         if self.inchi and not self.inchi.startswith(("InChI=1/", "InChI=1S/")):
             raise ValueError("inchi must use an InChI=1/ or InChI=1S/ prefix")
         if self.inchi_key and re.fullmatch(r"[A-Z]{14}-[A-Z]{10}-[A-Z]", self.inchi_key) is None:
@@ -427,8 +439,13 @@ class ComponentSpec:
                 "molecular_weight_g_mol is inconsistent with formula-derived "
                 f"value {calculated_mw:g} g/mol"
             )
-        if not isinstance(self.charge, int):
+        declared_charge = explicit_formula_charge(self.formula)
+        if self.charge is None:
+            object.__setattr__(self, "charge", 0 if declared_charge is None else declared_charge)
+        if isinstance(self.charge, bool) or not isinstance(self.charge, int):
             raise ValueError("charge must be an integer")
+        if declared_charge is not None and self.charge != declared_charge:
+            raise ValueError("explicit component charge conflicts with its formula charge")
         _validate_string_tuple(self.safety_tags, "safety_tags")
         _validate_string_tuple(
             self.allowed_property_correlations,
@@ -499,7 +516,7 @@ class ComponentSpec:
                 if payload.get("molecular_weight_g_mol") is None
                 else float(payload["molecular_weight_g_mol"])
             ),
-            charge=int(payload.get("charge", 0)),
+            charge=payload.get("charge"),
             default_phase=str(payload.get("default_phase", "liquid")),
             safety_tags=tuple(str(value) for value in payload.get("safety_tags", ())),
             allowed_property_correlations=tuple(
@@ -668,12 +685,24 @@ class PropertyCorrelation:
             raise ValueError("equation_id cannot be empty")
         if self.equation_id not in _EQUATION_CONTRACTS:
             raise ValueError(f"Unsupported property equation_id: {self.equation_id}")
-        if not self.coefficients:
+        if not self.coefficients and _required_coefficients(self.equation_id):
             raise ValueError("coefficients cannot be empty")
         _validate_coefficients(self.coefficients, self.equation_id)
         contract = _EQUATION_CONTRACTS[self.equation_id]
         output_spec = unit_spec(self.output_unit)
         expected_output_dimension = str(contract["output_dimension"])
+        if self.equation_id in CORRELATION_FAMILIES:
+            family = CORRELATION_FAMILIES[self.equation_id]
+            validate_family_parameters(self.equation_id, self.coefficients)
+            if self.property_id not in family.property_dimensions:
+                raise ValueError(f"{self.equation_id} requires a supported explicit property_id")
+            expected_output_dimension = family.property_dimensions[self.property_id]
+            if family.fixed_output_unit and self.output_unit != family.fixed_output_unit:
+                raise ValueError(
+                    f"{self.equation_id} coefficients require {family.fixed_output_unit}")
+            if self.input_units != family.input_units:
+                raise ValueError("correlation families require absolute-Kelvin input units "
+                                 "and Pa for declared pressure inputs")
         if output_spec.dimension != expected_output_dimension:
             raise ValueError(
                 f"output_unit for {self.equation_id} must have dimension "
@@ -709,7 +738,12 @@ class PropertyCorrelation:
             if len(bounds) != 2:
                 raise ValueError(f"Validity range must have two values: {variable}")
             lower, upper = bounds
-            if lower >= upper:
+            is_source_point = (self.equation_id in {"phase_change_point", "interface_source_point",
+                                                   "dimensionless_source_point"}
+                               and variable == "temperature"
+                               and lower == upper == self.coefficients["T_ref"])
+            if (not all(isfinite(v) for v in (lower, upper))
+                    or (lower >= upper and not is_source_point)):
                 raise ValueError(f"Invalid validity range for {variable}: {bounds}")
         object.__setattr__(self, "coefficients", dict(self.coefficients))
         object.__setattr__(self, "input_units", dict(self.input_units))
@@ -950,25 +984,6 @@ def _validate_string_tuple(values: Sequence[str], field_name: str) -> None:
         seen.add(value)
 
 
-def _validate_cas_number(cas_number: str) -> str:
-    parts = cas_number.split("-")
-    if (
-        len(parts) != 3
-        or not all(part.isdigit() for part in parts)
-        or len(parts[0]) < 2
-        or len(parts[1]) != 2
-        or len(parts[2]) != 1
-    ):
-        raise ValueError("cas_number must use CAS Registry Number format")
-    digits = parts[0] + parts[1]
-    checksum = (
-        sum(int(digit) * weight for weight, digit in enumerate(reversed(digits), start=1)) % 10
-    )
-    if checksum != int(parts[2]):
-        raise ValueError("cas_number checksum is invalid")
-    return cas_number
-
-
 def _component_identity_tokens(component: ComponentSpec) -> tuple[str, ...]:
     tokens = [component.identifier, *component.aliases]
     if component.cas_number:
@@ -1091,6 +1106,8 @@ def property_equation_contracts() -> dict[str, dict[str, object]]:
             },
             "output_dimension": str(contract["output_dimension"]),
         }
+        if equation_id in CORRELATION_FAMILIES:
+            contracts[equation_id].update(CORRELATION_FAMILIES[equation_id].to_dict())
     return contracts
 
 
