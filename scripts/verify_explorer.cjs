@@ -15,14 +15,20 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
  const ready=async route=>{await page.waitForFunction(()=>window.CHEMWORLD_CAPABILITIES&&document.querySelector('#site-page h1,#outline .tree-row,.site-error'));if(route?.startsWith('atlas'))await page.locator('#atlas-view:not([hidden]) [data-map]').first().waitFor();if(route?.startsWith('index'))await page.locator('#index-view:not([hidden]) h1').waitFor();if(route?.startsWith('guides'))await page.locator('#guide-reader h1').waitFor();};
  const go=async(route,lang='zh')=>{await page.goto(base+'?lang='+lang+'#'+route);await ready(route);};
  const hash=async route=>{await page.evaluate(r=>location.hash=r,route);await page.waitForURL('**#'+route);await ready(route);};
- const screenshot=name=>page.screenshot({path:path.join(out,name+'.png'),fullPage:true});
+ const screenshot=async name=>{await page.locator('img').evaluateAll(async images=>{for(const img of images)img.loading='eager';await Promise.all(images.map(img=>img.decode()));});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:path.join(out,name+'.png'),fullPage:true});};
  try{
   await go('home');
   await check('Home exposes the real hierarchy and defers guide payloads',async()=>{
    assert.equal(await page.locator('.site-nav [data-nav]').count(),4);assert.equal(await page.locator('[data-nav="research"]').count(),0);assert.equal(await page.locator('.site-explorer-toolbar').count(),0);
    assert.match(await page.locator('.home-scale').innerText(),/17/);assert.match(await page.locator('.home-scale').innerText(),/68/);
-   assert.match(await page.locator('.architecture-captions').innerText(),/任务与评测/);
+   assert.equal(await page.locator('.architecture-visual').count(),0);await page.locator('.home-hero-art img').evaluate(img=>img.decode());
+   assert.match(await page.locator('.home-hero-art img').getAttribute('src'),/assets\/home\/hero-/);assert.equal(await page.locator('.home-domain-card').count(),4);
    assert.ok(!requests.some(u=>/chemworld-guide-(content|localized)\.js/.test(u)));await screenshot('site-home');
+  });
+  await check('Homepage domain links, featured record and getting-started entry work',async()=>{
+   for(const id of ['reaction','materials','separation','bio']){await go('home');await page.locator(`.home-domain-card[href="#atlas/${id}"]`).click();await page.waitForURL('**#atlas/'+id);await page.locator('#atlas-view:not([hidden]) [data-map]').first().waitFor();}
+   await go('home');await page.locator('.home-record-actions .primary').click();await page.locator('#step-counter').waitFor();assert.equal(await page.locator('#step-counter').textContent(),'6 / 21');
+   await go('home');await page.locator('.home-next-actions .primary').click();await page.locator('.start-layout').waitFor();
   });
   await check('Catalog filtering and player navigation work',async()=>{
    await page.locator('[data-nav="experiments"]').click();await page.locator('.case-card').first().waitFor();
