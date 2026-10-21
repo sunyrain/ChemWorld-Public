@@ -1,0 +1,193 @@
+/* Homepage: generated photography, accessible live text and catalogue-derived counts. */
+.home-page { max-width: 1500px; margin: auto; padding: 28px 28px 0; }
+.home-eyebrow { font-size: 11px; line-height: 1.7; letter-spacing: .09em; color: #477982; font-weight: 550; }
+.home-hero {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  min-height: 590px;
+  overflow: hidden;
+  border-radius: 9px;
+  background: #061421;
+  color: #fff;
+}
+.home-hero-art { position: absolute; inset: 0; z-index: -2; }
+.home-hero-art img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: right center; }
+.home-hero::before { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, #061421 0%, #061421ed 24%, #06142100 57%); pointer-events: none; }
+.home-hero-copy { padding: 62px clamp(32px, 4.5vw, 68px) 68px; width: 56%; }
+.home-hero-copy .home-eyebrow { color: #98bec9; margin-bottom: 28px; letter-spacing: .12em; }
+.home-hero h1 { margin: 0 0 27px; font-size: clamp(38px, 3.8vw, 58px); line-height: 1.28; letter-spacing: -1.7px; font-weight: 620; }
+.home-hero h1 span { color: #b4dfdf; }
+.home-hero-copy > p { margin: 0; max-width: 460px; color: #c0d1da; font-size: 14px; line-height: 1.95; }
+.home-actions { display: flex; flex-wrap: wrap; gap: 13px; margin-top: 29px; }
+.home-actions .site-button { padding: 12px 17px; min-height: 44px; font-size: 12px; background: #ffffff04; border-color: #65818f; color: #e0edf0; }
+.home-actions .site-button:hover { background: #ffffff0d; }
+.home-actions .site-button.primary { background: #d6edeb; border-color: #d6edeb; color: #0c3d46; }
+.home-actions .site-button.primary:hover { background: #e8f6f4; }
+.home-interfaces { display: flex; flex-wrap: wrap; gap: 8px 19px; font-size: 10px; color: #9bb6c2; margin-top: 28px; }
+.home-interfaces span + span { border-left: 1px solid #3a5362; padding-left: 19px; }
+.home-art-caption { position: absolute; right: 19px; bottom: 16px; font-size: 9px; color: #c3d2d8; background: #061421b8; border-radius: 3px; padding: 5px 7px; }
+.home-scale { display: grid; grid-template-columns: 1fr 2fr; gap: 35px; align-items: center; margin: 0 34px; padding: 32px 0; border-bottom: 1px solid #dce7e9; }
+.home-scale-intro .home-eyebrow { display: block; font-size: 12px; color: #385e6c; letter-spacing: 0; }
+.home-scale-intro a { display: inline-flex; align-items: center; gap: 10px; margin-top: 11px; color: #00747c; font-size: 11px; }
+.home-scale-intro svg { width: 14px; height: 14px; }
+.home-scale dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 30px; margin: 0; }
+.home-scale dl > div { display: flex; flex-direction: column-reverse; gap: 8px; }
+.home-scale dt { font-size: 11px; color: #617b85; }
+.home-scale dd { font-size: 31px; line-height: 1.15; color: #193f4c; font-weight: 450; margin: 0; font-variant-numeric: tabular-nums; }
+.home-domains { padding: 55px 34px 57px; }
+.home-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 27px; }
+.home-section-heading .home-eyebrow { margin-bottom: 13px; }
+.home-section-heading h2 { margin: 0; color: #173c49; font-size: clamp(23px, 2.2vw, 30px); line-height: 1.45; letter-spacing: -.6px; font-weight: 600; }
+.home-section-heading > .site-link { flex-shrink: 0; margin-bottom: 6px; font-size: 12px; }
+.home-domain-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 23px; }
+.home-domain-card { min-width: 0; display: block; color: #1a414f; }
+.home-domain-card:hover { text-decoration: none !important; }
+.home-domain-image { overflow: hidden; border-radius: 5px; aspect-ratio: 1.5; background: #e5ecef; }
+.home-domain-image img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .4s ease; }
+.home-domain-card:hover img { transform: scale(1.035); }
+.home-domain-title { display: flex; gap: 9px; align-items: baseline; margin-top: 20px; }
+.home-domain-number { font: 10px Consolas, monospace; color: #7a969f; }
+.home-domain-title h3 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.home-domain-title > svg { flex: none; width: 15px; height: 15px; color: #4c8892; margin-left: auto; }
+.home-domain-card:hover h3 { color: #007b81; }
+.home-domain-card p { font-size: 11px; color: #6c818b; margin: 9px 0 0 22px; line-height: 1.8; }
+.home-experiment { margin: 0 34px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); border: 1px solid #dce7e9; border-radius: 7px; overflow: hidden; background: #f5f9fa; }
+.home-record-image { position: relative; display: block; min-height: 390px; background: #092332; }
+.home-record-image .experiment-cover { position: absolute; inset: 0; object-position: 50% 48%; }
+.home-watch { width: 57px; height: 57px; position: absolute; bottom: 26px; right: 26px; border-radius: 50%; background: #092e3cdd; border: 1px solid #b1c8d1; display: grid; place-items: center; color: #fff; transition: background .2s; }
+.home-watch svg { width: 20px; height: 20px; }
+.home-record-image:hover .home-watch { background: #006f78; }
+.home-record-label { position: absolute; top: 21px; left: 23px; padding: 6px 9px; color: #e1edf0; background: #0b2838c4; border: 1px solid #ffffff40; font-size: 10px; letter-spacing: .04em; border-radius: 3px; }
+.home-record-copy { padding: 42px; align-self: center; }
+.home-record-copy .home-eyebrow { margin-bottom: 20px; }
+.home-record-copy h2 { color: #163c4a; font-size: clamp(25px, 2.6vw, 35px); letter-spacing: -.6px; line-height: 1.45; font-weight: 600; margin: 0 0 20px; }
+.home-record-copy > p { font-size: 13px; line-height: 1.9; color: #5b7682; margin: 0; }
+.home-record-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px 20px; font-size: 10px; color: #6e8590; margin-top: 23px; }
+.home-record-facts strong { font-size: 19px; font-weight: 500; color: #234d5a; margin-right: 4px; }
+.home-record-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 19px; margin-top: 27px; }
+.home-record-actions .site-button, .home-record-actions .site-link { font-size: 11px; }
+.home-next { display: flex; align-items: center; justify-content: space-between; gap: 35px; margin: 0 34px; padding: 53px 0 58px; }
+.home-next .home-eyebrow { margin-bottom: 13px; }
+.home-next h2 { color: #163c4a; font-size: 28px; line-height: 1.5; font-weight: 600; margin: 0 0 10px; letter-spacing: -.5px; }
+.home-next p { color: #657e8a; font-size: 12px; line-height: 1.9; margin: 0; }
+.home-next-actions { display: flex; flex-direction: column; gap: 15px; align-items: center; flex-shrink: 0; }
+.home-next-actions .site-button { min-height: 43px; }
+.home-next-actions .site-link { font-size: 11px; }
+@media (max-width: 1200px) {
+  .home-page { padding: 24px 24px 0; }
+  .home-hero { min-height: 550px; }
+  .home-hero-copy { padding: 50px 40px 56px; width: 57%; }
+  .home-hero h1 { font-size: 43px; }
+  .home-hero-copy > p { font-size: 13px; }
+  .home-scale, .home-experiment, .home-next { margin-left: 16px; margin-right: 16px; }
+  .home-domains { padding-left: 16px; padding-right: 16px; }
+  .home-domain-grid { gap: 18px; }
+  .home-domain-title { gap: 7px; }
+  .home-domain-title h3 { font-size: 14px; }
+  .home-record-copy { padding: 31px; }
+}
+@media (max-width: 1000px) {
+  .home-hero { min-height: 540px; }
+  .home-hero-copy { width: 61%; padding: 42px 30px 48px; }
+  .home-hero h1 { font-size: 39px; }
+  .home-hero::before { background: linear-gradient(90deg, #061421 0%, #061421f0 26%, #06142100 65%); }
+  .home-hero-copy .home-eyebrow { font-size: 10px; }
+  .home-actions { gap: 9px; }
+  .home-actions .site-button { padding: 10px 13px; font-size: 11px; }
+  .home-scale { grid-template-columns: 1fr 2fr; gap: 22px; padding-top: 27px; padding-bottom: 27px; }
+  .home-scale dl { gap: 20px; }
+  .home-scale dt { font-size: 10px; }
+  .home-scale dd { font-size: 28px; }
+  .home-domain-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 23px; }
+  .home-domain-title h3 { font-size: 17px; }
+  .home-domain-card p { font-size: 12px; }
+  .home-record-copy { padding: 29px; }
+  .home-record-copy h2 { font-size: 27px; }
+  .home-record-image { min-height: 420px; }
+  .home-record-facts { gap: 10px 15px; }
+  .home-section-heading h2 { font-size: 25px; }
+  .home-next h2 { font-size: 25px; }
+}
+@media (max-width: 736px) {
+  .home-page { padding: 18px 18px 0; }
+  .home-hero { display: flex; flex-direction: column; min-height: 0; align-items: stretch; }
+  .home-hero::before { display: none; }
+  .home-hero-copy { width: auto; padding: 32px 27px 27px; }
+  .home-hero-copy .home-eyebrow { margin-bottom: 21px; }
+  .home-hero h1 { font-size: 38px; letter-spacing: -1.2px; line-height: 1.3; margin-bottom: 19px; }
+  .home-hero-copy > p { font-size: 13px; max-width: none; }
+  .home-actions { margin-top: 23px; gap: 10px; }
+  .home-actions .site-button { font-size: 12px; padding: 11px 14px; }
+  .home-interfaces { margin-top: 24px; gap: 8px 12px; font-size: 10px; }
+  .home-interfaces span + span { padding-left: 12px; }
+  .home-hero-art { position: relative; order: 1; inset: auto; height: 340px; z-index: 0; overflow: hidden; }
+  .home-hero-art img { object-fit: contain; object-position: center; }
+  .home-art-caption { z-index: 1; font-size: 8px; right: 10px; bottom: 11px; }
+  .home-scale { grid-template-columns: 1fr; gap: 23px; margin: 0 6px; padding: 27px 0; }
+  .home-scale-intro { display: flex; align-items: center; justify-content: space-between; gap: 13px; }
+  .home-scale-intro a { margin: 0; flex-shrink: 0; font-size: 10px; }
+  .home-scale-intro .home-eyebrow { font-size: 11px; }
+  .home-scale dl { gap: 15px; }
+  .home-scale dd { font-size: 29px; }
+  .home-domains { padding: 36px 6px 36px; }
+  .home-section-heading { display: block; margin-bottom: 23px; }
+  .home-section-heading h2 { font-size: 25px; max-width: 510px; }
+  .home-section-heading > .site-link { margin-top: 15px; margin-bottom: 0; font-size: 11px; }
+  .home-domain-grid { gap: 27px 18px; }
+  .home-domain-title { margin-top: 15px; }
+  .home-domain-title h3 { font-size: 16px; }
+  .home-domain-card p { font-size: 11px; }
+  .home-experiment { display: flex; flex-direction: column; margin: 0 6px; }
+  .home-record-image { min-height: 0; aspect-ratio: 1.5; }
+  .home-record-copy { padding: 29px 26px; }
+  .home-record-copy h2 { font-size: 29px; }
+  .home-record-copy > p { font-size: 13px; }
+  .home-record-copy .home-eyebrow { margin-bottom: 16px; }
+  .home-record-facts { margin-top: 20px; }
+  .home-record-actions { margin-top: 23px; }
+  .home-next { display: block; margin: 0 6px; padding: 35px 0 40px; }
+  .home-next h2 { font-size: 25px; }
+  .home-next-actions { align-items: start; margin-top: 22px; }
+}
+@media (max-width: 540px) {
+  .home-page { padding: 14px 12px 0; }
+  .home-hero-copy { padding: 29px 22px 24px; }
+  .home-hero h1 { font-size: 33px; letter-spacing: -.8px; }
+  .home-hero-copy > p { font-size: 12px; }
+  .home-actions .site-button { padding: 11px 12px; font-size: 11px; }
+  .home-hero-art { height: 310px; }
+  .home-domain-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 25px 14px; }
+  .home-domain-image { aspect-ratio: 1.4; }
+  .home-domain-title { gap: 6px; align-items: start; margin-top: 13px; }
+  .home-domain-title h3 { font-size: 14px; min-width: 0; }
+  .home-domain-number { display: none; }
+  .home-domain-card p { font-size: 10px; margin-left: 0; }
+  .home-domain-title > svg { width: 13px; height: 13px; margin-top: 4px; }
+  .home-scale-intro { flex-wrap: wrap; gap: 9px; }
+  .home-scale dt { font-size: 9px; }
+  .home-scale dd { font-size: 27px; }
+  .home-scale dl { gap: 9px; }
+  .home-record-copy { padding: 26px 23px; }
+  .home-record-copy h2 { font-size: 27px; }
+  .home-section-heading h2 { font-size: 24px; }
+}
+@media (max-width: 360px) {
+  .home-domain-grid { grid-template-columns: 1fr; }
+  .home-domain-image { aspect-ratio: 1.65; }
+  .home-domain-title h3 { font-size: 17px; }
+  .home-domain-card p { font-size: 11px; }
+  .home-hero h1 { font-size: 29px; }
+  .home-hero-copy { padding-left: 19px; padding-right: 19px; }
+  .home-actions .site-button { padding: 10px 11px; font-size: 10px; min-height: 40px; }
+  .home-actions { gap: 8px; }
+  .home-interfaces { gap: 7px 9px; font-size: 9px; }
+  .home-interfaces span + span { padding-left: 9px; }
+  .home-hero-art { height: 270px; }
+  .home-scale dd { font-size: 24px; }
+  .home-scale dt { font-size: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-domain-image img, .home-watch { transition: none; }
+}

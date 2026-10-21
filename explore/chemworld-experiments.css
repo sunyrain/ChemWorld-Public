@@ -6,8 +6,6 @@
   height: 100%;
   object-fit: cover;
 }
-.featured-art { overflow: hidden; }
-.featured-art .experiment-cover { position: absolute; inset: 0; }
 .experiment-collection {
   max-width: 1400px;
   margin: auto;
