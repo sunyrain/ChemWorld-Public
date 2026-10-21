@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Explore ChemWorld capabilities, domain guides and recorded experiments.">
+  <title>ChemWorld · 世界、实验与发现</title>
+  <link rel="stylesheet" href="chemworld-skill-tree.css">
+  <link rel="stylesheet" href="chemworld-guide-reader.css">
+  <link rel="stylesheet" href="chemworld-guide-code.css">
+  <link rel="stylesheet" href="chemworld-site.css">
+  <script src="chemworld-site.js" defer></script>
+</head>
+<body class="site-preview">
+  <a class="skip-link" href="#site-main">跳到主要内容 / Skip to content</a>
+  <header class="site-header">
+    <a href="#home" class="site-brand" aria-label="ChemWorld home">ChemWorld<span>.</span></a>
+    <nav class="site-nav" aria-label="主导航 / Main navigation">
+      <a href="#atlas/chemworld" data-view="atlas" data-nav="atlas" data-i18n="atlas">总览图谱</a>
+      <a href="#index/chemworld" data-view="index" data-nav="index" data-i18n="index">能力索引</a>
+      <a href="#guides/thermal-reaction/native_mechanisms" data-view="guides" data-nav="guides" data-i18n="guides">领域指南</a>
+      <a href="#experiments" data-nav="experiments" data-i18n="experiments">实验案例</a>
+      <a href="#research" data-nav="research" data-i18n="research">研究</a>
+    </nav>
+    <div class="site-search-wrap">
+      <span class="site-search-icon" aria-hidden="true"></span>
+      <input id="site-search" type="search" autocomplete="off" aria-label="搜索 / Search" placeholder="搜索能力、文档、实验…">
+      <kbd aria-hidden="true">/</kbd>
+      <div id="site-search-results" class="site-search-results" hidden></div>
+    </div>
+    <div class="site-languages" aria-label="Language"><a data-site-lang="zh" href="?lang=zh">中文</a><span>/</span><a data-site-lang="en" href="?lang=en">EN</a></div>
+    <a class="site-button primary header-start" href="#start" data-i18n="start">开始使用</a>
+  </header>
+  <main id="site-main">
+    <div id="site-page"></div>
+    <div id="site-explorer" hidden>
+      <div id="explorer-pages"></div>
+    </div>
+    <div class="legacy-chrome" hidden aria-hidden="true"><div class="registry"></div><span class="nav-count"></span><input id="search" type="search"><div id="search-results" hidden></div></div>
+  </main>
+  <footer class="site-footer"><span>ChemWorld <span class="footer-dot">·</span> <span data-i18n="footer">用于实验智能的因果世界引擎</span></span><div><a href="#start" data-i18n="start">开始使用</a><a href="https://github.com/sunyrain/ChemWorld-Public" target="_blank" rel="noopener">GitHub ↗</a><span class="preview-label" data-i18n="preview">设计预览</span></div></footer>
+  <div id="announcement" class="sr-only" aria-live="polite"></div>
+  <div id="site-toast" role="status" hidden></div>
+  <noscript><p>请启用 JavaScript 浏览交互预览。Please enable JavaScript for this interactive preview.</p><a href="https://sunyrain.github.io/ChemWorld-Public/">Documentation</a></noscript>
+</body>
+</html>

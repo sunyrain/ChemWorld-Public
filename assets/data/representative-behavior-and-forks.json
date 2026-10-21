@@ -1,0 +1,777 @@
+{
+  "agent_lifecycle": {
+    "actions": [
+      {
+        "action": {
+          "amount_mol": 0.04,
+          "operation": "add_reagent"
+        },
+        "cumulative_process_time_s": 0.0,
+        "details": "0.04 mol",
+        "label": "Reagent",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.11999999999999998,
+        "process_time_delta_s": 0.0,
+        "public_score": 0.0,
+        "sample_consumed_delta_L": 0.0,
+        "step": 1,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "add_solvent",
+          "solvent": 2,
+          "volume_L": 0.08
+        },
+        "cumulative_process_time_s": 0.0,
+        "details": "0.08 L; solvent 2",
+        "label": "Solvent",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.1024,
+        "process_time_delta_s": 0.0,
+        "public_score": 0.0,
+        "sample_consumed_delta_L": 0.0,
+        "step": 2,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "catalyst": 1,
+          "catalyst_amount_mol": 0.002,
+          "operation": "add_catalyst"
+        },
+        "cumulative_process_time_s": 0.0,
+        "details": "0.002 mol; catalyst 1",
+        "label": "Catalyst",
+        "observation_highlight": "—",
+        "physical_cost_delta": 1.44,
+        "process_time_delta_s": 0.0,
+        "public_score": 0.0,
+        "sample_consumed_delta_L": 0.0,
+        "step": 3,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "duration_s": 1500,
+          "operation": "heat",
+          "stirring_speed_rpm": 800,
+          "target_temperature_K": 375
+        },
+        "cumulative_process_time_s": 1500.0,
+        "details": "375 K; 1500 s",
+        "label": "Heat",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.012499999999999956,
+        "process_time_delta_s": 1500.0,
+        "public_score": 0.0,
+        "sample_consumed_delta_L": 0.0,
+        "step": 4,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "instrument": "hplc",
+          "operation": "measure"
+        },
+        "cumulative_process_time_s": 1500.0,
+        "details": "hplc",
+        "label": "HPLC",
+        "observation_highlight": "conversion 0.094; yield 0.088; distillate purity 0.001; score 0.033",
+        "physical_cost_delta": 0.08000000000000007,
+        "process_time_delta_s": 0.0,
+        "public_score": 0.03340166434645653,
+        "sample_consumed_delta_L": 0.0002,
+        "step": 5,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "duration_s": 1800,
+          "operation": "heat",
+          "stirring_speed_rpm": 900,
+          "target_temperature_K": 395
+        },
+        "cumulative_process_time_s": 3300.0,
+        "details": "395 K; 1800 s",
+        "label": "Heat",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.014999999999999902,
+        "process_time_delta_s": 1800.0,
+        "public_score": 0.025594212114810944,
+        "sample_consumed_delta_L": 0.0,
+        "step": 6,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "instrument": "hplc",
+          "operation": "measure"
+        },
+        "cumulative_process_time_s": 3300.0,
+        "details": "hplc",
+        "label": "HPLC",
+        "observation_highlight": "conversion 0.221; yield 0.203; distillate purity 0.013; score 0.056",
+        "physical_cost_delta": 0.08000000000000007,
+        "process_time_delta_s": 0.0,
+        "public_score": 0.05588202923536301,
+        "sample_consumed_delta_L": 0.0002,
+        "step": 7,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "duration_s": 2400,
+          "operation": "wait",
+          "stirring_speed_rpm": 900
+        },
+        "cumulative_process_time_s": 5700.0,
+        "details": "2400 s",
+        "label": "Wait",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.006666666666666599,
+        "process_time_delta_s": 2400.0,
+        "public_score": 0.06333862245082855,
+        "sample_consumed_delta_L": 0.0,
+        "step": 8,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "quench"
+        },
+        "cumulative_process_time_s": 5758.454222464699,
+        "details": "—",
+        "label": "Quench",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.08789922650500603,
+        "process_time_delta_s": 58.45422246469934,
+        "public_score": 0.06410347670316696,
+        "sample_consumed_delta_L": 0.0,
+        "step": 9,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "duration_s": 600,
+          "operation": "evaporate",
+          "target_temperature_K": 345
+        },
+        "cumulative_process_time_s": 6358.454222464699,
+        "details": "345 K; 600 s",
+        "label": "Evaporate",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.006666666666666599,
+        "process_time_delta_s": 600.0,
+        "public_score": 0.061471812427043915,
+        "sample_consumed_delta_L": 0.0,
+        "step": 10,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "duration_s": 1800,
+          "operation": "distill",
+          "reflux_ratio": 2.5,
+          "target_temperature_K": 365
+        },
+        "cumulative_process_time_s": 8158.454222464699,
+        "details": "365 K; 1800 s; reflux 2.5",
+        "label": "Distill",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.0924999999999998,
+        "process_time_delta_s": 1800.0,
+        "public_score": 0.060290563851594925,
+        "sample_consumed_delta_L": 0.0,
+        "step": 11,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "collect_fraction",
+          "transfer_fraction": 0.7
+        },
+        "cumulative_process_time_s": 8158.454222464699,
+        "details": "fraction 0.7",
+        "label": "Fraction",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.017999999999999794,
+        "process_time_delta_s": 0.0,
+        "public_score": 0.060290563851594925,
+        "sample_consumed_delta_L": 0.0,
+        "step": 12,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "instrument": "gc",
+          "operation": "measure"
+        },
+        "cumulative_process_time_s": 8158.454222464699,
+        "details": "gc",
+        "label": "GC",
+        "observation_highlight": "distillate purity 0.253; score 0.086",
+        "physical_cost_delta": 0.06000000000000005,
+        "process_time_delta_s": 0.0,
+        "public_score": 0.08592837303876877,
+        "sample_consumed_delta_L": 0.00015000000000000001,
+        "step": 13,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "terminate"
+        },
+        "cumulative_process_time_s": 8158.454222464699,
+        "details": "—",
+        "label": "Terminate",
+        "observation_highlight": "—",
+        "physical_cost_delta": 0.0,
+        "process_time_delta_s": 0.0,
+        "public_score": 0.08592837303876877,
+        "sample_consumed_delta_L": 0.0,
+        "step": 14,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "instrument": "final_assay",
+          "operation": "measure"
+        },
+        "cumulative_process_time_s": 8158.454222464699,
+        "details": "final_assay",
+        "label": "Final assay",
+        "observation_highlight": "conversion 0.324; yield 0.301; distillate purity 0.268; distillate recovery 0.642; endpoint score 0.281",
+        "physical_cost_delta": 0.16000000000000014,
+        "process_time_delta_s": 0.0,
+        "public_score": 0.280548632144928,
+        "sample_consumed_delta_L": 0.00030000000000000003,
+        "step": 15,
+        "terminated": true,
+        "transaction_status": "committed"
+      }
+    ],
+    "final_public_observation": {
+      "conversion": 0.32425937056541443,
+      "distillate_purity": 0.26802578568458557,
+      "distillate_recovery": 0.641661524772644,
+      "score": 0.280548632144928,
+      "selectivity": 0.9100170135498047,
+      "yield": 0.3012162148952484
+    },
+    "summary": {
+      "committed_actions": 15,
+      "exact_replay": true,
+      "process_time_limit_s": 10440.0,
+      "process_time_used_s": 8158.454222464699,
+      "provider_sessions": 1,
+      "public_private_leakage_count": 0,
+      "rollbacks": 0,
+      "submitted_actions": 15
+    },
+    "title": "Persistent agent in a non-reference reaction-distillation world"
+  },
+  "claim_boundary": [
+    "These are representative views of frozen qualification evidence, not new experiments.",
+    "The agent lifecycle is an interface-integration demonstration, not a model ranking.",
+    "Controlled forks qualify registered single-private-component interventions within the declared software-model domain."
+  ],
+  "controlled_world_forks": {
+    "pairs": [
+      {
+        "case_id": "partition-constitutive-law-family",
+        "exact_replay": true,
+        "expectations": [
+          {
+            "channel": "physical_state",
+            "child_value": 0.00516234086591,
+            "expectation_id": "terminal-product-organic-amount",
+            "parent_value": 0.00405952657641,
+            "passed": true,
+            "relative_change_percent": 21.36267864027609,
+            "signed_delta": 0.0011028142894999992,
+            "signed_relative_change_percent": 21.36267864027609
+          },
+          {
+            "channel": "public_observation",
+            "child_value": 0.7331562042236328,
+            "expectation_id": "assayed-product-organic-fraction",
+            "parent_value": 0.6838465332984924,
+            "passed": true,
+            "relative_change_percent": 6.725670551660444,
+            "signed_delta": 0.04930967092514038,
+            "signed_relative_change_percent": 6.725670551660444
+          }
+        ],
+        "intervention_class": "mechanism_or_constitutive_law",
+        "public_contract_invariant": true,
+        "same_sequence_executable": true,
+        "seed": 0,
+        "target_component_id": "private_physics.constitutive_laws"
+      },
+      {
+        "case_id": "partition-constitutive-law-family",
+        "exact_replay": true,
+        "expectations": [
+          {
+            "channel": "physical_state",
+            "child_value": 0.00641654668877,
+            "expectation_id": "terminal-product-organic-amount",
+            "parent_value": 0.00504696008399,
+            "passed": true,
+            "relative_change_percent": 21.344605926066098,
+            "signed_delta": 0.0013695866047799994,
+            "signed_relative_change_percent": 21.344605926066098
+          },
+          {
+            "channel": "public_observation",
+            "child_value": 0.6898006796836853,
+            "expectation_id": "assayed-product-organic-fraction",
+            "parent_value": 0.6367225646972656,
+            "passed": true,
+            "relative_change_percent": 7.694703201910319,
+            "signed_delta": 0.05307811498641968,
+            "signed_relative_change_percent": 7.694703201910319
+          }
+        ],
+        "intervention_class": "mechanism_or_constitutive_law",
+        "public_contract_invariant": true,
+        "same_sequence_executable": true,
+        "seed": 1,
+        "target_component_id": "private_physics.constitutive_laws"
+      },
+      {
+        "case_id": "partition-constitutive-law-family",
+        "exact_replay": true,
+        "expectations": [
+          {
+            "channel": "physical_state",
+            "child_value": 0.00818200130646,
+            "expectation_id": "terminal-product-organic-amount",
+            "parent_value": 0.00643437828497,
+            "passed": true,
+            "relative_change_percent": 21.359358866273766,
+            "signed_delta": 0.0017476230214899992,
+            "signed_relative_change_percent": 21.359358866273766
+          },
+          {
+            "channel": "public_observation",
+            "child_value": 0.8159653544425964,
+            "expectation_id": "assayed-product-organic-fraction",
+            "parent_value": 0.7773053050041199,
+            "passed": true,
+            "relative_change_percent": 4.737952319665101,
+            "signed_delta": 0.03866004943847656,
+            "signed_relative_change_percent": 4.737952319665101
+          }
+        ],
+        "intervention_class": "mechanism_or_constitutive_law",
+        "public_contract_invariant": true,
+        "same_sequence_executable": true,
+        "seed": 2,
+        "target_component_id": "private_physics.constitutive_laws"
+      },
+      {
+        "case_id": "electrochemical-material-law-counterfactual",
+        "exact_replay": true,
+        "expectations": [
+          {
+            "channel": "physical_state",
+            "child_value": 8.162705698e-05,
+            "expectation_id": "terminal-selective-product-amount",
+            "parent_value": 8.614699271e-05,
+            "passed": true,
+            "relative_change_percent": 5.246771347220017,
+            "signed_delta": -4.519935729999997e-06,
+            "signed_relative_change_percent": -5.246771347220017
+          },
+          {
+            "channel": "public_observation",
+            "child_value": 0.8568496704101562,
+            "expectation_id": "assayed-ohmic-efficiency",
+            "parent_value": 0.9778022766113281,
+            "passed": true,
+            "relative_change_percent": 12.369842972788451,
+            "signed_delta": -0.12095260620117188,
+            "signed_relative_change_percent": -12.369842972788451
+          }
+        ],
+        "intervention_class": "material_law_counterfactual",
+        "public_contract_invariant": true,
+        "same_sequence_executable": true,
+        "seed": 0,
+        "target_component_id": "private_physics.material_laws"
+      },
+      {
+        "case_id": "electrochemical-material-law-counterfactual",
+        "exact_replay": true,
+        "expectations": [
+          {
+            "channel": "physical_state",
+            "child_value": 8.187973086e-05,
+            "expectation_id": "terminal-selective-product-amount",
+            "parent_value": 8.621322312e-05,
+            "passed": true,
+            "relative_change_percent": 5.026482137163836,
+            "signed_delta": -4.333492260000002e-06,
+            "signed_relative_change_percent": -5.026482137163836
+          },
+          {
+            "channel": "public_observation",
+            "child_value": 0.8327061533927917,
+            "expectation_id": "assayed-ohmic-efficiency",
+            "parent_value": 0.9571918249130249,
+            "passed": true,
+            "relative_change_percent": 13.005300325412259,
+            "signed_delta": -0.12448567152023315,
+            "signed_relative_change_percent": -13.005300325412259
+          }
+        ],
+        "intervention_class": "material_law_counterfactual",
+        "public_contract_invariant": true,
+        "same_sequence_executable": true,
+        "seed": 1,
+        "target_component_id": "private_physics.material_laws"
+      },
+      {
+        "case_id": "electrochemical-material-law-counterfactual",
+        "exact_replay": true,
+        "expectations": [
+          {
+            "channel": "physical_state",
+            "child_value": 8.494354889e-05,
+            "expectation_id": "terminal-selective-product-amount",
+            "parent_value": 8.70503818e-05,
+            "passed": true,
+            "relative_change_percent": 2.4202454560630087,
+            "signed_delta": -2.10683291e-06,
+            "signed_relative_change_percent": -2.4202454560630087
+          },
+          {
+            "channel": "public_observation",
+            "child_value": 0.7657053470611572,
+            "expectation_id": "assayed-ohmic-efficiency",
+            "parent_value": 0.9712375402450562,
+            "passed": true,
+            "relative_change_percent": 21.161887248719857,
+            "signed_delta": -0.20553219318389893,
+            "signed_relative_change_percent": -21.161887248719857
+          }
+        ],
+        "intervention_class": "material_law_counterfactual",
+        "public_contract_invariant": true,
+        "same_sequence_executable": true,
+        "seed": 2,
+        "target_component_id": "private_physics.material_laws"
+      }
+    ],
+    "summary": {
+      "all_gates_passed": true,
+      "pairs": 6,
+      "provider_calls": 0,
+      "traces": 24
+    },
+    "title": "Single-private-law controlled world forks"
+  },
+  "rollback_recovery": {
+    "actions": [
+      {
+        "action": {
+          "operation": "separate_phase",
+          "target_phase": "organic"
+        },
+        "details": "organic",
+        "label": "Separate",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": "precondition_failed",
+        "step": 1,
+        "terminated": false,
+        "transaction_status": "rolled_back"
+      },
+      {
+        "action": {
+          "operation": "add_solvent",
+          "solvent": 2,
+          "volume_L": 0.025
+        },
+        "details": "0.025 L; solvent 2",
+        "label": "Solvent",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 2,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "amount_mol": 0.01,
+          "operation": "add_reagent"
+        },
+        "details": "0.01 mol",
+        "label": "Reagent",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 3,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "catalyst": 1,
+          "catalyst_amount_mol": 0.0002,
+          "operation": "add_catalyst"
+        },
+        "details": "0.0002 mol; catalyst 1",
+        "label": "Catalyst",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 4,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "duration_s": 1200.0,
+          "operation": "heat",
+          "stirring_speed_rpm": 650.0,
+          "target_temperature_K": 370.0
+        },
+        "details": "370 K; 1200 s",
+        "label": "Heat",
+        "process_time_delta_s": 1200.0,
+        "rollback_reason": null,
+        "step": 5,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "quench"
+        },
+        "details": "—",
+        "label": "Quench",
+        "process_time_delta_s": 18.297964703525167,
+        "rollback_reason": null,
+        "step": 6,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "instrument": "hplc",
+          "operation": "measure"
+        },
+        "details": "hplc",
+        "label": "HPLC",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 7,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "add_phase",
+          "phase": "aqueous",
+          "volume_L": 0.015
+        },
+        "details": "0.015 L; aqueous",
+        "label": "Add phase",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 8,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "extractant": 1,
+          "operation": "add_extractant",
+          "volume_L": 0.0175
+        },
+        "details": "0.0175 L; extractant 1",
+        "label": "Extractant",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 9,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "duration_s": 180.0,
+          "operation": "mix",
+          "stirring_speed_rpm": 650.0
+        },
+        "details": "180 s",
+        "label": "Mix",
+        "process_time_delta_s": 180.0,
+        "rollback_reason": null,
+        "step": 10,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "duration_s": 360.0,
+          "operation": "settle"
+        },
+        "details": "360 s",
+        "label": "Settle",
+        "process_time_delta_s": 360.0,
+        "rollback_reason": null,
+        "step": 11,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "separate_phase",
+          "target_phase": "organic"
+        },
+        "details": "organic",
+        "label": "Separate",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 12,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "wash",
+          "wash_volume_L": 0.0065
+        },
+        "details": "0.0065 L",
+        "label": "Wash",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 13,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "dry"
+        },
+        "details": "—",
+        "label": "Dry",
+        "process_time_delta_s": 300.0000000000002,
+        "rollback_reason": null,
+        "step": 14,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "duration_s": 600.0,
+          "operation": "concentrate"
+        },
+        "details": "600 s",
+        "label": "Concentrate",
+        "process_time_delta_s": 600.0,
+        "rollback_reason": null,
+        "step": 15,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "transfer",
+          "transfer_fraction": 0.8
+        },
+        "details": "fraction 0.8",
+        "label": "Transfer",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 16,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "instrument": "hplc",
+          "operation": "measure"
+        },
+        "details": "hplc",
+        "label": "HPLC",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 17,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "operation": "terminate"
+        },
+        "details": "—",
+        "label": "Terminate",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 18,
+        "terminated": false,
+        "transaction_status": "committed"
+      },
+      {
+        "action": {
+          "instrument": "final_assay",
+          "operation": "measure"
+        },
+        "details": "final_assay",
+        "label": "Final assay",
+        "process_time_delta_s": 0.0,
+        "rollback_reason": null,
+        "step": 19,
+        "terminated": true,
+        "transaction_status": "committed"
+      }
+    ],
+    "summary": {
+      "committed_actions": 18,
+      "exact_replay": true,
+      "final_assays": 1,
+      "ghost_state_preserved_on_rollback": true,
+      "observation_rng_preserved_on_rollback": true,
+      "physical_state_preserved_on_rollback": true,
+      "rollback_penalty": {
+        "cost": 0.03,
+        "risk": 0.08,
+        "sample_consumed_L": 0.0,
+        "time_s": 0.0
+      },
+      "rolled_back_actions": 1,
+      "submitted_actions": 19
+    },
+    "title": "Planned precondition failure followed by recovery"
+  },
+  "schema_version": "chemworld-public-readme-visuals-0.1",
+  "sources": {
+    "agent-instrument-use.json.gz": {
+      "path": "evidence/reports/agent-instrument-use.json.gz",
+      "sha256": "ca9d899b35723ae18c6893e1c6a3a038d5f00febbd23b9bb3ca6db773d316f04"
+    },
+    "controlled-world-forks.json.gz": {
+      "path": "evidence/reports/controlled-world-forks.json.gz",
+      "sha256": "291080316a82e3f85b083bd6f01894a7c59b1cd4418e4807775851915adcfd63"
+    },
+    "deterministic-use-cases.json.gz": {
+      "path": "evidence/reports/deterministic-use-cases.json.gz",
+      "sha256": "08322ec3e9eb8c37ed48b612f6314322eada6c929464b5c13a0ad1efdb3ee1e8"
+    }
+  }
+}
