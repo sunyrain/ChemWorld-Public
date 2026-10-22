@@ -21,3 +21,9 @@
 @media(max-width:1100px){.atlas-heading{flex-wrap:wrap}.atlas-actions{justify-content:start}.map-scope{padding:0 22px 12px}.tree-row[data-kind="method"] .status{font-size:0;gap:0}}
 @media(max-width:600px){.atlas-heading{gap:15px}.atlas-heading p{max-width:none}.atlas-actions{width:100%;justify-content:space-between}.level-control{font-size:10px;gap:5px}.level-control select{max-width:120px;padding:6px;font-size:10px}.atlas-actions button{font-size:10px}.map-scope{padding:0 20px 12px;gap:6px}.map-scope small{display:none}.atlas-main{height:670px}.tree-row{padding-left:calc(8px + var(--depth)*12px)}.tree-row.leaf:before,.tree-row.leaf:after{left:calc(11px + var(--depth)*12px)}.tree-row[data-kind="method"] .status{font-size:0;gap:0}}
 @media(prefers-reduced-motion:no-preference){button{transition:background .12s,color .12s}}
+
+/* These sibling actions share one baseline and one typographic treatment. */
+.doc-links{align-items:center;line-height:1.6}
+.doc-links>a,.doc-links>button{display:inline-flex;align-items:center;min-height:32px;margin:0;padding:4px 0;border:0;border-radius:0;background:none;font:inherit;line-height:1.6;color:var(--accent);text-align:left;text-decoration:none}
+.doc-links>a:hover,.doc-links>button:hover{text-decoration:underline;text-underline-offset:4px;background:none}
+.doc-links>a:focus-visible,.doc-links>button:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
