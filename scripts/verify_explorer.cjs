@@ -32,7 +32,8 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
   });
   await check('Milestones remain readable in both languages and link to current scope',async()=>{
    for(const lang of ['zh','en']){
-    await go('home',lang);assert.equal(await page.locator('.home-milestone').count(),4);
+    await go('home',lang);assert.equal(await page.locator('.home-milestone').count(),6);
+    assert.deepEqual(await page.locator('.home-milestone-date time:first-child').evaluateAll(items=>items.map(item=>item.dateTime)),['2026-10-21','2026-10-20','2026-10-09','2026-09-16','2026-09-06','2026-08-13']);
     assert.match(await page.locator('.home-milestones').innerText(),/Thevenin/);
     assert.match(await page.locator('.home-milestones').innerText(),lang==='en'?/Milestones/:/迭代里程碑/);
     await page.locator('.home-milestones .site-link').click();await page.locator('#guide-reader h1').waitFor();

@@ -43,15 +43,19 @@ budget while keeping the experimental process inspectable.
 
 ## Milestones
 
-Major updates, grouped by public availability. See [current foundation](docs/current-foundation.md)
-for implementation scope and validation, or explore the [interactive timeline](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#home).
+Major updates from development in the main **ChemWorld** repository, grouped into
+delivery stages. Dates follow development history rather than public-repository
+synchronization. See [current foundation](docs/current-foundation.md) for public
+distribution scope, or explore the [interactive timeline](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#home).
 
 | Date | Capability update |
 | --- | --- |
-| **2026-10-22** | **Property data, gas thermodynamics and circuit workflows.** External density/volume sources; second- and third-virial coefficients, cross parameters and mixture rules; pure-gas properties and closed, fixed-volume thermal processes. Thevenin circuits connect to persistent equipment, shared time and in-situ measurements. |
-| **2026-10-21** | **Scientific models and interoperability.** Shared residual/DAE infrastructure; bounded SPMe/DFN and particle-distribution battery models, impedance and state-of-health diagnostics; expanded property methods, selected CALPHAD/ChemSage models and supported SBML/SED-ML subsets. |
-| **2026-10-19–20** | **A composable native foundation.** Gas, bulk and surface reactions alongside separation, membranes, crystallization, mineral and solid phases, and stochastic networks. Shared time, retained devices and measurement queues connect workflows across Python, Gym, CLI and Agent interfaces, with continuation and exact replay. |
-| **2026-08-12** | **Experimental agents, ready to run.** Provider-free Student Lab, offline examples and tutorial notebooks bring together experimental actions, measurements, resource accounting and replay. |
+| **2026-10-21–22** | **Scientific solvers, property data and interoperability.** Shared residual/DAE infrastructure; bounded battery models and diagnostics; sourced virial gas properties and thermal processes; persistent Thevenin circuits. Selected CALPHAD/ChemSage models and SBML/SED-ML subsets extend interoperability. |
+| **2026-10-20** | **A composable native foundation.** Gas, bulk and surface reactions alongside separation, membranes, crystallization, mineral and solid phases, and stochastic networks. Shared time, retained devices and measurement queues connect Python, Gym, CLI and Agent workflows with continuation and exact replay. |
+| **2026-10-09–13** | **A programmable laboratory and research records.** Identified samples, multiple vessels, material ports, persistent control and finite streams; configurable synthetic NMR/IR/MS spectra and repeated recrystallization. Complete histories and versioned hypothesis notebooks accompany a local research-workbench prototype in the main repository. |
+| **2026-09-16–18** | **Phase-resolved experimental workflows.** Selective sampling and phase inventories across reaction-to-purification, crystallization and distillation; retained crystal populations, heat evolution and seed provenance. Autonomous electrochemical campaigns and post-experiment evaluation extend continuous experiments. |
+| **2026-09-06** | **A visual laboratory prototype.** The main repository connects an optional Blender scene, mobile manipulator and explicit carrier transport to public observations, sharing Core execution, budgets and replay. This prototype does not drive physical hardware. |
+| **2026-08-13–15** | **Resource-bounded experimental campaigns.** Task-specific budgets account for operations, materials and process time, reserve final-measurement resources, and preserve completed actions through cross-experiment continuation and failure recovery. |
 
 ## Quick start
 

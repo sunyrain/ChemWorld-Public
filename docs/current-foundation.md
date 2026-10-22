@@ -31,7 +31,17 @@ affected file then passed. These overlapping results are reported separately.
 Changed Python files pass Ruff. The strict bilingual documentation build and
 20 browser checks pass, including the milestone links, both languages and
 viewport widths from 320 to 1440 pixels. The website and both READMEs present
-four grouped milestones dated by public availability.
+six grouped milestones drawn from the main ChemWorld development history.
+
+### Milestone dates and distribution scope
+
+The homepage follows development delivery dates in the main ChemWorld repository,
+independently of the public synchronization dates recorded here. It groups August
+campaign/resource work, September visualization and phase-resolved workflows,
+and October laboratory composition, research records and native scientific models.
+The optional Blender laboratory and local research-workbench application are
+main-repository prototypes; they are not included in this public distribution.
+Public runtime commands and supported models remain described in the guides above.
 
 ### Previous public synchronization: 21 October
 
