@@ -537,6 +537,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="本次源码同步">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#10-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        上次公开同步：10 月 21 日
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -750,6 +767,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="本次源码同步">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#10-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        上次公开同步：10 月 21 日
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -807,6 +841,17 @@
 
 <h1 id="_1">当前基座<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
 <h2 id="source-synchronization">本次源码同步<a class="headerlink" href="#source-synchronization" title="Permanent link">&para;</a></h2>
+<p><strong>2026 年 10 月 22 日</strong>更新将公开基座从 <code>8dc31912</code> 同步到已提交源码 <code>8a17e23b</code>，包含：</p>
+<ul>
+<li>外部密度／体积来源（含 CRC 维里数据）及保留来源信息的临界常数输入。</li>
+<li>7 类二阶、2 类三阶维里方法，交叉参数、混合规则及导数，以及密度／压力形式的正反求解。</li>
+<li>纯单相气体的 PVT 与热量性质消费，通过共同耦合求解器推进封闭定容加热；通用非理想混合物热量性质及开放流路尚不在该消费合同内。</li>
+<li>Thevenin RC 与双节点热模型接入持久世界、共享时钟采集、仪器队列、续算和回放。</li>
+</ul>
+<p>入口见<a href="../native_foundation/">原生 API</a>和<a href="../native_domains/">工作流示例</a>。数据来源与应用范围须显式声明；Thevenin 使用经验参数，分别记录电荷与热收支，不推断化学物种。本次公开实现、测试与对照运行器，未重新发布研究原始运行目录，也不构成新的材料准确性验证。</p>
+<p>Windows/Python 3.11 定向集成选择了 217 项测试，首轮 215 项通过（包括实际 sdist→wheel 安装），两项旧仪器测试在同步前的公开源码上也出现相同失败。修正测试替身及读数失败断言后，该文件 12/12 通过：真实采样仍计费，失败读数不产生有效信号和奖励。两轮存在重叠，分别报告，不拼接分母。</p>
+<p>变更 Python 文件通过 Ruff；严格中英文档构建及 20 项浏览器检查通过，覆盖里程碑链接、双语和 320–1440 像素窗口。网站与中英文 README 按公开上线日期展示四组主要里程碑。</p>
+<h3 id="10-21">上次公开同步：10 月 21 日<a class="headerlink" href="#10-21" title="Permanent link">&para;</a></h3>
 <p>10 月 21 日更新同步了截至源码提交 <code>8dc31912</code> 的已提交基座成果，未纳入工作区仍在开发的修改。这是开发源码更新，不是新的 PyPI 发布，也不重新生成历史科学证据。</p>
 <ul>
 <li>模块声明统一驱动模型编解码、推进策略、状态归属与快照续算。</li>
@@ -866,8 +911,7 @@
 </tr>
 </tbody>
 </table>
-<p>全局注册表为43类操作、19个世界干预轴、9类仪器（含粒径）；每个任务只开放兼容子集。
-此前公开版对应28、12、5。原有经典优化和可选强化学习接口继续保留。</p>
+<p>操作、组件与仪器由原生模块注册表声明；编译后的世界及任务只开放兼容子集。原生物理通道保留单位，历史 Gym 向量作为兼容投影。原有经典优化和可选强化学习接口继续保留。</p>
 <h2 id="_3">运行与验证<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync<span class="w"> </span>--locked<span class="w"> </span>--extra<span class="w"> </span>dev
 uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>chemworld<span class="w"> </span>tasks<span class="w"> </span>list

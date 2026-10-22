@@ -647,6 +647,50 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#pure-virial-coefficients" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pure virial coefficients
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#external-density-and-volume-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        External density and volume sources
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#virial-mixtures-and-gas-consumers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Virial mixtures and gas consumers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-native-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run native sessions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#use-the-same-session-through-other-entry-points" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1053,6 +1097,77 @@
 
 
 <h1 id="native-physical-sessions">Native physical sessions<a class="headerlink" href="#native-physical-sessions" title="Permanent link">&para;</a></h1>
+<h2 id="pure-virial-coefficients">Pure virial coefficients<a class="headerlink" href="#pure-virial-coefficients" title="Permanent link">&para;</a></h2>
+<p><code>virial_correlation</code> declares seven second-virial methods (<code>Pitzer_Curl</code>,
+<code>Abbott</code>, <code>Tsonopoulos</code>, <code>Tsonopoulos_extended</code>, <code>Oconnell_Prausnitz</code>, <code>Xiang</code>,
+<code>Meng</code>) and two third-virial methods (<code>Orbey_Vera</code>, <code>Liu_Xiang</code>) for the existing
+property package and input card. For example:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem</span><span class="w"> </span><span class="kn">import</span> <span class="n">virial_correlation</span><span class="p">,</span> <span class="n">virial_temperature_report</span>
+
+<span class="n">curve</span> <span class="o">=</span> <span class="n">virial_correlation</span><span class="p">(</span>
+    <span class="s2">&quot;Tsonopoulos&quot;</span><span class="p">,</span>
+    <span class="n">parameters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;Tc&quot;</span><span class="p">:</span> <span class="mf">425.2</span><span class="p">,</span> <span class="s2">&quot;Pc&quot;</span><span class="p">:</span> <span class="mf">3.8e6</span><span class="p">,</span> <span class="s2">&quot;omega&quot;</span><span class="p">:</span> <span class="mf">0.193</span><span class="p">},</span>
+    <span class="n">temperature_range_K</span><span class="o">=</span><span class="p">(</span><span class="mi">300</span><span class="p">,</span> <span class="mi">900</span><span class="p">),</span>
+    <span class="n">source_note</span><span class="o">=</span><span class="s2">&quot;Explicit example critical parameters; application range chosen by caller&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">value</span><span class="p">,</span> <span class="n">first</span><span class="p">,</span> <span class="n">second</span><span class="p">,</span> <span class="n">third</span> <span class="o">=</span> <span class="n">virial_temperature_report</span><span class="p">(</span><span class="n">curve</span><span class="p">,</span> <span class="n">temperature_K</span><span class="o">=</span><span class="mi">510</span><span class="p">)</span>
+</code></pre></div>
+<p>Inputs use K, Pa and m³/mol; B is m³/mol and C is m⁶/mol². Signed coefficients
+are valid. <code>virial_derivatives</code> and <code>virial_fast</code> return the value through the
+third temperature derivative; <code>virial_vector</code> and <code>virial_matrix</code> apply the same
+kernel to explicit parameter sets. They do not generate cross parameters or
+perform mixture rules. All parameters remain fixed during differentiation.</p>
+<p><code>virial_value(..., order=-1)</code> and <code>order=-2</code> provide the documented indefinite
+integrals for Pitzer–Curl, Abbott and the two Tsonopoulos variants, with zero
+constants in the dimensional-temperature basis (<code>log(T / 1 K)</code>). Other methods
+do not declare these indefinite integrals. Normal <code>integrate_correlation</code>
+remains available for definite integrals within the declared application range.</p>
+<p>Extended Tsonopoulos requires explicit <code>a</code> and <code>b</code>, or a <code>polar</code> selection with
+<code>species_type</code> and the dipole in debye where required. The default <code>documented</code>
+polar convention includes methanol and the zero-dipole alkanol limit; explicitly
+select <code>convention="chemicals_1_5_2"</code> to reproduce that API's different behavior.
+Meng requires explicit <code>a</code>, or <code>polar={"dipole": ..., "haloalkane": ...}</code>.
+Choices and source notes survive JSON. Unknown classes and conflicting choices
+are rejected. Xiang/Liu constants were recovered from public calls in their
+documented mathematical basis and checked on separate inputs; their original
+paper tables have not been directly verified. Development mathematical agreement
+does not establish material accuracy or the validity of a truncated gas EOS.</p>
+<h2 id="external-density-and-volume-sources">External density and volume sources<a class="headerlink" href="#external-density-and-volume-sources" title="Permanent link">&para;</a></h2>
+<p><code>chemworld.data.volume.VolumeDatabase(data_root)</code> reads explicitly supplied
+Density tables and the existing ChemSep/VDI sources. It uses the same lazy
+identity and source database as other property inputs. Call
+<code>db.volumes("64-17-5", method="PERRY_VOLUME")</code> to inspect candidates, then
+<code>db.property_input("64-17-5", component, method="PERRY_VOLUME")</code> to obtain a
+normal <code>PropertyInputCard</code>; its <code>evaluate_state</code> consumes liquid <code>density</code>
+and <code>molar_volume</code> with the component's molecular weight.</p>
+<p>Select <code>curve_id</code> if a source has multiple candidates. Missing critical inputs
+must be supplied in <code>parameters</code>; unknown temperature bounds require
+<code>temperature_bounds_K</code>. Source coefficients cannot be overwritten. CRC constant
+observations require <code>application_temperature_K</code> and <code>application_note</code> and
+remain single points. VDI tables require <code>interpolation="linear"</code>; missing
+intervals and extrapolation are rejected. These temperature paths do not imply
+an independent pressure equation or caloric data. Source identity and molecular
+weight must agree with the component. External scientific datasets are not
+bundled or silently discovered through an upstream library.</p>
+<h2 id="virial-mixtures-and-gas-consumers">Virial mixtures and gas consumers<a class="headerlink" href="#virial-mixtures-and-gas-consumers" title="Permanent link">&para;</a></h2>
+<p>The public virial API also provides cross-parameter constructors, B/C mixture
+rules and composition derivatives. <code>virial_gas</code> exposes density- and
+pressure-form forward/inverse calculations. These mathematical kernels do not
+by themselves establish a mixture's material accuracy or phase stability.</p>
+<p><code>chemworld.data.virial_inputs.sourced_virial_input</code> consumes an explicitly
+selected <code>ConstantDatabase</code> record (including HEOS constants), preserving source
+identity, units and missing fields. The caller declares the application range;
+critical constants alone do not supply a measured validity interval. The volume
+database also exposes CRC virial polynomials with the same explicit range rule.</p>
+<p>For a pure single-phase gas, <code>PropertyInputCard.evaluate_state(gas_model="virial", ...)</code>
+uses the B/C equations for pressure, density and compressibility. With explicit
+ideal caloric data it also evaluates consistent internal energy, enthalpy,
+entropy and heat capacities. <code>VirialGasThermodynamics</code> and
+<code>virial_gas_batch_system</code> connect this state to the common <code>CoupledSystem</code> for
+closed, fixed-volume heating, energy accounting and continuation. General
+nonideal mixture calorics, open-flow processes and phase equilibrium are outside
+this consumer contract. See <code>tests/test_virial_consumers.py</code> for runnable inputs.</p>
+<h2 id="run-native-sessions">Run native sessions<a class="headerlink" href="#run-native-sessions" title="Permanent link">&para;</a></h2>
 <p>These development examples use the installed current runtime, without a model
 API key or upstream solver. Start with the finite synthetic CO oxidation model
 below, then use the domain-specific examples in the later sections. Python 3.11
@@ -1062,6 +1177,13 @@ live under <code>scripts/</code>. The <code>workstreams/world_foundation/</code>
 guide identify development records in the authoring repository. Those run outputs
 are not part of this public source synchronization; the included commands create
 new comparison results at the output path you choose.</p>
+<p>For the current ten cross-domain workflows, shared-clock boundaries and the
+separate source/install denominators, start with <a href="../native_domains/">native domains</a>.
+Both sequential and keyed detection are supported on the qualified shared-clock
+histories. Explicitly declared multi-device queues and idle-system material
+replacement use the same runtime, transaction and continuation machinery.
+The sections below also describe later scientific extensions; their individual
+acceptance scope does not follow automatically from stage-A completion.</p>
 <p>After installing the wheel or sdist in an isolated environment:</p>
 <div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>chemworld.examples.native_surface_research<span class="w"> </span>--bulk<span class="w"> </span>--mobile<span class="w"> </span>--terminal-assay
 python<span class="w"> </span>-m<span class="w"> </span>chemworld.examples.reuse_native_equipment
