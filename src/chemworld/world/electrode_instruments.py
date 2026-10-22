@@ -1,5 +1,7 @@
 """A native terminal voltmeter/ammeter, without hidden concentration profiles."""
 
+from dataclasses import replace
+
 from chemworld.foundation import Instrument, Observation
 from chemworld.foundation.observations import ObservationChannel
 from chemworld.world.domain_modules import InstrumentSpec
@@ -36,10 +38,23 @@ def electrical_observation(identity, potential_v, current_a):
     )
 
 
+def read_thevenin(state, action, rng):
+    from chemworld.physchem.battery_thevenin import thevenin_fields
+    from chemworld.runtime.thevenin import METER, unpack_thevenin
+
+    _, _, spec, physical, program = unpack_thevenin(state)
+    fields = thevenin_fields(spec, physical, program)
+    return electrical_observation(METER, fields["voltage_V"], fields["current_A"])
+
+
 def electrode_instrument_specs():
+    thevenin = electrical_instrument_spec("thevenin_meter", read_thevenin)
+    thevenin = replace(thevenin, contract=replace(thevenin.contract,
+        input_state_schema={**thevenin.contract.input_state_schema, "required_phase": "formal"}))
     return (
         electrical_instrument_spec("electrical_meter", read_electrical),
         electrical_instrument_spec("battery_meter", read_battery),
+        thevenin,
     )
 
 

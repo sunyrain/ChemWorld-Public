@@ -158,6 +158,25 @@ def test_first_soc_stop_keeps_actual_time_and_unclipped_state(minimum_soc):
     assert initial.coordinates[SOC] == .7
 
 
+def test_stop_surface_is_unchanged_and_roundoff_state_cannot_advance_past_it():
+    spec = fixture(0, minimum_soc=.2)
+    program = ScalarControlProgram(((0., .5),), "A")
+    initial = spec.initial_state()
+    values = {**initial.coordinates, SOC: np.nextafter(.2, 0.)}
+    stopped = replace(initial, coordinates=values)
+    system = thevenin_system(spec, program)
+    result = system.advance(stopped, 1.)
+    assert result.outcome == "stopped" and result.actual_duration_s == 0.
+    assert result.final_state.coordinates == values  # No boundary clipping.
+    surface = next(e for e in system.events if e.event_id == "thevenin:minimum-soc")
+    assert surface.value(stopped) == values[SOC]-.2
+    assert surface.value(replace(initial, coordinates={**values, SOC: .2})) == 0.
+    coordinate = next(c for c in spec.coordinate_declarations if c.name == SOC)
+    assert .2-coordinate.minimum <= 32*np.spacing(1.)
+    with pytest.raises(ValueError, match="declared domain"):
+        system.advance(replace(stopped, coordinates={**values, SOC: .2-1e-10}), 0.)
+
+
 def test_source_table_roundtrip_and_zero_time_readout_preserve_state():
     spec = fixture(2)
     restored = TheveninSpec.from_dict(json.loads(json.dumps(spec.to_dict(), sort_keys=True)))

@@ -1,5 +1,91 @@
 # Native physical sessions
 
+## Pure virial coefficients
+
+`virial_correlation` declares seven second-virial methods (`Pitzer_Curl`,
+`Abbott`, `Tsonopoulos`, `Tsonopoulos_extended`, `Oconnell_Prausnitz`, `Xiang`,
+`Meng`) and two third-virial methods (`Orbey_Vera`, `Liu_Xiang`) for the existing
+property package and input card. For example:
+
+```python
+from chemworld.physchem import virial_correlation, virial_temperature_report
+
+curve = virial_correlation(
+    "Tsonopoulos",
+    parameters={"Tc": 425.2, "Pc": 3.8e6, "omega": 0.193},
+    temperature_range_K=(300, 900),
+    source_note="Explicit example critical parameters; application range chosen by caller",
+)
+value, first, second, third = virial_temperature_report(curve, temperature_K=510)
+```
+
+Inputs use K, Pa and m³/mol; B is m³/mol and C is m⁶/mol². Signed coefficients
+are valid. `virial_derivatives` and `virial_fast` return the value through the
+third temperature derivative; `virial_vector` and `virial_matrix` apply the same
+kernel to explicit parameter sets. They do not generate cross parameters or
+perform mixture rules. All parameters remain fixed during differentiation.
+
+`virial_value(..., order=-1)` and `order=-2` provide the documented indefinite
+integrals for Pitzer–Curl, Abbott and the two Tsonopoulos variants, with zero
+constants in the dimensional-temperature basis (`log(T / 1 K)`). Other methods
+do not declare these indefinite integrals. Normal `integrate_correlation`
+remains available for definite integrals within the declared application range.
+
+Extended Tsonopoulos requires explicit `a` and `b`, or a `polar` selection with
+`species_type` and the dipole in debye where required. The default `documented`
+polar convention includes methanol and the zero-dipole alkanol limit; explicitly
+select `convention="chemicals_1_5_2"` to reproduce that API's different behavior.
+Meng requires explicit `a`, or `polar={"dipole": ..., "haloalkane": ...}`.
+Choices and source notes survive JSON. Unknown classes and conflicting choices
+are rejected. Xiang/Liu constants were recovered from public calls in their
+documented mathematical basis and checked on separate inputs; their original
+paper tables have not been directly verified. Development mathematical agreement
+does not establish material accuracy or the validity of a truncated gas EOS.
+
+## External density and volume sources
+
+`chemworld.data.volume.VolumeDatabase(data_root)` reads explicitly supplied
+Density tables and the existing ChemSep/VDI sources. It uses the same lazy
+identity and source database as other property inputs. Call
+`db.volumes("64-17-5", method="PERRY_VOLUME")` to inspect candidates, then
+`db.property_input("64-17-5", component, method="PERRY_VOLUME")` to obtain a
+normal `PropertyInputCard`; its `evaluate_state` consumes liquid `density`
+and `molar_volume` with the component's molecular weight.
+
+Select `curve_id` if a source has multiple candidates. Missing critical inputs
+must be supplied in `parameters`; unknown temperature bounds require
+`temperature_bounds_K`. Source coefficients cannot be overwritten. CRC constant
+observations require `application_temperature_K` and `application_note` and
+remain single points. VDI tables require `interpolation="linear"`; missing
+intervals and extrapolation are rejected. These temperature paths do not imply
+an independent pressure equation or caloric data. Source identity and molecular
+weight must agree with the component. External scientific datasets are not
+bundled or silently discovered through an upstream library.
+
+## Virial mixtures and gas consumers
+
+The public virial API also provides cross-parameter constructors, B/C mixture
+rules and composition derivatives. `virial_gas` exposes density- and
+pressure-form forward/inverse calculations. These mathematical kernels do not
+by themselves establish a mixture's material accuracy or phase stability.
+
+`chemworld.data.virial_inputs.sourced_virial_input` consumes an explicitly
+selected `ConstantDatabase` record (including HEOS constants), preserving source
+identity, units and missing fields. The caller declares the application range;
+critical constants alone do not supply a measured validity interval. The volume
+database also exposes CRC virial polynomials with the same explicit range rule.
+
+For a pure single-phase gas, `PropertyInputCard.evaluate_state(gas_model="virial", ...)`
+uses the B/C equations for pressure, density and compressibility. With explicit
+ideal caloric data it also evaluates consistent internal energy, enthalpy,
+entropy and heat capacities. `VirialGasThermodynamics` and
+`virial_gas_batch_system` connect this state to the common `CoupledSystem` for
+closed, fixed-volume heating, energy accounting and continuation. General
+nonideal mixture calorics, open-flow processes and phase equilibrium are outside
+this consumer contract. See `tests/test_virial_consumers.py` for runnable inputs.
+
+## Run native sessions
+
 These development examples use the installed current runtime, without a model
 API key or upstream solver. Start with the finite synthetic CO oxidation model
 below, then use the domain-specific examples in the later sections. Python 3.11
@@ -10,6 +96,14 @@ live under `scripts/`. The `workstreams/world_foundation/` reports cited in this
 guide identify development records in the authoring repository. Those run outputs
 are not part of this public source synchronization; the included commands create
 new comparison results at the output path you choose.
+
+For the current ten cross-domain workflows, shared-clock boundaries and the
+separate source/install denominators, start with [native domains](native_domains.md).
+Both sequential and keyed detection are supported on the qualified shared-clock
+histories. Explicitly declared multi-device queues and idle-system material
+replacement use the same runtime, transaction and continuation machinery.
+The sections below also describe later scientific extensions; their individual
+acceptance scope does not follow automatically from stage-A completion.
 
 After installing the wheel or sdist in an isolated environment:
 

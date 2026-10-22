@@ -39,6 +39,40 @@ class ChemWorldInstrumentCostServices:
         self.constitution = constitution
         self.modules = modules
         self.thermal = thermal
+        self.shared_clock_advance = None
+
+    def _shared_acquisition(self, state, duration):
+        """Span finite queued boundaries through the original shared scheduler.
+
+        No candidate is committed here. A later failure rolls back all earlier
+        slices with the surrounding measurement transaction, including detector
+        and analyzer states. A real physical stop retains only actual duration.
+        """
+        if self.shared_clock_advance is None:
+            return ModelProviderResult({}, {}, success=False, outcome="rejected",
+                failure_reason="shared_measurement_requires_lab_scheduler")
+        initial, candidate, slices = state.ledger.time_s, state, []
+        # Each pre-existing job can end at most once; no new jobs are added by
+        # the measurement. The final slice consumes the remaining acquisition.
+        budget = len(state.lab_clock.queued)+len(state.lab_clock.running)+1
+        for _ in range(budget):
+            remaining = duration-(candidate.ledger.time_s-initial)
+            result = self.shared_clock_advance(candidate,
+                {"operation": "wait", "duration_s": remaining})
+            if result.outcome in {"rejected", "numerical_failure"}:
+                return replace(result, state=None, actual_duration_s=0.)
+            slices.append({"duration_s": result.actual_duration_s,
+                           "outcome": result.outcome, "diagnostics": dict(result.diagnostics)})
+            candidate = result.state
+            elapsed = candidate.ledger.time_s-initial
+            if result.outcome == "stopped" or elapsed >= duration-1e-10:
+                return replace(result, state=candidate, actual_duration_s=elapsed, diagnostics={
+                    **result.diagnostics, "shared_acquisition_clock": "lab_schedule",
+                    "shared_acquisition_slices": slices})
+            if result.actual_duration_s <= 0:
+                break
+        return ModelProviderResult({}, {"shared_acquisition_slices": slices}, success=False,
+            outcome="numerical_failure", failure_reason="shared_acquisition_did_not_progress")
 
     def apply_measurement_cost(
         self, state: WorldState, action: dict[str, Any]
@@ -81,8 +115,10 @@ class ChemWorldInstrumentCostServices:
                     outputs={}, diagnostics={}, success=False, outcome="rejected",
                     failure_reason="measurement_requires_supported_physical_clock",
                 )
-            advancement = self.thermal.integrate(
-                state, {"duration_s": duration, "operation": action["operation"]}, heat=False
+            advancement = (
+                self._shared_acquisition(state, duration) if state.lab_clock is not None
+                else self.thermal.integrate(
+                    state, {"duration_s": duration, "operation": action["operation"]}, heat=False)
             )
             if advancement.outcome in {"rejected", "numerical_failure"}:
                 return advancement

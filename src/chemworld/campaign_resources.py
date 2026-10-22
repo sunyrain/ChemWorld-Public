@@ -485,13 +485,16 @@ def derive_campaign_resource_delta(
     is_nonfinal = committed and bool(instrument) and not is_final
     instrument_uses = {instrument: 1} if is_nonfinal else {}
     if committed and outcome is not None and "instrument_uses" in outcome:
-        if operation != "wait":
-            raise CampaignResourceIntegrityError("queued acquisition receipt requires a wait")
+        if operation not in {"wait", "measure"}:
+            raise CampaignResourceIntegrityError(
+                "queued acquisition receipt requires a clock advance")
         instrument_uses = dict(_normalized_int_map(
             outcome["instrument_uses"], name="instrument_uses",
         ))
         if "final_assay" in instrument_uses:
             raise CampaignResourceIntegrityError("queued acquisition cannot be a final assay")
+        if operation == "measure" and instrument_uses.get(instrument, 0) < 1:
+            raise CampaignResourceIntegrityError("acquisition receipt omits the direct measurement")
 
     process_time_s = 0.0
     sample_consumed_L = 0.0
@@ -1530,8 +1533,12 @@ class CampaignResourceLedger:
     @staticmethod
     def _instrument_reservation(action, reservation):
         instruments = dict(_normalized_int_map(reservation or {}, name="instrument_reservation"))
-        if instruments and (action.get("operation") != "wait" or "final_assay" in instruments):
-            raise CampaignResourceIntegrityError("instrument reservation requires an offline wait")
+        if instruments and (action.get("operation") not in ("wait", "measure")
+                            or "final_assay" in instruments):
+            raise CampaignResourceIntegrityError("instrument reservation requires a clock advance")
+        if (instruments and action.get("operation") == "measure"
+                and instruments.get(str(action.get("instrument", "")), 0) < 1):
+            raise CampaignResourceIntegrityError("reservation omits the direct measurement")
         return instruments
 
     @staticmethod

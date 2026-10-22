@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from math import isfinite, sqrt
+from math import isfinite
 
 from chemworld.physchem.property_cards import _VOLUME_REFERENCE_READING
 from chemworld.physchem.property_equations import (
@@ -12,7 +12,6 @@ from chemworld.physchem.property_equations import (
     evaluate_correlation,
 )
 from chemworld.physchem.property_reports import (
-    R_J_PER_MOL_K,
     PropertyEvaluation,
     ValidityPolicy,
     _validate_phase,
@@ -31,6 +30,7 @@ class MolarVolumeReport:
     compressibility_factor: float | None = None
     compressibility_status: str = "not_applicable"
     reference_reading: tuple[str, ...] = ()
+    gas_root: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         _validate_phase(self.phase)
@@ -74,6 +74,7 @@ class MolarVolumeReport:
             "compressibility_factor": self.compressibility_factor,
             "compressibility_status": self.compressibility_status,
             "reference_reading": list(self.reference_reading),
+            "gas_root": self.gas_root,
         }
 
 
@@ -269,14 +270,17 @@ def virial_gas_molar_volume_report(
         raise ValueError("pressure_Pa must be positive")
     if warning_threshold <= 0:
         raise ValueError("warning_threshold must be positive")
-    rt = R_J_PER_MOL_K * temperature_K
-    discriminant = rt * rt + 4.0 * pressure_Pa * rt * second_virial_m3_mol
-    if discriminant <= 0:
-        raise ValueError("second virial coefficient gives no positive gas-volume root")
-    molar_volume = (rt + sqrt(discriminant)) / (2.0 * pressure_Pa)
-    if molar_volume <= 0:
-        raise ValueError("virial gas molar volume root must be positive")
-    z_factor = pressure_Pa * molar_volume / rt
+    from chemworld.physchem.virial_gas import VirialRootError, density_virial_state
+
+    try:
+        state = density_virial_state(temperature_K, pressure_Pa, (second_virial_m3_mol,))
+    except VirialRootError as exc:
+        raise VirialRootError(
+            "second virial coefficient gives no positive gas-volume root "
+            "with nonsingular mechanical stability", exc.candidates,
+        ) from exc
+    molar_volume = state.molar_volume_m3_mol
+    z_factor = state.compressibility_factor
     correction = abs(second_virial_m3_mol / molar_volume)
     if correction <= 1e-12:
         status = "ideal"
@@ -310,6 +314,7 @@ def virial_gas_molar_volume_report(
         compressibility_factor=z_factor,
         compressibility_status=status,
         reference_reading=_VOLUME_REFERENCE_READING,
+        gas_root=state.to_dict(),
     )
 
 

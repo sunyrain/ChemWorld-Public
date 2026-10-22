@@ -245,6 +245,17 @@ _DIMENSIONS = (
     ),
     _definition("molecular_weight", "g/mol", M / N, "physical", "Mass per amount."),
     _definition("molar_volume", "m^3/mol", L**3 / N, "physical", "Volume per amount."),
+    _definition("third_virial_coefficient", "m^6/mol^2", L**6 / N**2,
+                "physical", "Third coefficient of the density virial expansion."),
+    *(_definition(f"third_virial_coefficient_temperature_derivative_{order}",
+                  "(m^6/mol^2)/K" + (f"^{order}" if order > 1 else ""),
+                  L**6 / N**2 / THETA**order, "physical",
+                  "Temperature derivative of the third virial coefficient.")
+      for order in (1, 2, 3)),
+    *(_definition(f"molar_volume_temperature_derivative_{order}",
+                  f"(m^3/mol)/K^{order}", L**3 / N / THETA**order, "physical",
+                  "Higher temperature derivative of molar volume or second virial coefficient.")
+      for order in (2, 3)),
     _definition("molar_area", "m^2/mol", L**2 / N, "physical", "Area per amount."),
     _definition("solubility_parameter", "Pa^0.5", (M / L / T**2)**0.5, "physical",
                 "Square root of cohesive energy density."),

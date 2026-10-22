@@ -1,4 +1,4 @@
-"""Check native atomic resources in actual wheel and sdist-built wheel."""
+"""Check resources and actual installation of the sdist-built wheel."""
 
 import subprocess
 import sys
@@ -48,6 +48,19 @@ from chemworld.data.scientific_inputs import InputSource
 from chemworld.physchem.data_conflicts import DataSourceProvenance
 from chemworld.data.pressure import PressureDatabase
 from chemworld.data.phase_change import PhaseChangeDatabase
+from chemworld.data.volume import VolumeDatabase
+from pathlib import Path
+packed_volume_root = Path(sys.argv[1] + '.volume-data')
+packed_volume_db = VolumeDatabase(packed_volume_root)
+assert len(packed_volume_db.catalog) == 8 and packed_volume_db.loaded_sources == ()
+packed_volume_path = packed_volume_root / packed_volume_db.source('PERRY_VOLUME').relative_path
+packed_volume_path.parent.mkdir(parents=True)
+packed_volume_path.write_text('CAS\\tChemical\\tC1\\tC2\\tC3\\tC4\\tTmin\\tTmax\\n'
+    '7732-18-5\\twater\\t2000\\t0.25\\t600\\t0.3\\t200\\t500\\n')
+packed_volume_card = packed_volume_db.property_input('7732-18-5',
+    ComponentSpec('packed-water','H2O',cas_number='7732-18-5'),method='PERRY_VOLUME')
+assert packed_volume_card.evaluate_state(temperature_K=300,pressure_Pa=101325,
+    phase='liquid',quantities=('density',)).properties['density'].value > 100
 from chemworld.data.viscosity import ViscosityDatabase
 from chemworld.physchem import viscosity_value, water_viscosity_iapws, wilke_viscosity
 viscosity_data = ViscosityDatabase(sys.argv[1] + '.external-data')
@@ -694,6 +707,23 @@ assert abs(packed_ecm_step.final_state.coordinates['thevenin:soc']-.6998) < 1e-9
 assert abs(thevenin_fields(packed_ecm,packed_ecm_step.final_state,
     packed_ecm_control)['voltage_V']-3.68) < 1e-9
 assert packed_ecm_step.energy_balance_residual_J is None
+from chemworld.examples.native_thevenin import default_spec as circuit_fixture, run as run_circuit
+from chemworld.world.thevenin_world import thevenin_world_spec
+from chemworld.physchem.battery_thevenin import SOC as circuit_soc
+from chemworld.runtime.thevenin import unpack_thevenin
+packed_circuit = ChemWorldRuntime(composition=thevenin_world_spec(circuit_fixture()))
+packed_circuit.reset(seed=9)
+assert packed_circuit.execute({'operation':'configure_electrical_control',
+    'current_A':.2}).info['transaction_status'] == 'committed'
+assert packed_circuit.execute({'operation':'measure',
+    'instrument':'thevenin_meter'}).info['actual_duration_s'] == 1.
+assert abs(unpack_thevenin(packed_circuit._state)[3].coordinates[circuit_soc]-.698) < 1e-9
+packed_circuit = ChemWorldRuntime.from_snapshot(json.loads(json.dumps(
+    packed_circuit.snapshot().to_dict(),sort_keys=True,allow_nan=False)))
+assert packed_circuit.execute({'operation':'wait','duration_s':.1}).info[
+    'transaction_status'] == 'committed'
+assert packed_circuit._state.ledger.time_s == 1.1
+assert run_circuit(sys.argv[1]+'.thevenin.jsonl')['replay_steps'] == 9
 packed_ocv = ElectrodeOCV('packaged-electrode', sbml_source, (.2,-.1),
     tanh_terms=((-0.02,5.,.4),))
 assert ElectrodeOCV.from_dict(packed_ocv.to_dict()) == packed_ocv
@@ -711,15 +741,101 @@ for packed_cell in (
     assert packed_cell_state == packed_cell.initial_state()
     assert json.loads(json.dumps(packed_spectrum.to_dict(), allow_nan=False))['unit'] == 'ohm'
 assert 'pybamm' not in sys.modules
+import math
+from chemworld.physchem import (
+    VIRIAL_METHODS, virial_correlation, virial_temperature_report,
+    virial_value, tsonopoulos_polar_parameters, ComponentUncertainty,
+)
+from chemworld.physchem.property_inputs import PropertyInputCard
+for virial_method, virial_spec in VIRIAL_METHODS.items():
+    virial_all = dict(Tc=500.,Pc=5e6,Vc=.0002,omega=.2,a=.03,b=.01)
+    virial_p = {k:virial_all[k] for k in virial_spec.required.split()}
+    virial_curve = virial_correlation(virial_method,parameters=virial_p,
+        temperature_range_K=(300,1500),source_note='Synthetic installed qualification')
+    virial_card = PropertyInputCard(
+        ComponentPropertyPackage(ComponentSpec('packed-virial','CH4'),(virial_curve,)),
+        (sbml_source,),
+        {virial_curve.correlation_id: ComponentUncertainty(
+            virial_curve.correlation_id,unit=virial_curve.output_unit,
+            source_id=sbml_source.provenance.source_id,coverage='unspecified',
+            note='Synthetic installed qualification')},
+        None,'Virial coefficients only, no caloric data')
+    virial_restored = PropertyInputCard.from_json(json.dumps(virial_card.to_dict()))
+    virial_result = virial_restored.package.evaluate(virial_spec.property_id,temperature_K=600)
+    assert abs(virial_result.value-virial_value(virial_method,600,**virial_p)) < 1e-15
+    virial_reports = virial_temperature_report(
+        virial_restored.package.correlations[0],temperature_K=600)
+    assert len(virial_reports)==4 and all(math.isfinite(r.to(r.unit).value) for r in virial_reports)
+assert tsonopoulos_polar_parameters(Tc=500,Pc=5e6,species_type='methanol')['a']==.0878
+from chemworld.physchem import (
+    virial_cross_parameters, virial_coefficient_matrices, virial_mixture_response,
+    density_virial_state, virial_pressure, density_to_pressure_virial,
+    pressure_virial_volume, pressure_virial_state,
+)
+cross = virial_cross_parameters([200.,400.],[4e6,5e6],[1e-4,2e-4],[.01,.2])
+cross_b = [[{k:v for k,v in cell.items() if k != 'Vc'} for cell in row] for row in cross]
+mixed_b = virial_mixture_response([.4,.6],virial_coefficient_matrices('Tsonopoulos',500.,cross_b))
+gas = density_virial_state(500.,1e5,(mixed_b.value,1e-8))
+assert abs(virial_pressure(500.,gas.molar_volume_m3_mol,(mixed_b.value,1e-8))-1e5)<1e-5
+pressure_coeffs = density_to_pressure_virial(500.,(mixed_b.value,1e-8))
+pressure_volume = pressure_virial_volume(500.,1e5,pressure_coeffs)
+assert abs(pressure_virial_state(500.,pressure_volume,pressure_coeffs).pressure_Pa-1e5)<1e-5
+assert json.loads(json.dumps(gas.to_dict(),allow_nan=False))['expansion']=='density'
+from chemworld.physchem import VirialGasThermodynamics, virial_gas_batch_system
+from chemworld.physchem.property_packages import SpeciesCaloricModel
+from chemworld.physchem.property_reports import CaloricReference
+from chemworld.physchem.coupled_system import CoupledState, HeatFlux
+packed_crc_path = packed_volume_root / packed_volume_db.source('CRC_VIRIAL').relative_path
+packed_crc_path.write_text('CAS\\tChemical\\ta1\\ta2\\ta3\\ta4\\ta5\\n'
+    '74-82-8\\tmethane\\t-42\\t-123\\t-20\\t0\\t0\\n')
+packed_gas_component = ComponentSpec('packed-methane','CH4',cas_number='74-82-8')
+packed_crc_card = packed_volume_db.property_input('74-82-8', packed_gas_component,
+    method='CRC_VIRIAL',temperature_bounds_K=(200,800))
+packed_crc_card = PropertyInputCard.from_json(json.dumps(packed_crc_card.to_dict()))
+packed_crc_state = packed_crc_card.evaluate_state(temperature_K=300,pressure_Pa=1e5,
+    phase='gas',quantities=('molar_volume','density'),gas_model='virial')
+assert packed_crc_state.model_details['root']['candidates']
+packed_critical_root = Path(sys.argv[1]+'.virial-constants')
+packed_critical_db = ConstantDatabase(packed_critical_root)
+packed_critical_path = packed_critical_root / packed_critical_db.source('HEOS').relative_path
+packed_critical_path.parent.mkdir(parents=True)
+packed_critical_path.write_text('CAS\\tname\\tTc\\tPc\\tVc\\tomega\\n'
+    '74-82-8\\tmethane\\t190.564\\t4599200\\t0.00009863\\t0.01142\\n')
+packed_c_card = packed_critical_db.virial_input('74-82-8',packed_gas_component,
+    method='Liu_Xiang',constant_source='HEOS',temperature_range_K=(200,800))
+packed_gas_package = ComponentPropertyPackage(packed_gas_component,
+    (packed_crc_card.package.correlations[0],packed_c_card.package.correlations[0]))
+packed_gas_ideal = SpeciesCaloricModel(PropertyCorrelation(correlation_id='packed-ideal-cv',
+    equation_id='cp_polynomial',property_id='isochoric_heat_capacity',coefficients={'a':25},
+    input_units={'temperature':'K'},output_unit='J/(mol*K)',
+    validity_ranges={'temperature':(200,800)},source_note='Synthetic installed Cv'),
+    CaloricReference(phase='gas',temperature_K=300,energy_basis='internal_energy'))
+packed_thermal = VirialGasThermodynamics(packed_gas_package,packed_gas_ideal)
+packed_thermal = VirialGasThermodynamics.from_dict(json.loads(json.dumps(packed_thermal.to_dict())))
+packed_heating = virial_gas_batch_system(packed_thermal,heat_flux=lambda _:HeatFlux(heater_W=5))
+packed_gas_run = packed_heating.advance(CoupledState({'packed-methane':2},300,10),1)
+assert packed_gas_run.final_state.time_s == 1
+assert packed_gas_run.final_state.temperature_K > 300
+assert abs(packed_gas_run.energy_balance_residual_J) < 1e-4
+assert 'chemicals' not in sys.modules
 print('packaged atomic resources OK')
 """
+    # Native workflows use filesystem-backed bundled protocols. Importing the
+    # .whl as a ZIP is not an installation and does not exercise that contract.
+    target = tmp_path / "installed"
+    subprocess.run(
+        ["uv", "pip", "install", "--python", sys.executable, "--target", str(target),
+         "--no-deps", str(wheel)],
+        cwd=tmp_path, check=True, capture_output=True, text=True,
+    )
     probe = tmp_path / "isolated_wheel_probe.py"
     probe.write_text(program, encoding="utf-8")
     result = subprocess.run(
-        [sys.executable, "-I", str(probe), str(wheel)],
+        [sys.executable, "-I", str(probe), str(target)],
         cwd=tmp_path,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
     assert "packaged atomic resources OK" in result.stdout

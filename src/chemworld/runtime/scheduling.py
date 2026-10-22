@@ -8,6 +8,7 @@ sampling, queue changes and RNG draws. Completion is the publication boundary.
 from copy import deepcopy
 from dataclasses import replace
 from math import fsum, isclose, isfinite
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -45,7 +46,7 @@ def shared_operation_allowed(operation, state, modules, action=None):
     return any(
         (selected is None or identity == selected)
         and spec.contract.input_state_schema.get("required_phase") == "formal"
-        and spec.contract.clock_semantics == "instantaneous_snapshot"
+        and spec.contract.clock_semantics in {"instantaneous_snapshot", "in_situ_end"}
         and spec.contract.sample_consumption_L == 0
         and not spec.contract.destructive
         and (spec.native_observer is not None or spec.observer_factory is not None)
@@ -226,14 +227,62 @@ def ready_lab_jobs(state):
     return tuple(ready)
 
 
-def lab_instrument_reservation(state, action):
-    """Waiting costs no acquisition; reserve only this slice's actual starts."""
-    if state is None or action.get("operation") != "wait":
+def lab_instrument_reservation(state, action, *, modules=None):
+    """Reserve potential starts, without advancing physics or reading an instrument.
+
+    A wait commits one scheduling slice. A timed formal acquisition can span
+    several queued boundaries; its FIFO plan uses the same admission rule and
+    declared analysis durations. A physical stop can only reduce actual starts.
+    """
+    if state is None or state.lab_clock is None:
+        return {}
+    if action.get("operation") == "measure":
+        return _acquisition_reservation(state, action, modules)
+    if action.get("operation") != "wait":
         return {}
     counts = {}
     for job in ready_lab_jobs(state):
         if job["kind"] == "measure":
             counts[job["instrument"]] = counts.get(job["instrument"], 0) + 1
+    return counts
+
+
+def _acquisition_reservation(state, action, modules):
+    from chemworld.world.operations import instrument_name
+
+    if modules is None or state.phase != "formal":
+        return {}
+    specs = modules.instrument_specs()
+    try:
+        identity = instrument_name(action.get("instrument"), modules=modules)
+        contract = specs[identity].contract
+    except (KeyError, ValueError, TypeError):
+        return {}  # Invalid actions still go through the normal schema gate.
+    if (contract.clock_semantics != "in_situ_end" or not contract.physical_duration_s
+            or contract.sample_consumption_L or contract.destructive):
+        return {}
+    counts, lab = {identity: 1}, state.lab_clock
+    now, horizon = state.ledger.time_s, state.ledger.time_s+contract.physical_duration_s
+    for _ in range(len(lab.queued)+len(lab.running)+1):
+        ready = ready_lab_jobs(SimpleNamespace(lab_clock=lab))
+        started = {job["sequence"] for job in ready}
+        running = list(lab.running)
+        for job in ready:
+            if job["kind"] == "measure":
+                counts[job["instrument"]] = counts.get(job["instrument"], 0)+1
+                duration = specs[job["instrument"]].contract.analysis_time_s
+            else:
+                duration = job["duration_s"]
+            running.append({**job, "available_at": now+duration})
+        if not running:
+            break
+        next_time = min(job["available_at"] for job in running)
+        if next_time >= horizon:
+            break  # No new acquisition starts after the observation endpoint.
+        lab = replace(lab,
+            queued=tuple(job for job in lab.queued if job["sequence"] not in started),
+            running=tuple(job for job in running if job["available_at"] > next_time))
+        now = next_time
     return counts
 
 

@@ -56,6 +56,25 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'volume_pressure_derivatives'
     ).split(),
     "volume_correlations": ['volume_correlation'],
+    "virial_kernels": (
+        'VIRIAL_METHODS TSONOPOULOS_CLASSES virial_value virial_derivatives virial_fast '
+        'virial_vector virial_matrix tsonopoulos_polar_parameters meng_polar_parameter'
+    ).split(),
+    "virial_correlations": ['virial_correlation', 'virial_temperature_report'],
+    "virial_thermodynamics": (
+        'evaluate_virial_gas_state VirialGasThermodynamics virial_gas_batch_system'
+    ).split(),
+    "virial_mixtures": (
+        'lee_kesler_cross_volumes tarakad_danner_interactions meng_duan_interactions '
+        'virial_cross_parameters virial_coefficient_matrices VirialCoefficientResponse '
+        'virial_mixture_response'
+    ).split(),
+    "virial_gas": (
+        'virial_pressure pressure_virial_volume density_to_pressure_virial '
+        'pressure_to_density_virial VirialGasState VirialRootError density_virial_state '
+        'pressure_virial_state second_virial_from_compressibility '
+        'compressibility_from_second_virial virial_volume_composition_response'
+    ).split(),
     "volume_mixtures": (
         'MIXTURE_VOLUME_METHODS mixture_volume_value mixture_volume_derivatives '
         'mixture_volume_composition_jacobian mixture_volume_evaluation mixture_volume_correlation'

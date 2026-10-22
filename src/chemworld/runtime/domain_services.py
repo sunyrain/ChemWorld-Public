@@ -77,6 +77,9 @@ class ChemWorldDomainServices:
         installed = self.service_registry.operation_map()
         if hasattr(self, "lab_schedule"):
             self.lab_schedule._domains = self
+            # Late binding avoids a second scheduler or a circular service
+            # construction dependency for timed in-situ formal observations.
+            self.instrument_cost.shared_clock_advance = self.lab_schedule.advance
         self._operation_methods = {
             name: spec.bind(context.services)
             for name, spec in self.modules.operation_specs().items()
@@ -165,7 +168,11 @@ class ChemWorldDomainServices:
                 actual_duration_s=next_state.ledger.time_s - before.ledger.time_s,
             )
 
-        if (state.lab_clock is not None and operation != "wait"
+        shared_acquisition = (
+            operation == "measure"
+            and result.diagnostics.get("shared_acquisition_clock") == "lab_schedule"
+        )
+        if (state.lab_clock is not None and operation != "wait" and not shared_acquisition
                 and next_state.ledger.time_s != state.ledger.time_s):
             return ModelProviderResult(
                 {"preconditions": preconditions}, diagnostics={}, state=None,

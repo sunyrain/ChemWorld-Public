@@ -48,6 +48,7 @@ def reserve_resources(
     operation_index: int,
     vessel_started: bool,
     state: WorldState,
+    modules=None,
 ) -> ResourceReservation | None:
     if campaign is None:
         return None
@@ -55,7 +56,7 @@ def reserve_resources(
     discard = isinstance(operation, str) and operation == "discard_batch"
     starts_vessel = not vessel_started and not discard
     event_id = campaign_resource_event_id(campaign_id, operation_index)
-    instruments = lab_instrument_reservation(state, action)
+    instruments = lab_instrument_reservation(state, action, modules=modules)
     return ResourceReservation(
         event_id,
         starts_vessel,
@@ -114,7 +115,7 @@ def settle_resources(
             previous, current, observation_values,
         ),
     }
-    if (action.get("operation") == "wait" and previous.lab_clock is not None
+    if (action.get("operation") in ("wait", "measure") and previous.lab_clock is not None
             and current.lab_clock is not None):
         before = {job["sequence"] for job in (
             *previous.lab_clock.running, *previous.lab_clock.completed,
@@ -123,7 +124,11 @@ def settle_resources(
         for job in (*current.lab_clock.running, *current.lab_clock.completed):
             if job["sequence"] not in before and job["kind"] == "measure":
                 counts[job["instrument"]] = counts.get(job["instrument"], 0) + 1
-        outcome["instrument_uses"] = counts
+        if action.get("operation") == "measure" and counts and committed:
+            instrument = action["instrument"]
+            counts[instrument] = counts.get(instrument, 0)+1
+        if action.get("operation") == "wait" or counts:
+            outcome["instrument_uses"] = counts
     delta = campaign.record_outcome(
         reservation.event_id, action, outcome, starts_vessel=reservation.starts_vessel,
     )

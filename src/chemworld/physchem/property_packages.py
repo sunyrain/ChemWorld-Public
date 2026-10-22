@@ -631,9 +631,24 @@ class ComponentPropertyPackage:
     def evaluate_state(
         self, *, temperature_K: float, pressure_Pa: float, phase: str,
         quantities: Sequence[str], reference: CaloricReference | None = None,
-        validity_policy: ValidityPolicy = "raise",
+        validity_policy: ValidityPolicy = "raise", gas_model: str | None = None,
     ) -> StatePropertyReport:
         """Evaluate requested intensive properties on a one-mole pure basis."""
+        if gas_model is not None:
+            from chemworld.physchem.virial_thermodynamics import evaluate_virial_gas_state
+
+            if gas_model != "virial" or phase != "gas" or validity_policy != "raise":
+                raise ValueError("virial gas consumption requires gas phase and strict validity")
+            ideal = None
+            if set(quantities) & {"cp", "cv", "enthalpy", "internal_energy", "entropy",
+                                  "chemical_potential", "dH_dT_P", "dU_dT_V"}:
+                candidates = (*self.by_property("ideal_gas_heat_capacity"),
+                              *self.by_property("isochoric_heat_capacity"))
+                if len(candidates) != 1 or reference is None:
+                    raise ValueError("virial gas needs one explicit ideal heat capacity/reference")
+                ideal = SpeciesCaloricModel(candidates[0], reference)
+            return evaluate_virial_gas_state(self, temperature_K=temperature_K,
+                pressure_Pa=pressure_Pa, quantities=quantities, ideal_caloric=ideal)
         references = None if reference is None else {self.component.identifier: reference}
         return evaluate_property_state(
             (self,), {self.component.identifier: 1.0}, temperature_K=temperature_K,
@@ -650,6 +665,22 @@ class ComponentPropertyPackage:
     ) -> PropertyEvaluation:
         candidates = self.by_property(property_id)
         if not candidates:
+            # Convert an explicitly authored phase volume/density relation.
+            # Do not substitute another model when an authored curve fails.
+            for phase in ("liquid", "solid", "gas"):
+                density_id, volume_id = phase + "_density", phase + "_molar_volume"
+                if property_id not in {density_id, volume_id}:
+                    continue
+                alternate = volume_id if property_id == density_id else density_id
+                if self.by_property(alternate):
+                    original = self.evaluate(alternate, temperature_K=temperature_K,
+                        pressure_Pa=pressure_Pa, validity_policy=validity_policy)
+                    value = original.to("m^3/mol" if alternate == volume_id else "kg/m^3").value
+                    if value <= 0:
+                        raise ValueError("volume/density conversion requires positive source value")
+                    return replace(original, property_id=property_id,
+                        value=self.component.molecular_weight_g_mol / 1000 / value,
+                        unit="kg/m^3" if property_id == density_id else "m^3/mol")
             raise ValueError(
                 f"No correlation for property {property_id!r} on component "
                 f"{self.component.identifier!r}"

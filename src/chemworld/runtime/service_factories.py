@@ -177,6 +177,12 @@ def battery_spm(composition):
     return BatteryRuntime(composition)
 
 
+def battery_thevenin(composition):
+    from chemworld.runtime.thevenin import TheveninRuntime
+
+    return TheveninRuntime(composition)
+
+
 def finite_transport(composition):
     from chemworld.runtime.transport_devices import TransportRuntime
 

@@ -1041,7 +1041,8 @@ def _campaign_resource_rejection_reasons_for_action(
     reasons = ledger.preview_rejection_reasons(
         action,
         starts_vessel=_campaign_starts_vessel(base, operation),
-        instrument_reservation=lab_instrument_reservation(getattr(base, "_state", None), action),
+        instrument_reservation=lab_instrument_reservation(
+            getattr(base, "_state", None), action, modules=getattr(base, "domain_modules", None)),
     )
     local = getattr(base, "_batch_resource_ledger", None)
     if local is not None:
@@ -1052,6 +1053,7 @@ def _campaign_resource_rejection_reasons_for_action(
                 starts_vessel=_campaign_starts_vessel(base, operation),
                 instrument_reservation=lab_instrument_reservation(
                     getattr(base, "_state", None), action,
+                    modules=getattr(base, "domain_modules", None),
                 ),
             )
         )

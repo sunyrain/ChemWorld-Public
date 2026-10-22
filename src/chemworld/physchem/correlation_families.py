@@ -28,6 +28,7 @@ from chemworld.physchem.interface_kernels import INTERFACE_METHODS, interface_de
 from chemworld.physchem.lennard_jones import kinetic_viscosity_value_slope
 from chemworld.physchem.phase_change_kernels import latent_heat_derivatives
 from chemworld.physchem.vapor_pressure_kernels import pressure_derivatives
+from chemworld.physchem.virial_kernels import VIRIAL_METHODS, virial_derivatives
 from chemworld.physchem.viscosity_kernels import VISCOSITY_METHODS, viscosity_derivatives
 from chemworld.physchem.volume_kernels import VOLUME_METHODS, volume_derivatives
 
@@ -50,6 +51,7 @@ class CorrelationFamily:
     interface_method: str = ""
     volume_method: str = ""
     volume_output: str = ""
+    virial_method: str = ""
 
     @property
     def input_units(self):
@@ -76,6 +78,8 @@ class CorrelationFamily:
             return "chemicals 1.5.2: interface." + self.interface_method
         if self.volume_method:
             return "chemicals 1.5.2: volume." + self.volume_method
+        if self.virial_method:
+            return "chemicals 1.5.2: virial public mathematics and documented call characterization"
         return "chemicals 1.5.2: " + (self.reference_method or (
             "dippr." + self.equation_id.replace("dippr", "EQ")))
 
@@ -96,8 +100,13 @@ class CorrelationFamily:
             result["coefficient_output_unit"] = self.fixed_output_unit
         if self.optional_prefix:
             result["indexed_coefficient_prefix"] = self.optional_prefix
-        if self.pressure_method or self.interface_method or self.volume_method:
+        if (self.pressure_method or self.interface_method
+                or self.volume_method or self.virial_method):
             result["temperature_derivative"] = "analytic_through_third_where_differentiable"
+        if self.virial_method:
+            result["indefinite_temperature_integral_orders"] = (
+                [-1, -2] if VIRIAL_METHODS[self.virial_method].integrals else [])
+            result["physical_relation"] = "density_virial_coefficient"
         if self.volume_method:
             result["physical_relation"] = VOLUME_METHODS[self.volume_method].relation
             result["temperature_derivative_path"] = (
@@ -105,7 +114,7 @@ class CorrelationFamily:
                 if VOLUME_METHODS[self.volume_method].uses_pressure else
                 VOLUME_METHODS[self.volume_method].relation)
         if self.equation_id in {"phase_change_point", "interface_source_point",
-                                "dimensionless_source_point"}:
+                                "dimensionless_source_point", "molar_volume_source_point"}:
             result["temperature_derivative"] = "unavailable_single_observation"
             result["integrals"] = []
         return result
@@ -114,7 +123,9 @@ class CorrelationFamily:
 _CP = dict.fromkeys(("heat_capacity", "ideal_gas_heat_capacity", "liquid_heat_capacity",
                     "solid_heat_capacity", "isochoric_heat_capacity"), "molar_heat_capacity")
 _DENSITY = {"liquid_density": "mass_density", "solid_density": "mass_density",
-            "liquid_molar_density": "concentration", "solid_molar_density": "concentration"}
+            "liquid_molar_density": "concentration", "solid_molar_density": "concentration",
+            "gas_density": "mass_density"}
+_VOLUME = {p + "_molar_volume": "molar_volume" for p in ("liquid", "solid", "gas")}
 _PRESSURE_VISCOSITY = {"vapor_pressure": "pressure", "sublimation_pressure": "pressure",
                        "liquid_viscosity": "dynamic_viscosity"}
 _POSITIVE_T = "finite T > 0 K; finite parameters and result"
@@ -152,6 +163,9 @@ def _latent(equation, method, required, domain="0 < T <= Tc; no supercritical ex
 
 
 _FAMILIES = (
+    CorrelationFamily("molar_volume_source_point", ("T_ref", "value"), (),
+        MappingProxyType(_VOLUME), "one explicit temperature; no thermal curve or derivative",
+        fixed_output_unit="m^3/mol", reference_document="Explicit source observation"),
     CorrelationFamily("permittivity_crc", ("A",), tuple("BCD"),
         MappingProxyType({"relative_permittivity":"dimensionless"}),
         "positive T and permittivity; caller supplies source/application temperature range",
@@ -213,7 +227,7 @@ _FAMILIES = (
     CorrelationFamily("chemsep16", tuple("ABCDE"), (), MappingProxyType(_CP), _POSITIVE_T,
         reference_document="ChemSep Help, Table 3, equation 16: "
         "https://studylib.es/doc/9235141/chemsep-help"),
-    _family(100, "A", "BCDEFG", {**_CP, **_DENSITY, **_LATENT,
+    _family(100, "A", "BCDEFG", {**_CP, **_DENSITY, **_LATENT, **_VOLUME,
                                 "gas_viscosity": "dynamic_viscosity",
                                 "thermal_conductivity": "thermal_conductivity"}),
     _family(101, "AB", "CDE", _PRESSURE_VISCOSITY),
@@ -231,12 +245,12 @@ _FAMILIES = (
     _family(116, ("Tc", "A", "B", "C", "D", "E"), "", _DENSITY,
             "Tc > 0; 0 < T < Tc"),
     _family(127, "ABCDEFG", "", _CP),
-    _family("100_reciprocal", "A", "BCDEFG", {"liquid_molar_volume": "molar_volume"},
+    _family("100_reciprocal", "A", "BCDEFG", _VOLUME,
             _POSITIVE_T + "; polynomial nonzero; integration cannot cross a zero"),
-    _family("105_reciprocal", "ABCD", "", {"liquid_molar_volume": "molar_volume"},
+    _family("105_reciprocal", "ABCD", "", _VOLUME,
             "A/B/C/D > 0; 0 < T < C (K)"),
     _family("106_reciprocal", ("Tc", "A", "B"), "CDE",
-            {"liquid_molar_volume": "molar_volume"}, "Tc > 0; 0 < T < Tc; base nonzero"),
+            _VOLUME, "Tc > 0; 0 < T < Tc; base nonzero"),
     _caloric("poling_cp", "Poling", "a b c d e", "", "ideal_gas"),
     _caloric("shomate_cp", "Shomate", "A B C D E", "", "all",
              _POSITIVE_T + "; SI coefficients use T in K, not kilokelvin"),
@@ -319,7 +333,16 @@ CORRELATION_FAMILIES: Mapping[str, CorrelationFamily] = MappingProxyType(
             reference_document="Explicit source observation at one declared temperature"
             if method == "source_point" else "",
         ) for method, (required, optional) in INTERFACE_METHODS.items()
-    ), *_volume_families())})
+    ), *_volume_families(), *(
+        CorrelationFamily(
+            "virial_" + method.lower(), tuple(spec.required.split()), (),
+            MappingProxyType({spec.property_id: "third_virial_coefficient"
+                              if spec.third else "molar_volume"}),
+            "positive T/Tc/Pc/Vc; finite explicit omega and polar parameters; "
+            "signed B/C; explicit application interval, no stability claim",
+            fixed_output_unit=spec.unit, virial_method=method,
+        ) for method, spec in VIRIAL_METHODS.items()
+    ))})
 
 
 def validate_family_parameters(equation_id: str, coefficients: Mapping[str, float]) -> None:
@@ -353,7 +376,7 @@ def family_value_and_slope(
     T = temperature_K
     if not isfinite(T) or T <= 0:
         raise ValueError("correlations require finite positive absolute temperature")
-    if equation_id == "dimensionless_source_point":
+    if equation_id in {"dimensionless_source_point", "molar_volume_source_point"}:
         raise ValueError("a single source observation has no temperature derivative")
     if equation_id == "permittivity_crc":
         from chemworld.physchem.caloric_math import derivative_values
@@ -391,6 +414,9 @@ def family_value_and_slope(
             parameters["P"] = pressure_Pa
         return volume_derivatives(family.volume_method, T, parameters,
                                   order=1, output=family.volume_output)
+    if CORRELATION_FAMILIES[equation_id].virial_method:
+        return virial_derivatives(CORRELATION_FAMILIES[equation_id].virial_method,
+                                  T, coefficients, order=1)
     c = coefficients
     reciprocal = equation_id.endswith("_reciprocal")
     equation = equation_id.removesuffix("_reciprocal")

@@ -576,6 +576,7 @@ class ChemWorldRuntime:
             campaign_id=self._campaign_id, operation_index=self._operation_id + 1,
             vessel_started=self._campaign_resource_current_vessel_started,
             state=previous_state,
+            modules=self.domain_modules,
         )
         resource_preflight = reservation.campaign if reservation else None
         batch_preflight = reservation.batch if reservation else None

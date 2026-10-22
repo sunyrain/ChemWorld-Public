@@ -496,6 +496,15 @@ class ConstantDatabase:
             )
         return tuple(result)
 
+    def virial_input(self, identity, component, *, method, constant_source,
+                     temperature_range_K, parameters=None, polar=None):
+        """Select one source explicitly; use existing records without another cache."""
+        from chemworld.data.virial_inputs import sourced_virial_input
+
+        return sourced_virial_input(self, identity, component, method=method,
+            constant_source=constant_source, temperature_range_K=temperature_range_K,
+            parameters=parameters, polar=polar)
+
     def records_for(self, identity, *, method):
         self.records(method)
         return tuple(self._indices[method].get(_lookup_key(identity), ()))

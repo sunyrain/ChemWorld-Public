@@ -2,6 +2,39 @@
 
 ## Source synchronization {#source-synchronization}
 
+The **22 October 2026** update imports committed foundation work through source
+revision `8a17e23b`, advancing the previous `8dc31912` snapshot. It includes:
+
+- Explicit external density/volume sources, including CRC virial data, and
+  source-preserving critical-constant inputs.
+- Seven second- and two third-virial methods, cross parameters, mixture rules
+  and derivatives, plus density/pressure forward and inverse calculations.
+- Pure single-phase gas PVT and caloric consumers and closed, fixed-volume
+  heating through the common coupled solver. General nonideal mixture calorics
+  and open-flow processes remain outside this contract.
+- Thevenin RC and two-node thermal models connected to persistent worlds,
+  shared-clock acquisition, instrument queues, continuation and replay.
+
+See the [native API](native_foundation.md) and [workflow examples](native_domains.md).
+Sources and application ranges must be explicit. Thevenin parameters are empirical;
+the model retains separate charge and heat balances rather than inferring chemical species.
+This synchronization distributes implementation, tests and comparison runners;
+it does not republish raw research runs or claim new material validation.
+
+Windows/Python 3.11 integration selected 217 tests. Initially 215 passed, including
+the real sdist-to-wheel installation; two old instrument tests failed identically
+on the preceding public source. Their test double and readout-failure expectations
+were updated to the existing transaction contract: physical sampling stays paid,
+while an invalid readout creates no valid signal or reward. All 12 tests in that
+affected file then passed. These overlapping results are reported separately.
+
+Changed Python files pass Ruff. The strict bilingual documentation build and
+20 browser checks pass, including the milestone links, both languages and
+viewport widths from 320 to 1440 pixels. The website and both READMEs present
+four grouped milestones dated by public availability.
+
+### Previous public synchronization: 21 October
+
 The 21 October update imports committed foundation work through source revision
 `8dc31912`. Uncommitted development changes are outside this snapshot. This is a
 development source update, not a new PyPI release or a rerun of frozen scientific evidence.

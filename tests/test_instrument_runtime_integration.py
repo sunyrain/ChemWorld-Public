@@ -300,9 +300,13 @@ def test_rolled_back_final_assay_cannot_observe_reward_or_end_episode(
             operation_type: str,
             events: tuple[Any, ...],
             patches: tuple[Any, ...],
+            action: dict[str, Any],
+            actual_duration_s: float,
         ) -> TransactionResult:
             del patches
             assert operation_type == "measure"
+            assert action["instrument"] == "final_assay"
+            assert actual_duration_s >= 0
             return transaction_manager.rollback(
                 state=state,
                 operation_type=operation_type,
@@ -408,35 +412,48 @@ def test_insufficient_sample_and_repeat_assay_fail_before_material_mutation() ->
         env.close()
 
 
-def test_provider_failure_rolls_back_cost_sample_and_signal() -> None:
+def test_provider_failure_retains_sampling_without_valid_signal_or_reward() -> None:
     env = gym.make("ChemWorld", task_id="reaction-to-assay", seed=5)
+    control = gym.make("ChemWorld", task_id="reaction-to-assay", seed=5)
     try:
-        env.reset(seed=5)
+        for candidate in (env, control):
+            candidate.reset(seed=5)
+            candidate.step({"operation": "add_solvent", "volume_L": 0.025, "solvent": 2})
+            candidate.step({"operation": "add_reagent", "amount_mol": 0.008})
         base: Any = env.unwrapped
-        env.step({"operation": "add_solvent", "volume_L": 0.025, "solvent": 2})
-        env.step({"operation": "add_reagent", "amount_mol": 0.008})
         volume_before = float(base._state.volume_L)
         samples_before = float(base._state.ledger.sample_consumed_L)
-        species_before = dict(base._state.species_amounts)
-        initial_before = dict(base._state.species.initial_amounts_mol)
-        phases_before = base._state.phases.to_dict()
+        cached_observation = dict(base._state.process.last_observation)
         base.observation_kernel.instrument_provider = FailingProvider()
 
-        _obs, _reward, _terminated, _truncated, info = env.step(
+        _obs, reward, terminated, truncated, info = env.step(
             {"operation": "measure", "instrument": "hplc"}
         )
+        *_, successful_info = control.step({"operation": "measure", "instrument": "hplc"})
+        expected = control.unwrapped._state
 
-        assert info["transaction_status"] == "validation_failed"
+        assert info["transaction_status"] == "committed"
+        assert info["measurement_status"] == "invalid"
+        assert (
+            info["outcome_diagnostics"]["observation_failure"]
+            == "readout_domain_error: ValueError"
+        )
+        assert base.observation_kernel.last_provider_execution["success"] is False
         assert info["raw_signal"] == {}
-        assert info["measurement_cost"] == 0.0
-        assert info["sample_consumed"] == 0.0
-        assert base._state.volume_L == pytest.approx(volume_before)
-        assert base._state.ledger.sample_consumed_L == pytest.approx(samples_before)
-        assert base._state.species_amounts == species_before
-        assert base._state.species.initial_amounts_mol == initial_before
-        assert base._state.phases.to_dict() == phases_before
+        assert reward == 0.0
+        assert terminated is False and truncated is False
+        assert info["measurement_cost"] == successful_info["measurement_cost"] > 0.0
+        assert info["sample_consumed"] == successful_info["sample_consumed"] > 0.0
+        assert base._state.volume_L == expected.volume_L < volume_before
+        assert base._state.ledger.sample_consumed_L > samples_before
+        assert base._state.ledger.to_dict() == expected.ledger.to_dict()
+        assert base._state.species_amounts == expected.species_amounts
+        assert base._state.species.initial_amounts_mol == expected.species.initial_amounts_mol
+        assert base._state.phases.to_dict() == expected.phases.to_dict()
+        assert base._state.process.last_observation == cached_observation
     finally:
         env.close()
+        control.close()
 
 
 

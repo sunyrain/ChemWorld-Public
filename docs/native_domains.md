@@ -28,6 +28,9 @@ actual action/readout trajectories and terminal snapshots, not invented scores.
 | `distillation` | Finite tray holdup, retained receiver, timed fraction collection, full reflux and reflux change. |
 | `crystal` | Seeding, finite cooling/growth, filtration, resuspension, warm redissolution and a second cooling interval. |
 | `solid` | Binary demixing → heating → cooling with local equilibrium and native phase readout. |
+| `heterogeneous` | Four closed systems (reaction, SPM battery, adsorption and SSA) advance on one clock with a finite heater. |
+| `open-closed` | A finite transport apparatus and a closed thermal bottle share event endpoints, including source exhaustion. |
+| `device-lifecycle` | Multiple heaters/analyzers, FIFO contention and local material replacement while an unrelated analysis remains active. |
 
 ## Device and time boundaries
 
@@ -41,7 +44,7 @@ instrument hot plugging. A rejected reconnection follows normal procedure-penalt
 semantics but does not change material, equipment or physical time.
 
 The `shared-clock` workflow is different: all enabled vessels age together under
-item 39's finite scheduler. It does **not** couple SSA and ODE inside one vessel,
+the common finite scheduler. It does **not** couple SSA and ODE inside one vessel,
 and molecular capture is zero-carrier-volume Bernoulli sampling, not a liquid
 aliquot. Do not interpret repeated resets with the same seeds as independent runs.
 
@@ -61,8 +64,12 @@ Changing declaration order or selecting another vessel does not choose the
 numerical assembly order. One physical heater and one offline analyzer serve
 persistent FIFO requests. A failed slice discards sampling and RNG changes;
 the existing rejected-action cost/risk penalty remains in history. Open
-connections beyond declared finite apparatus, multiple devices and same-vessel
-ODE/SSA mixing remain unsupported.
+connections beyond declared finite apparatus and same-vessel ODE/SSA mixing
+remain unsupported. Multiple devices use explicit identities and per-device
+FIFO queues; choose a device when the request would otherwise be ambiguous.
+Local material replacement is evaluator-only and requires the affected system
+to be idle. It retains the shared clock, resource history, calibration and
+unrelated queued analyses; it is not an Agent reset action.
 
 `chemworld.examples.closed_shared_labs.reactive_closed_lab()` authors four
 independent synthetic systems: a thermal A/B reaction, thermal SPM battery,
@@ -154,6 +161,14 @@ uv run --no-sync python scripts/smoke_test_wheel.py --native-foundation-only --o
 
 The latter builds both distributions and installs each outside the repository
 using locked default dependencies. It checks absence of optional upstream
-libraries, runs the seven examples, and verifies each trajectory in another
+libraries, runs the ten examples, and verifies each trajectory in another
 process. This is a local installation test, **not** a PyPI upload or formal release.
 No claim is made about platforms not actually tested in the acceptance record.
+
+The stage-A source qualification passed 10 histories x 2 noise modes x 4 actual
+entry points: 80 trajectories, 80 independent JSONL replays and 20 fresh-process
+continuations. These are separate from the Windows installation qualification:
+Python 3.11/3.12 x wheel/sdist, four passed units with 40 histories and 40
+fresh-process replays using default sequential noise. Linux/macOS installation
+is deferred; its eight planned units remain unexecuted. This does not qualify
+every later scientific extension or establish real-material accuracy.

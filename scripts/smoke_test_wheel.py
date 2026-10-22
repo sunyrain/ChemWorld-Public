@@ -168,6 +168,31 @@ for index, name in enumerate(WORKFLOWS, 1):
     row['new_process_replay'] = True
     domain_cases.append(row)
     progress('domains', index, len(WORKFLOWS), current=name)
+documentation_commands = [
+    ['-m', 'chemworld.examples.native_domains', '--workflow', 'heater',
+     '--noise-mode', 'keyed', '--output', str(evidence / 'documented-keyed')],
+    ['-m', 'chemworld.examples.native_capabilities', '--format', 'json'],
+    ['-m', 'chemworld.examples.native_capabilities', '--composition',
+     str(domain_output / 'heater-recipe.json')],
+    ['-c', 'from chemworld.cli import main; main()', 'verify', '--submission',
+     str(evidence / 'documented-keyed' / 'heater.jsonl')],
+    ['-m', 'chemworld.examples.native_surface_research', '--bulk', '--mobile', '--terminal-assay'],
+    ['-m', 'chemworld.examples.reuse_native_equipment'],
+]
+for index, command in enumerate(documentation_commands, 1):
+    progress('documentation', index - 1, len(documentation_commands))
+    completed = subprocess.run([sys.executable, '-I', *command],
+                               text=True, capture_output=True)
+    (evidence / ('documentation-' + str(index) + '.stdout')).write_text(
+        completed.stdout, encoding='utf-8')
+    (evidence / ('documentation-' + str(index) + '.stderr')).write_text(
+        completed.stderr, encoding='utf-8')
+    completed.check_returncode()
+    if index == 2:
+        assert json.loads(completed.stdout) == json.loads(json.dumps(capability_rows()))
+    if index == 4:
+        assert json.loads(completed.stdout)['verified']
+    progress('documentation', index, len(documentation_commands))
 assert all(name not in sys.modules for name in upstreams)
 print(json.dumps({'package':chemworld.__file__, 'cantera_installed':False,
                   'platform':{'system':platform.system(), 'python':platform.python_version()},
@@ -175,6 +200,7 @@ print(json.dumps({'package':chemworld.__file__, 'cantera_installed':False,
                   'task_binding':True, 'serialized_continuation':True,
                   'trajectory_replay_steps':replay.checked_steps,
                   'upstream_libraries_absent':list(upstreams),
+                  'documentation_commands_passed':len(documentation_commands),
                   'domain_workflows':domain_cases}))
 """
 

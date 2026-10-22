@@ -160,15 +160,25 @@ class TheveninSpec:
     @property
     def coordinate_declarations(self):
         p = self._native
+        # Event surfaces retain the exact authored stopping bounds. Dense-output
+        # root evaluation can land a few floating-point units to either side;
+        # numerical validity allows roundoff, never clips the accepted state or
+        # permits advancement past a stopping event. This is not a data domain
+        # extension or a change to any comparison/qualification tolerance.
+        soc_guard = 32*np.spacing(1.)
+        temperature_guard = 32*np.spacing(max(
+            p["maximum_temperature_K"], p["reference_frame_temperature_K"]))
         work_scale = p["capacity_C"]*p["maximum_voltage_V"]
         heat_scale = (p["cell_heat_capacity_J_K"]+p["jig_heat_capacity_J_K"])*(
             p["maximum_temperature_K"]-p["minimum_temperature_K"])
         return (
-            CoupledCoordinate(SOC, "dimensionless", 1., p["minimum_soc"], p["maximum_soc"]),
+            CoupledCoordinate(SOC, "dimensionless", 1., p["minimum_soc"]-soc_guard,
+                              p["maximum_soc"]+soc_guard),
             *(CoupledCoordinate(rc_key(i), "V", p["maximum_voltage_V"])
               for i in range(len(self.rc_elements))),
             *(CoupledCoordinate(key, "K", p["reference_frame_temperature_K"],
-                                p["minimum_temperature_K"], p["maximum_temperature_K"])
+                                p["minimum_temperature_K"]-temperature_guard,
+                                p["maximum_temperature_K"]+temperature_guard)
               for key in (CELL_T, JIG_T)),
             CoupledCoordinate(CHARGE, "C", p["capacity_C"]),
             CoupledCoordinate(WORK, "J", work_scale),

@@ -738,8 +738,9 @@ class PropertyCorrelation:
             if len(bounds) != 2:
                 raise ValueError(f"Validity range must have two values: {variable}")
             lower, upper = bounds
-            is_source_point = (self.equation_id in {"phase_change_point", "interface_source_point",
-                                                   "dimensionless_source_point"}
+            is_source_point = (self.equation_id in {
+                "phase_change_point", "interface_source_point",
+                "dimensionless_source_point", "molar_volume_source_point"}
                                and variable == "temperature"
                                and lower == upper == self.coefficients["T_ref"])
             if (not all(isfinite(v) for v in (lower, upper))

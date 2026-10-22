@@ -226,7 +226,8 @@ def check_operation_preconditions(
         "measure_final_not_repeated": not is_final_assay or not final_assay_done,
         "terminate_requires_material": operation_type != "terminate"
         or has_material
-        or thermal_body,
+        or thermal_body
+        or state.lab_clock is not None,
         "filter_requires_crystallization": operation_type != "filter_crystals" or crystallized,
         "resuspend_requires_filtered_crystals": operation_type != "resuspend_crystals"
         or (

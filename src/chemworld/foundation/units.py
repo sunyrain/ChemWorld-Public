@@ -67,6 +67,9 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "kJ/(mol*K)": ("molar_heat_capacity", "J/(mol*K)", 1000.0, 0.0),
     "g/mol": ("molecular_weight", "g/mol", 1.0, 0.0),
     "m^3/mol": ("molar_volume", "m^3/mol", 1.0, 0.0),
+    "m^6/mol^2": ("third_virial_coefficient", "m^6/mol^2", 1.0, 0.0),
+    "L^2/mol^2": ("third_virial_coefficient", "m^6/mol^2", 1e-6, 0.0),
+    "m^6/kmol^2": ("third_virial_coefficient", "m^6/mol^2", 1e-6, 0.0),
     "m^3/(mol*K)": ("molar_volume_per_temperature", "m^3/(mol*K)", 1.0, 0.0),
     "(m^3/mol)/K": ("molar_volume_per_temperature", "m^3/(mol*K)", 1.0, 0.0),
     "L/(mol*K)": ("molar_volume_per_temperature", "m^3/(mol*K)", 0.001, 0.0),
@@ -172,6 +175,19 @@ _UNIT_TABLE.update({
     for order, suffix in ((1, "K"), (2, "K^2"), (3, "K^3"))
     for name in (f"{pressure_unit}/{suffix}", f"({pressure_unit})/{suffix}")
 })
+
+
+# Same source scales for B/C temperature derivatives, including existing dB/dT.
+for _base, (_dimension, _canonical, _scale, _) in tuple(_UNIT_TABLE.items()):
+    if _dimension in {"molar_volume", "third_virial_coefficient"}:
+        for _order in (1, 2, 3):
+            _suffix = "K" if _order == 1 else f"K^{_order}"
+            _key = f"({_base})/{_suffix}"
+            _unit = ("m^3/(mol*K)" if _dimension == "molar_volume" and _order == 1
+                     else f"({_canonical})/{_suffix}")
+            _dim = ("molar_volume_per_temperature" if _dimension == "molar_volume" and _order == 1
+                    else f"{_dimension}_temperature_derivative_{_order}")
+            _UNIT_TABLE[_key] = (_dim, _unit, _scale, 0.)
 
 
 def unit_spec(unit: str) -> UnitSpec:

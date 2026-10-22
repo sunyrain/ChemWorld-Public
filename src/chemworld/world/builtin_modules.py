@@ -367,6 +367,21 @@ BUILTIN_MODULES = (
         dependencies=("electrical_control",),
     ),
     DomainModuleSpec(
+        module_id="battery_thevenin",
+        scope_notes=("Sourced empirical RC and two-node cell/jig heat model; shared CC/CV "
+                     "control and persistent apparatus. No chemical inventory/total energy, "
+                     "diffusion element or independent released-model qualification yet.",),
+        components=(("battery_thevenin", ComponentCapability(
+            operations=("configure_electrical_control", "queue_electrical_stage", "wait"),
+            interfaces=("electrical_control",), state_owners=("empirical_circuit_state",),
+            input_ports=(), outputs=(),
+        )),),
+        advance_strategies=(AdvanceStrategySpec(
+            "thevenin-empirical-circuit", factories.battery_thevenin, shared_clock=True,
+        ),),
+        dependencies=("electrical_control", "lab_schedule"),
+    ),
+    DomainModuleSpec(
         module_id="vacuum_concentration",
         advance_strategies=(
             AdvanceStrategySpec(

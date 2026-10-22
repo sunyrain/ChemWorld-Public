@@ -93,11 +93,16 @@ def _evaluate_equation(
     equation = correlation.equation_id
     coeffs = correlation.coefficients
     T = inputs["temperature"]
-    if equation == "dimensionless_source_point":
+    if equation in {"dimensionless_source_point", "molar_volume_source_point"}:
         from chemworld.physchem.property_points import source_point_value
 
         return source_point_value(T,coeffs["T_ref"],coeffs["value"])
     if equation in CORRELATION_FAMILIES:
+        if CORRELATION_FAMILIES[equation].virial_method:
+            from chemworld.physchem.virial_kernels import virial_derivatives
+
+            return virial_derivatives(CORRELATION_FAMILIES[equation].virial_method,
+                                      T, coeffs, order=0)[0]
         if CORRELATION_FAMILIES[equation].pressure_method:
             return pressure_derivatives(equation, T, coeffs, order=0)[0]
         if CORRELATION_FAMILIES[equation].phase_change_method:
@@ -387,6 +392,8 @@ def _choose_valid_correlation(
 def _ensure_finite_positive(value: float, correlation: PropertyCorrelation) -> None:
     if not isfinite(value):
         raise ValueError(f"Correlation returned non-finite value: {correlation.correlation_id}")
+    if (correlation.property_id.endswith(("_molar_volume", "_density")) and value <= 0):
+        raise ValueError(f"Volume/density must be positive: {correlation.correlation_id}")
     if correlation.property_id in {"relative_permittivity", "refractive_index"} and value <= 0:
         raise ValueError(
             f"Electro-optical correlation must be positive: {correlation.correlation_id}")
