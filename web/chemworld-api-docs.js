@@ -13,7 +13,8 @@
       planned:'尚未提供调用接口', plannedNote:'这是规划能力，目前没有已实现的 API、可运行示例或实测输出。',
       missing:'此条目的接口文档尚未加载，请刷新后重试。',
       schema:'动作字段', schemaNote:'以下合同来自示例会话初始化后的 action_schema()。单位、枚举和范围取决于装置、任务及当前状态；执行前可用 validate_action() 再检查。',
-      field:'字段', unit:'单位', bounds:'范围 / 选项', details:'完整动作合同', optional:'可选',
+      field:'字段', value:'值', unit:'单位', bounds:'范围 / 选项', details:'完整动作合同', optional:'可选',
+      inputView:'参数', outputView:'结果', display:'展示方式', items:'项', emptyObject:'空对象', emptyArray:'空数组',
       checks:'示例验证', checksNote:'这些是固定合成输入的软件使用示例，用于核对接口、代码与输出。它们不扩大材料验证、科学资格或正式评测的范围。',
       long:'可滚动查看并复制完整内容', alternatives:'本例涉及的其他接口',
     },
@@ -26,7 +27,8 @@
       planned:'No callable API yet', plannedNote:'This is a planned capability. No implemented API, runnable example or executed output is available yet.',
       missing:'The API reference for this item did not load. Refresh to try again.',
       schema:'Action fields', schemaNote:'These contracts come from action_schema() after initializing the example session. Units, choices and bounds depend on apparatus, task and state; use validate_action() before execution.',
-      field:'Field', unit:'Unit', bounds:'Bounds / choices', details:'Full action contract', optional:'Optional',
+      field:'Field', value:'Value', unit:'Unit', bounds:'Bounds / choices', details:'Full action contract', optional:'Optional',
+      inputView:'Parameters', outputView:'Results', display:'Display format', items:'items', emptyObject:'Empty object', emptyArray:'Empty array',
       checks:'Example verification', checksNote:'These fixed synthetic software examples check agreement between interface, code and output. They do not extend material validation, scientific qualification or benchmark claims.',
       long:'Scroll to read or copy the full content', alternatives:'Other interfaces used in this example',
     }
@@ -34,6 +36,65 @@
   function codeBlock(value, label, t, kind) {
     const content = typeof value === 'string' ? value : json(value);
     return `<div class="api-code" data-api-block="${kind}"><div class="api-code-bar"><span>${esc(label)}</span><button type="button" data-api-copy data-copy-label="${esc(t.copy)}" data-copied-label="${esc(t.copied)}" data-error-label="${esc(t.copyFailed)}" aria-label="${esc(t.copy+' '+label)}">${esc(t.copy)}</button><span class="api-copy-status" role="status"></span></div><pre tabindex="0" aria-label="${esc(label)}"><code>${esc(content)}</code></pre>${content.split('\n').length>24?`<div class="api-scroll-note">${esc(t.long)}</div>`:''}</div>`;
+  }
+  // Labels supplement the original keys; unknown fields keep their API names.
+  const fieldNames = {
+    formula:['分子式','Formula'], formation_enthalpy_J_mol:['生成焓','Formation enthalpy'],
+    amount_mol:['物质的量','Amount'], amounts_mol:['各组分物质的量','Component amounts'],
+    stoichiometry:['化学计量','Stoichiometry'],
+    HHV_J_mol:['高位热值','Higher heating value'], LHV_J_mol:['低位热值','Lower heating value'],
+    finite_heat:['有限物料热量','Finite-material heat'], temperature_K:['温度','Temperature'],
+    pressure_Pa:['压力','Pressure'], volume_L:['体积','Volume'], time_s:['时间','Time'],
+    duration_s:['持续时间','Duration'], actual_duration_s:['实际持续时间','Actual duration'],
+    enthalpy_J:['焓','Enthalpy'], status:['状态','Status'], operation:['操作','Operation'],
+    value:['数值','Value'], unit:['单位','Unit'], uncertainty:['不确定度','Uncertainty'],
+    quality:['质量标记','Quality'], sample_id:['样品标识','Sample ID'], channel_id:['通道标识','Channel ID'],
+    valid_range:['有效范围','Valid range'], detection_limit:['检测限','Detection limit'],
+  };
+  const unitSuffixes = [['_J_mol','J/mol'],['_mol_L','mol/L'],['_mol_s','mol/s'],['_mL_min','mL/min'],
+    ['_g_mol','g/mol'],['_mol','mol'],['_J','J'],['_K','K'],['_Pa','Pa'],['_mL','mL'],['_L','L'],['_s','s']];
+  const viewModes = new Map();
+  const isObject = value => value !== null && typeof value === 'object';
+  const isQuantity = value => isObject(value) && !Array.isArray(value) && Object.keys(value).length === 2 &&
+    Object.hasOwn(value,'value') && typeof value.unit === 'string' && !isObject(value.value);
+  const number = value => String(value).replace(/^(-?)(\d+)(\.\d+)?$/,(_,sign,whole,fraction='')=>
+    sign+whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+fraction);
+  const pathText = path => path.reduce((result,key)=>typeof key==='number'?`${result}[${key}]`:
+    /^[\w-]+$/.test(key)?`${result}${result?'.':''}${key}`:`${result}[${JSON.stringify(key)}]`,'');
+  function dataTable(value,t,lang) {
+    const rows=[];
+    let groupId=0;
+    const field = (key,path) => {
+      const label=fieldNames[key]?.[lang==='zh'?0:1] ?? String(key), raw=pathText(path);
+      return `<span class="api-field-label">${esc(label)}</span>${raw!==label?`<code class="api-field-path">${esc(raw)}</code>`:''}`;
+    };
+    const visit = (item,key,path,ancestors=[],hidden=false,unit='') => {
+      const depth=Math.min(Math.max(path.length-1,0),3);
+      const attrs=`data-api-ancestors="${ancestors.join(' ')}" style="--api-depth:${depth}"${hidden?' hidden':''}`;
+      const quantity=isQuantity(item);
+      if(isObject(item)&&!quantity&&Object.keys(item).length) {
+        const id=String(++groupId), entries=Object.entries(item), open=path.length<3&&entries.length<=8;
+        rows.push(`<tr class="api-data-group" ${attrs}><th colspan="3"><button type="button" data-api-group="${id}" aria-expanded="${open}"><span class="api-group-chevron" aria-hidden="true">›</span><span>${field(key,path)}</span><span class="api-group-count">${entries.length} ${t.items}</span></button></th></tr>`);
+        for(const [child,next] of entries)visit(next,Array.isArray(item)?`[${child}]`:child,[...path,Array.isArray(item)?Number(child):child],
+          [...ancestors,id],hidden||!open,child==='value'&&typeof item.unit==='string'?item.unit:'');
+        return;
+      }
+      const scalar=quantity?item.value:item, scalarPath=quantity?[...path,'value']:path;
+      const displayed=isObject(scalar)?(Array.isArray(scalar)?t.emptyArray:t.emptyObject):
+        scalar===null?'null':typeof scalar==='number'?number(scalar):scalar===''?'""':String(scalar);
+      const units=quantity?item.unit:unit || (typeof scalar==='number'?unitSuffixes.find(([suffix])=>String(key).endsWith(suffix))?.[1]:'') || '';
+      const type=scalar===null?'null':Array.isArray(scalar)?'array':typeof scalar;
+      rows.push(`<tr class="api-data-row" ${attrs} data-api-path="${esc(JSON.stringify(scalarPath))}"><th scope="row">${field(key,scalarPath)}</th><td class="api-data-value" data-value-type="${type}">${esc(displayed)}</td><td class="api-data-unit">${esc(units||'—')}</td></tr>`);
+    };
+    if(isObject(value)&&!isQuantity(value)&&Object.keys(value).length) {
+      for(const [key,item] of Object.entries(value))visit(item,Array.isArray(value)?`[${key}]`:key,[Array.isArray(value)?Number(key):key],[],false,
+        key==='value'&&typeof value.unit==='string'?value.unit:'');
+    } else visit(value,t.value,[]);
+    return `<table class="api-data-table"><thead><tr><th scope="col">${t.field}</th><th scope="col">${t.value}</th><th scope="col">${t.unit}</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+  }
+  function dataBlock(value,t,lang,kind,recipeKey) {
+    const key=recipeKey+':'+kind, mode=viewModes.get(key)||'pretty', label=kind==='input'?t.inputView:t.outputView;
+    return `<div class="api-code api-data" data-api-block="${kind}" data-api-view-key="${esc(key)}"><div class="api-code-bar"><div class="api-data-switch" role="group" aria-label="${esc(label+' · '+t.display)}"><button type="button" data-api-view="pretty" aria-pressed="${mode==='pretty'}">${label}</button><button type="button" data-api-view="json" aria-pressed="${mode==='json'}">JSON</button></div><button type="button" data-api-copy data-copied-label="${esc(t.copied)}" data-error-label="${esc(t.copyFailed)}">${t.copy} JSON</button><span class="api-copy-status" role="status"></span></div><div data-api-panel="pretty"${mode==='pretty'?'':' hidden'}>${dataTable(value,t,lang)}</div><div data-api-panel="json"${mode==='json'?'':' hidden'}><pre tabindex="0" aria-label="${esc(label+' JSON')}"><code>${esc(json(value))}</code></pre></div></div>`;
   }
   function parameterTable(api,t) {
     const rows = api.parameters.map(p=>`<tr><th scope="row"><code>${esc(p.name)}</code>${p.kind==='KEYWORD_ONLY'?'<small>keyword-only</small>':''}</th><td><code>${esc(p.type||t.untyped)}</code></td><td><code>${esc(p.required?t.required:p.default||'—')}</code></td></tr>`).join('');
@@ -56,9 +117,9 @@
       if(interfaces.length>1)html+=`<details class="api-other-interfaces"><summary>${t.alternatives} (${interfaces.length-1})</summary>${interfaces.slice(1).map(a=>interfaceBlock(a,t,mode==='io')).join('')}</details>`;
       html+=actionFields(recipe,t);
     }
-    html+=`<h3>${t.input}</h3>${codeBlock(recipe.inputs,'JSON',t,'input')}`;
+    html+=`<h3>${t.input}</h3>${dataBlock(recipe.inputs,t,lang,'input',recipe.key)}`;
     if(mode!=='io')html+=`<h3>${t.code}</h3>${codeBlock(recipe.code,'Python',t,'python')}`;
-    html+=`<h3>${t.output}</h3>${codeBlock(recipe.output,'JSON',t,'output')}`;
+    html+=`<h3>${t.output}</h3>${dataBlock(recipe.output,t,lang,'output',recipe.key)}`;
     return html;
   }
   function render(node,lang='zh',mode='overview') {
@@ -75,8 +136,23 @@
     }).join('')}</section>`;
   }
   document.addEventListener('click',async event=>{
+    const view=event.target.closest('[data-api-view]');
+    if(view) {
+      const block=view.closest('.api-data'), mode=view.dataset.apiView;
+      viewModes.set(block.dataset.apiViewKey,mode);
+      block.querySelectorAll('[data-api-view]').forEach(button=>button.setAttribute('aria-pressed',String(button===view)));
+      block.querySelectorAll('[data-api-panel]').forEach(panel=>{panel.hidden=panel.dataset.apiPanel!==mode;});
+      return;
+    }
+    const group=event.target.closest('[data-api-group]');
+    if(group) {
+      group.setAttribute('aria-expanded',String(group.getAttribute('aria-expanded')!=='true'));
+      const table=group.closest('table'), closed=new Set([...table.querySelectorAll('[data-api-group][aria-expanded="false"]')].map(button=>button.dataset.apiGroup));
+      table.querySelectorAll('[data-api-ancestors]').forEach(row=>{row.hidden=row.dataset.apiAncestors.split(' ').some(id=>closed.has(id));});
+      return;
+    }
     const button=event.target.closest('[data-api-copy]');if(!button)return;
-    const code=button.closest('.api-code').querySelector('code').textContent;
+    const code=button.closest('.api-code').querySelector('pre > code').textContent;
     const status=button.parentElement.querySelector('.api-copy-status');
     try {await navigator.clipboard.writeText(code);status.textContent=button.dataset.copiedLabel;}
     catch {status.textContent=button.dataset.errorLabel;}

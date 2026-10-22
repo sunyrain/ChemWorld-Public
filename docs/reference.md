@@ -10,6 +10,9 @@ Select **Usage** for a complete walkthrough, **API & parameters** for signatures
 action fields, or **Examples & output** for the runnable code and its results. Additional
 examples are expandable. Planned capabilities are labelled and have no callable API.
 
+Inputs and outputs default to a field/value/unit table with expandable nested groups.
+Switch to **JSON** to inspect the full structure; **Copy JSON** works in either view.
+
 Examples use synthetic inputs or packaged presets. Some demonstrate initialization,
 configuration or a rejected request; their scope is stated beside the code. They are
 representative entry points, not an exhaustive listing of every Python symbol or a new

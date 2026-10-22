@@ -131,9 +131,72 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
    const code=await page.locator('[data-api-block="python"] code').first().textContent();
    await page.locator('[data-api-block="python"] [data-api-copy]').first().click();assert.equal((await page.evaluate(()=>navigator.clipboard.readText())).replace(/\r\n/g,'\n'),code);
    const expected=await page.evaluate(()=>window.CHEMWORLD_API_REFERENCE.recipes.combustion.output);
-   assert.deepEqual(JSON.parse(await page.locator('[data-api-block="output"] code').first().textContent()),expected);
+   assert.deepEqual(JSON.parse(await page.locator('[data-api-block="output"] pre > code').first().textContent()),expected);
    assert.equal(await page.locator('#document a[href*="github.com"]').count(),0);
    await screenshot('site-api-zh');
+  });
+  await check('Parameter tables preserve every example value, precision and explicit quantity unit',async()=>{
+   const checked=await page.evaluate(()=>{
+    const data=window.CHEMWORLD_API_REFERENCE, host=document.createElement('div');let blocks=0,values=0,tiny=0,nulls=0,booleans=0;
+    try {
+     for(const [key,recipe] of Object.entries(data.recipes)){
+      data.nodes.__table_qa={examples:[key]};host.innerHTML=window.ChemWorldApiDocs.render({id:'__table_qa',kind:'capability',state:'done'},'en','examples');
+      for(const kind of ['input','output']){
+       const source=kind==='input'?recipe.inputs:recipe.output, block=host.querySelector(`[data-api-block="${kind}"]`), found=new Set();
+       if(JSON.stringify(JSON.parse(block.querySelector('pre > code').textContent))!==JSON.stringify(source))throw Error(`${key}/${kind}: JSON changed`);
+       for(const row of block.querySelectorAll('[data-api-path]')){
+        const path=JSON.parse(row.dataset.apiPath), value=path.reduce((item,part)=>item[part],source), cell=row.querySelector('.api-data-value');
+        const expected=value===null?'null':typeof value==='object'?(Array.isArray(value)?'Empty array':'Empty object'):value===''?'""':String(value);
+        const actual=typeof value==='number'?cell.textContent.replaceAll(',',''):cell.textContent;
+        if(actual!==expected)throw Error(`${key}/${kind}/${path.join('.')}: ${actual} != ${expected}`);
+        if(found.has(JSON.stringify(path)))throw Error('Duplicate field');found.add(JSON.stringify(path));values++;
+        if(typeof value==='number'&&value!==0&&Math.abs(value)<1e-8)tiny++;
+        if(value===null)nulls++;if(typeof value==='boolean')booleans++;
+        const parent=path.slice(0,-1).reduce((item,part)=>item[part],source);
+        if(path.at(-1)==='value'&&typeof parent?.unit==='string'&&row.querySelector('.api-data-unit').textContent!==(parent.unit||'—'))throw Error(`${key}/${kind}/${path.join('.')}: lost quantity unit ${parent.unit}`);
+       }
+       // Traverse the source independently; only a two-field quantity folds its unit into a column.
+       const visit=(value,path=[])=>{
+        if(value!==null&&typeof value==='object'&&Object.keys(value).length){
+         const quantity=!Array.isArray(value)&&Object.keys(value).length===2&&Object.hasOwn(value,'value')&&typeof value.unit==='string'&&(value.value===null||typeof value.value!=='object');
+         for(const [name,item] of Object.entries(value))if(!(quantity&&name==='unit'))visit(item,[...path,Array.isArray(value)?Number(name):name]);
+        }else if(!found.delete(JSON.stringify(path)))throw Error(`${key}/${kind}: missing ${JSON.stringify(path)}`);
+       };
+       visit(source);if(found.size)throw Error('Unexpected fields');blocks++;
+      }
+     }
+    } finally {delete data.nodes.__table_qa;}
+    return {blocks,values,tiny,nulls,booleans};
+   });
+   assert.equal(checked.blocks,132);assert.ok(checked.values>1000);assert.ok(checked.tiny>0);assert.ok(checked.nulls>0);assert.ok(checked.booleans>0);
+  });
+  await check('Table/JSON switching, copy and nested groups work independently with the keyboard',async()=>{
+   const input=page.locator('[data-api-block="input"]').first(),output=page.locator('[data-api-block="output"]').first();
+   assert.equal(await input.locator('[data-api-panel="pretty"]').isVisible(),true);assert.equal(await output.locator('[data-api-panel="pretty"]').isVisible(),true);
+   const expected=await page.evaluate(()=>window.CHEMWORLD_API_REFERENCE.recipes.combustion.output);
+   await output.locator('[data-api-copy]').click();assert.deepEqual(JSON.parse(await page.evaluate(()=>navigator.clipboard.readText())),expected);
+   await output.locator('[data-api-view="json"]').focus();await page.keyboard.press('Enter');assert.equal(await output.locator('[data-api-panel="json"]').isVisible(),true);
+   assert.equal(await input.locator('[data-api-panel="pretty"]').isVisible(),true);
+   await output.locator('[data-api-view="pretty"]').click();const group=output.locator('[data-api-group]').first();
+   assert.equal(await output.locator('.api-data-row:visible').count(),6);await group.focus();await page.keyboard.press('Space');assert.equal(await output.locator('.api-data-row:visible').count(),3);
+   await page.keyboard.press('Enter');assert.equal(await output.locator('.api-data-row:visible').count(),6);
+   await hash('index/distillation');await page.locator('[data-tab="examples"]').click();
+   const large=page.locator('[data-api-block="output"] [data-api-group]').filter({has:page.locator('.api-field-label',{hasText:/^timed_fractions$/})}).first();
+   await large.waitFor();const before=await page.locator('[data-api-block="output"] .api-data-row:visible').count();await large.click();
+   assert.ok(await page.locator('[data-api-block="output"] .api-data-row:visible').count()>before);
+   await large.click();assert.equal(await page.locator('[data-api-block="output"] .api-data-row:visible').count(),before);
+   await go('index/combustion');
+  });
+  await check('Documentation footer actions share font, line height and vertical alignment',async()=>{
+   for(const lang of ['zh','en']){
+    await go('index/combustion',lang);
+    const styles=await page.locator('.doc-links > a,.doc-links > button').evaluateAll(items=>items.map(item=>{
+     const css=getComputedStyle(item),box=item.getBoundingClientRect();return {font:css.fontFamily,size:css.fontSize,weight:css.fontWeight,line:css.lineHeight,color:css.color,top:box.top,height:box.height};
+    }));
+    assert.equal(styles.length,2);assert.deepEqual(styles[0],styles[1]);
+    await page.locator('.doc-links').scrollIntoViewIfNeeded();await screenshot('site-api-footer-'+lang);
+   }
+   await go('index/combustion');
   });
   await check('API tabs expose parameter defaults, action units, additional examples and planned states',async()=>{
    await page.locator('[data-tab="io"]').click();assert.ok(await page.locator('.api-parameters tbody tr').count()>0);
