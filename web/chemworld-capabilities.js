@@ -1,11 +1,11 @@
 // Editorial navigation over the existing capability snapshot; not a runtime registry.
 window.CHEMWORLD_CAPABILITIES = {
-  "snapshot": "2026-10-21",
+  "snapshot": "2026-10-22",
   "registry": {
-    "modules": 25,
-    "components": 30,
-    "operations": 50,
-    "measurements": 24
+    "modules": 27,
+    "components": 32,
+    "operations": 51,
+    "measurements": 26
   },
   "tree": [
     {
@@ -214,8 +214,8 @@ window.CHEMWORLD_CAPABILITIES = {
                   "id": "density",
                   "name": "临界性质、密度与维里",
                   "state": "partial",
-                  "ability": "部分临界／分子估算与原常数消费已实现。",
-                  "boundary": "完整体积／密度与高阶维里方法族待补。",
+                  "ability": "外部密度／体积来源、7 类 B 与 2 类 C 维里方法、交叉参数和混合规则已接入；纯气体 PVT／热量性质连接封闭定容热过程。",
+                  "boundary": "调用者显式提供来源与适用范围；混合物通用热力学和开放非理想流路不在当前消费范围。",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "物性方法"
@@ -741,8 +741,8 @@ window.CHEMWORLD_CAPABILITIES = {
                   "id": "impedance",
                   "name": "阻抗与扩展电池族",
                   "state": "partial",
-                  "ability": "共同频率响应、SPM/SPMe/DFN 只读阻抗已接入。",
-                  "boundary": "SPM 独立频域资格已完成；其余频域与扩展模型仍待交付。",
+                  "ability": "共同频率响应与 SPM/SPMe/DFN 只读阻抗已接入；Thevenin RC／双节点热模型支持持久设备、共享时钟、原位测量和回放。",
+                  "boundary": "SPM 独立频域资格已完成；其他模型的资格范围分别声明。Thevenin 使用经验参数与独立电荷／热收支，不推断化学物种。",
                   "source": "docs/native_domains.md",
                   "kind": "capability",
                   "type": "电池诊断"

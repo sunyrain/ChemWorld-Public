@@ -18,6 +18,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#experimental-domains">Capabilities</a> ·
+  <a href="#milestones">Milestones</a> ·
   <a href="docs/native_domains.md">Examples</a> ·
   <a href="docs/native_foundation.md">Native API</a> ·
   <a href="docs/agents.md">Connect an agent</a> ·
@@ -39,6 +40,18 @@ native measurements, resource accounting and replay through one runtime shared b
 Use it to develop experimental policies, study how agents use observations, or build
 reproducible simulation exercises. Change the world, available information or research
 budget while keeping the experimental process inspectable.
+
+## Milestones
+
+Major updates, grouped by public availability. See [current foundation](docs/current-foundation.md)
+for implementation scope and validation, or explore the [interactive timeline](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#home).
+
+| Date | Capability update |
+| --- | --- |
+| **2026-10-22** | **Property data, gas thermodynamics and circuit workflows.** External density/volume sources; second- and third-virial coefficients, cross parameters and mixture rules; pure-gas properties and closed, fixed-volume thermal processes. Thevenin circuits connect to persistent equipment, shared time and in-situ measurements. |
+| **2026-10-21** | **Scientific models and interoperability.** Shared residual/DAE infrastructure; bounded SPMe/DFN and particle-distribution battery models, impedance and state-of-health diagnostics; expanded property methods, selected CALPHAD/ChemSage models and supported SBML/SED-ML subsets. |
+| **2026-10-19–20** | **A composable native foundation.** Gas, bulk and surface reactions alongside separation, membranes, crystallization, mineral and solid phases, and stochastic networks. Shared time, retained devices and measurement queues connect workflows across Python, Gym, CLI and Agent interfaces, with continuation and exact replay. |
+| **2026-08-12** | **Experimental agents, ready to run.** Provider-free Student Lab, offline examples and tutorial notebooks bring together experimental actions, measurements, resource accounting and replay. |
 
 ## Quick start
 

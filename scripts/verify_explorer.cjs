@@ -30,6 +30,17 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
    await go('home');await page.locator('.home-record-actions .primary').click();await page.locator('#step-counter').waitFor();assert.equal(await page.locator('#step-counter').textContent(),'6 / 21');
    await go('home');await page.locator('.home-next-actions .primary').click();await page.locator('.start-layout').waitFor();
   });
+  await check('Milestones remain readable in both languages and link to current scope',async()=>{
+   for(const lang of ['zh','en']){
+    await go('home',lang);assert.equal(await page.locator('.home-milestone').count(),4);
+    assert.match(await page.locator('.home-milestones').innerText(),/Thevenin/);
+    assert.match(await page.locator('.home-milestones').innerText(),lang==='en'?/Milestones/:/迭代里程碑/);
+    await page.locator('.home-milestones .site-link').click();await page.locator('#guide-reader h1').waitFor();
+    assert.ok(page.url().endsWith('#guides/chemworld/current-foundation'));
+    assert.match(await page.locator('#guide-body').innerText(),/8a17e23b/);
+   }
+   await go('home');
+  });
   await check('Catalog filtering and player navigation work',async()=>{
    await page.locator('[data-nav="experiments"]').click();await page.locator('.case-card').first().waitFor();
    await page.locator('.case-card').last().scrollIntoViewIfNeeded();await page.waitForFunction(()=>[...document.querySelectorAll('.case-card-art img')].every(img=>img.complete&&img.naturalWidth>0));

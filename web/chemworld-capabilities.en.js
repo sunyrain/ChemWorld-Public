@@ -1,12 +1,12 @@
 // Generated English preview edition.
 // Editorial navigation over the existing capability snapshot; not a runtime registry.
 window.CHEMWORLD_CAPABILITIES = {
-  "snapshot": "2026-10-21",
+  "snapshot": "2026-10-22",
   "registry": {
-    "modules": 25,
-    "components": 30,
-    "operations": 50,
-    "measurements": 24
+    "modules": 27,
+    "components": 32,
+    "operations": 51,
+    "measurements": 26
   },
   "tree": [
     {
@@ -215,8 +215,8 @@ window.CHEMWORLD_CAPABILITIES = {
                   "id": "density",
                   "name": "Critical properties, density & virial models",
                   "state": "partial",
-                  "ability": "Partial estimates for critical/molecular values and initial constant consumption have been achieved.",
-                  "boundary": "Complete volume/density and the higher-order virial method family still need to be completed.",
+                  "ability": "External density/volume sources, seven B and two C virial methods, cross parameters and mixture rules; pure-gas PVT/caloric properties drive closed, fixed-volume thermal processes.",
+                  "boundary": "Sources and application ranges are explicit. General mixture thermodynamics and open nonideal flow are outside the current consumer scope.",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "Material property method"
@@ -742,8 +742,8 @@ window.CHEMWORLD_CAPABILITIES = {
                   "id": "impedance",
                   "name": "Impedance & extended battery models",
                   "state": "partial",
-                  "ability": "The shared frequency response and the SPM/SPMe/DFN impedance are now active.",
-                  "boundary": "SPM: Independent frequency domain qualification has been completed. The remaining frequency domains and the extended model are still pending delivery.",
+                  "ability": "Shared frequency response and read-only SPM/SPMe/DFN impedance; Thevenin RC/two-node thermal models connect to persistent devices, shared time, in-situ measurements and replay.",
+                  "boundary": "SPM has independent frequency-domain qualification; other model scopes are stated individually. Thevenin uses empirical parameters and separate charge/heat balances without inferring chemical species.",
                   "source": "docs/native_domains.md",
                   "kind": "capability",
                   "type": "Battery diagnostics"

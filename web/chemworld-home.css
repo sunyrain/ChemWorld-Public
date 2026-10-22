@@ -53,6 +53,18 @@
 .home-domain-title > svg { flex: none; width: 15px; height: 15px; color: #4c8892; margin-left: auto; }
 .home-domain-card:hover h3 { color: #007b81; }
 .home-domain-card p { font-size: 11px; color: #6c818b; margin: 9px 0 0 22px; line-height: 1.8; }
+.home-milestones { margin: 0 34px; padding: 44px 0 47px; border-top: 1px solid #dce7e9; }
+.home-milestones .home-section-heading { margin-bottom: 12px; }
+.home-milestones-intro { margin: 0 0 29px; color: #657e8a; font-size: 12px; line-height: 1.8; }
+.home-timeline { list-style: none; padding: 0; margin: 0; }
+.home-milestone { position: relative; display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 30px; padding: 0 0 27px 29px; margin: 0; border-left: 1px solid #cedfe0; }
+.home-milestone::before { content: ""; position: absolute; top: 7px; left: -4px; width: 7px; height: 7px; border-radius: 50%; background: #96b4b8; }
+.home-milestone:first-child::before { background: #007b81; box-shadow: 0 0 0 4px #e5f1ef; }
+.home-milestone:last-child { padding-bottom: 0; border-left-color: transparent; }
+.home-milestone-date { padding-top: 3px; color: #50717c; font-size: 12px; line-height: 1.7; font-variant-numeric: tabular-nums; }
+.home-milestone-latest { display: table; margin-top: 9px; padding: 2px 8px; border-radius: 3px; background: #e5f1ef; color: #076b6e; font-size: 10px; }
+.home-milestone-copy h3 { margin: 0 0 9px; font-size: 17px; line-height: 1.5; color: #193f4c; font-weight: 600; }
+.home-milestone-copy p { margin: 0; color: #59737f; font-size: 12px; line-height: 1.95; max-width: 880px; }
 .home-experiment { margin: 0 34px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); border: 1px solid #dce7e9; border-radius: 7px; overflow: hidden; background: #f5f9fa; }
 .home-record-image { position: relative; display: block; min-height: 390px; background: #092332; }
 .home-record-image .experiment-cover { position: absolute; inset: 0; object-position: 50% 48%; }
@@ -81,7 +93,7 @@
   .home-hero-copy { padding: 50px 40px 56px; width: 57%; }
   .home-hero h1 { font-size: 43px; }
   .home-hero-copy > p { font-size: 13px; }
-  .home-scale, .home-experiment, .home-next { margin-left: 16px; margin-right: 16px; }
+  .home-scale, .home-experiment, .home-next, .home-milestones { margin-left: 16px; margin-right: 16px; }
   .home-domains { padding-left: 16px; padding-right: 16px; }
   .home-domain-grid { gap: 18px; }
   .home-domain-title { gap: 7px; }
@@ -140,6 +152,11 @@
   .home-domain-title h3 { font-size: 16px; }
   .home-domain-card p { font-size: 11px; }
   .home-experiment { display: flex; flex-direction: column; margin: 0 6px; }
+  .home-milestones { margin: 0 6px; padding: 32px 0 36px; }
+  .home-milestone { grid-template-columns: 1fr; gap: 10px; padding-left: 20px; }
+  .home-milestone-date { display: flex; align-items: center; gap: 0; padding-top: 0; font-size: 11px; }
+  .home-milestone-latest { display: inline-block; margin: 0 0 0 12px; }
+  .home-milestone-copy h3 { font-size: 16px; }
   .home-record-image { min-height: 0; aspect-ratio: 1.5; }
   .home-record-copy { padding: 29px 26px; }
   .home-record-copy h2 { font-size: 29px; }
