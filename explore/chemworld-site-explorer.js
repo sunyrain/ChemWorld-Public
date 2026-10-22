@@ -130,7 +130,7 @@
     const api=window.ChemWorldApiDocs.render(node,'zh',activeTab);
     if(activeTab==='overview')return api===null?overviewContent(node):`<p class="scope-statement">${esc(detail?.boundary||node.boundary)}</p>${api}${node.children?childList(node):''}`;
     if(activeTab==='io'||activeTab==='examples')return api===null?overviewContent(node):api;
-    return `${api||''}<h2>当前状态</h2><p>${status(node,true)||'分支包含多种交付状态。'}</p><h2>验证范围</h2><p>${esc(detail?.validation||node.boundary||'交付范围按具体能力分别记录，不从分类分支推断整域已完成。')}</p><p class="scope-statement">${node.state==='planned'?'规划项代表扩展方向，尚未作为已交付能力。':'已交付指明示范围内的开发验收；有限模型保留具体模型、参数与物理适用域。'}</p>${detail?.test?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/${detail.test}" target="_blank" rel="noopener">查看功能与边界检查 ↗</a>`:''}<div class="doc-links"><a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/current-foundation.md" target="_blank" rel="noopener">查看当前交付与验收记录 ↗</a></div>`;
+    return `${api||''}<h2>当前状态</h2><p>${status(node,true)||'分支包含多种交付状态。'}</p><h2>验证范围</h2><p>${esc(detail?.validation||node.boundary||'交付范围按具体能力分别记录，不从分类分支推断整域已完成。')}</p><p class="scope-statement">${node.state==='planned'?'规划项代表扩展方向，尚未作为已交付能力。':'已交付指明示范围内的开发验收；有限模型保留具体模型、参数与物理适用域。'}</p>`;
   }
   function renderDocument() {
     const node=nodes.get(selected), detail=special[node.id];
