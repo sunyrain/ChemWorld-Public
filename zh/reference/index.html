@@ -586,6 +586,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API 参考
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -602,6 +620,47 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行示例
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行时与世界构建
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -654,6 +713,36 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行示例
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行时与世界构建
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -673,10 +762,28 @@
 
 
 <h1 id="api">API 参考<a class="headerlink" href="#api" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p>当前基座见<a href="../current-foundation/">10月更新</a>。下文已有图示与数值证据对应8月冻结运行时。</p>
-</blockquote>
-<p>ChemWorld v0.3.0 保持与 v0.2.0 相同的运行时接口。可以先从 Agent-facing helper 开始，再进入世界构建和评测合同。</p>
+<p><a href="https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh#index/combustion">能力索引</a>
+是当前公开基座的交互式 API 文档。每项已实现能力都提供页内 Python 接口、参数与默认值、
+完整示例、明确输入以及由该代码实际运行产生的输出。无需打开实现源码即可复制使用。</p>
+<p>在“使用文档”中阅读完整用法，在“接口与参数”中查看函数签名与动作字段，在“示例与输出”
+中查看可运行代码及结果。同一条目的其他示例可以展开。规划项明确标记，尚无可调用接口。</p>
+<p>示例使用合成输入或随包提供的预设。部分示例演示初始化、配置或请求拒绝，具体用途写在
+代码旁。它们是代表性入口，并非全部 Python 符号的穷举，也不是新增的科学资格结果。
+不同平台或求解库版本可能导致数值末位差异；交付边界见<a href="../current-foundation/">当前基座</a>。</p>
+<h2 id="_1">运行示例<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>按<a href="../getting_started/">安装说明</a>安装当前源码，将复制的 Python 代码保存为 <code>example.py</code>，
+执行 <code>uv run --no-sync python example.py</code>。例如，使用公开的物理量接口转换温度：</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.foundation.units</span><span class="w"> </span><span class="kn">import</span> <span class="n">Quantity</span>
+
+<span class="n">result</span> <span class="o">=</span> <span class="n">Quantity</span><span class="p">(</span><span class="mf">26.85</span><span class="p">,</span> <span class="s2">&quot;degC&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;K&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">unit</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>300.0 K
+</code></pre></div>
+<h2 id="_2">运行时与世界构建<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>装置示例提供初始化后实际的 <code>action_schema()</code> 字段，包括单位、必填项、范围与可选值。
+范围可能随状态改变，执行前可用 <code>validate_action()</code> 检查。操作回执区分已提交动作与拒绝请求。
+<code>observe()</code> 只读取已有公开观测；重新采集测量需调用 <code>execute({"operation": "measure", ...})</code>。</p>
 <table>
 <thead>
 <tr>
@@ -711,7 +818,7 @@
 </tr>
 </tbody>
 </table>
-<p>核心 Agent 接口位于 <code>env.unwrapped</code>：</p>
+<p>Gymnasium 适配器的 <code>env.unwrapped</code> 也提供核心 Agent 接口：</p>
 <div class="highlight"><pre><span></span><code><span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">task_prompt</span><span class="p">()</span>
 <span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">available_actions</span><span class="p">()</span>
 <span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">action_schema</span><span class="p">(</span><span class="s2">&quot;heat&quot;</span><span class="p">)</span>

@@ -33,44 +33,21 @@
       intro:"Based on clearly defined feed and reaction specifications, we can determine the composition of the product and the corresponding heat output.",
       rows:[["Elemental quantification","The complete combustion products and the principle of conservation of atoms."],["Heat calculation","HHV / LHV, for reference against the specified standard."],["Flow specifications","Two-stream / Three-stream, wet base / dry base tail gas"],["Finite consumption","Feed rate → Product yield and heat"]],
       flow:["Feed and specifications","Measurement and thermal equilibrium","Products and Heat"],
-      boundary:"Complete combustion and explicit reference to the reference state; the dynamics of the flame, product temperature, and general equilibrium are also extended.",
-      io:[["Input","Composition of constituent elements, enthalpy or heat value, phase reference, limited feed rate; separate specifications for flow rate issues."],["Output","Measured product yield, oxygen consumption, HHV / LHV, heat corresponding to finite material quantities, and the selected flow rate specifications."],["Units & conventions","The Moore heat model uses J/mol for finite heat usage, and J for limited heat usage; heat release is defined using a negative enthalpy change convention."],["Failure conditions","Inconsistencies in enthalpy, reference state, or the absence of necessary product data will result in rejection."]],
+      boundary:"Complete combustion with explicit reference states; flame kinetics, product temperature and general equilibrium are outside this interface.",
       related:['assessment','conservation','caloric'],
-      code:'from chemworld.foundation.units import Quantity\nfrom chemworld.physchem.combustion import combustion_data\n\nfuel = combustion_data("CH4", method="Stoichiometry", Hf=-74520)\nheat = fuel.heat(Quantity(2, "mol"), basis="HHV")\nprint(heat.value, heat.unit)',
-      exampleNote:"Using a clearly defined example for the enthalpy of formation, calculate the complete combustion heat of 2 mol methane; without solving for the flame temperature.",
       validation:"This includes ensuring the conservation of elements and products, maintaining consistency with the HHV / LHV standard, limiting material heat, and adhering to specifications for two-stream and three-stream configurations, as well as rejecting inputs with conflicts or missing information.",
-      source:'src/chemworld/physchem/combustion.py',test:'tests/test_combustion.py'
+      test:'tests/test_combustion.py'
     },
     temperature: {
       intro:"Convert historical temperature readings to an explicitly chosen temperature scale for use in property calculations, inputs and observations.",
       rows:[["Supported temperature scales",'ITS-90 / ITS-68 / ITS-48 / ITS-27 / ITS-76'],["Forward & inverse conversion","Forward, inverse and inter-scale conversions within each scale's valid range"],["Native integration","Quantity, InputValue, and the observation channel"],["Source conventions","Literature conventions and differences between reference versions are explicitly distinguished"]],
       flow:["Historical readings and temperature scale","Bounded calibration & inverse conversion","Material property input or derived observation"],
-      io:[["Input","Specify the temperature, original temperature scale, target temperature, and required source according to the agreed-upon units."],["Output","Temperature after calibration; the specific result can include the derivative of the same transformation."],["Boundary","Evaluate the true mapping endpoint; scalar observations retain the original values and sample times."]],
       related:['solubility','optics','conservation'],
-      code:'from chemworld.foundation.units import Quantity\nfrom chemworld.physchem import temperature_quantity, water_refractive_index_iapws\n\ncalibrated = temperature_quantity(Quantity(26.85, "degC"), "IPTS-68", "ITS-90")\nindex = water_refractive_index_iapws(calibrated.value, 997)',
-      exampleNote:"Calculate the refractive index of water after converting historical temperature data; the example is based on the current native field guidelines.",
       validation:"Verify nodes, intervals, forward and reverse directions, actual endpoints, and cross-functional consumption; retain the source value differences separately.",
-      source:'docs/native_foundation.md',test:'tests/test_temperature_scales.py'
+      test:'tests/test_temperature_scales.py'
     }
   };
-  const exampleFiles = {
-    calibration:'native_calibration', 'thermal-reaction':'native_gas_mechanism', surface:'native_multisite_surface',
-    flash:'native_flash_research', extraction:'native_liquid_research', distillation:'native_distillation_research',
-    crystal:'native_crystal_research', adsorption:'native_sorbent_research', transport:'native_liquid_transport',
-    electrode:'native_electrode_research', spm:'native_battery_cycles', 'spme-dfn':'battery_dfn',
-    aqueous:'native_aqueous_research', mineral:'native_mineral_research', membrane:'native_membrane_fouling',
-    handling:'native_surface_research', devices:'reuse_native_equipment', programmed:'programmed_chromatography',
-    scheduler:'multi_device_lab', persistence:'shared_lifecycle_lab', continuation:'closed_shared_labs'
-  };
-  const sourceByBranch = {
-    foundation:'docs/world-foundations.md', properties:'docs/native_foundation.md', reaction:'docs/native_mechanisms.md',
-    separation:'docs/native_foundation.md', materials:'docs/native_domains.md', water:'docs/native_foundation.md',
-    bio:'docs/native_biochemical.md', actions:'docs/operations.md', instruments:'docs/native_foundation.md',
-    lifecycle:'docs/native_shared_lab.md', 'research-tasks':'docs/quickstart.md', protocol:'docs/agents.md',
-    views:'docs/student-lab.md'
-  };
   function lineage(node) { const out=[]; for(let n=node;n;n=n.parent)out.unshift(n); return out; }
-  function source(node) { return special[node.id]?.source || lineage(node).reverse().find(n=>n.source)?.source || sourceByBranch[lineage(node).find(n=>n.kind==='domain')?.id] || 'docs/world-foundations.md'; }
   function status(node, badge=false) { return node.state ? `<span class="status ${node.state}${badge?' status-badge':''}"><i aria-hidden="true"></i>${states[node.state]}</span>` : ''; }
   function counts(node) { return Object.fromEntries(Object.keys(states).map(state=>[state,node.leaves.filter(n=>n.state===state).length])); }
   function announce(text) { $('#announcement').textContent=text; }
@@ -135,8 +112,8 @@
     return special[node.id]?.related || (node.parent?.children||[]).filter(n=>n.id!==node.id).slice(0,3).map(n=>n.id);
   }
   function documentationLinks(node) {
-    const example=exampleFiles[node.id],guide=guideReader.resolve(node);
-    return `<div class="doc-links"><a href="${guideReader.route(guide.id,guide.anchor,node.id)}" data-open-guide="${node.id}">Read the domain guide →</a>${special[node.id]?.source?.endsWith('.py')?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/${source(node)}" target="_blank" rel="noopener">Methods and interfaces ↗</a>`:''}${example?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/src/chemworld/examples/${example}.py" target="_blank" rel="noopener">Runnable example ↗</a>`:''}<button type="button" class="text-button" data-go-atlas="${node.id}">Locate in the atlas →</button></div>`;
+    const guide=guideReader.resolve(node);
+    return `<div class="doc-links"><a href="${guideReader.route(guide.id,guide.anchor,node.id)}" data-open-guide="${node.id}">Read the domain guide →</a><button type="button" class="text-button" data-go-atlas="${node.id}">Locate in the atlas →</button></div>`;
   }
   function table(rows) { return `<table class="capability-table"><tbody>${rows.map(([key,value])=>`<tr><th scope="row">${esc(key)}</th><td>${esc(value)}</td></tr>`).join('')}</tbody></table>`; }
   function overviewContent(node) {
@@ -151,22 +128,19 @@
   function childList(node){return `<div class="child-list">${(node.children||[]).map(child=>`<button type="button" data-select="${child.id}"><span>${esc(child.name)}</span>${child.state?status(child):`<small>${child.leaves.length} capabilities →</small>`}</button>`).join('')}</div>`;}
   function tabContent(node) {
     const detail=special[node.id];
-    if(activeTab==='overview')return overviewContent(node);
-    if(activeTab==='io')return detail?.io?`<h2>Inputs & outputs</h2>${table(detail.io)}`:`<h2>Interface scope</h2><p>${esc(node.ability||node.preview)}</p><h2>Conditions for use</h2><p>${esc(node.boundary||"Specific properties, states, and task permissions are defined separately for each capability.")}</p><p>For parameters, types, and return fields, please refer to the domain guide linked on this page.</p>`;
-    if(activeTab==='examples') {
-      const file=exampleFiles[node.id];
-      return `<h2>${detail?.code?"Minimum example":file?"Runnable example":"Use cases"}</h2><p>${esc(detail?.exampleNote||node.example||(node.state==='planned'?"This refers to a planning capability, but there is currently no operational example that has been delivered.":"Specific usage details for this item can be found in the relevant field guide."))}</p>${detail?.code?`<pre><code>${esc(detail.code)}</code></pre>`:file?`<pre><code>uv run --no-sync python -m chemworld.examples.${file}</code></pre>`:''}${file?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/src/chemworld/examples/${file}.py" target="_blank" rel="noopener">View example source code ↗</a>`:''}`;
-    }
-    return `<h2>Current status</h2><p>${status(node,true)||"The branches include various delivery statuses."}</p><h2>Validation scope</h2><p>${esc(detail?.validation||node.boundary||"The scope of delivery is recorded separately for each specific capability, and it is not inferred that the entire domain is complete based on the classification branches.")}</p><p class="scope-statement">${node.state==='planned'?"The planned items represent potential directions for expansion, but they have not yet been implemented as delivered capabilities.":"The development acceptance within the specified scope has been completed and delivered. The limited model retains specific models, parameters, and the applicable physical domain."}</p>${detail?.test?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/${detail.test}" target="_blank" rel="noopener">View functionality and boundary checks ↗</a>`:''}<div class="doc-links"><a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/current-foundation.md" target="_blank" rel="noopener">View current delivery and acceptance records ↗</a></div>`;
+    const api=window.ChemWorldApiDocs.render(node,'en',activeTab);
+    if(activeTab==='overview')return api===null?overviewContent(node):`<p class="scope-statement">${esc(detail?.boundary||node.boundary)}</p>${api}${node.children?childList(node):''}`;
+    if(activeTab==='io'||activeTab==='examples')return api===null?overviewContent(node):api;
+    return `${api||''}<h2>Current status</h2><p>${status(node,true)||"The branches include various delivery statuses."}</p><h2>Validation scope</h2><p>${esc(detail?.validation||node.boundary||"The scope of delivery is recorded separately for each specific capability, and it is not inferred that the entire domain is complete based on the classification branches.")}</p><p class="scope-statement">${node.state==='planned'?"The planned items represent potential directions for expansion, but they have not yet been implemented as delivered capabilities.":"The development acceptance within the specified scope has been completed and delivered. The limited model retains specific models, parameters, and the applicable physical domain."}</p>${detail?.test?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/${detail.test}" target="_blank" rel="noopener">View functionality and boundary checks ↗</a>`:''}<div class="doc-links"><a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/current-foundation.md" target="_blank" rel="noopener">View current delivery and acceptance records ↗</a></div>`;
   }
   function renderDocument() {
     const node=nodes.get(selected), detail=special[node.id];
-    const tabs=[['overview',"Overview"],['io',"Inputs & outputs"],['examples',"Examples"],['validation',"Validation scope"]];
+    const tabs=[['overview',"Usage"],['io',"API & parameters"],['examples',"Examples & output"],['validation',"Validation scope"]];
     $('#document').innerHTML=`<div class="doc-inner"><div class="breadcrumbs">${lineage(node).slice(1,-1).map(n=>`<button type="button" data-select="${n.id}">${esc(n.name)}</button>`).join('<span>/</span>')||"<span>Architecture overview</span>"}</div>
       <div class="node-kind">${esc(kindLabel(node))}</div><div class="title-row"><h1>${esc(node.name)}</h1>${status(node,true)}</div><p class="doc-intro">${esc(detail?.intro||node.preview||node.ability)}</p>
       <div class="doc-tabs" role="tablist" aria-label="Details of Abilities Section">${tabs.map(([id,label])=>`<button type="button" id="tab-${id}" role="tab" data-tab="${id}" aria-selected="${activeTab===id}" aria-controls="detail-panel" tabindex="${activeTab===id?0:-1}">${label}</button>`).join('')}</div>
       <div id="detail-panel" class="doc-content" role="tabpanel" aria-labelledby="tab-${activeTab}">${tabContent(node)}</div>
-      ${documentationLinks(node)}<div class="source-note">Current development platform ${snapshot} Skill snapshot<br>Software declaration describing the number of registered users; the installation, task permissions, and current executable capabilities are evaluated separately for each specific world.</div></div>`;
+      ${documentationLinks(node)}<div class="source-note">Current development foundation · ${snapshot} capability snapshot<br>Registry counts describe software declarations. Installation, task permissions and current availability are evaluated for each world.</div></div>`;
   }
   $('#document').addEventListener('click',event=>{
     const button=event.target.closest('[data-tab]');if(!button)return;

@@ -586,6 +586,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -602,6 +620,47 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#run-an-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run an example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-and-authoring-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime and authoring contracts
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -654,6 +713,36 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#run-an-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run an example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runtime-and-authoring-contracts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime and authoring contracts
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -673,10 +762,36 @@
 
 
 <h1 id="api-reference">API reference<a class="headerlink" href="#api-reference" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p>Current main: <a href="../current-foundation/">October foundation update</a>. Existing figures and numerical evidence below describe the frozen August runtime.</p>
-</blockquote>
-<p>ChemWorld exposes the same runtime surface as v0.2.0. Start from the agent-facing helpers, then use the deeper contracts when authoring worlds or evaluation code.</p>
+<p>The <a href="https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#index/combustion">capability index</a>
+is the interactive API reference for the current public foundation. Each implemented
+capability has an inline Python interface, parameter/default table, complete example,
+explicit input and output captured by executing that example. You can copy and run
+the code without opening the implementation source.</p>
+<p>Select <strong>Usage</strong> for a complete walkthrough, <strong>API &amp; parameters</strong> for signatures and
+action fields, or <strong>Examples &amp; output</strong> for the runnable code and its results. Additional
+examples are expandable. Planned capabilities are labelled and have no callable API.</p>
+<p>Examples use synthetic inputs or packaged presets. Some demonstrate initialization,
+configuration or a rejected request; their scope is stated beside the code. They are
+representative entry points, not an exhaustive listing of every Python symbol or a new
+scientific qualification. Numerical last digits can vary with the platform and solver
+version. See the <a href="../current-foundation/">current foundation</a> for delivery boundaries.</p>
+<h2 id="run-an-example">Run an example<a class="headerlink" href="#run-an-example" title="Permanent link">&para;</a></h2>
+<p>Install the current checkout using <a href="../getting_started/">Getting started</a>. Save the
+copied Python code as <code>example.py</code>, then run <code>uv run --no-sync python example.py</code>.
+For example, convert a temperature using the public quantity API:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.foundation.units</span><span class="w"> </span><span class="kn">import</span> <span class="n">Quantity</span>
+
+<span class="n">result</span> <span class="o">=</span> <span class="n">Quantity</span><span class="p">(</span><span class="mf">26.85</span><span class="p">,</span> <span class="s2">&quot;degC&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="s2">&quot;K&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">unit</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>300.0 K
+</code></pre></div>
+<h2 id="runtime-and-authoring-contracts">Runtime and authoring contracts<a class="headerlink" href="#runtime-and-authoring-contracts" title="Permanent link">&para;</a></h2>
+<p>Apparatus examples show the actual <code>action_schema()</code> fields for the initialized
+session, including units, required fields, bounds and choices. Bounds can change with
+state: use <code>validate_action()</code> before execution. A request's receipt distinguishes a
+committed action from a rejection. Reading <code>observe()</code> returns the cached public
+packet; acquiring a new measurement uses <code>execute({"operation": "measure", ...})</code>.</p>
 <table>
 <thead>
 <tr>
@@ -711,7 +826,7 @@
 </tr>
 </tbody>
 </table>
-<p>Core agent-facing calls are available on <code>env.unwrapped</code>:</p>
+<p>Core agent-facing calls are also available on the Gymnasium adapter's <code>env.unwrapped</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">task_prompt</span><span class="p">()</span>
 <span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">available_actions</span><span class="p">()</span>
 <span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">action_schema</span><span class="p">(</span><span class="s2">&quot;heat&quot;</span><span class="p">)</span>

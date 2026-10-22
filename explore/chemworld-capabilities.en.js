@@ -331,7 +331,7 @@ window.CHEMWORLD_CAPABILITIES = {
                   "name": "Combustion stoichiometry & heating values",
                   "state": "done",
                   "ability": "Complete product measurement, HHV/LHV, reference heat value, and specifications for two/three-phase flow.",
-                  "boundary": "Solve for the temperature when complete combustion is balanced; the solution does not include flames or product temperatures.",
+                  "boundary": "Complete-combustion balances; no flame kinetics or product-temperature solution.",
                   "example": "For a given total output rate and air-to-fuel ratio, calculate the input rate and exhaust gas composition.",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
@@ -344,7 +344,7 @@ window.CHEMWORLD_CAPABILITIES = {
                       "type": "Thermal chemistry calculations",
                       "state": "done",
                       "ability": "The complete combustion product and oxygen consumption are determined by clearly defined elements.",
-                      "boundary": "Solve for the temperature when complete combustion is balanced; the solution does not include flames or product temperatures.",
+                      "boundary": "Complete-combustion balances; no flame kinetics or product-temperature solution.",
                       "source": "docs/native_foundation.md",
                       "derivedFrom": "combustion"
                     },
@@ -355,7 +355,7 @@ window.CHEMWORLD_CAPABILITIES = {
                       "type": "Thermal chemistry calculations",
                       "state": "done",
                       "ability": "Calculate the high and low-end calorific values based on the specified reference conversion, and then calculate the finite heat quantity.",
-                      "boundary": "Solve for the temperature when complete combustion is balanced; the solution does not include flames or product temperatures.",
+                      "boundary": "Complete-combustion balances; no flame kinetics or product-temperature solution.",
                       "source": "docs/native_foundation.md",
                       "derivedFrom": "combustion"
                     },
@@ -366,7 +366,7 @@ window.CHEMWORLD_CAPABILITIES = {
                       "type": "Thermal chemistry calculations",
                       "state": "done",
                       "ability": "Solve for the independent specifications of limited fuel, air, and the third flow.",
-                      "boundary": "Solve for the temperature when complete combustion is balanced; the solution does not include flames or product temperatures.",
+                      "boundary": "Complete-combustion balances; no flame kinetics or product-temperature solution.",
                       "source": "docs/native_foundation.md",
                       "derivedFrom": "combustion"
                     }

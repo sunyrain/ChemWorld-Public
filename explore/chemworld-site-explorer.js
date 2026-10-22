@@ -33,43 +33,20 @@
       rows:[['元素计量','完全燃烧产物与原子守恒'],['热量计算','HHV / LHV 与明确相参考'],['流量规格','两流 / 三流、湿基 / 干基尾气'],['有限消耗','进料量 → 产物量与热量']],
       flow:['进料与规格','计量与热量平衡','产物与热量'],
       boundary:'完全燃烧与显式参考态；火焰动力学、产物温度和通用平衡另行扩展。',
-      io:[['输入','组分元素组成、生成焓或显式热值、相参考、有限进料量；流量问题另给足够的独立规格。'],['输出','产物计量、耗氧量、HHV / LHV、有限物料对应的热量及所选流量规格。'],['单位与约定','摩尔热量使用 J/mol，有限热量使用 J；放热采用负焓变约定。'],['失败条件','矛盾热值、参考态不一致或缺少必要产物数据会被拒绝。']],
       related:['assessment','conservation','caloric'],
-      code:'from chemworld.foundation.units import Quantity\nfrom chemworld.physchem.combustion import combustion_data\n\nfuel = combustion_data("CH4", method="Stoichiometry", Hf=-74520)\nheat = fuel.heat(Quantity(2, "mol"), basis="HHV")\nprint(heat.value, heat.unit)',
-      exampleNote:'采用明确的示例生成焓，计算 2 mol 甲烷的完全燃烧热；不求解火焰温度。',
       validation:'覆盖元素与产物守恒、相参考、HHV / LHV 一致性、有限物料热量、两流与三流规格，以及冲突和缺失输入的拒绝。',
-      source:'src/chemworld/physchem/combustion.py',test:'tests/test_combustion.py'
+      test:'tests/test_combustion.py'
     },
     temperature: {
       intro:'将历史温度读数校准到明确温标，继续供物性、输入和观测使用。',
       rows:[['温标覆盖','ITS-90 / ITS-68 / ITS-48 / ITS-27 / ITS-76'],['变换与反求','各自有效范围内的正向、逆向与温标间转换'],['原生消费','Quantity、InputValue 与观测通道'],['来源约定','文献约定和参考版本差值行为显式区分']],
       flow:['历史读数与温标','有界校准与反求','物性输入或派生观测'],
-      io:[['输入','带单位的温度、原温标、目标温标与所需来源约定。'],['输出','校准后的温度；专用结果可附带同一变换的导数。'],['边界','真实映射端点内求值；标量观测保留原读数和样品时间。']],
       related:['solubility','optics','conservation'],
-      code:'from chemworld.foundation.units import Quantity\nfrom chemworld.physchem import temperature_quantity, water_refractive_index_iapws\n\ncalibrated = temperature_quantity(Quantity(26.85, "degC"), "IPTS-68", "ITS-90")\nindex = water_refractive_index_iapws(calibrated.value, 997)',
-      exampleNote:'历史温度转换后进入水的折射率计算；示例来自当前原生领域指南。',
       validation:'检查节点、区间、正反方向、真实端点和跨功能消费；来源差值约定分别保留。',
-      source:'docs/native_foundation.md',test:'tests/test_temperature_scales.py'
+      test:'tests/test_temperature_scales.py'
     }
   };
-  const exampleFiles = {
-    calibration:'native_calibration', 'thermal-reaction':'native_gas_mechanism', surface:'native_multisite_surface',
-    flash:'native_flash_research', extraction:'native_liquid_research', distillation:'native_distillation_research',
-    crystal:'native_crystal_research', adsorption:'native_sorbent_research', transport:'native_liquid_transport',
-    electrode:'native_electrode_research', spm:'native_battery_cycles', 'spme-dfn':'battery_dfn',
-    aqueous:'native_aqueous_research', mineral:'native_mineral_research', membrane:'native_membrane_fouling',
-    handling:'native_surface_research', devices:'reuse_native_equipment', programmed:'programmed_chromatography',
-    scheduler:'multi_device_lab', persistence:'shared_lifecycle_lab', continuation:'closed_shared_labs'
-  };
-  const sourceByBranch = {
-    foundation:'docs/world-foundations.md', properties:'docs/native_foundation.md', reaction:'docs/native_mechanisms.md',
-    separation:'docs/native_foundation.md', materials:'docs/native_domains.md', water:'docs/native_foundation.md',
-    bio:'docs/native_biochemical.md', actions:'docs/operations.md', instruments:'docs/native_foundation.md',
-    lifecycle:'docs/native_shared_lab.md', 'research-tasks':'docs/quickstart.md', protocol:'docs/agents.md',
-    views:'docs/student-lab.md'
-  };
   function lineage(node) { const out=[]; for(let n=node;n;n=n.parent)out.unshift(n); return out; }
-  function source(node) { return special[node.id]?.source || lineage(node).reverse().find(n=>n.source)?.source || sourceByBranch[lineage(node).find(n=>n.kind==='domain')?.id] || 'docs/world-foundations.md'; }
   function status(node, badge=false) { return node.state ? `<span class="status ${node.state}${badge?' status-badge':''}"><i aria-hidden="true"></i>${states[node.state]}</span>` : ''; }
   function counts(node) { return Object.fromEntries(Object.keys(states).map(state=>[state,node.leaves.filter(n=>n.state===state).length])); }
   function announce(text) { $('#announcement').textContent=text; }
@@ -134,8 +111,8 @@
     return special[node.id]?.related || (node.parent?.children||[]).filter(n=>n.id!==node.id).slice(0,3).map(n=>n.id);
   }
   function documentationLinks(node) {
-    const example=exampleFiles[node.id],guide=guideReader.resolve(node);
-    return `<div class="doc-links"><a href="${guideReader.route(guide.id,guide.anchor,node.id)}" data-open-guide="${node.id}">阅读领域指南 →</a>${special[node.id]?.source?.endsWith('.py')?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/${source(node)}" target="_blank" rel="noopener">查看方法与接口 ↗</a>`:''}${example?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/src/chemworld/examples/${example}.py" target="_blank" rel="noopener">查看可运行示例 ↗</a>`:''}<button type="button" class="text-button" data-go-atlas="${node.id}">在总览图谱中定位 →</button></div>`;
+    const guide=guideReader.resolve(node);
+    return `<div class="doc-links"><a href="${guideReader.route(guide.id,guide.anchor,node.id)}" data-open-guide="${node.id}">阅读领域指南 →</a><button type="button" class="text-button" data-go-atlas="${node.id}">在总览图谱中定位 →</button></div>`;
   }
   function table(rows) { return `<table class="capability-table"><tbody>${rows.map(([key,value])=>`<tr><th scope="row">${esc(key)}</th><td>${esc(value)}</td></tr>`).join('')}</tbody></table>`; }
   function overviewContent(node) {
@@ -150,17 +127,14 @@
   function childList(node){return `<div class="child-list">${(node.children||[]).map(child=>`<button type="button" data-select="${child.id}"><span>${esc(child.name)}</span>${child.state?status(child):`<small>${child.leaves.length} 项能力 →</small>`}</button>`).join('')}</div>`;}
   function tabContent(node) {
     const detail=special[node.id];
-    if(activeTab==='overview')return overviewContent(node);
-    if(activeTab==='io')return detail?.io?`<h2>输入与输出</h2>${table(detail.io)}`:`<h2>接口范围</h2><p>${esc(node.ability||node.preview)}</p><h2>使用前提</h2><p>${esc(node.boundary||'具体物性、状态与任务许可由各项能力分别定义。')}</p><p>参数、类型与返回字段请参阅本页所链接的领域指南。</p>`;
-    if(activeTab==='examples') {
-      const file=exampleFiles[node.id];
-      return `<h2>${detail?.code?'最小示例':file?'可运行示例':'使用场景'}</h2><p>${esc(detail?.exampleNote||node.example||(node.state==='planned'?'该项为规划能力，尚无已交付的可运行示例。':'本项的具体用法见对应领域指南。'))}</p>${detail?.code?`<pre><code>${esc(detail.code)}</code></pre>`:file?`<pre><code>uv run --no-sync python -m chemworld.examples.${file}</code></pre>`:''}${file?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/src/chemworld/examples/${file}.py" target="_blank" rel="noopener">阅读示例源码 ↗</a>`:''}`;
-    }
-    return `<h2>当前状态</h2><p>${status(node,true)||'分支包含多种交付状态。'}</p><h2>验证范围</h2><p>${esc(detail?.validation||node.boundary||'交付范围按具体能力分别记录，不从分类分支推断整域已完成。')}</p><p class="scope-statement">${node.state==='planned'?'规划项代表扩展方向，尚未作为已交付能力。':'已交付指明示范围内的开发验收；有限模型保留具体模型、参数与物理适用域。'}</p>${detail?.test?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/${detail.test}" target="_blank" rel="noopener">查看功能与边界检查 ↗</a>`:''}<div class="doc-links"><a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/current-foundation.md" target="_blank" rel="noopener">查看当前交付与验收记录 ↗</a></div>`;
+    const api=window.ChemWorldApiDocs.render(node,'zh',activeTab);
+    if(activeTab==='overview')return api===null?overviewContent(node):`<p class="scope-statement">${esc(detail?.boundary||node.boundary)}</p>${api}${node.children?childList(node):''}`;
+    if(activeTab==='io'||activeTab==='examples')return api===null?overviewContent(node):api;
+    return `${api||''}<h2>当前状态</h2><p>${status(node,true)||'分支包含多种交付状态。'}</p><h2>验证范围</h2><p>${esc(detail?.validation||node.boundary||'交付范围按具体能力分别记录，不从分类分支推断整域已完成。')}</p><p class="scope-statement">${node.state==='planned'?'规划项代表扩展方向，尚未作为已交付能力。':'已交付指明示范围内的开发验收；有限模型保留具体模型、参数与物理适用域。'}</p>${detail?.test?`<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/${detail.test}" target="_blank" rel="noopener">查看功能与边界检查 ↗</a>`:''}<div class="doc-links"><a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/current-foundation.md" target="_blank" rel="noopener">查看当前交付与验收记录 ↗</a></div>`;
   }
   function renderDocument() {
     const node=nodes.get(selected), detail=special[node.id];
-    const tabs=[['overview','概览'],['io','输入与输出'],['examples','示例'],['validation','验证范围']];
+    const tabs=[['overview','使用文档'],['io','接口与参数'],['examples','示例与输出'],['validation','验证范围']];
     $('#document').innerHTML=`<div class="doc-inner"><div class="breadcrumbs">${lineage(node).slice(1,-1).map(n=>`<button type="button" data-select="${n.id}">${esc(n.name)}</button>`).join('<span>/</span>')||'<span>架构总览</span>'}</div>
       <div class="node-kind">${esc(kindLabel(node))}</div><div class="title-row"><h1>${esc(node.name)}</h1>${status(node,true)}</div><p class="doc-intro">${esc(detail?.intro||node.preview||node.ability)}</p>
       <div class="doc-tabs" role="tablist" aria-label="能力详情章节">${tabs.map(([id,label])=>`<button type="button" id="tab-${id}" role="tab" data-tab="${id}" aria-selected="${activeTab===id}" aria-controls="detail-panel" tabindex="${activeTab===id?0:-1}">${label}</button>`).join('')}</div>
