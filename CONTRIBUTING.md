@@ -39,3 +39,18 @@ the English source when editing scientific terms. Build outputs stay in ignored
 `site/` and are published only on the separate `gh-pages` hosting branch.
 The player exports observed public fields from the committed historical test
 fixture. It does not execute experiments or provide exact-replay submissions.
+
+The capability index embeds API signatures and executed examples from
+`scripts/capability_reference_recipes.py`. When changing these examples or their
+public interfaces, regenerate the committed `web/chemworld-api-reference.js`:
+
+```bash
+uv run --no-sync python scripts/build_capability_reference.py --report /path/outside/repo/api-docs.json
+```
+
+The command checks every documented recipe, records all failures in the requested
+report, and publishes the asset only when execution and capability coverage pass.
+Use `--only <recipe>` to check one example without changing the asset. These are
+synthetic software demonstrations, not scientific qualification runs. Ordinary
+site builds copy the committed asset and do not rerun experiments. The shared
+bilingual presentation lives in `web/chemworld-api-docs.js` and its matching CSS.

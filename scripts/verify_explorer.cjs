@@ -23,7 +23,7 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
    assert.match(await page.locator('.home-scale').innerText(),/17/);assert.match(await page.locator('.home-scale').innerText(),/68/);
    assert.equal(await page.locator('.architecture-visual').count(),0);await page.locator('.home-hero-art img').evaluate(img=>img.decode());
    assert.match(await page.locator('.home-hero-art img').getAttribute('src'),/assets\/home\/hero-/);assert.equal(await page.locator('.home-domain-card').count(),4);
-   assert.ok(!requests.some(u=>/chemworld-guide-(content|localized)\.js/.test(u)));await screenshot('site-home');
+   assert.ok(!requests.some(u=>/chemworld-guide-(content|localized)\.js|chemworld-api-reference\.js/.test(u)));await screenshot('site-home');
   });
   await check('Homepage domain links, featured record and getting-started entry work',async()=>{
    for(const id of ['reaction','materials','separation','bio']){await go('home');await page.locator(`.home-domain-card[href="#atlas/${id}"]`).click();await page.waitForURL('**#atlas/'+id);await page.locator('#atlas-view:not([hidden]) [data-map]').first().waitFor();}
@@ -114,12 +114,42 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
   await check('Installation commands can be copied',async()=>{
    await hash('start');await page.locator('[data-copy="install"]').click();assert.match(await page.evaluate(()=>navigator.clipboard.readText()),/uv sync --locked --extra dev/);
   });
+  await check('All implemented capability and method pages have executable inline documentation',async()=>{
+   await go('index/combustion');
+   const coverage=await page.evaluate(()=>{
+    const data=window.CHEMWORLD_API_REFERENCE, nodes=[];
+    const walk=n=>{nodes.push(n);(n.children||[]).forEach(walk);};window.CHEMWORLD_CAPABILITIES.tree.forEach(walk);
+    for(const lang of ['zh','en'])for(const node of nodes.filter(n=>['capability','method'].includes(n.kind))){
+     const html=window.ChemWorldApiDocs.render(node,lang);
+     if(node.state==='planned'){
+      if(!html.includes('api-planned')||html.includes('data-api-block="python"'))throw Error('Fake planned API: '+node.id);
+     }else if(!html.includes('data-api-block="python"')||!html.includes('data-api-block="input"')||!html.includes('data-api-block="output"'))throw Error('Missing inline docs: '+node.id);
+    }
+    return data.coverage;
+   });
+   assert.equal(coverage.implemented_capabilities,58);assert.equal(coverage.planned_capabilities,10);assert.equal(coverage.examples,66);
+   const code=await page.locator('[data-api-block="python"] code').first().textContent();
+   await page.locator('[data-api-block="python"] [data-api-copy]').first().click();assert.equal((await page.evaluate(()=>navigator.clipboard.readText())).replace(/\r\n/g,'\n'),code);
+   const expected=await page.evaluate(()=>window.CHEMWORLD_API_REFERENCE.recipes.combustion.output);
+   assert.deepEqual(JSON.parse(await page.locator('[data-api-block="output"] code').first().textContent()),expected);
+   assert.equal(await page.locator('#document a[href*="github.com"]').count(),0);
+   await screenshot('site-api-zh');
+  });
+  await check('API tabs expose parameter defaults, action units, additional examples and planned states',async()=>{
+   await page.locator('[data-tab="io"]').click();assert.ok(await page.locator('.api-parameters tbody tr').count()>0);
+   await page.locator('[data-tab="io"]').focus();await page.keyboard.press('ArrowRight');assert.equal(await page.locator('[data-tab="examples"]').getAttribute('aria-selected'),'true');
+   await hash('index/surface');await page.locator('[data-tab="io"]').click();assert.ok(await page.locator('.api-action').count()>0);
+   await page.locator('.api-action summary').first().click();assert.match(await page.locator('.api-action[open]').innerText(),/mol/);
+   await hash('index/spme-dfn');await page.locator('[data-tab="examples"]').click();await page.locator('.api-example-more>summary').click();assert.equal(await page.locator('.api-example-more[open] [data-api-block="python"]').count(),1);
+   await hash('index/advanced-thermo');assert.equal(await page.locator('.api-planned').count(),1);assert.equal(await page.locator('[data-api-copy]').count(),0);
+   await go('index/combustion','en');assert.match(await page.locator('.api-reference').innerText(),/Complete Python example/);await screenshot('site-api-en');
+  });
   for(const width of [1440,1024,736,390,320])await check(`Chinese and English routes fit at ${width}px`,async()=>{
    await page.setViewportSize({width,height:1000});
    for(const lang of ['zh','en'])for(const route of ['home','experiments','experiment/reaction-to-purification/6','atlas/materials','index/combustion','guides/thermal-reaction/native_mechanisms','start']){
     await go(route,lang);const overflow=await page.evaluate(()=>({page:document.documentElement.scrollWidth,viewport:innerWidth}));assert.ok(overflow.page<=overflow.viewport+1,`${width}/${lang}/${route}: ${JSON.stringify(overflow)}`);
     const clippedNav=await page.locator('.site-nav a').evaluateAll(links=>links.filter(link=>{const box=link.getBoundingClientRect();return box.left<0||box.right>innerWidth;}).map(link=>link.textContent));assert.deepEqual(clippedNav,[],`${width}/${lang}: clipped navigation`);
-    if(width===390&&lang==='en'&&['home','experiments','experiment/reaction-to-purification/6','guides/thermal-reaction/native_mechanisms'].includes(route))await screenshot('site-mobile-'+route.split('/')[0]);
+    if(width===390&&lang==='en'&&['home','experiments','experiment/reaction-to-purification/6','guides/thermal-reaction/native_mechanisms','index/combustion'].includes(route))await screenshot('site-mobile-'+route.split('/')[0]);
     if(width===1440&&lang==='en'&&route==='home')await screenshot('site-home-en');
     if(width===1440&&lang==='en'&&route==='experiments')await screenshot('site-experiments-en');
    }
