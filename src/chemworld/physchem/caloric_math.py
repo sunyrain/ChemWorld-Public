@@ -7,6 +7,8 @@ algebraic terms during capacity validation; they own no model or runtime state.
 from dataclasses import dataclass
 from math import exp, expm1, inf, isfinite, log, nextafter, tanh
 
+from chemworld.physchem.second_order_pair import SecondOrderPair
+
 
 @dataclass(frozen=True)
 class FirstDerivative:
@@ -55,7 +57,7 @@ def _jet(value):
 
 def scalar_value(value):
     """The primal number of a possibly nested chain-rule derivative."""
-    while isinstance(value, FirstDerivative):
+    while isinstance(value, (FirstDerivative, SecondOrderPair)):
         value = value.value
     return value
 
@@ -66,7 +68,7 @@ def derivative_depth(value):
     while isinstance(value, FirstDerivative):
         depth += 1
         value = value.value
-    return depth
+    return depth + (2 if isinstance(value, SecondOrderPair) else 0)
 
 
 def nonnegative_power(value, exponent):
@@ -79,7 +81,7 @@ def nonnegative_power(value, exponent):
     if scalar_value(value) < 0:
         raise ValueError("fractional power requires a nonnegative base")
     if scalar_value(value) == 0:
-        if isinstance(exponent, FirstDerivative):
+        if isinstance(exponent, (FirstDerivative, SecondOrderPair)):
             raise ValueError("variable-exponent derivative at zero is undefined")
         depth = derivative_depth(value)
         if exponent < 0 or (exponent < depth and exponent != int(exponent)):
@@ -90,7 +92,7 @@ def nonnegative_power(value, exponent):
         for _ in range(int(exponent)):
             result *= value
         return result
-    if isinstance(exponent, FirstDerivative):
+    if isinstance(exponent, (FirstDerivative, SecondOrderPair)):
         return exponential(exponent * logarithm(value))
     return value**exponent
 
@@ -107,17 +109,7 @@ def derivative_values(function, value, *, order=1):
     if not isfinite(value):
         raise ValueError("analytic differentiation requires a finite input")
 
-    def constant(number, depth):
-        if not depth:
-            return number
-        return FirstDerivative(constant(number, depth-1), constant(0, depth-1))
-
-    def variable(number, depth):
-        if not depth:
-            return number
-        return FirstDerivative(variable(number, depth-1), constant(1, depth-1))
-
-    result = function(variable(value, order))
+    result = function(_derivative_seed(value, (True,) * order))
     derivatives = []
     for _ in range(order+1):
         derivatives.append(scalar_value(result))
@@ -125,6 +117,43 @@ def derivative_values(function, value, *, order=1):
     if any(not isfinite(v) for v in derivatives):
         raise ValueError("property or requested analytic derivative is nonfinite")
     return tuple(derivatives)
+
+
+def _derivative_constant(number, depth):
+    if not depth:
+        return number
+    return FirstDerivative(_derivative_constant(number, depth-1),
+                           _derivative_constant(0, depth-1))
+
+
+def _derivative_seed(number, active_levels):
+    if not active_levels:
+        return number
+    return FirstDerivative(_derivative_seed(number, active_levels[:-1]),
+                           _derivative_constant(int(active_levels[-1]), len(active_levels)-1))
+
+
+def partial_derivative(function, values, coordinates):
+    """A named mixed partial through total order three, using the same chain rules.
+
+    ``function`` consumes a mapping. Repeated coordinates request repeated
+    derivatives; each input is seeded at the same depth, including constants.
+    The caller owns the model's physical domain and differentiability checks.
+    """
+    coordinates = tuple(coordinates)
+    if not 1 <= len(coordinates) <= 3 or any(name not in values for name in coordinates):
+        raise ValueError("partial derivative needs one to three known coordinates")
+    if any(isinstance(v, bool) or not isfinite(v) for v in values.values()):
+        raise ValueError("partial derivative inputs must be finite real numbers")
+    seeded = {name: _derivative_seed(value, tuple(name == c for c in coordinates))
+              for name, value in values.items()}
+    result = function(seeded)
+    for _ in coordinates:
+        result = result.slope if isinstance(result, FirstDerivative) else 0.0
+    result = scalar_value(result)
+    if not isfinite(result):
+        raise ValueError("requested analytic partial derivative is nonfinite")
+    return result
 
 
 @dataclass(frozen=True)
@@ -191,6 +220,9 @@ def _interval(value):
 
 
 def exponential(value):
+    if isinstance(value, SecondOrderPair):
+        result = exp(value.value)
+        return value.compose(result, result, result)
     if isinstance(value, FirstDerivative):
         result = exponential(value.value)
         return FirstDerivative(result, result * value.slope)
@@ -201,6 +233,9 @@ def exponential(value):
 
 def exponential_minus_one(value):
     """Accurate near-zero exp(x)-1 on the same nested chain-rule arithmetic."""
+    if isinstance(value, SecondOrderPair):
+        result = exp(value.value)
+        return value.compose(expm1(value.value), result, result)
     if isinstance(value, FirstDerivative):
         return FirstDerivative(exponential_minus_one(value.value),
                                exponential(value.value)*value.slope)
@@ -210,6 +245,9 @@ def exponential_minus_one(value):
 
 
 def logarithm(value):
+    if isinstance(value, SecondOrderPair):
+        inverse = 1/value.value
+        return value.compose(log(value.value), inverse, -inverse*inverse)
     if isinstance(value, FirstDerivative):
         return FirstDerivative(logarithm(value.value), value.slope / value.value)
     if isinstance(value, Interval):
@@ -218,11 +256,26 @@ def logarithm(value):
 
 
 def positive_part(value):
+    if isinstance(value, SecondOrderPair):
+        return value if value.value > 0 else SecondOrderPair(0.0)
     if isinstance(value, FirstDerivative):
         return value if scalar_value(value) > 0 else FirstDerivative(0)
     if isinstance(value, Interval):
         return Interval(max(0, value.lower), max(0, value.upper))
     return max(0, value)
+
+
+def oscillator_expression(x, *, cosh=False):
+    """Stable squared hyperbolic ratio, including analytic parameter derivatives."""
+    if scalar_value(x) < 0:
+        x = -x
+    if scalar_value(x) > 745:
+        return 0.0
+    if not cosh and scalar_value(x) < 1e-4:
+        square = x * x
+        return 1 - square / 3 + square**2 / 15 - 2 * square**3 / 189
+    denominator = (1 + exponential(-2*x)) if cosh else -exponential_minus_one(-2*x)
+    return (2*x*exponential(-x)/denominator)**2
 
 
 def oscillator_value_slope(x, temperature, *, cosh=False):
@@ -234,8 +287,7 @@ def oscillator_value_slope(x, temperature, *, cosh=False):
         square = x * x
         return (1 - square / 3 + square**2 / 15 - 2 * square**3 / 189,
                 (2 * square / 3 - 4 * square**2 / 15 + 12 * square**3 / 189) / temperature)
-    denominator = (1 + exp(-2 * x)) if cosh else -expm1(-2 * x)
-    value = (2 * x * exp(-x) / denominator)**2
+    value = oscillator_expression(x, cosh=cosh)
     logarithmic_slope = x * tanh(x) if cosh else x / tanh(x)
     return value, 2 * value * (logarithmic_slope - 1) / temperature
 

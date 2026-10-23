@@ -8,6 +8,7 @@ from chemworld.foundation.state_ledgers import (
     VesselRecord,
 )
 from chemworld.physchem.property_packages import ComponentPropertyPackage
+from chemworld.physchem.property_reports import _validated_fraction_mapping
 from chemworld.physchem.reaction_network import ReactionNetworkSpec, SpeciesSpec
 from chemworld.physchem.specs import ComponentSpec, PropertyCorrelation
 from chemworld.physchem.transport_devices import FiniteTransportSpec, LiquidTransportProperties
@@ -66,17 +67,35 @@ def synthetic_transport_properties():
 
 
 def transport_world_spec(
-    spec=None, *, feed_temperature_K=298.15, feed_volume_L=0.02, receiver_volume_L=0.005, budget=60
+    spec=None, *, feed_temperature_K=298.15, feed_volume_L=0.02, receiver_volume_L=0.005, budget=60,
+    feed_mole_fractions=None, receiver_mole_fractions=None, receiver_temperature_K=298.15,
 ):
+    """Build the original two-reservoir apparatus from explicit material inputs.
+
+    The historical binary 80:20 example remains the default. Other mixtures
+    require explicit fractions; a pure component has its unique composition.
+    """
     spec = spec or FiniteTransportSpec(synthetic_transport_properties())
+    ids = spec.properties.component_ids
+    if feed_mole_fractions is None:
+        if len(ids) not in (1, 2):
+            raise ValueError("declare feed fractions for a multicomponent transport world")
+        feed_mole_fractions = dict(zip(ids, (1.0,) if len(ids) == 1 else (0.8, 0.2), strict=True))
+    if receiver_mole_fractions is None:
+        receiver_mole_fractions = feed_mole_fractions
+    compositions = tuple(_validated_fraction_mapping(x, "mole") for x in (
+        feed_mole_fractions, receiver_mole_fractions,
+    ))
+    if any(set(x) != set(ids) for x in compositions):
+        raise ValueError("transport compositions must match the declared components")
     states = {}
     for index, (name, volume, temperature) in enumerate(
         (
             (spec.source_vessel_id, feed_volume_L, feed_temperature_K),
-            ("reactor", receiver_volume_L, 298.15),
+            ("reactor", receiver_volume_L, receiver_temperature_K),
         )
     ):
-        fractions = dict(zip(spec.properties.component_ids, (0.8, 0.2), strict=True))
+        fractions = compositions[index]
         per_mole = spec.properties.evaluate(fractions, temperature)[2] * 1000
         amounts = {key: x * volume / per_mole for key, x in fractions.items()}
         equipment = (
@@ -106,8 +125,8 @@ def transport_world_spec(
                         name,
                         "finite-transport-tank",
                         spec.receiver_capacity_L if index else max(0.1, volume),
-                        340.0,
-                        5e5,
+                        spec.properties.temperature_bounds_K[1],
+                        max(5e5, spec.properties.pressure_Pa),
                         ("liquid",),
                         temperature,
                         spec.properties.pressure_Pa,

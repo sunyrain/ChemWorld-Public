@@ -1,7 +1,7 @@
 """Auditable import envelope for the existing component/property package."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 from types import MappingProxyType
 
@@ -16,6 +16,7 @@ from chemworld.data.scientific_inputs import (
 from chemworld.physchem.heat_capacity import PiecewiseHeatCapacity
 from chemworld.physchem.property_packages import ComponentPropertyPackage
 from chemworld.physchem.property_reports import CaloricReference
+from chemworld.physchem.property_selection import PropertySelectionPolicy
 from chemworld.physchem.specs import ComponentSpec, ComponentUncertainty, PropertyCorrelation
 
 PROPERTY_INPUT_VERSION = "chemworld-property-input-1"
@@ -110,6 +111,89 @@ class PropertyInputCard:
             "reference_note": self.reference_note,
         }
 
+    def with_selection(self, policies):
+        """Attach the card's declared sources to the chosen package alternatives."""
+        sources = {s.provenance.source_id: s.provenance for s in self.sources}
+
+        def bind(curve, source):
+            if isinstance(curve, PiecewiseHeatCapacity):
+                return replace(curve, segments=tuple(bind(c, source) for c in curve.segments))
+            metadata = dict(curve.metadata)
+            previous = metadata.get("source")
+            if previous is not None:
+                if (not isinstance(previous, Mapping)
+                        or previous.get("source_id") != source.source_id):
+                    raise ValueError(
+                        "selection source disagrees with the input card's declared source")
+                # A source-backed curve may carry a row, URL, or other original
+                # provenance in addition to the envelope's source declaration.
+                # Choosing a method must not rewrite that evidence.
+                return curve
+            return replace(curve, metadata={**metadata, "source": source.to_dict()})
+
+        curves = tuple(bind(c, sources[self.uncertainties[c.correlation_id].source_id])
+                       for c in self.package.correlations)
+        package = replace(self.package, correlations=curves).with_selection(policies)
+        return replace(self, package=package)
+
+    @classmethod
+    def combine(cls, cards, *, reference_note, selection_policies=None):
+        """Join explicitly selected inputs for one component without precedence.
+
+        Identical declarations are shared. Conflicting source identifiers,
+        overlapping alternatives for one property, or different caloric datums
+        require an explicit choice by the caller, never last-write-wins.
+        """
+        cards = tuple(cards)
+        if not cards or any(c.package.component != cards[0].package.component for c in cards):
+            raise ValueError("combined inputs require the same complete component declaration")
+        sources, curves, uncertainties = {}, {}, {}
+        policies = {}
+        for card in cards:
+            for prop, policy in card.package.selection_policies.items():
+                if prop in policies and policies[prop] != policy:
+                    raise ValueError("combined inputs have conflicting selection policies")
+                policies[prop] = policy
+        policies.update(selection_policies or {})
+        reference = None
+        for card in cards:
+            if card.reference is not None:
+                if reference is not None and reference != card.reference:
+                    raise ValueError("combined inputs have conflicting caloric references")
+                reference = card.reference
+            for source in card.sources:
+                key = source.provenance.source_id
+                if key in sources and sources[key] != source:
+                    raise ValueError("combined inputs have conflicting source declarations")
+                sources[key] = source
+            for curve in card.package.correlations:
+                key = curve.correlation_id
+                uncertainty = card.uncertainties[key]
+                if key in curves:
+                    if curves[key] != curve or uncertainties[key] != uncertainty:
+                        raise ValueError("combined inputs have conflicting correlations")
+                    continue
+                for previous in curves.values():
+                    if previous.property_id != curve.property_id:
+                        continue
+                    previous_phase = previous.metadata.get("phase")
+                    phase = curve.metadata.get("phase")
+                    if previous_phase and phase and previous_phase != phase:
+                        continue
+                    a, b = previous.validity_ranges, curve.validity_ranges
+                    disjoint = any(
+                        a[name][1] < b[name][0] or b[name][1] < a[name][0]
+                        for name in a.keys() & b.keys()
+                    )
+                    if not disjoint and curve.property_id not in policies:
+                        raise ValueError("select one input for overlapping property domains")
+                curves[key], uncertainties[key] = curve, uncertainty
+        combined = cls(
+            ComponentPropertyPackage(cards[0].package.component, tuple(curves.values()), policies),
+            tuple(sources.values()), uncertainties, reference, reference_note,
+        )
+        return combined.with_selection({}) if policies else combined
+
     @classmethod
     def from_dict(cls, payload):
         _keys(payload, (
@@ -118,7 +202,7 @@ class PropertyInputCard:
         if payload["schema_version"] != PROPERTY_INPUT_VERSION:
             raise ValueError("unsupported property input schema")
         package = payload["package"]
-        _keys(package, ("component", "correlations"))
+        _keys(package, ("component", "correlations"), optional=("selection_policies",))
         correlations = tuple(_correlation_from_input(raw)
             for raw in _sequence(package["correlations"], "correlations"))
         reference = payload["reference"]
@@ -143,7 +227,8 @@ class PropertyInputCard:
             uncertainties[key] = ComponentUncertainty.from_dict(dict(raw))
         return cls(
             ComponentPropertyPackage(ComponentSpec.from_dict(dict(package["component"])),
-                                     tuple(correlations)),
+                tuple(correlations), {k: PropertySelectionPolicy.from_dict(p)
+                    for k, p in package.get("selection_policies", {}).items()}),
             tuple(InputSource.from_dict(raw) for raw in _sequence(payload["sources"], "sources")),
             uncertainties, reference, payload["reference_note"],
         )

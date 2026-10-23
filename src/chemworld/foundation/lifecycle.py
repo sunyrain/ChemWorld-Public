@@ -7,6 +7,10 @@ new batch is a closed physical transition. In-world flushing uses material routi
 
 from dataclasses import dataclass, replace
 
+from chemworld.foundation.material_properties import (
+    extract_material_properties,
+    install_material_properties,
+)
 from chemworld.foundation.state import WorldState
 from chemworld.foundation.state_ledgers import EquipmentLedger, ProcessLedger
 from chemworld.foundation.state_ownership import StateSlots
@@ -70,7 +74,10 @@ def initialize_entities(current, initial, *, scope="batch", vessel_ids=None, pre
         result[name] = template.replace(
             state_slots=slots,
             equipment=(_batch_equipment(previous.equipment, template.equipment)
-                       if scope == "batch" else previous.equipment),
+                       if scope == "batch" else install_material_properties(
+                           previous.equipment,
+                           extract_material_properties(template.equipment), name,
+                       )),
             process=ProcessLedger(),
             **({"ledger": previous.ledger, "thermal": previous.thermal,
                 "vessels": previous.vessels if scope == "material" else template.vessels}

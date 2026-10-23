@@ -79,6 +79,24 @@ def test_flash_domain_failures_nonconvergence_and_no_fabricated_tp_heat():
         tp_flash(model, feed, temperature_K=350, pressure_Pa=1e5)
 
 
+@pytest.mark.parametrize("direction", ("A:light|heavy", "A:heavy|light"))
+def test_single_direction_margules_uses_same_symmetric_stability_and_flash(direction):
+    model = synthetic_vle_properties()
+    explicit = replace(model, activity_model=ActivityModelSpec(
+        "symmetric", model.component_ids, "margules",
+        {"A:light|heavy": 1.5, "A:heavy|light": 1.5}))
+    single = replace(model, activity_model=ActivityModelSpec(
+        "single-direction", model.component_ids, "margules", {direction: 1.5}))
+    assert single.liquid_stability(350) == explicit.liquid_stability(350)
+    kwargs = {"temperature_K": 350, "pressure_Pa": 1e5}
+    feed = {"light": .4, "heavy": .6}
+    expected = tp_flash(explicit, feed, **kwargs)
+    actual = tp_flash(single, feed, **kwargs)
+    assert actual.vapor_fraction == pytest.approx(expected.vapor_fraction)
+    assert actual.liquid_amounts_mol == pytest.approx(expected.liquid_amounts_mol)
+    assert actual.total_enthalpy_j == pytest.approx(expected.total_enthalpy_j)
+
+
 def test_pure_saturation_plateau_and_zero_component_survive_ph():
     model = synthetic_vle_properties()
     for beta in (0, 1e-7, .5, 1 - 1e-7, 1):

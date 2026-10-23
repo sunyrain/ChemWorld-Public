@@ -350,9 +350,17 @@ def reconcile_thermal_initialization(previous, fresh, transition, physics):
         thermal = model.thermodynamics
         initial_t, retained_t = templates[name].temperature_K, old[name].temperature_K
         reference = thermal.reference_temperature_K
-        introduced = sum(
-            n * thermal.species_energy_j_mol(k, initial_t) for k, n in state.species_amounts.items()
-        )
+        if model.pressure_law == "helmholtz":
+            from chemworld.physchem.coupled_system import CoupledState
+
+            introduced = thermal.internal_energy_j(CoupledState(
+                state.species_amounts, initial_t, state.volume_L)) - (
+                    thermal.support_heat_capacity_J_K * (initial_t-reference))
+        else:
+            introduced = sum(
+                n * thermal.species_energy_j_mol(k, initial_t)
+                for k, n in state.species_amounts.items()
+            )
         if model.condensed_background is not None:
             introduced += (
                 model.condensed_background.volumetric_cv_J_L_K

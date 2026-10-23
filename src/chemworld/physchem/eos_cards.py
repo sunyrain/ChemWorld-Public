@@ -13,7 +13,7 @@ def eos_model_cards() -> tuple[ModelCard, ...]:
             title="Peng-Robinson/SRK Cubic EOS Fugacity And Residual Properties",
             maturity=MaturityLevel.REFERENCE_VALIDATED,
             summary=(
-                "Compact PR/SRK cubic-EOS slice with one-fluid mixing, explicit "
+                "PR/SRK cubic EOS with quadratic, predictive or excess-Gibbs mixing, explicit "
                 "root selection, fugacity coefficients, and molar residual "
                 "enthalpy/entropy/Gibbs properties."
             ),
@@ -22,13 +22,19 @@ def eos_model_cards() -> tuple[ModelCard, ...]:
                 "b_i=Omega_b R Tc_i/Pc_i",
                 "a_mix=sum_i sum_j x_i x_j sqrt(a_i a_j)(1-k_ij)",
                 "b_mix=sum_i x_i b_i",
+                "GE rules: HV, exact MHV, MHV1, MHV2 and Wong-Sandler define a(T,x), b(T,x).",
+                "A^R=-RT ln(1-b/V)-a/[b(s1-s2)] ln[(V+s1 b)/(V+s2 b)].",
+                "GE-rule ln(phi_i)=d[n A^R/(RT)]/dn_i|T,V,n_j-ln(Z); "
+                "H^R=A^R-T A^R_T+RT(Z-1), S^R=-A^R_T+R ln(Z).",
                 "PR: H^R=RT(Z-1)+(T da/dT-a)/(2 sqrt(2) b) ln((Z+(1+sqrt(2))B)/(Z+(1-sqrt(2))B))",
                 "SRK: H^R=RT(Z-1)+(T da/dT-a)/b ln((Z+B)/Z)",
                 "S^R=R ln(Z-B)+(da/dT/c) ln(argument), with c=2 sqrt(2) b for PR and b for SRK",
             ),
             assumptions=(
-                "Classical quadratic mixing rules with optional symmetric k_ij.",
-                "Pure-component alpha functions use the standard PR and SRK acentric-factor forms.",
+                "Mixing explicitly selects quadratic, PPR78 or a source-bearing GE model. "
+                "MHV1/2 q coefficients and all Wong-Sandler binary pairs are declared inputs.",
+                "Pure-component alpha functions explicitly select the legacy PR/SRK "
+                "Soave acentric-factor form or the three-coefficient Twu91 form.",
                 "Residual properties are molar mixture departures from ideal gas "
                 "at the same T/P/composition.",
             ),
@@ -66,6 +72,49 @@ def eos_model_cards() -> tuple[ModelCard, ...]:
                 "critical/VLE architecture hooks",
             ),
             validation_evidence=(
+                ValidationEvidence(
+                    evidence_id="ge-cubic-mixing-potential-consumers",
+                    evidence_type="independent_high_precision_reference",
+                    description=(
+                        "Five rules, PR/SRK and binary/ternary states: 120 mixing-response "
+                        "and 480 liquid/vapor-root states pass 6480/6480 fixed comparisons "
+                        "against independent 80-digit mixing and Helmholtz equations. "
+                        "Covers temperature derivatives through third order, fugacity, "
+                        "H/S/G/Cp and mechanical responses, including WS db/dT. "
+                        "Nine GE families and all six UNIFAC variants reach original EOS."
+                    ),
+                    status="passing",
+                    command_or_path="workstreams/world_foundation/archive/20261023-completed/convergence/23/NATIVE_CONV23G_RESULTS.json",
+                    tolerance="2e-8 absolute/relative; existing numerical Cp 2e-6+2e-7 relative",
+                ),
+                ValidationEvidence(
+                    evidence_id="ppr78-full-source-eos-consumer",
+                    evidence_type="independent_high_precision_reference",
+                    description=(
+                        "All 225 original and 1600 extended interaction rows enter k(T), "
+                        "three temperature derivatives and original PR78 mixture consumers. "
+                        "The prospective domain-aware block passes 35942/35942 criteria: "
+                        "1745 valid EOS states and 80 explicit negative-attraction rejections. "
+                        "The initial block's 84 exceptions remain recorded."
+                    ),
+                    status="passing",
+                    command_or_path="workstreams/world_foundation/archive/20261023-completed/convergence/23/NATIVE_CONV23F_RESULTS.json",
+                    tolerance="2e-8 absolute + 2e-8 relative",
+                ),
+                ValidationEvidence(
+                    evidence_id="bell2018-twu-full-source-consumer",
+                    evidence_type="independent_high_precision_reference",
+                    description=(
+                        "All 2571 Bell2018 rows enter original PR and SRK EOS consumers. "
+                        "Alpha through third temperature derivative, actual vapor states "
+                        "and source JSON roundtrip pass 97698/97698 fixed criteria. "
+                        "This establishes equation/data consumption, not material accuracy "
+                        "or portability of fitted Bell coefficients between EOS families."
+                    ),
+                    status="passing",
+                    command_or_path="workstreams/world_foundation/archive/20261023-completed/convergence/23/NATIVE_CONV23E_RESULTS.json",
+                    tolerance="2e-8 absolute + 2e-9 relative",
+                ),
                 ValidationEvidence(
                     evidence_id="default-eos-residual-tests",
                     evidence_type="unit_tests",

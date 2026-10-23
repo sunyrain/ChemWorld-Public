@@ -544,6 +544,154 @@ def gas_shape_units():
                 )
 
 
+def gas_completion_unit(method, t, parameters):
+    order = 0 if method == "Eli_Hanley_dense" and t / parameters["Tc"] == 2 else 1
+    values = conductivity_derivatives(method, t, parameters, order=order)
+    ref = lambda temp: getattr(reference, method)(temp, **parameters)  # noqa: E731
+    expected = ref(t)
+    metrics = {"value": compare(values[0], expected)}
+    if order:
+        metrics["derivatives"] = slope(values[1], ref, t)
+    return metrics
+
+
+def gas_completion_units():
+    cases = []
+    for mw, tb, pc, omega in (
+        (16.04246, 111.66, 4599000, 0.0115478),
+        (44.09562, 231.04, 4251200, 0.1521),
+        (72.151, 309.21, 3370000, 0.251),
+    ):
+        for t in (400, 580, 800, 1200):
+            cases.append(("Gharagheizi_gas", t, dict(MW=mw, Tb=tb, Pc=pc, omega=omega)))
+    for mw, tc, pc, vc, zc, kg in (
+        (44.013, 309.6, 7240000, 97.4e-6, 0.274, 0.0234),
+        (16.04246, 190.564, 4599000, 98.6e-6, 0.286, 0.034),
+    ):
+        for t in (250, 378.15, 600):
+            for rho in (1e-10, 0.1, 0.499999, 0.5, 0.500001, 1.2, 1.999999, 2, 2.000001, 2.79):
+                cases.append(
+                    (
+                        "Stiel_Thodos_dense",
+                        t,
+                        dict(MW=mw, Tc=tc, Pc=pc, Vc=vc, Zc=zc, kg=kg, Vm=vc / rho),
+                    )
+                )
+    for mw, tc, vc, zc, omega, cv in (
+        (42.081, 364.9, 1.81e-4, 0.274, 0.144, 82.70),
+        (72.151, 460.4, 3.06e-4, 0.267, 0.227, 135.9),
+    ):
+        for tr in (0.6, 1, 1.8, 2, 2.4):
+            for vr in (0.5, 0.95, 1.999999, 2, 10):
+                cases.append(
+                    (
+                        "Eli_Hanley_dense",
+                        tr * tc,
+                        dict(MW=mw, Tc=tc, Vc=vc, Zc=zc, omega=omega, Cvm=cv, Vm=vr * vc),
+                    )
+                )
+    cases.append(
+        (
+            "Eli_Hanley_dense",
+            473,
+            dict(MW=42.081, Tc=364.9, Vc=1.81e-4, Zc=0.274, omega=0.144, Cvm=82.70, Vm=1.721e-4),
+        )
+    )
+    for i, (method, t, p) in enumerate(cases):
+        yield (
+            f"{method}/{i}",
+            {"T": t, **p},
+            lambda m=method, t=t, p=p: gas_completion_unit(m, t, p),
+        )
+
+
+def ely_translational_equation(temperature, parameters):
+    """Independent 80-digit equation evaluation; no native arithmetic reused."""
+    import mpmath as mp
+
+    p = {key: mp.mpf(str(value)) for key, value in parameters.items()}
+    c = lambda x: mp.mpf(str(x))  # noqa: E731
+    t = mp.mpf(temperature)
+    tau = min(t / p["Tc"], c(2))
+    volume = min(p["Vm"] / p["Vc"], c(2))
+    w = p["omega"] - c(0.011)
+    z = c(0.288) / p["Zc"]
+    theta = 1 + w * (
+        c(0.09057) - c(0.86276) * mp.log(tau) + (c(0.31664) - c(0.46568) / tau) * (volume - c(0.5))
+    )
+    psi = z * (
+        1
+        + w * (c(0.3949) * (volume - c(1.02355)) - c(0.93281) * (volume - c(0.75464)) * mp.log(tau))
+    )
+    f, h = p["Tc"] * theta / c(190.4), p["Vc"] * psi / c(0.0000992)
+    t0, rho = t / f, c(16.04) * h / p["Vm"] / 10**6
+    coeffs = (
+        "2907741.307",
+        "-3312874.033",
+        "1608101.838",
+        "-433190.4871",
+        "70624.8133",
+        "-7116.62075",
+        "432.51744",
+        "-14.4591121",
+        "0.2037119479",
+    )
+
+    def eta(temperature):
+        return (
+            mp.fsum(mp.mpf(a) * temperature ** (mp.mpf(i - 3) / 3) for i, a in enumerate(coeffs))
+            / 10**7
+        )
+
+    dtheta = w * (-c(0.86276) / t + (volume - c(0.5)) * c(0.46568) * p["Tc"] / t**2)
+    if t / p["Tc"] > 2:
+        dtheta = 0
+    x = ((1 - t * dtheta / theta) * z) ** c(1.5)
+    h_factor = mp.sqrt(c(16.04) * f / p["MW"]) / h ** (mp.mpf(2) / 3)
+    k0 = 1944 * eta(t0)
+    k1 = (c(-0.2527692) + c(0.33432859) * (c(1.12) - mp.log(t0 / 168)) ** 2) * rho / 1000
+    q = (c(12.47183) - c(984.6252) / t0 ** c(1.5)) * rho ** c(0.1)
+    q += (
+        (rho / c(0.1617) - 1)
+        * mp.sqrt(rho)
+        * (c(0.3594685) + c(69.79841) / t0 - c(872.8833) / t0**2)
+    )
+    k2 = mp.exp(c(-7.19771) + c(85.67822) / t0) * mp.expm1(q) / 1000
+    fd = p["Tc"] / c(190.4) * (1 + w * (c(0.56553) - c(0.86276) * mp.log(tau) - c(0.69852) / tau))
+    hd = p["Vc"] / c(0.0000992) * z * (1 + w * (c(0.3856) - c(1.1617) * mp.log(tau)))
+    internal = eta(t / fd) * mp.sqrt(fd * p["MW"] / c(16.04)) / hd ** (mp.mpf(2) / 3)
+    internal *= 1000 / p["MW"] * c(1.32) * (p["Cvm"] - c(1.5) * c(8.31446261815324))
+    return (k0 + k1 + k2) * h_factor * x + internal
+
+
+def ely_high_precision_unit(inputs):
+    import mpmath as mp
+
+    t = inputs["T"]
+    p = {key: value for key, value in inputs.items() if key != "T"}
+    order = 0 if t / p["Tc"] == 2 else 1
+    values = conductivity_derivatives("Ely_Hanley_dense_translational", t, p, order=order)
+    with mp.workdps(80):
+        temperature = mp.mpf(str(t))
+        expected = float(ely_translational_equation(temperature, p))
+        metrics = {
+            "value": compare(values[0], expected),
+            "reference_compatibility_value": reference.Eli_Hanley_dense(t, **p),
+        }
+        if order:
+            derivative = float(
+                mp.diff(lambda temp: ely_translational_equation(temp, p), temperature)
+            )
+            metrics["derivative"] = compare(values[1], derivative, rtol=3e-6, atol=1e-11)
+    return metrics
+
+
+def ely_high_precision_units():
+    for identity, inputs, _ in gas_completion_units():
+        if identity.startswith("Eli_Hanley_dense/"):
+            yield identity, inputs, lambda p=inputs: ely_high_precision_unit(p)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -556,6 +704,8 @@ def main():
             "water-air",
             "air-critical-high-precision",
             "gas-shapes",
+            "gas-completion",
+            "ely-translational-high-precision",
         ),
         required=True,
     )
@@ -573,6 +723,8 @@ def main():
             "water-air": water_air_units,
             "air-critical-high-precision": high_precision_air_units,
             "gas-shapes": gas_shape_units,
+            "gas-completion": gas_completion_units,
+            "ely-translational-high-precision": ely_high_precision_units,
         }[args.block]()
     )
     assert (
@@ -585,6 +737,8 @@ def main():
             "water-air": 65,
             "air-critical-high-precision": 8,
             "gas-shapes": 32,
+            "gas-completion": 123,
+            "ely-translational-high-precision": 51,
         }[args.block]
     )
     print(f"{args.block}: fixed denominator {len(units)}", flush=True)

@@ -205,7 +205,8 @@ def native(reference_data, directory, output):
                 synthetic = name.startswith("synthetic-")
                 source = InputSource(DataSourceProvenance(
                     ("synthetic-cef:" if synthetic else "pycalphad-test-tdb:") + name, 0,
-                    ("Explicit formulas: workstreams/world_foundation/NATIVE_CONV41B1_EXPERIMENT.md"
+                    ("Explicit formulas: workstreams/world_foundation/"
+                     "archive/20261023-completed/convergence/41/NATIVE_CONV41B1_EXPERIMENT.md"
                      if synthetic else
                      "https://github.com/pycalphad/pycalphad/blob/0.11.2/"
                      "pycalphad/tests/databases/" + name),

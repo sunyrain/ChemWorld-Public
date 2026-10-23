@@ -502,6 +502,50 @@ class IdentifierDatabase:
             raise UnknownIdentifierMethodError(f"{source_id} is not a preference source")
         return self.records(source_id)[0]
 
+    def inspect_search(self, identity, *, kind="auto", source_ids=None):
+        """Return full candidates and separate missing/invalid source diagnostics.
+
+        Use search's exact global name/formula/SMILES semantics over the
+        available sources. A source failure never becomes proof of no match.
+        """
+        self._query(identity, kind)
+        if isinstance(source_ids, str):
+            raise TypeError("source_ids must be a sequence of source IDs")
+        sources = _COMPOUND_SOURCES if source_ids is None else tuple(source_ids)
+        if len(set(sources)) != len(sources):
+            raise ValueError("duplicate query source ids")
+        reports, available = [], []
+        for source_id in sources:
+            report = {"source_id": source_id}
+            reports.append(report)
+            try:
+                source = self.source(source_id)
+                if source.kind != "compound":
+                    raise UnknownIdentifierMethodError(
+                        f"{source_id} is not a compound query source")
+                report["source"] = source.provenance.to_dict()
+                self.records(source_id)
+            except (UnknownIdentifierMethodError, IdentifierSourceUnavailableError,
+                    IdentifierSourceFormatError) as exc:
+                report.update(status={UnknownIdentifierMethodError: "unknown_method",
+                    IdentifierSourceUnavailableError: "source_unavailable",
+                    IdentifierSourceFormatError: "invalid_source"}[type(exc)], error=str(exc))
+                continue
+            available.append(source_id)
+        candidates = self.search(identity, kind=kind, source_ids=available)
+        for report in reports:
+            if report["source_id"] in available:
+                report["record_ids"] = [r.record_id for r in candidates
+                                        if r.source_id == report["source_id"]]
+                report["status"] = "matched" if report["record_ids"] else "missing_identity"
+        conflicts = [field for field in _CONFLICT_FIELDS if len({
+            _formula(r.formula) if field == "formula" else getattr(r, field)
+            for r in candidates if getattr(r, field) not in {None, ""}}) > 1]
+        return {"identity": identity, "kind": kind, "sources": reports,
+                "candidates": [r.to_dict() for r in candidates],
+                "identity_conflict": len({r.registry_key for r in candidates}) > 1,
+                "conflicting_fields": conflicts, "selected_record_id": None}
+
     def resolve(
         self, identity, *, kind="auto", source_ids=None, preference_sources=(), source_priority=()
     ):

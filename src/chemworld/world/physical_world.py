@@ -291,6 +291,13 @@ class CompositionPhysics:
         """Intersect declared thermal actions with the installed device capability."""
         from chemworld.runtime.aqueous_mineral import aqueous_record
 
+        thermal = self.models_of("thermal").get(vessel)
+        if thermal is not None and thermal.pressure_law == "helmholtz":
+            operations = tuple(op for op in operations if op in {
+                "heat", "wait", "pause_control", "resume_control", "measure",
+                "select_vessel", "configure_instrument", "terminate",
+                "queue_lab_heat", "queue_lab_measure",
+            })
         if self.lab_clock is not None:
             from chemworld.runtime.scheduling import shared_operation_allowed
 
@@ -615,7 +622,17 @@ class CompositionPhysics:
             }
             if any(state.units.get(key) != unit for key, unit in expected_units.items()):
                 raise ValueError("initial-state quantities must use native mol/L/K/Pa/s units")
-            if state.phase not in {"liquid", "gas", "solid", "formal"}:
+            if state.phase == "fluid":
+                from chemworld.physchem.helmholtz_equilibrium_thermal import (
+                    HelmholtzEquilibriumIsochoricThermodynamics,
+                )
+
+                thermal = self.models_of("thermal").get(name)
+                if thermal is None or not isinstance(
+                    thermal.thermodynamics, HelmholtzEquilibriumIsochoricThermodynamics
+                ):
+                    raise ValueError("aggregate fluid phase requires equilibrium Helmholtz closure")
+            elif state.phase not in {"liquid", "gas", "solid", "formal"}:
                 raise ValueError("initial state needs an explicit supported phase")
             report = constitution.check_state(state)
             if not report.passed:

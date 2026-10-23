@@ -10,6 +10,9 @@ def test_unit_conversion_table() -> None:
     assert convert_value(1.0, "h", "s") == 3600.0
     assert convert_value(25.0, "degC", "K") == 298.15
     assert Quantity(1000.0, "mL").to("L").value == 1.0
+    assert convert_value(1, "MPa", "kPa") == 1000
+    assert convert_value(1, "kPa", "Pa") == 1000
+    assert convert_value(1, "MPa/K^2", "kPa/K^2") == 1000
 
 
 def test_constitution_initial_state_passes() -> None:

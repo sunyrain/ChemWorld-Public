@@ -6,22 +6,23 @@ hidden readout or optimizer inside the runtime.
 
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 from dataclasses import dataclass
-from math import exp, isclose, isfinite, log
+from math import isclose, isfinite
 
-import numpy as np
-from scipy.optimize import least_squares
-
-from chemworld.data.scientific_inputs import QuantityColumn, ScientificTable
+from chemworld.data.calibration_core import (
+    BoundedParameterCoordinates,
+    ForwardEvaluationError,
+    MeasurementCalibration,
+)
+from chemworld.data.scientific_inputs import QuantityColumn
 from chemworld.foundation.units import convert_value
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.world.composition import WorldCompositionSpec
 
 
 @dataclass(frozen=True)
-class CalibrationParameter:
+class CalibrationParameter(BoundedParameterCoordinates):
     column: QuantityColumn
     path: tuple[str, ...]
     initial: float
@@ -31,12 +32,7 @@ class CalibrationParameter:
         object.__setattr__(self, "path", tuple(self.path))
         if self.column.role != "parameter" or self.coordinate not in {"linear", "log"}:
             raise ValueError("calibration requires parameter columns and linear/log coordinates")
-        lower, upper = self.column.valid_range
-        if isinstance(self.initial, bool) or not isfinite(self.initial) \
-                or not lower <= self.initial <= upper:
-            raise ValueError("initial parameter must lie inside its finite declared bounds")
-        if self.coordinate == "log" and lower <= 0:
-            raise ValueError("log parameters require strictly positive bounds")
+        self._validate_coordinates()
         path = self.path
         registered = (
             len(path) >= 6 and path[:2] == ("physics", "models") and path[3] == "bindings"
@@ -48,24 +44,13 @@ class CalibrationParameter:
         if not (registered or equipment):
             raise ValueError("only declared model or initial equipment model parameters may vary")
 
-    def encode(self, value):
-        lower, upper = self.column.valid_range
-        if not isfinite(value) or not lower <= value <= upper:
-            raise ValueError("parameter is outside its finite declared domain")
-        if self.coordinate == "log":
-            value, lower, upper = log(value), log(lower), log(upper)
-        return (value - lower) / (upper - lower)
+    @property
+    def bounds(self):
+        return self.column.valid_range
 
-    def decode(self, coordinate):
-        if not isfinite(coordinate) or not 0 <= coordinate <= 1:
-            raise ValueError("normalized parameter coordinate must be finite and inside [0, 1]")
-        lower, upper = self.column.valid_range
-        if self.coordinate == "log":
-            value = exp(log(lower) + coordinate * (log(upper) - log(lower)))
-        else:
-            value = lower + coordinate * (upper - lower)
-        # Floating-point endpoint reconstruction must not extend the domain.
-        return min(upper, max(lower, value))
+    @property
+    def parameter_id(self):
+        return self.column.quantity_id
 
     def to_dict(self):
         return {
@@ -126,16 +111,11 @@ def parameterized_world(experiment, parameters, values):
     return WorldCompositionSpec.from_dict(payload, modules=experiment.composition.modules)
 
 
-class ForwardEvaluationError(ValueError):
-    """An executed candidate could not provide the declared public measurements."""
-
-
-class NativeCalibration:
+class NativeCalibration(MeasurementCalibration):
     def __init__(self, table, parameters, experiments, *, max_forward_groups=300, progress=None):
-        if not isinstance(table, ScientificTable) or table.kind != "measurements":
-            raise ValueError("calibration requires a scientific measurement table")
-        self.table = table
-        self.parameters = tuple(parameters)
+        super().__init__(table, parameters, max_forward_groups=max_forward_groups,
+                         progress=progress)
+        parameters = self.parameters
         self.experiments = tuple(
             NativeCalibrationExperiment(
                 e.group_id,
@@ -145,23 +125,8 @@ class NativeCalibration:
                 e.actions, e.readouts, e.seed,
             ) for e in experiments
         )
-        if (
-            not self.parameters
-            or len({p.column.quantity_id for p in parameters}) != len(parameters)
-        ):
-            raise ValueError("calibration parameters must be nonempty and unique")
         if len({p.path for p in parameters}) != len(parameters):
             raise ValueError("two parameters cannot write the same physical model field")
-        if isinstance(max_forward_groups, bool) or not isinstance(max_forward_groups, int) \
-                or max_forward_groups <= 0:
-            raise ValueError("forward execution limit must be a positive integer")
-        self.max_forward_groups = max_forward_groups
-        self.progress = progress
-        self.runs = []
-        self.columns = {c.quantity_id: c for c in table.columns}
-        self.rows = {row.row_id: row for row in table.rows}
-        self.excluded = []
-        self.pairs = {}
         groups = {row.group_id for row in table.rows}
         if (
             len({e.group_id for e in experiments}) != len(experiments)
@@ -193,33 +158,6 @@ class NativeCalibration:
         }
         if seen != expected:
             raise ValueError("fixed readouts must cover every observation, including invalid data")
-        for row in table.rows:
-            for column in table.columns:
-                if column.role != "observation":
-                    continue
-                value = row.values[column.quantity_id]
-                if value.quality != "valid":
-                    self.excluded.append({
-                        "row_id": row.row_id, "quantity_id": column.quantity_id,
-                        "split": row.split, "quality": value.quality,
-                    })
-                    continue
-                if value.uncertainty is None or value.uncertainty <= 0:
-                    raise ValueError(
-                        "weighted fitting requires positive declared standard uncertainty"
-                    )
-                self.pairs.setdefault(row.split, []).append((row.row_id, column.quantity_id))
-        if not self.pairs.get("train"):
-            raise ValueError("at least one valid training measurement is required")
-
-    @property
-    def initial_values(self):
-        return {p.column.quantity_id: p.initial for p in self.parameters}
-
-    def values(self, coordinates):
-        return {p.column.quantity_id: p.decode(x) for p, x in zip(
-            self.parameters, coordinates, strict=True,
-        )}
 
     def forward(self, values, split, *, stage="prediction"):
         predictions = {}
@@ -311,106 +249,3 @@ class NativeCalibration:
                         "group_id": experiment.group_id, "failure": record["failure"],
                     })
         return predictions
-
-    def residuals(self, predictions, split):
-        return np.asarray([
-            (predictions[key] - self.rows[key[0]].values[key[1]].value)
-            / self.rows[key[0]].values[key[1]].uncertainty
-            for key in self.pairs.get(split, ())
-        ])
-
-    def metrics(self, predictions, split):
-        residuals = self.residuals(predictions, split)
-        details = []
-        for key in self.pairs.get(split, ()):
-            measured = self.rows[key[0]].values[key[1]]
-            details.append({
-                "row_id": key[0], "quantity_id": key[1], "unit": measured.unit,
-                "measured": measured.value, "predicted": predictions[key],
-                "error": predictions[key] - measured.value, "uncertainty": measured.uncertainty,
-            })
-        return {
-            "n_valid": len(details),
-            "n_excluded": sum(e["split"] == split for e in self.excluded),
-            "weighted_rmse": float(np.sqrt(np.mean(residuals**2))) if len(residuals) else None,
-            "sum_squared_weighted_residuals": float(residuals @ residuals),
-            "measurements": details,
-        }
-
-    def fit(self, *, max_nfev=30, diff_step=1e-3, rank_rtol=1e-5, rank_atol=1e-8):
-        if self.runs:
-            raise ValueError("use a fresh calibration object for each fixed fitting block")
-        if isinstance(max_nfev, bool) or not isinstance(max_nfev, int) or max_nfev <= 0:
-            raise ValueError("optimizer limit must be a positive integer")
-        if not all(isfinite(v) and v > 0 for v in (diff_step, rank_rtol, rank_atol)):
-            raise ValueError("derivative and rank tolerances must be positive and finite")
-        report = {
-            "schema_version": "chemworld-native-calibration-1",
-            "dataset": self.table.summary(),
-            "sources": [source.to_dict() for source in self.table.sources],
-            "parameters": [p.to_dict() for p in self.parameters],
-            "optimization_split": "train", "heldout_split": "validation",
-            "excluded_observations": self.excluded,
-            "optimizer": {
-                "method": "TRF weighted least squares", "jacobian": "3-point",
-                "diff_step": diff_step, "max_nfev": max_nfev,
-                "max_forward_groups": self.max_forward_groups,
-                "ftol": 1e-8, "xtol": 1e-8, "gtol": 1e-8,
-            },
-            "runs": self.runs, "status": "not_started", "failures": [],
-        }
-        try:
-            def training_residual(x):
-                return self.residuals(self.forward(self.values(x), "train", stage="fit"), "train")
-
-            result = least_squares(
-                training_residual,
-                [p.encode(p.initial) for p in self.parameters], bounds=(0.0, 1.0),
-                method="trf", jac="3-point", diff_step=diff_step, max_nfev=max_nfev,
-                ftol=1e-8, xtol=1e-8, gtol=1e-8,
-            )
-            report["optimizer"].update(
-                success=bool(result.success), message=result.message, nfev=result.nfev,
-                njev=result.njev, optimality=float(result.optimality),
-            )
-            report["estimate"] = self.values(result.x)
-            report["active_bounds"] = {
-                p.column.quantity_id: int(active)
-                for p, active in zip(self.parameters, result.active_mask, strict=True)
-            }
-            singular_values = np.linalg.svd(result.jac, compute_uv=False)
-            threshold = max(rank_atol, rank_rtol * float(singular_values[0]))
-            rank = int(np.count_nonzero(singular_values > threshold))
-            report["identifiability"] = {
-                "rank": rank, "parameter_count": len(self.parameters),
-                "singular_values": singular_values.tolist(), "rank_threshold": threshold,
-                "status": "full_rank_local" if rank == len(self.parameters) else "rank_deficient",
-                "weighted_jacobian": result.jac.tolist(),
-                "coordinate": "dimensionless bounded linear/log parameters",
-                "boundary": "local sensitivity; no global uniqueness or material qualification",
-            }
-            if not result.success:
-                report.update(status="optimizer_not_converged")
-                report["failures"].append(result.message)
-            else:
-                report["training"] = self.metrics(
-                    self.forward(report["estimate"], "train", stage="training_final"), "train",
-                )
-                report["validation"] = self.metrics(
-                    self.forward(report["estimate"], "validation", stage="heldout"), "validation",
-                )
-                report["status"] = "fitted"
-        except ForwardEvaluationError as exc:
-            report.update(status="forward_failed")
-            report["failures"].append(str(exc))
-        steps = [step for run in self.runs for step in run["steps"]]
-        report["resources"] = {
-            "forward_groups": len(self.runs), "attempted_operations": len(steps),
-            "committed_operations": sum(s["transaction_status"] == "committed" for s in steps),
-            **{key: sum(s[key] for s in steps) for key in (
-                "actual_duration_s", "analysis_effort_s", "cost_delta", "sample_delta_L",
-            )},
-        }
-        # Results must be usable as strict, readable JSON without hidden objects.
-        json.dumps(report, allow_nan=False)
-        return report

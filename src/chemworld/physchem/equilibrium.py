@@ -7,6 +7,7 @@ estimates, and a material-conserving liquid-liquid extraction stage.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from itertools import pairwise
@@ -14,6 +15,8 @@ from math import exp, isfinite, log, sqrt
 from typing import Literal
 
 from chemworld.foundation.units import convert_value
+from chemworld.physchem.activity_kernels import interaction, log_activity
+from chemworld.physchem.composition_math import _normalize_composition
 from chemworld.physchem.equilibrium_cards import activity_model_cards
 from chemworld.physchem.property_reports import ValidityPolicy
 from chemworld.physchem.saturation import (
@@ -22,7 +25,8 @@ from chemworld.physchem.saturation import (
 )
 from chemworld.physchem.specs import PropertyCorrelation
 
-ActivityModel = Literal["ideal", "margules", "wilson", "nrtl", "uniquac"]
+ActivityModel = Literal["ideal", "margules", "wilson", "nrtl", "uniquac",
+                        "regular_solution", "flory_huggins", "hansen", "unifac"]
 VLESolveMode = Literal["bubble_temperature", "dew_temperature"]
 FlashPhaseStatus = Literal["all_liquid", "two_phase", "all_vapor"]
 AzeotropeScanStatus = Literal[
@@ -138,11 +142,13 @@ class ActivityModelSpec:
     component_ids: tuple[str, ...]
     model: ActivityModel = "ideal"
     parameters: dict[str, float] = field(default_factory=dict)
+    provenance: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.model_id:
             raise ValueError("model_id cannot be empty")
-        if self.model not in {"ideal", "margules", "wilson", "nrtl", "uniquac"}:
+        if self.model not in {"ideal", "margules", "wilson", "nrtl", "uniquac",
+                              "regular_solution", "flory_huggins", "hansen", "unifac"}:
             raise ValueError(f"Unsupported activity model: {self.model}")
         if not self.component_ids:
             raise ValueError("component_ids cannot be empty")
@@ -150,6 +156,10 @@ class ActivityModelSpec:
             raise ValueError("Duplicate component ids are not allowed")
         if any(not isfinite(value) for value in self.parameters.values()):
             raise ValueError("activity-model parameters must be finite")
+        if not isinstance(self.provenance, dict):
+            raise ValueError("activity provenance must be a JSON object")
+        object.__setattr__(self, "provenance",
+                           json.loads(json.dumps(self.provenance, allow_nan=False)))
         _validate_activity_parameter_contract(self)
 
     def to_dict(self) -> dict[str, object]:
@@ -158,6 +168,7 @@ class ActivityModelSpec:
             "component_ids": list(self.component_ids),
             "model": self.model,
             "parameters": dict(self.parameters),
+            **({"provenance": json.loads(json.dumps(self.provenance))} if self.provenance else {}),
         }
 
 
@@ -647,24 +658,16 @@ def activity_coefficients(
     *,
     temperature_K: float,
 ) -> dict[str, float]:
-    if temperature_K <= 0:
-        raise ValueError("temperature_K must be positive")
+    if temperature_K <= 0 or not isfinite(temperature_K):
+        raise ValueError("temperature_K must be positive and finite")
     x = _composition_vector(spec.component_ids, composition)
-    if spec.model == "ideal":
-        return dict.fromkeys(spec.component_ids, 1.0)
-    if spec.model == "margules":
-        return _margules_gamma(spec, x)
-    if spec.model == "wilson":
-        return _wilson_gamma(spec, x, temperature_K=temperature_K)
-    if spec.model == "nrtl":
-        return _nrtl_gamma(spec, x, temperature_K=temperature_K)
-    if spec.model == "uniquac":
-        return uniquac_activity_report(
-            spec,
-            composition,
-            temperature_K=temperature_K,
-        ).activity_coefficients
-    raise ValueError(f"Unsupported activity model: {spec.model}")
+    try:
+        values = tuple(exp(value) for value in log_activity(spec, x, temperature_K))
+    except OverflowError as exc:
+        raise ValueError("activity coefficient is outside numerical range") from exc
+    if any(value <= 0 or not isfinite(value) for value in values):
+        raise ValueError("activity coefficients must be positive and finite")
+    return dict(zip(spec.component_ids, values, strict=True))
 
 
 def uniquac_activity_report(
@@ -704,7 +707,6 @@ def uniquac_activity_report(
 
     combinatorial: dict[str, float] = {}
     residual: dict[str, float] = {}
-    gammas: dict[str, float] = {}
     for i, component_id in enumerate(spec.component_ids):
         phi_over_x = r_values[i] / r_sum
         theta_over_phi = q_values[i] * r_sum / (r_values[i] * q_sum)
@@ -728,15 +730,8 @@ def uniquac_activity_report(
         log_gamma = combinatorial_log + residual_log
         if not isfinite(log_gamma):
             raise ValueError("UNIQUAC log-gamma must be finite")
-        try:
-            gamma_value = exp(log_gamma)
-        except OverflowError as exc:
-            raise ValueError("UNIQUAC log-gamma is outside numerical range") from exc
-        if gamma_value <= 0.0 or not isfinite(gamma_value):
-            raise ValueError("UNIQUAC activity coefficient must be positive and finite")
         combinatorial[component_id] = combinatorial_log
         residual[component_id] = residual_log
-        gammas[component_id] = gamma_value
 
     return UNIQUACActivityReport(
         model_id=spec.model_id,
@@ -752,7 +747,7 @@ def uniquac_activity_report(
         surface_fractions=dict(zip(spec.component_ids, theta, strict=True)),
         combinatorial_log_terms=combinatorial,
         residual_log_terms=residual,
-        activity_coefficients=gammas,
+        activity_coefficients=activity_coefficients(spec, composition, temperature_K=temperature_K),
         coordination_number=z_coordination,
     )
 
@@ -2057,149 +2052,6 @@ def _find_azeotrope_crossing(
     return None
 
 
-def _margules_gamma(spec: ActivityModelSpec, x: tuple[float, ...]) -> dict[str, float]:
-    gamma = {}
-    for i, component_id in enumerate(spec.component_ids):
-        ln_gamma = 0.0
-        for j, other_id in enumerate(spec.component_ids):
-            if i == j:
-                continue
-            ln_gamma += _pair_parameter(spec, component_id, other_id, prefix="A") * x[j] ** 2
-        gamma[component_id] = exp(ln_gamma)
-    return gamma
-
-
-def _wilson_gamma(
-    spec: ActivityModelSpec,
-    x: tuple[float, ...],
-    *,
-    temperature_K: float,
-) -> dict[str, float]:
-    lambdas = _wilson_lambda_matrix(spec, temperature_K)
-    n = len(spec.component_ids)
-    sums = []
-    for i in range(n):
-        total = sum(x[j] * lambdas[i][j] for j in range(n))
-        if total <= 0.0 or not isfinite(total):
-            raise ValueError("Wilson lambda composition sum must be positive")
-        sums.append(total)
-
-    gamma = {}
-    for i, component_id in enumerate(spec.component_ids):
-        log_gamma = 1.0 - log(sums[i])
-        log_gamma -= sum(x[j] * lambdas[j][i] / sums[j] for j in range(n))
-        gamma[component_id] = exp(log_gamma)
-    return gamma
-
-
-def _nrtl_gamma(
-    spec: ActivityModelSpec,
-    x: tuple[float, ...],
-    *,
-    temperature_K: float,
-) -> dict[str, float]:
-    n = len(spec.component_ids)
-    tau = [[0.0 for _ in range(n)] for _ in range(n)]
-    g = [[1.0 for _ in range(n)] for _ in range(n)]
-    for i, left in enumerate(spec.component_ids):
-        for j, right in enumerate(spec.component_ids):
-            if i == j:
-                continue
-            tau[i][j] = _nrtl_tau(spec, left, right, temperature_K)
-            alpha = _nrtl_alpha(spec, left, right, temperature_K)
-            if alpha <= 0.0:
-                raise ValueError("NRTL alpha values must be positive")
-            g[i][j] = exp(-alpha * tau[i][j])
-
-    gamma = {}
-    for i, component_id in enumerate(spec.component_ids):
-        denominator_i = sum(x[k] * g[k][i] for k in range(n))
-        if denominator_i <= 0.0 or not isfinite(denominator_i):
-            raise ValueError("NRTL denominator must be positive")
-        first = sum(x[j] * tau[j][i] * g[j][i] for j in range(n)) / denominator_i
-        second = 0.0
-        for j in range(n):
-            denominator = sum(x[k] * g[k][j] for k in range(n))
-            weighted_tau = sum(x[m] * tau[m][j] * g[m][j] for m in range(n))
-            if denominator <= 0.0 or not isfinite(denominator):
-                raise ValueError("NRTL denominator must be positive")
-            second += x[j] * g[i][j] / denominator * (tau[i][j] - weighted_tau / denominator)
-        gamma[component_id] = exp(first + second)
-    return gamma
-
-
-def _wilson_lambda_matrix(
-    spec: ActivityModelSpec,
-    temperature_K: float,
-) -> list[list[float]]:
-    component_ids = spec.component_ids
-    n = len(component_ids)
-    matrix = [[1.0 for _ in range(n)] for _ in range(n)]
-    for i, left in enumerate(component_ids):
-        for j, right in enumerate(component_ids):
-            if i == j:
-                continue
-            value = _wilson_lambda(spec, left, right, temperature_K)
-            if value <= 0.0 or not isfinite(value):
-                raise ValueError("Wilson Lambda values must be finite and positive")
-            matrix[i][j] = value
-    return matrix
-
-
-def _wilson_lambda(
-    spec: ActivityModelSpec,
-    left: str,
-    right: str,
-    temperature_K: float,
-) -> float:
-    direct = _directional_parameter(spec, "lambda", left, right, default=None)
-    if direct is not None:
-        return direct
-    exponent = (
-        _directional_value(spec, "lambda_a", left, right, default=0.0)
-        + _directional_value(spec, "lambda_b", left, right, default=0.0) / temperature_K
-        + _directional_value(spec, "lambda_c", left, right, default=0.0) * log(temperature_K)
-        + _directional_value(spec, "lambda_d", left, right, default=0.0) * temperature_K
-        + _directional_value(spec, "lambda_e", left, right, default=0.0) / temperature_K**2
-        + _directional_value(spec, "lambda_f", left, right, default=0.0) * temperature_K**2
-    )
-    return exp(exponent)
-
-
-def _nrtl_tau(
-    spec: ActivityModelSpec,
-    left: str,
-    right: str,
-    temperature_K: float,
-) -> float:
-    direct = _directional_parameter(spec, "tau", left, right, default=None)
-    if direct is not None:
-        return direct
-    return (
-        _directional_value(spec, "tau_a", left, right, default=0.0)
-        + _directional_value(spec, "tau_b", left, right, default=0.0) / temperature_K
-        + _directional_value(spec, "tau_e", left, right, default=0.0) * log(temperature_K)
-        + _directional_value(spec, "tau_f", left, right, default=0.0) * temperature_K
-        + _directional_value(spec, "tau_g", left, right, default=0.0) / temperature_K**2
-        + _directional_value(spec, "tau_h", left, right, default=0.0) * temperature_K**2
-    )
-
-
-def _nrtl_alpha(
-    spec: ActivityModelSpec,
-    left: str,
-    right: str,
-    temperature_K: float,
-) -> float:
-    direct = _directional_parameter(spec, "alpha", left, right, default=None)
-    if direct is not None:
-        return direct
-    return (
-        _directional_value(spec, "alpha_c", left, right, default=0.0)
-        + _directional_value(spec, "alpha_d", left, right, default=0.0) * temperature_K
-    )
-
-
 def _uniquac_tau_matrix(
     spec: ActivityModelSpec,
     temperature_K: float,
@@ -2224,23 +2076,7 @@ def _uniquac_tau(
     right: str,
     temperature_K: float,
 ) -> float:
-    direct = _directional_parameter(spec, "tau", left, right, default=None)
-    if direct is not None:
-        return direct
-    exponent = (
-        _directional_value(spec, "tau_a", left, right, default=0.0)
-        + _directional_value(spec, "tau_b", left, right, default=0.0) / temperature_K
-        + _directional_value(spec, "tau_c", left, right, default=0.0) * log(temperature_K)
-        + _directional_value(spec, "tau_d", left, right, default=0.0) * temperature_K
-        + _directional_value(spec, "tau_e", left, right, default=0.0) / temperature_K**2
-        + _directional_value(spec, "tau_f", left, right, default=0.0) * temperature_K**2
-    )
-    if not isfinite(exponent):
-        raise ValueError("UNIQUAC tau exponent must be finite")
-    try:
-        return exp(exponent)
-    except OverflowError as exc:
-        raise ValueError("UNIQUAC tau exponent is outside numerical range") from exc
+    return interaction(spec.parameters, "tau", left, right, temperature_K)
 
 
 def _uniquac_structural_parameter(
@@ -2265,7 +2101,24 @@ def _uniquac_coordination_number(spec: ActivityModelSpec) -> float:
 
 
 def _validate_activity_parameter_contract(spec: ActivityModelSpec) -> None:
-    if spec.model in {"ideal", "margules"}:
+    if spec.model == "unifac":
+        from chemworld.physchem.unifac import validate_unifac_parameters
+
+        validate_unifac_parameters(spec)
+        return
+    if spec.model in {"regular_solution", "flory_huggins", "hansen"}:
+        from chemworld.physchem.regular_solution import validate_regular_parameters
+
+        validate_regular_parameters(spec)
+        return
+    if spec.model == "ideal":
+        return
+    if spec.model == "margules":
+        for i, left in enumerate(spec.component_ids):
+            for right in spec.component_ids[i + 1:]:
+                if not any(key in spec.parameters for key in
+                           (f"A:{left}|{right}", f"A:{right}|{left}")):
+                    raise ValueError(f"Margules requires an explicit A for pair {left}|{right}")
         return
     if spec.model == "uniquac":
         _uniquac_coordination_number(spec)
@@ -2360,34 +2213,6 @@ def _directional_parameter(
     if key not in spec.parameters:
         return default
     return float(spec.parameters[key])
-
-
-def _directional_value(
-    spec: ActivityModelSpec,
-    prefix: str,
-    left: str,
-    right: str,
-    *,
-    default: float,
-) -> float:
-    value = _directional_parameter(spec, prefix, left, right, default=None)
-    return default if value is None else value
-
-
-def _pair_parameter(
-    spec: ActivityModelSpec,
-    left: str,
-    right: str,
-    *,
-    prefix: str,
-    default: float = 0.0,
-) -> float:
-    return float(
-        spec.parameters.get(
-            f"{prefix}:{left}|{right}",
-            spec.parameters.get(f"{prefix}:{right}|{left}", default),
-        )
-    )
 
 
 def _normalize_amounts(amounts: Mapping[str, float]) -> dict[str, float]:
@@ -2491,17 +2316,6 @@ def _composition_vector_mapping(
     if missing or extra:
         raise ValueError(f"Composition ids do not match model: missing={missing}, extra={extra}")
     return {component_id: normalized[component_id] for component_id in component_ids}
-
-
-def _normalize_composition(composition: Mapping[str, float]) -> dict[str, float]:
-    if not composition:
-        raise ValueError("composition cannot be empty")
-    if any(value < 0 or not isfinite(value) for value in composition.values()):
-        raise ValueError("composition values must be finite and nonnegative")
-    total = sum(composition.values())
-    if total <= 0:
-        raise ValueError("composition must contain positive material")
-    return {component_id: float(value) / total for component_id, value in composition.items()}
 
 
 def _validate_k_values(

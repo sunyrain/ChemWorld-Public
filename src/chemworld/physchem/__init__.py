@@ -12,6 +12,221 @@ from importlib import import_module
 from typing import Any
 
 _MODULE_EXPORTS: dict[str, list[str]] = {
+    "tank_heads": ['HEAD_KINDS', 'TankHead'],
+    "tank_geometry": (
+        'TankGeometry TankCalibrationTable TankChebyshev cylindrical_wetted_area'
+    ).split(),
+    "solar_ephemeris": (
+        'SolarParameters SolarPosition SolarEphemeris solar_delta_t_seconds'
+    ).split(),
+    "solar_events": ['SolarEvents', 'solar_events'],
+    "solar_irradiance": ['SolarIrradiance', 'clear_sky_irradiance', 'extraterrestrial_irradiance'],
+    "equipment_geometry": (
+        'EquipmentGeometry solve_tube_pitch corrugated_plate_enlargement helical_coil_geometry '
+        'plate_exchanger_geometry fin_exchanger_geometry air_cooled_geometry'
+    ).split(),
+    "geometric_primitives": (
+        'cylinder_geometry circular_segment_area circular_segment_height '
+        'partial_sphere_geometry shape_factor CoolingTowerGeometry'
+    ).split(),
+    "msis_atmosphere": ['MSISParameters', 'MSISAtmosphereState', 'MSISAtmosphere'],
+    "standard_atmosphere": (
+        'StandardAtmosphereState standard_atmosphere standard_air_properties standard_gravity '
+        'standard_pressure_column AirColumnMass air_column_mass'
+    ).split(),
+    "fitting_curves": ['FittingCurve', 'FittingCurves'],
+    "local_fittings": (
+        'entrance_loss_coefficient transition_loss_coefficient staged_diffuser_loss'
+    ).split(),
+    "bend_fittings": ['bend_loss_coefficient', 'coil_loss_coefficient'],
+    "valve_fittings": (
+        'CRANE_VALVE_TYPES VALVE_LIFT_TYPES FittingCoefficientCatalog JunctionLossCoefficients '
+        'crane_valve_coefficient minimum_valve_lift_velocity junction_loss_coefficients '
+        'resistance_from_valve_coefficient valve_coefficient_from_resistance '
+        'change_loss_velocity_basis darby_resistance hooper_resistance nominal_size_from_bore'
+    ).split(),
+    "engineering_numbers": (
+        'ENGINEERING_GROUP_PARAMETERS engineering_group current_fluid_similarity '
+        'thermal_diffusivity_si convert_viscosity engineering_resistance_conversion '
+        'local_gravity ideal_gas_sound_speed'
+    ).split(),
+    "differential_meters": (
+        'DifferentialMeterSpec DifferentialMeterResult LiquidMeterPressureResult '
+        'liquid_differential_meter_pressure solve_differential_meter meter_discharge '
+        'meter_flow_coefficient'
+    ).split(),
+    "meter_correlations": (
+        'METER_TYPES METER_ALIASES meter_beta meter_expansibility miller_orifice_coefficient '
+        'meter_discharge_coefficient meter_loss_coefficient meter_coefficient_from_loss '
+        'wet_venturi_correction'
+    ).split(),
+    "meter_tables": ['MeterTableSurface'],
+    "jet_pumps": (
+        'LiquidJetPumpModel solve_jet_pump_inlet jet_pump_report '
+        'solve_liquid_jet_pump vacuum_air_leakage'
+    ).split(),
+    "pump_engineering": (
+        'corripio_pump_efficiency corripio_motor_efficiency pump_specific_speed '
+        'pump_specific_diameter motor_synchronous_speed ideal_motor_current '
+        'DriveEfficiencyResult DriveEfficiencyMap MotorEfficiencyCatalog MotorSizeCatalog '
+        'MotorPartLoadCatalog ElectricalSupplyRecord ElectricalSupplyCatalog PumpDriveSpec'
+    ).split(),
+    "particle_distributions": (
+        'ContinuousDiameterDistribution AnalyticDiameterDistribution CustomDiameterDistribution '
+        'InterpolatedDiameterDistribution BinnedDiameterDistribution diameter_spacing'
+    ).split(),
+    "sieve_catalog": ['SieveSpecification', 'SieveCatalog'],
+    "helmholtz": ['HelmholtzFluid', 'HelmholtzState'],
+    "helmholtz_terms": ['HelmholtzTerm'],
+    "helmholtz_thermal": ['HelmholtzIsochoricThermodynamics'],
+    "helmholtz_equilibrium_thermal": ['HelmholtzEquilibriumIsochoricThermodynamics'],
+    "helmholtz_processes": (
+        'HelmholtzStream HelmholtzPressureStage HelmholtzPressureStageReport'
+    ).split(),
+    "helmholtz_flash": (
+        'HelmholtzTwoPhaseState HelmholtzFlashReport coexistence_derivatives '
+        'saturation_at_pressure solve_two_phase_state flash_at_pressure'
+    ).split(),
+    "helmholtz_solvers": (
+        'HelmholtzAncillary HelmholtzPhaseModel HelmholtzSolveReport '
+        'HelmholtzSaturationReport homogeneous_state_derivatives'
+    ).split(),
+    "flow_meters": (
+        'LiquidOrificeSpec LiquidOrificeResult liquid_orifice_pressure liquid_orifice_mass_flow '
+        'liquid_orifice_bore liquid_orifice_pressure_endpoint orifice_discharge_coefficient'
+    ).split(),
+    "gas_flow": (
+        'IsothermalGasState IsothermalGasPipeResult isothermal_critical_pressure_ratio '
+        'isothermal_gas_pipe solve_isothermal_gas_pipe'
+    ).split(),
+    "gas_flow_thermo": (
+        'isothermal_gas_work_molar isentropic_gas_work_molar solve_isentropic_gas_work '
+        'isentropic_gas_outlet_temperature gas_efficiency_conversion gas_polytropic_exponent '
+        'critical_gas_pressure critical_gas_temperature is_critical_gas_flow '
+        'stagnation_energy_J_kg stagnation_temperature_from_velocity gas_stagnation_pressure '
+        'gas_stagnation_temperature GasNozzleResult ideal_gas_nozzle'
+    ).split(),
+    "relief_valves": (
+        'API526_ORIFICES_IN2 API526_ORIFICES_M2 ReliefSizingResult '
+        'api520_critical_coefficient api520_subcritical_factor api520_steam_pressure_factor '
+        'api520_steam_superheat_factor api520_gas_backpressure_factor '
+        'api520_liquid_backpressure_factor api520_viscosity_factor api526_select_orifice '
+        'size_gas_relief_valve size_steam_relief_valve size_liquid_relief_valve '
+        'api521_noise_curve api521_flare_noise vdi3732_flare_noise'
+    ).split(),
+    "gas_pipeline": (
+        'GAS_PIPELINE_METHODS EmpiricalGasPipelineSpec EmpiricalGasPipelineResult '
+        'solve_empirical_gas_pipeline'
+    ).split(),
+    "open_channel": (
+        'WEIR_METHODS WeirFlowReport manning_velocity chezy_velocity manning_to_chezy '
+        'chezy_to_manning uniform_channel_flow weir_flow manning_roughness_table '
+        'select_manning_roughness'
+    ).split(),
+    "valve_characteristics": (
+        'ValveOpeningCurve convert_valve_coefficient valve_cavitation_index '
+        'gas_valve_choked liquid_valve_choked gas_valve_choke_pressure liquid_valve_choke_pressure'
+    ).split(),
+    "valve_noise": (
+        'ValveAcousticGeometry ValveNoiseResult liquid_control_valve_noise gas_control_valve_noise'
+    ).split(),
+    "two_phase_holdup": (
+        'TwoPhaseProperties VOIDAGE_REQUIREMENTS TWO_PHASE_VISCOSITY_METHODS '
+        'available_voidage_methods available_two_phase_viscosity_methods martinelli_parameter '
+        'two_phase_void_fraction two_phase_mixture_density void_fraction_from_density '
+        'two_phase_mixture_viscosity'
+    ).split(),
+    "packed_beds": (
+        'PACKED_BED_METHODS PackedBedSpec PackedBedPressureReport '
+        'available_packed_bed_methods packed_bed_pressure packed_bed_voidage'
+    ).split(),
+    "friction_correlations": ['colebrook_friction_factor', 'pipe_friction_factor'],
+    "straight_friction": (
+        'STRAIGHT_FRICTION_RANGES available_straight_friction_methods '
+        'straight_friction_correlation friction_transmission_factor crane_fully_turbulent_friction'
+    ).split(),
+    "curved_friction": (
+        'HELICAL_TRANSITION_RANGES HELICAL_FRICTION_METHODS HelicalFrictionResult '
+        'helical_transition_reynolds available_helical_friction_methods helical_friction_factor'
+    ).split(),
+    "plate_friction": ['PLATE_FRICTION_METHODS', 'plate_friction_factor'],
+    "pneumatic_conveying": ['SALTATION_METHODS', 'SaltationResult', 'saltation_velocity'],
+    "piping_catalog": ['PipeDimensions', 'PipeScheduleCatalog', 'WireGaugeSelection',
+                       'WireGaugeCatalog', 'piping_erosional_velocity'],
+    "packed_towers": ['TowerPackingSpec', 'TowerPressureResult', 'DemisterEfficiencyResult',
+                      'mesh_voidage_from_mass', 'mesh_specific_area',
+                      'demister_dry_pressure_drop', 'demister_wet_pressure_drop',
+                      'demister_removal_efficiency', 'stichlmair_tower_pressure',
+                      'stichlmair_flooding_velocity', 'robbins_tower_pressure_drop'],
+    "particle_drag": ['PARTICLE_DRAG_RANGES', 'PARTICLE_ODE_POLICY', 'ParticleDragSpec',
+                      'ParticleTerminalResult', 'ParticleMotionState', 'ParticleMotionResult',
+                      'available_particle_drag_methods', 'particle_drag_coefficient',
+                      'particle_terminal_velocity', 'time_to_stokes_terminal',
+                      'advance_particle_motion'],
+    "separator_capacity": ['WATKINS_METHODS', 'SeparatorCapacityCurve',
+                           'SeparatorCapacityResult', 'separator_theoretical_capacity',
+                           'separator_watkins_capacity', 'separator_demister_capacity',
+                           'separator_gas_capacity'],
+    "mixing_engineering": ['AgitatorMixingResult', 'agitator_mixing_time',
+                           'ribbon_power_reynolds', 'ribbon_mixing_time', 'static_mixer_cov',
+                           'static_mixer_loss_coefficient', 'StaticMixerResult',
+                           'static_mixer_performance', 'TeeMixingResult', 'tee_mixing_cov'],
+    "pipe_roughness": ['farshad_pipe_roughness', 'MaterialRoughnessResult',
+                       'PipeRoughnessCatalog', 'smooth_pipe_observation_pairs'],
+    "single_phase_pressure": ['single_phase_friction_pressure_drop',
+                              'single_phase_acceleration_pressure_drop',
+                              'single_phase_acceleration_gradient',
+                              'single_phase_gravity_pressure_drop'],
+    "flow_filters": (
+        'FILTER_METHODS MESH_PATTERNS FilterCurve FilterPressureReport '
+        'filter_loss_coefficient filter_pressure_drop'
+    ).split(),
+    "two_phase_pressure": (
+        'TwoPhasePressureResult TWO_PHASE_PRESSURE_REQUIREMENTS TWO_PHASE_PRESSURE_GUIDANCE '
+        'available_two_phase_pressure_methods two_phase_pressure_drop'
+    ).split(),
+    "two_phase_balances": (
+        'two_phase_acceleration_pressure_drop two_phase_acceleration_gradient '
+        'two_phase_gravity_gradient two_phase_gravity_pressure_drop'
+    ).split(),
+    "two_phase_regimes": (
+        'TwoPhaseRegimeResult LogRegimeBoundary TaitelDuklerBoundaries '
+        'mandhane_gregory_aziz_regime taitel_dukler_regime'
+    ).split(),
+    "gas_control_valves": (
+        'GasControlValveSpec GasValveResult GasValveSizingResult size_gas_control_valve '
+        'gas_valve_flow gas_valve_outlet_pressure gas_valve_piping_factors'
+    ).split(),
+    "fluids_devices": (
+        'LiquidControlValveSpec LiquidValveResult LiquidValveSizingResult '
+        'valve_critical_pressure_factor valve_piping_factors valve_reynolds valve_reynolds_factor '
+        'liquid_valve_pressure_drop liquid_valve_flow size_liquid_control_valve'
+    ).split(),
+    "composition_math": (
+        'normalized_fractions regularized_fractions fraction_basis convert_component_flows '
+        'weighted_property combine_component_flows solve_stream_composition '
+        'constrained_composition_gradient constrained_composition_hessian '
+        'composition_gradient_to_moles partial_molar_from_mole_gradient '
+        'partial_molar_properties partial_molar_composition_jacobian '
+        'extensive_hessian_from_moles'
+    ).split(),
+    "fluid_response": (
+        'mass_molar_property density_molar_volume velocity_basis gravity_scale '
+        'watson_characterization vapor_mass_fraction parachor molecular_radius_of_gyration '
+        'compressibility_factor isobaric_expansion isothermal_compressibility '
+        'heat_capacity_difference joule_thomson acoustic_velocity isentropic_exponent '
+        'isentropic_exponent_pv isentropic_exponent_pt isentropic_exponent_tv '
+        'phase_identification_parameter phase_from_response'
+    ).split(),
+    "dippr": (
+        'DIPPRTemperatureResponse DIPPRParameterJacobian DIPPRMixedDerivative '
+        'dippr_temperature_response dippr_parameter_jacobian dippr_mixed_derivative '
+        'dippr106_coefficients_from_point'
+    ).split(),
+    "property_selection": (
+        'PropertySelectionPolicy PropertySelectionReport PropertySelectionError '
+        'inspect_property_selection'
+    ).split(),
     "tabulated_functions": 'TabulatedScalar'.split(),
     "battery_thevenin": 'TheveninSpec thevenin_system thevenin_fields'.split(),
     "battery_mpm": 'BatteryMPMSpec mpm_fields'.split(),
@@ -90,7 +305,8 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ).split(),
     "dense_conductivity": (
         'compressed_liquid_conductivity compressed_liquid_conductivity_derivatives '
-        'compressed_liquid_conductivity_report chung_dense_conductivity'
+        'compressed_liquid_conductivity_report chung_dense_conductivity '
+        'stiel_thodos_dense_conductivity ely_hanley_dense_conductivity'
     ).split(),
     "conductivity_kernels": (
         'CONDUCTIVITY_METHODS conductivity_value conductivity_derivatives'
@@ -130,11 +346,12 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'BOILING_CRITICAL_FITS MERSMANN_KIND_RADII_ANGSTROM '
         'MERSMANN_KIND_REGRESSED_RADII_ANGSTROM acentric_factor_from_pressure '
         'lee_kesler_acentric_factor stiel_polar_factor critical_surface '
-        'boiling_critical_temperature mersmann_kind_volume mixture_critical_property'
+        'boiling_critical_temperature mersmann_kind_volume mixture_critical_property '
+        'hekayati_raeissi_critical critical_compressibility'
     ).split(),
     "critical_properties": (
         'CriticalEstimate estimate_critical_property acentric_estimate_from_correlation '
-        'eos_component_from_critical_inputs mixture_critical_estimate'
+        'eos_component_from_critical_inputs mixture_critical_estimate critical_correlation_input'
     ).split(),
     "vapor_pressure": (
         'VaporPressureJacobian vapor_pressure_parameter_jacobian '
@@ -205,7 +422,7 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'TransportPropertyReport VaporPressureReport binary_gas_diffusivity_fuller_report '
         'density_to_molar_volume_m3_mol evaluate_correlation '
         'gas_mixture_effective_diffusivity_ledger gas_thermal_conductivity_dippr9b_report '
-        'heat_capacity_report ideal_gas_molar_volume_report '
+        'heat_capacity_report ideal_gas_molar_volume_report ideal_gas_transport_state '
         'liquid_mixture_thermal_conductivity_dippr9h_ledger mixture_density '
         'mixture_enthalpy_ledger mixture_molar_volume_ledger mixture_viscosity_log_rule '
         'molar_volume_report molar_volume_to_density_kg_m3 normal_boiling_point_report '
@@ -228,6 +445,23 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'reaction_quotient reaction_quotient_log solid_solubility_mole_fraction '
         'solve_gibbs_minimization solve_mass_action_equilibrium solve_monoprotic_acid_base '
         'solve_reaction_extent water_ion_product'
+    ).split(),
+    "activity_thermodynamics": (
+        'ActivityInfiniteDilutionReport ActivityThermodynamicReport '
+        'activity_infinite_dilution activity_parameter_jacobian activity_thermodynamic_report'
+    ).split(),
+    "regular_solution": ['regular_solution_model', 'hansen_activity_model'],
+    "unifac": (
+        'UNIFAC_VARIANTS UNIFACSubgroup unifac_activity_model unifac_rq unifac_psi'
+    ).split(),
+    "cubic_alpha": ['CubicAlphaResponse', 'cubic_alpha_response'],
+    "ppr78": ["PPR78Spec", "ppr78_interaction_response"],
+    "cubic_mixing": ["GibbsExcessMixingSpec"],
+    "phase_evaluation": ["PhasePropertyModel", "PhaseEvaluation", "PhaseTransportSpec"],
+    "group_contribution": (
+        'GroupContributionTable GroupEstimateReport joback_group_values '
+        'fedors_critical_volume wilson_jasperson_critical bondi_group_properties '
+        'joback_estimate structural_group_estimate joback_property_correlations'
     ).split(),
     "equilibrium": (
         'ActivityModelSpec AzeotropeScanPoint AzeotropeScanStatus '

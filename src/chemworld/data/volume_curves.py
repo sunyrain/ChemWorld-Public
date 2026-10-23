@@ -63,7 +63,7 @@ class VolumeData:
                 "source": self.record.source.provenance.to_dict(),
                 "source_record": self.record.record_id,
                 "source_curve": self.curve_key,
-                "source_bounds_K": self.source_bounds_K,
+                "source_bounds_K": list(self.source_bounds_K),
                 "source_notes": list(self.notes),
                 "temperature_range_basis": basis,
                 "phase": phase if phase in {"liquid", "solid", "gas"} else "gas",

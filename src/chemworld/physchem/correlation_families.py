@@ -10,14 +10,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from math import exp, isfinite, log, tanh
+from math import exp, isfinite, tanh
 from types import MappingProxyType
 
 import numpy as np
 from scipy.optimize import brentq
 
+from chemworld.physchem.caloric_math import derivative_values
 from chemworld.physchem.caloric_math import oscillator_value_slope as _oscillator
 from chemworld.physchem.conductivity_kernels import CONDUCTIVITY_METHODS, conductivity_derivatives
+from chemworld.physchem.dippr_kernels import dippr_expression
 from chemworld.physchem.heat_capacity_kernels import (
     caloric_domain,
     caloric_value_slope,
@@ -98,6 +100,10 @@ class CorrelationFamily:
         }
         if self.fixed_output_unit:
             result["coefficient_output_unit"] = self.fixed_output_unit
+        if self.equation_id.startswith("dippr"):
+            result["temperature_derivative"] = "analytic_through_third_subcritical"
+            result["parameter_derivative"] = "analytic_declared_source_coordinates"
+            result["mixed_derivative_order"] = 3
         if self.optional_prefix:
             result["indexed_coefficient_prefix"] = self.optional_prefix
         if (self.pressure_method or self.interface_method
@@ -379,7 +385,6 @@ def family_value_and_slope(
     if equation_id in {"dimensionless_source_point", "molar_volume_source_point"}:
         raise ValueError("a single source observation has no temperature derivative")
     if equation_id == "permittivity_crc":
-        from chemworld.physchem.caloric_math import derivative_values
         from chemworld.physchem.electro_optics import relative_permittivity_crc
 
         return derivative_values(lambda t:relative_permittivity_crc(t,**coefficients),T)
@@ -417,67 +422,16 @@ def family_value_and_slope(
     if CORRELATION_FAMILIES[equation_id].virial_method:
         return virial_derivatives(CORRELATION_FAMILIES[equation_id].virial_method,
                                   T, coefficients, order=1)
-    c = coefficients
-    reciprocal = equation_id.endswith("_reciprocal")
-    equation = equation_id.removesuffix("_reciprocal")
-    A, B, C, D, E, F, G = (c.get(key, 0.0) for key in "ABCDEFG")
-    Tc = c.get("Tc")
-    if Tc is not None and Tc <= T:
-        raise ValueError(f"{equation_id} requires T < Tc")
-    if equation == "dippr105" and T >= C:
-        raise ValueError("DIPPR105 requires T < C")
+    if equation_id.startswith("dippr"):
+        return derivative_values(lambda t: dippr_expression(equation_id, t, coefficients), T)
+    A, B, C, D, E = (coefficients[key] for key in "ABCDE")
     try:
-        if equation == "chemsep16":
+        if equation_id == "chemsep16":
             exponential = exp(B / T + C + D * T + E * T**2)
             value = A + exponential
             slope = exponential * (-B / T**2 + D + 2 * E * T)
-        elif equation == "dippr100":
-            value, slope = G, 0.0
-            for coefficient in (F, E, D, C, B, A):
-                slope, value = slope * T + value, value * T + coefficient
-        elif equation in {"dippr101", "dippr115"}:
-            value, slope = pressure_derivatives(equation, T, c, order=1)
-        elif equation == "dippr102":
-            denominator = 1 + C / T + D / T**2
-            value = A * T**B / denominator
-            slope = value * (B / T + (C / T**2 + 2 * D / T**3) / denominator)
-        elif equation == "dippr104":
-            value = A + B / T + C / T**3 + D / T**8 + E / T**9
-            slope = -B / T**2 - 3 * C / T**4 - 8 * D / T**9 - 9 * E / T**10
-        elif equation == "dippr105":
-            tau = 1 - T / C
-            value = A / B**(1 + tau**D)
-            slope = value * log(B) * D * tau**(D - 1) / C
-        elif equation == "dippr106":
-            reduced, tau = T / Tc, 1 - T / Tc
-            exponent = B + C * reduced + D * reduced**2 + E * reduced**3
-            value = A * tau**exponent
-            slope = value / Tc * ((C + 2 * D * reduced + 3 * E * reduced**2) * log(tau)
-                                  - exponent / tau)
-        elif equation in {"dippr107", "dippr127"}:
-            value, slope = A, 0.0
-            terms = ((B, C, False), (D, E, True)) if equation == "dippr107" else (
-                (B, C / 2, False), (D, E / 2, False), (F, G / 2, False))
-            for amplitude, theta, cosh in terms:
-                term, derivative = _oscillator(theta / T, T, cosh=cosh)
-                value += amplitude * term
-                slope += amplitude * derivative
-        elif equation == "dippr114":
-            tau = 1 - T / Tc
-            value = (A*A / tau + B - 2*A*C*tau - A*D*tau**2 - C*C*tau**3/3
-                     - C*D*tau**4/2 - D*D*tau**5/5)
-            slope = (A*A / tau**2 + 2*A*C + 2*A*D*tau + C*C*tau**2
-                     + 2*C*D*tau**3 + D*D*tau**4) / Tc
-        elif equation == "dippr116":
-            tau = 1 - T / Tc
-            terms = ((B, .35), (C, 2/3), (D, 1), (E, 4/3))
-            value = A + sum(coefficient * tau**power for coefficient, power in terms)
-            slope = -sum(coefficient * power * tau**(power - 1)
-                         for coefficient, power in terms) / Tc
         else:
             raise ValueError(f"Unsupported family {equation_id}")
-        if reciprocal:
-            value, slope = 1 / value, -slope / value / value
     except (OverflowError, ZeroDivisionError) as exc:
         raise ValueError(
             f"{equation_id} exceeds its finite numerical domain or meets a pole") from exc

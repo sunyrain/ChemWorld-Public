@@ -5,7 +5,7 @@ Caller supplied critical inputs are explicit; source coefficients cannot be
 overridden. CRC constant observations require a stated application temperature.
 """
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 
 from chemworld.data.constant_catalog import ConstantField, ConstantSource
 from chemworld.data.constants import (
@@ -134,10 +134,30 @@ class VolumeDatabase(ConstantDatabase):
             # Source tables often publish rounded MW. Never silently replace it.
             if abs(mw - component.molecular_weight_g_mol) > 1e-9 * mw:
                 raise ValueError("source MW must match the component molecular weight")
+        # A sourced fit may require explicitly selected critical estimates.
+        # Keep them as parameter provenance, without replacing table coefficients.
+        from chemworld.data.scientific_inputs import InputValue
+        from chemworld.physchem.critical_properties import CriticalEstimate, _input
+
+        from .constants import ConstantValue
+
+        supplemental = build_options.get("parameters", {})
+        origins, converted = {}, {}
+        for key, value in supplemental.items():
+            if isinstance(value, (CriticalEstimate, ConstantValue, InputValue)):
+                converted[key] = _input(value, key, component.identifier, component.cas_number)
+                origins[key] = value.to_dict()
+            else:
+                converted[key] = value
+        if supplemental:
+            build_options = {**build_options, "parameters": converted}
         if selected.equation_id == "tabulated":
             curves = selected.build_segments(**build_options)
         else:
             curves = (selected.build(**build_options),)
+        if origins:
+            curves = tuple(replace(c, metadata={**c.metadata, "parameter_sources": origins})
+                           for c in curves)
         source = record.source.provenance
         return PropertyInputCard(
             ComponentPropertyPackage(component, curves),

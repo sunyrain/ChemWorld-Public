@@ -60,14 +60,18 @@ def _thermal(physics, spec):
     bulk_species = {s.species_id for s in physics.network.species if s.phase != "surface"}
     for name, model in physics.models_of("thermal").items():
         state = physics.initial_states[name]
-        required = set(model.thermodynamics.species) & bulk_species
+        required = set(model.thermodynamics.inventory_keys) & bulk_species
         if not required <= state.species_amounts.keys():
             raise ValueError("initial state omits a declared local thermal inventory")
+        if model.pressure_law == "helmholtz":
+            _without_processes(spec, (name,), "pure-fluid Helmholtz thermal")
         if name not in physics.models_of("crystal"):
             assemble_local_system(state, physics, spec.modules, spec.components)
 
 
 def _thermal_feed(source, model):
+    if model.pressure_law == "helmholtz":
+        raise ValueError("Helmholtz world feed needs an explicitly declared EOS enthalpy port")
     if set(source.species_amounts) <= set(model.thermodynamics.inventory_keys):
         for key, amount in source.species_amounts.items():
             if amount:

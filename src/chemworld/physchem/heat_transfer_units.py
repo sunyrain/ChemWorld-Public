@@ -8,6 +8,10 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from chemworld.physchem.gas_mechanism_batch import NASA7GasThermodynamics
+    from chemworld.physchem.helmholtz_equilibrium_thermal import (
+        HelmholtzEquilibriumIsochoricThermodynamics,
+    )
+    from chemworld.physchem.helmholtz_thermal import HelmholtzIsochoricThermodynamics
 
 from chemworld.physchem.coupled_system import ConstantCvThermodynamics, SpeciesInternalEnergy
 from chemworld.physchem.property_packages import PropertyPackageThermodynamics
@@ -110,8 +114,9 @@ class ThermalSystemSpec:
 
     thermodynamics: (
         ConstantCvThermodynamics | PropertyPackageThermodynamics | NASA7GasThermodynamics
+        | HelmholtzIsochoricThermodynamics | HelmholtzEquilibriumIsochoricThermodynamics
     )
-    pressure_law: Literal["ideal_gas", "fixed_pressure"] = "ideal_gas"
+    pressure_law: Literal["ideal_gas", "fixed_pressure", "helmholtz"] = "ideal_gas"
     environment_temperature_K: float = 300.0
     loss_conductance_W_K: float = 0.01
     minimum_temperature_K: float = 300.0
@@ -122,6 +127,24 @@ class ThermalSystemSpec:
 
     def __post_init__(self) -> None:
         from chemworld.physchem.gas_mechanism_batch import NASA7GasThermodynamics
+        from chemworld.physchem.helmholtz_equilibrium_thermal import (
+            HelmholtzEquilibriumIsochoricThermodynamics,
+        )
+        from chemworld.physchem.helmholtz_thermal import HelmholtzIsochoricThermodynamics
+
+        is_helmholtz = isinstance(self.thermodynamics, (
+            HelmholtzIsochoricThermodynamics, HelmholtzEquilibriumIsochoricThermodynamics))
+        if is_helmholtz != (self.pressure_law == "helmholtz"):
+            raise ValueError("Helmholtz calorics and pressure must use the same EOS")
+        if isinstance(self.thermodynamics, (
+            HelmholtzIsochoricThermodynamics, HelmholtzEquilibriumIsochoricThermodynamics
+        )):
+            fluid = (self.thermodynamics.fluid
+                     if isinstance(self.thermodynamics, HelmholtzIsochoricThermodynamics)
+                     else self.thermodynamics.phase_model.fluid)
+            if not (fluid.minimum_temperature_K <= self.minimum_temperature_K
+                    < self.maximum_temperature_K <= fluid.maximum_temperature_K):
+                raise ValueError("thermal bounds leave the Helmholtz source temperature domain")
 
         if (isinstance(self.thermodynamics, NASA7GasThermodynamics)
                 and self.pressure_law != "ideal_gas"):
@@ -133,7 +156,7 @@ class ThermalSystemSpec:
             0 < self.minimum_temperature_K < self.stop_temperature_K < self.maximum_temperature_K
         ) or not isfinite(self.maximum_temperature_K):
             raise ValueError("thermal limits must be finite, positive and ordered")
-        if self.pressure_law not in {"ideal_gas", "fixed_pressure"}:
+        if self.pressure_law not in {"ideal_gas", "fixed_pressure", "helmholtz"}:
             raise ValueError("unsupported local pressure law")
         if self.condensed_background is not None and (
             not isinstance(self.condensed_background, CondensedBackgroundSpec)
@@ -190,6 +213,16 @@ class ThermalSystemSpec:
                 **values["condensed_background"]
             )
         thermal = dict(values.pop("thermodynamics"))
+        if thermal.get("model") == "helmholtz-equilibrium-isochoric-v1":
+            from chemworld.physchem.helmholtz_equilibrium_thermal import (
+                HelmholtzEquilibriumIsochoricThermodynamics,
+            )
+
+            return cls(HelmholtzEquilibriumIsochoricThermodynamics.from_dict(thermal), **values)
+        if thermal.get("model") == "helmholtz-isochoric-thermal-v1":
+            from chemworld.physchem.helmholtz_thermal import HelmholtzIsochoricThermodynamics
+
+            return cls(HelmholtzIsochoricThermodynamics.from_dict(thermal), **values)
         if thermal.get("model") == "nasa7-ideal-gas-v1":
             from chemworld.physchem.gas_mechanism_batch import NASA7GasThermodynamics
 

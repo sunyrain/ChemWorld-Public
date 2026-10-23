@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-import numpy as np
-
 from chemworld.foundation import (
     WorldState,
     equipment_settings,
@@ -16,6 +14,7 @@ from chemworld.foundation import (
 )
 from chemworld.foundation.state import PhaseLedger, PhaseRecord
 from chemworld.physchem.reactor_shared import JacketTemperatureProgram
+from chemworld.runtime.action_values import bounded_action_float
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.full_process_contract import (
     seed_provenance_active,
@@ -25,25 +24,6 @@ from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.world.parameters import ChemWorldParameters
 from chemworld.world.reaction_kernel import integrate_compiled_reaction_ode
 from chemworld.world.thermal_kernel import account_temperature_transition, pressure_and_risk
-
-
-def _action_float(action: dict[str, Any], key: str, default: float) -> float:
-    value = action.get(key, default)
-    return float(np.asarray(value).reshape(-1)[0])
-
-
-def _bounded_action_float(
-    action: dict[str, Any],
-    key: str,
-    default: float,
-    *,
-    minimum: float,
-    maximum: float,
-) -> float:
-    value = _action_float(action, key, default)
-    if not np.isfinite(value) or not minimum <= value <= maximum:
-        raise ValueError(f"{key} must be finite and in [{minimum}, {maximum}]")
-    return value
 
 
 class ChemWorldReactionThermalServices:
@@ -154,14 +134,14 @@ class ChemWorldReactionThermalServices:
         heat: bool,
         jacket_program: JacketTemperatureProgram | None = None,
     ) -> ModelProviderResult:
-        duration = _bounded_action_float(
+        duration = bounded_action_float(
             action,
             "duration_s",
             600.0,
             minimum=1.0e-6 if jacket_program is not None else 1.0,
             maximum=14_400.0,
         )
-        target_temperature = _bounded_action_float(
+        target_temperature = bounded_action_float(
             action,
             "target_temperature_K",
             state.temperature_K,
@@ -169,7 +149,7 @@ class ChemWorldReactionThermalServices:
             maximum=520.0,
         )
         reactor_settings = equipment_settings(state.equipment, "batch_reactor")
-        stirring_speed = _bounded_action_float(
+        stirring_speed = bounded_action_float(
             action,
             "stirring_speed_rpm",
             float(reactor_settings.get("stirring_speed_rpm", 600.0)),

@@ -21,11 +21,66 @@ from chemworld.physchem.property_reports import (
 from chemworld.physchem.specs import MixtureSpec, PropertyCorrelation
 
 
-def liquid_transport_state(packages, amounts, temperature_K, pressure_Pa, references):
-    """Declared ideal-volume, log-viscosity and DIPPR9H mixture closure.
+def ideal_gas_transport_state(packages, amounts, temperature_K, pressure_Pa, references):
+    """Explicit ideal-gas volume, Wilke viscosity and WHZ conductivity closure.
+
+    Return the existing FluidState, molar enthalpy and total volume, as for
+    liquid_transport_state. This is a local dilute-gas property closure for
+    pipe/heat-transfer consumers, not a compressible-flow or dense-fluid EOS.
+    All properties and caloric datums are evaluated by the original package.
+    """
+    from chemworld.physchem.conductivity_mixtures import (
+        wassiljewa_herning_zipperer_conductivity,
+    )
+    from chemworld.physchem.property_packages import evaluate_property_state
+    from chemworld.physchem.transport import FluidState
+    from chemworld.physchem.viscosity_mixtures import wilke_viscosity
+
+    ids = tuple(p.component.identifier for p in packages)
+    _require_same_keys(dict.fromkeys(ids), amounts, "component amounts")
+    if references is None:
+        raise ValueError("gas transport needs explicit caloric references")
+    _require_same_keys(dict.fromkeys(ids), references, "explicit caloric references")
+    report = evaluate_property_state(
+        packages, amounts, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+        phase="gas", quantities=("cp", "enthalpy", "density", "molar_volume"),
+        references=references,
+    )
+    total = sum(amounts.values())
+    fractions = tuple(amounts[k] / total for k in ids)
+    weights = tuple(p.component.molecular_weight_g_mol for p in packages)
+    pure = [p.evaluate_state(
+        temperature_K=temperature_K, pressure_Pa=pressure_Pa, phase="gas",
+        quantities=("viscosity", "thermal_conductivity"),
+    ) for p in packages]
+    values = {key: value.value for key, value in report.properties.items()}
+    molecular_weight = sum(x * mw for x, mw in zip(fractions, weights, strict=True)) / 1000
+    fluid = FluidState(
+        values["density"],
+        wilke_viscosity(fractions, tuple(p.properties["viscosity"].value for p in pure), weights),
+        values["cp"] / molecular_weight,
+        wassiljewa_herning_zipperer_conductivity(
+            fractions, tuple(p.properties["thermal_conductivity"].value for p in pure), weights,
+        ),
+    )
+    return fluid, values["enthalpy"], total * values["molar_volume"]
+
+
+def liquid_transport_state(
+    packages, amounts, temperature_K, pressure_Pa, references, *,
+    viscosity_pressure_parameters=None, volume_mixing_method=None,
+    volume_mixing_parameters=None, volume_pressure_parameters=None,
+    activity_model=None,
+):
+    """Declared volume, log-viscosity and DIPPR9H mixture closure.
 
     Caloric and pure transport values come from the common property evaluator;
     this helper selects mixing laws without adding a second property database.
+    Amgat uses current pure volumes; an explicit Rackett/COSTALD selection
+    consumes the current MixtureSpec T/P/composition at every evaluation.
+    Liquid calorics use the declared pure references and optional same-GE
+    excess enthalpy/heat capacity. This remains a declared single-liquid path;
+    no liquid-liquid split or implicit excess-volume law is supplied.
     """
     from chemworld.physchem.property_packages import evaluate_property_state
     from chemworld.physchem.transport import FluidState
@@ -38,6 +93,7 @@ def liquid_transport_state(packages, amounts, temperature_K, pressure_Pa, refere
         phase="liquid",
         quantities=("cp", "enthalpy"),
         references=references,
+        activity_model=activity_model,
     )
     ids = tuple(p.component.identifier for p in packages)
     weights = tuple(p.component.molecular_weight_g_mol for p in packages)
@@ -63,7 +119,23 @@ def liquid_transport_state(packages, amounts, temperature_K, pressure_Pa, refere
         )
         for p in packages
     ]
-    mu = mixture_viscosity_log_rule(mixture, tuple(p.properties["viscosity"].value for p in pure))
+    viscosities = [p.properties["viscosity"].value for p in pure]
+    if viscosity_pressure_parameters:
+        from chemworld.physchem.dense_viscosity import lucas_liquid_viscosity
+
+        if set(viscosity_pressure_parameters) - set(ids):
+            raise ValueError("pressure correction names an undeclared liquid component")
+        for i, package in enumerate(packages):
+            parameters = viscosity_pressure_parameters.get(ids[i])
+            if parameters is not None:
+                psat = package.evaluate(
+                    "vapor_pressure", temperature_K=temperature_K, validity_policy="raise",
+                ).to("Pa").value
+                viscosities[i] = lucas_liquid_viscosity(
+                    temperature_K, pressure_Pa, saturation_pressure_Pa=psat,
+                    saturation_viscosity_Pa_s=viscosities[i], **parameters,
+                )
+    mu = mixture_viscosity_log_rule(mixture, tuple(viscosities))
     conductivity = liquid_mixture_thermal_conductivity_dippr9h_ledger(
         component_mass_fractions=dict(zip(ids, mixture.mass_fractions, strict=True)),
         component_thermal_conductivities_W_m_K={
@@ -71,10 +143,21 @@ def liquid_transport_state(packages, amounts, temperature_K, pressure_Pa, refere
         },
     )
     values = {key: value.value for key, value in report.properties.items()}
-    volume = sum(
-        amounts[k] * mw / 1000 / p.properties["density"].value
-        for k, mw, p in zip(ids, weights, pure, strict=True)
-    )
+    from chemworld.physchem.volume_mixtures import mixture_volume_evaluation
+
+    method = volume_mixing_method or "Amgat"
+    parameters = volume_mixing_parameters or {}
+    if method == "Amgat":
+        if parameters or volume_pressure_parameters:
+            raise ValueError("Amgat transport uses current pure volumes, not frozen parameters")
+        parameters = {
+            k: {"Vms": mw / 1000 / p.properties["density"].value}
+            for k, mw, p in zip(ids, weights, pure, strict=True)
+        }
+    volume = total * mixture_volume_evaluation(
+        mixture, method=method, component_parameters=parameters,
+        **(volume_pressure_parameters or {}),
+    ).value
     fluid = FluidState(
         mass / 1000 / volume,
         mu.value,

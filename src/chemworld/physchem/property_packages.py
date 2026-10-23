@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from math import isfinite, log
 from types import MappingProxyType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from chemworld.physchem.eos import CubicEOSSpec
+    from chemworld.physchem.equilibrium import ActivityModelSpec
+    from chemworld.physchem.helmholtz_solvers import HelmholtzPhaseModel
+    from chemworld.physchem.phase_evaluation import PhasePropertyModel, PhaseTransportSpec
 
 from chemworld.foundation.units import convert_value
 from chemworld.physchem.enthalpy import (
@@ -19,7 +26,6 @@ from chemworld.physchem.heat_capacity import (
     validate_capacity_curve,
 )
 from chemworld.physchem.property_equations import (
-    _choose_valid_correlation,
     _validity_warnings,
     evaluate_correlation,
     integrate_correlation,
@@ -31,6 +37,11 @@ from chemworld.physchem.property_reports import (
     PropertyEvaluation,
     StatePropertyReport,
     ValidityPolicy,
+)
+from chemworld.physchem.property_selection import (
+    PropertySelectionPolicy,
+    inspect_property_selection,
+    select_property_correlation,
 )
 from chemworld.physchem.saturation import (
     PureSaturationReport,
@@ -302,7 +313,7 @@ class PropertyPackageThermodynamics:
 def evaluate_property_state(
     packages: Sequence[ComponentPropertyPackage], component_amounts_mol: Mapping[str, float], *,
     temperature_K: float, pressure_Pa: float, phase: str, quantities: Sequence[str],
-    references: Mapping[str, CaloricReference] | None = None, eos=None,
+    references: Mapping[str, CaloricReference] | None = None, eos=None, activity_model=None,
     validity_policy: ValidityPolicy = "raise", volume_model: PropertyCorrelation | None = None,
 ) -> StatePropertyReport:
     """Evaluate a single-phase state using existing identities/correlations.
@@ -312,6 +323,9 @@ def evaluate_property_state(
     governed departure. No phase split or missing transport data is invented.
     An explicit mixture volume_model uses the original liquid correlation at
     actual T/P and binds its fixed composition to the component inventory.
+    An explicit liquid activity model adds excess H/Cp/S and mixing chemical
+    potentials to declared pure-liquid references, without inventing a volume
+    or a constant-volume caloric closure.
     """
     from chemworld.physchem.eos import (
         cubic_state_derivatives,
@@ -321,6 +335,8 @@ def evaluate_property_state(
     from chemworld.physchem.property_reports import _validate_phase
 
     _validate_phase(phase)
+    if activity_model is not None and (phase != "liquid" or eos is not None):
+        raise ValueError("an activity model requires liquid phase without a simultaneous EOS")
     if volume_model is not None and (phase != "liquid" or eos is not None):
         raise ValueError("explicit liquid volume model cannot be combined with a fluid EOS")
     if (validity_policy not in {"raise", "warn", "ignore"}
@@ -349,18 +365,31 @@ def evaluate_property_state(
     if "surface_tension" in requested and phase != "liquid":
         raise ValueError("surface tension requires the liquid side of a liquid-gas interface")
     if not requested or requested - (caloric | volume_quantities | transport_quantities
-                                     | {"fugacity_coefficient"}):
+                                     | {"fugacity_coefficient", "activity_coefficient"}):
         raise ValueError("unsupported or empty state-property request")
+    if "activity_coefficient" in requested and activity_model is None:
+        raise ValueError("activity coefficients require an explicit liquid activity model")
     if "chemical_potential" in requested and any(value == 0 for value in fractions.values()):
         raise ValueError("finite chemical potentials are undefined for zero mole fractions")
-    if phase != "gas" and eos is None and len(active) > 1 and requested & {
+    if (phase != "gas" and eos is None and activity_model is None and len(active) > 1
+            and requested & {
         "entropy", "chemical_potential", "fugacity_coefficient",
-    }:
+    }):
         raise ValueError("non-gas mixture chemical properties require an explicit activity/EOS")
     if eos is not None and phase == "solid":
         raise ValueError("a cubic fluid EOS does not describe a solid phase")
     policy = "warn" if validity_policy == "ignore" else validity_policy
-    model_details = {}
+    model_details: dict[str, object] = {}
+    excess = None
+    if activity_model is not None:
+        from chemworld.physchem.activity_thermodynamics import activity_thermodynamic_report
+
+        if set(activity_model.component_ids) != set(by_id):
+            raise ValueError("activity model identities must match the component packages")
+        excess = activity_thermodynamic_report(
+            activity_model, {key: fractions.get(key, 0.0) for key in by_id},
+            temperature_K=temperature_K)
+        model_details["activity"] = excess.to_dict()
     state = None
     derivatives = {}
     if eos is not None:
@@ -398,6 +427,8 @@ def evaluate_property_state(
         for key in active
     )
     if direct_internal and requested & caloric:
+        if excess is not None:
+            raise ValueError("activity excess properties require pure-liquid H references")
         if any(
             key not in reference_map or reference_map[key].energy_basis != "internal_energy"
             for key in active
@@ -425,8 +456,8 @@ def evaluate_property_state(
                                    == base_phase and reference.energy_basis == "enthalpy")
             if not candidates:
                 raise ValueError(f"No {property_id} correlation for {key}")
-            correlation = _choose_valid_correlation(candidates, temperature_K=temperature_K,
-                                                     pressure_Pa=pressure_Pa)
+            correlation = package.select_correlation(candidates[0].property_id,
+                candidates=candidates, temperature_K=temperature_K, pressure_Pa=pressure_Pa)
             needs = ((["cp"] if cp_needed else []) + (["enthalpy"] if energy_needed else [])
                      + (["entropy"] if entropy_needed else []))
             if direct_internal:
@@ -463,6 +494,10 @@ def evaluate_property_state(
             warnings_by_property["internal_energy"] = warnings_for("internal_energy")
     if cp_needed and not direct_internal:
         cp = weighted("cp") + derivatives.get("cp_departure_J_mol_K", 0.0)
+        if excess is not None:
+            cp += excess.heat_capacity_excess_J_mol_K
+            if not isfinite(cp) or cp <= 0:
+                raise ValueError("activity mixture Cp is outside the stable caloric domain")
         values.update(cp=cp, dH_dT_P=cp)
         for quantity in ("cp", "cv", "dH_dT_P", "dU_dT_V"):
             warnings_by_property[quantity] = warnings_for("cp")
@@ -476,6 +511,8 @@ def evaluate_property_state(
     if energy_needed and not direct_internal:
         values["enthalpy"] = weighted("enthalpy") + (
             state.molar_residual_enthalpy_J_mol if state else 0.0)
+        if excess is not None:
+            values["enthalpy"] += excess.enthalpy_excess_J_mol
         for quantity in ("enthalpy", "internal_energy"):
             warnings_by_property[quantity] = warnings_for("enthalpy")
     if entropy_needed:
@@ -484,6 +521,9 @@ def evaluate_property_state(
         if state is not None:
             values["entropy"] += (-R_J_PER_MOL_K * sum(x * log(x) for x in fractions.values() if x)
                                    + state.molar_residual_entropy_J_mol_K)
+        elif excess is not None:
+            values["entropy"] += (-R_J_PER_MOL_K * sum(x * log(x) for x in fractions.values() if x)
+                                   + excess.entropy_excess_J_mol_K)
     properties = {}
     for quantity in requested & transport_quantities:
         if len(active) != 1:
@@ -494,8 +534,8 @@ def evaluate_property_state(
                            if c.metadata.get("phase", phase) == phase)
         if not candidates:
             raise ValueError(f"No {property_id} correlation on the requested phase")
-        correlation = _choose_valid_correlation(candidates, temperature_K=temperature_K,
-                                                pressure_Pa=pressure_Pa)
+        correlation = package.select_correlation(property_id, candidates=candidates,
+            temperature_K=temperature_K, pressure_Pa=pressure_Pa)
         properties[quantity] = replace(evaluate_correlation(
             correlation, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
             validity_policy=policy).to(units[quantity]), property_id=quantity)
@@ -561,6 +601,12 @@ def evaluate_property_state(
                 raise ValueError("requested volume derivative requires a supported EOS")
             values[quantity] = derivatives[derivative]
     component_properties = {}
+    if "activity_coefficient" in requested and excess is not None:
+        component_properties["activity_coefficient"] = {
+            key: PropertyEvaluation("activity_coefficient", excess.model_id,
+                                     "partial_molar_excess_gibbs", value, "dimensionless",
+                                     {"temperature": temperature_K, "pressure": pressure_Pa})
+            for key, value in excess.activity_coefficients.items()}
     if "fugacity_coefficient" in requested:
         if state is None:
             raise ValueError("fugacity requires a declared EOS")
@@ -576,12 +622,19 @@ def evaluate_property_state(
             if state is not None:
                 mu += R_J_PER_MOL_K * temperature_K * (
                     log(fraction) + log(state.fugacity_coefficients[key]))
+            elif excess is not None:
+                mu += (R_J_PER_MOL_K * temperature_K * log(fraction)
+                       + excess.partial_molar_gibbs_excess_J_mol[key])
             component_properties["chemical_potential"][key] = PropertyEvaluation(
-                "chemical_potential", "+".join(source_ids), "declared_reference_and_fugacity", mu,
+                "chemical_potential", "+".join(source_ids),
+                "declared_reference_and_activity" if excess else "declared_reference_and_fugacity",
+                mu,
                 "J/mol", {"temperature": temperature_K, "pressure": pressure_Pa},
                 tuple(dict.fromkeys((*pure[key]["enthalpy"].warnings,
                                      *pure[key]["entropy"].warnings))))
     model_id = state.eos_id if state is not None else "single-phase-caloric-correlations-v1"
+    if excess is not None:
+        model_id = excess.model_id
     for quantity in requested - properties.keys() - component_properties.keys():
         if quantity not in values:
             raise ValueError(f"{quantity} is unavailable for the selected state model")
@@ -601,8 +654,16 @@ def evaluate_property_state(
 class ComponentPropertyPackage:
     component: ComponentSpec
     correlations: tuple[PropertyCorrelation, ...]
+    selection_policies: Mapping[str, PropertySelectionPolicy] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        policies = dict(self.selection_policies)
+        for prop, policy in policies.items():
+            if not isinstance(policy, PropertySelectionPolicy):
+                raise TypeError("package selection needs PropertySelectionPolicy objects")
+            if not self.by_property(prop):
+                raise ValueError(f"selection names an unavailable property {prop!r}")
+        object.__setattr__(self, "selection_policies", MappingProxyType(policies))
         ids = [correlation.correlation_id for correlation in self.correlations]
         if len(ids) != len(set(ids)):
             raise ValueError("Duplicate correlation_id values are not allowed")
@@ -628,12 +689,38 @@ class ComponentPropertyPackage:
             if correlation.property_id == property_id
         )
 
+    def selection_report(self, property_id, *, temperature_K, pressure_Pa=None, policy=None):
+        """Inspect all alternatives; this does not evaluate or fit their formulas."""
+        return inspect_property_selection(self.by_property(property_id), property_id=property_id,
+            temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+            policy=policy or self.selection_policies.get(property_id))
+
+    def select_correlation(self, property_id, *, temperature_K, pressure_Pa=None, candidates=None):
+        return select_property_correlation(
+            self.by_property(property_id) if candidates is None else candidates,
+            property_id=property_id, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+            policy=self.selection_policies.get(property_id))
+
+    def with_selection(self, policies):
+        """Declare choices for future states and preserve them in the original package."""
+        return replace(self, selection_policies={**self.selection_policies, **policies})
+
     def evaluate_state(
         self, *, temperature_K: float, pressure_Pa: float, phase: str,
         quantities: Sequence[str], reference: CaloricReference | None = None,
         validity_policy: ValidityPolicy = "raise", gas_model: str | None = None,
+        helmholtz_model: HelmholtzPhaseModel | None = None,
     ) -> StatePropertyReport:
         """Evaluate requested intensive properties on a one-mole pure basis."""
+        if helmholtz_model is not None:
+            from chemworld.physchem.helmholtz_properties import evaluate_helmholtz_property_state
+
+            if reference is not None or gas_model is not None or validity_policy != "raise":
+                raise ValueError(
+                    "Helmholtz uses its own caloric reference and strict source domain")
+            return evaluate_helmholtz_property_state(
+                self, helmholtz_model, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+                phase=phase, quantities=quantities)
         if gas_model is not None:
             from chemworld.physchem.virial_thermodynamics import evaluate_virial_gas_state
 
@@ -644,9 +731,13 @@ class ComponentPropertyPackage:
                                   "chemical_potential", "dH_dT_P", "dU_dT_V"}:
                 candidates = (*self.by_property("ideal_gas_heat_capacity"),
                               *self.by_property("isochoric_heat_capacity"))
-                if len(candidates) != 1 or reference is None:
+                if (not candidates or reference is None
+                        or len({c.property_id for c in candidates}) != 1
+                        or (len(candidates) > 1
+                            and candidates[0].property_id not in self.selection_policies)):
                     raise ValueError("virial gas needs one explicit ideal heat capacity/reference")
-                ideal = SpeciesCaloricModel(candidates[0], reference)
+                ideal = SpeciesCaloricModel(self.select_correlation(candidates[0].property_id,
+                    candidates=candidates, temperature_K=temperature_K), reference)
             return evaluate_virial_gas_state(self, temperature_K=temperature_K,
                 pressure_Pa=pressure_Pa, quantities=quantities, ideal_caloric=ideal)
         references = None if reference is None else {self.component.identifier: reference}
@@ -654,6 +745,23 @@ class ComponentPropertyPackage:
             (self,), {self.component.identifier: 1.0}, temperature_K=temperature_K,
             pressure_Pa=pressure_Pa, phase=phase, quantities=quantities,
             references=references, validity_policy=validity_policy)
+
+    def phase_model(
+        self, *, phase: str, reference: CaloricReference | None = None,
+        eos: CubicEOSSpec | None = None, activity_model: ActivityModelSpec | None = None,
+        volume_model: PropertyCorrelation | None = None,
+        transport_models: Mapping[str, PropertyCorrelation | PhaseTransportSpec] | None = None,
+        helmholtz_model: HelmholtzPhaseModel | None = None,
+    ) -> PhasePropertyModel:
+        """Freeze a pure-phase declaration over this package's existing consumers."""
+        from chemworld.physchem.phase_evaluation import PhasePropertyModel
+
+        return PhasePropertyModel(
+            (self,), phase=phase,
+            references=None if reference is None else {self.component.identifier: reference},
+            eos=eos, activity_model=activity_model, volume_model=volume_model,
+            transport_models=transport_models, helmholtz_model=helmholtz_model,
+        )
 
     def evaluate(
         self,
@@ -685,8 +793,8 @@ class ComponentPropertyPackage:
                 f"No correlation for property {property_id!r} on component "
                 f"{self.component.identifier!r}"
             )
-        chosen = _choose_valid_correlation(
-            candidates,
+        chosen = self.select_correlation(
+            property_id, candidates=candidates,
             temperature_K=temperature_K,
             pressure_Pa=pressure_Pa,
         )
@@ -711,8 +819,8 @@ class ComponentPropertyPackage:
                 f"No correlation for property {property_id!r} on component "
                 f"{self.component.identifier!r}"
             )
-        chosen = _choose_valid_correlation(
-            candidates,
+        chosen = self.select_correlation(
+            property_id, candidates=candidates,
             temperature_K=temperature_K,
             pressure_Pa=None,
         )
@@ -737,8 +845,8 @@ class ComponentPropertyPackage:
                 f"No correlation for property {property_id!r} on component "
                 f"{self.component.identifier!r}"
             )
-        chosen = _choose_valid_correlation(
-            candidates,
+        chosen = self.select_correlation(
+            property_id, candidates=candidates,
             temperature_K=temperature_K,
             pressure_Pa=None,
         )
@@ -766,8 +874,8 @@ class ComponentPropertyPackage:
                 f"No correlation for property {property_id!r} on component "
                 f"{self.component.identifier!r}"
             )
-        chosen = _choose_valid_correlation(
-            candidates,
+        chosen = self.select_correlation(
+            property_id, candidates=candidates,
             temperature_K=temperature_bounds_K[0] if temperature_bounds_K else 298.15,
             pressure_Pa=None,
         )
@@ -796,8 +904,8 @@ class ComponentPropertyPackage:
                 f"No correlation for property {property_id!r} on component "
                 f"{self.component.identifier!r}"
             )
-        chosen = _choose_valid_correlation(
-            candidates,
+        chosen = self.select_correlation(
+            property_id, candidates=candidates,
             temperature_K=temperature_bounds_K[0] if temperature_bounds_K else 298.15,
             pressure_Pa=None,
         )
@@ -814,4 +922,16 @@ class ComponentPropertyPackage:
         return {
             "component": self.component.to_dict(),
             "correlations": [correlation.to_dict() for correlation in self.correlations],
+            **({"selection_policies": {k: p.to_dict() for k, p in self.selection_policies.items()}}
+               if self.selection_policies else {}),
         }
+
+    @classmethod
+    def from_dict(cls, payload):
+        if set(payload) - {"component", "correlations", "selection_policies"}:
+            raise ValueError("unknown property package fields")
+        return cls(ComponentSpec.from_dict(payload["component"]),
+            tuple(PiecewiseHeatCapacity.from_dict(c) if "model" in c
+                  else PropertyCorrelation.from_dict(c) for c in payload["correlations"]),
+            {k: PropertySelectionPolicy.from_dict(p)
+             for k, p in payload.get("selection_policies", {}).items()})

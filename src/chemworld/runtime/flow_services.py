@@ -21,6 +21,7 @@ from chemworld.foundation.state_ledgers import EquipmentLedger, EquipmentRecord
 from chemworld.physchem.heat_transfer_units import TubularHeatTransferBoundarySpec
 from chemworld.physchem.pfr_reactors import PFRGeometrySpec, PFRModel
 from chemworld.physchem.reactor_shared import HeatTransferSpec
+from chemworld.runtime.action_values import bounded_action_float
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.runtime.reaction_thermal_services import ChemWorldReactionThermalServices
@@ -30,25 +31,6 @@ from chemworld.world.continuous_flow import (
     FIXED_FLOW_REACTOR_VOLUME_L,
 )
 from chemworld.world.mixtures import volumetric_heat_capacity, working_solvents
-
-
-def _action_float(action: dict[str, Any], key: str, default: float) -> float:
-    value = action.get(key, default)
-    return float(np.asarray(value).reshape(-1)[0])
-
-
-def _bounded_action_float(
-    action: dict[str, Any],
-    key: str,
-    default: float,
-    *,
-    minimum: float,
-    maximum: float,
-) -> float:
-    value = _action_float(action, key, default)
-    if not np.isfinite(value) or not minimum <= value <= maximum:
-        raise ValueError(f"{key} must be finite and in [{minimum}, {maximum}]")
-    return value
 
 
 def _feed_signature(state: WorldState) -> str:
@@ -98,14 +80,14 @@ class ChemWorldFlowServices:
             return selected[1].configure_flow(state, action)
         if action.get("flow_path", "process") != "process":
             raise ValueError("flow path is not supported by the installed apparatus")
-        flow_rate = _bounded_action_float(
+        flow_rate = bounded_action_float(
             action,
             "flow_rate_mL_min",
             1.0,
             minimum=0.01,
             maximum=20.0,
         )
-        requested_residence = _bounded_action_float(
+        requested_residence = bounded_action_float(
             action,
             "residence_time_s",
             600.0,
@@ -205,7 +187,7 @@ class ChemWorldFlowServices:
             raise RuntimeError("stored flow configuration is outside its declared domain")
         residence = float(flow_settings.get("minimum_run_duration_s", configured_residence))
         flow_rate = configured_flow_rate
-        duration = _bounded_action_float(
+        duration = bounded_action_float(
             action,
             "duration_s",
             residence,
@@ -214,7 +196,7 @@ class ChemWorldFlowServices:
         )
         if duration < residence:
             raise ValueError("run_flow duration must reach at least one configured residence time")
-        target_temperature = _bounded_action_float(
+        target_temperature = bounded_action_float(
             action,
             "target_temperature_K",
             348.15,

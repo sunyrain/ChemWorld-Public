@@ -207,7 +207,7 @@ def property_correlation_model_cards() -> tuple[ModelCard, ...]:
                                  "and separate complete 13-source external-data block; source "
                                  "missing/invalid data and all original failures stay explicit."),
                     status="implemented",
-                    command_or_path="workstreams/world_foundation/NATIVE_CONV22C3_EXPERIMENT.md",
+                    command_or_path="workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22C3_EXPERIMENT.md",
                     tolerance="Fixed per-measurement tolerances in the experiment note",
                     reference_backend="chemicals 1.5.2",
                 ),

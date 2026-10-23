@@ -97,6 +97,24 @@ def test_lazy_source_boundaries_and_complete_catalog(database):
     assert "not established" in rows[0].source.license
 
 
+def test_inspect_search_keeps_source_failures_and_structural_conflicts(database):
+    report = database.inspect_search(
+        "C2H6O", kind="formula", source_ids=("pubchem-small", "absent"))
+    assert len(report["candidates"]) == 2 and report["identity_conflict"]
+    assert "smiles" in report["conflicting_fields"]
+    assert report["sources"][1]["status"] == "unknown_method"
+    assert report["selected_record_id"] is None
+    assert json.loads(json.dumps(report)) == report
+    assert database.inspect_search("absent", source_ids=("pubchem-small",))["sources"][0][
+        "status"] == "missing_identity"
+    empty = IdentifierDatabase(database.source_directory / "absent")
+    report = empty.inspect_search("water", source_ids=("pubchem-small",))
+    assert report["sources"][0]["status"] == "source_unavailable"
+    assert report["candidates"] == []
+    with pytest.raises(TypeError):
+        database.inspect_search("water", source_ids="pubchem-small")
+
+
 @pytest.mark.parametrize(
     "identity,kind",
     [

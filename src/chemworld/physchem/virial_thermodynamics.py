@@ -8,6 +8,11 @@ accuracy, mixture cross rule, phase equilibrium or open-flow model is inferred.
 from dataclasses import dataclass
 from math import isfinite
 
+from chemworld.physchem.fluid_response import (
+    compressibility_factor,
+    density_molar_volume,
+    heat_capacity_difference,
+)
 from chemworld.physchem.property_packages import (
     ComponentPropertyPackage,
     SpeciesCaloricModel,
@@ -20,23 +25,36 @@ from chemworld.physchem.property_reports import (
     PropertyEvaluation,
     StatePropertyReport,
 )
-from chemworld.physchem.specs import ComponentSpec, PropertyCorrelation
 from chemworld.physchem.virial_correlations import virial_temperature_report
 from chemworld.physchem.virial_gas import density_virial_state, virial_pressure
 
 
-def _coefficients(package, temperature_K):
-    results, curves = [], []
-    for prefix, unit in (("second", "m^3/mol"), ("third", "m^6/mol^2")):
+def _coefficient_groups(package):
+    groups = []
+    for prefix in ("second", "third"):
         candidates = package.by_property(prefix + "_virial_coefficient")
         if prefix == "third" and not candidates:
+            groups.append(())
+            continue
+        if not candidates or (len(candidates) != 1
+                              and prefix + "_virial_coefficient" not in package.selection_policies):
+            raise ValueError(f"pure virial package requires exactly one {prefix} coefficient "
+                             "or an explicit selection policy")
+        if any("temperature" not in c.validity_ranges for c in candidates):
+            raise ValueError("virial consumer requires an explicit temperature range")
+        groups.append(candidates)
+    return groups
+
+
+def _coefficients(package, temperature_K):
+    results, curves = [], []
+    for group, unit in zip(_coefficient_groups(package), ("m^3/mol", "m^6/mol^2"), strict=True):
+        if not group:
             results.append((0.0,) * 4)
             continue
-        if len(candidates) != 1:
-            raise ValueError(f"pure virial package requires exactly one {prefix} coefficient")
-        curve = candidates[0]
-        if "temperature" not in curve.validity_ranges:
-            raise ValueError("virial consumer requires an explicit temperature range")
+        curve = package.select_correlation(group[0].property_id,
+                                           temperature_K=temperature_K, candidates=group)
+        curves.append(curve)
         evaluations = virial_temperature_report(curve, temperature_K=temperature_K)
         results.append(
             tuple(
@@ -44,7 +62,6 @@ def _coefficients(package, temperature_K):
                 for i, value in enumerate(evaluations)
             )
         )
-        curves.append(curve)
     return (*results, tuple(curves))
 
 
@@ -76,8 +93,8 @@ def _state_values(
     pt = R / v * (1 + (b[0] + t * b[1]) / v + (c[0] + t * c[1]) / v**2)
     values = {
         "molar_volume": v,
-        "density": package.component.molecular_weight_g_mol / 1000 / v,
-        "compressibility_factor": p * v / (R * t),
+        "density": density_molar_volume(v, package.component.molecular_weight_g_mol),
+        "compressibility_factor": compressibility_factor(t, p, v),
         "dV_dT_P": -pt / pv,
         "dV_dP_T": 1 / pv,
     }
@@ -97,7 +114,7 @@ def _state_values(
         utt = b[2] / v + c[2] / (2 * v**2)
         u = ideal["internal_energy"].value - R * t * t * ut
         cv = ideal["cv"].value - R * (2 * t * ut + t * t * utt)
-        cp = cv - t * pt * pt / pv
+        cp = cv + heat_capacity_difference(t, pt, pv)
         if not isfinite(cv) or cv <= 0 or not isfinite(cp) or cp <= 0:
             raise ValueError("virial caloric state requires positive finite Cv and Cp")
         values.update(internal_energy=u, enthalpy=u + p * v, cv=cv, cp=cp, dH_dT_P=cp, dU_dT_V=cv)
@@ -196,7 +213,9 @@ class VirialGasThermodynamics:
     def __post_init__(self):
         if self.ideal_caloric.reference.phase != "gas":
             raise ValueError("virial caloric reference must explicitly describe ideal gas")
-        _coefficients(self.package, self.ideal_caloric.reference.temperature_K)
+        # The ideal datum anchors only the ideal caloric integral. Residual
+        # Helmholtz terms are evaluated at the actual state, not at this datum.
+        _coefficient_groups(self.package)
 
     @property
     def inventory_keys(self):
@@ -256,10 +275,7 @@ class VirialGasThermodynamics:
             raise ValueError("unsupported virial thermal declaration")
         package = payload["package"]
         return cls(
-            ComponentPropertyPackage(
-                ComponentSpec.from_dict(package["component"]),
-                tuple(PropertyCorrelation.from_dict(c) for c in package["correlations"]),
-            ),
+            ComponentPropertyPackage.from_dict(package),
             SpeciesCaloricModel.from_dict(payload["ideal_caloric"]),
         )
 

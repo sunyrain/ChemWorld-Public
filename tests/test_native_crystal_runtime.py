@@ -157,7 +157,8 @@ def test_native_common_solver_failure_rolls_back_crystal_phases_population_tempe
         session.close()
 
 
-def test_material_reset_mixes_retained_body_heat_with_fresh_crystal_inventory():
+@pytest.mark.parametrize("scope", ["material", "vessel"])
+def test_material_reset_mixes_retained_body_heat_with_fresh_crystal_inventory(scope):
     world, session = session_for()
     try:
         execute(
@@ -168,16 +169,33 @@ def test_material_reset_mixes_retained_body_heat_with_fresh_crystal_inventory():
             stirring_speed_rpm=600,
         )
         before = session._state
-        expected = -20 + 20 * (before.temperature_K - 298.15)
-        session.reset(options={"scope": "material"})
+        old_settings = equipment_settings(before.equipment, "crystallizer")
+        expected = -20 + (20 * (before.temperature_K - 298.15) if scope == "material" else 0)
+        session.reset(options={"scope": scope})
         state = session._state
-        assert 298.15 < state.temperature_K < before.temperature_K
+        if scope == "material":
+            assert 298.15 < state.temperature_K < before.temperature_K
+        else:
+            assert state.temperature_K == pytest.approx(298.15)
         assert state.ledger == before.ledger
         assert state.phases.phases["solid"].species_amounts_mol["P"] == 0.001
         assert crystal_inventory_energy(
             state, world.physics.crystal_models["reactor"], world.physics.thermal_models["reactor"]
         ) == pytest.approx(expected, abs=1e-6)
         population_from_state(state, world.physics.crystal_models["reactor"])
+        settings = equipment_settings(state.equipment, "crystallizer")
+        assert settings["population_constituents"] == [[.0003, .0001, .001]]
+        assert settings["seed_target_mol"] == .0003
+        assert settings["dissolved_seed_target_mol"] == .0002
+        assert settings["execution_history"] == old_settings["execution_history"]
+        restored = ChemWorldRuntime.from_snapshot(json.loads(json.dumps(
+            session.snapshot().to_dict())))
+        try:
+            for current in (session, restored):
+                execute(current, operation="wait", duration_s=1, stirring_speed_rpm=600)
+            assert session._state.to_dict() == restored._state.to_dict()
+        finally:
+            restored.close()
     finally:
         session.close()
 

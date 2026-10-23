@@ -131,6 +131,32 @@ def test_conflicts_require_explicit_selection_and_duplicates_survive(db):
     assert db.record("PSRK:1", method="PSRK").raw("Tc__2") == "641"
 
 
+def test_inspection_separates_source_identity_field_value_unit_and_conflicts(db):
+    report = db.inspect_value("7732-18-5", "Tc", methods=("HEOS", "IUPAC", "PSRK", "absent"))
+    assert [r["status"] for r in report["methods"]] == [
+        "matched", "matched", "source_unavailable", "unknown_method"]
+    assert report["value_conflict"] and not report["identity_conflict"]
+    assert report["selected_record_id"] is None
+    assert json.loads(json.dumps(report)) == report
+    cases = (("Water", "Pt", "missing_value"), ("Water", "unknown", "missing_unit"),
+             ("Ethanol", "Tc", "invalid_value"), ("Water", "absent", "missing_field"))
+    for identity, field, diagnostic in cases:
+        item = db.inspect_value(identity, field, methods=("HEOS",))["methods"][0]
+        assert diagnostic in item["records"][0]["diagnostics"]
+    assert db.inspect_value("absent", "Tc", methods=("HEOS",))["methods"][0][
+        "status"] == "missing_identity"
+    series = db.inspect_value("water", "P", methods=("VDI",))
+    assert series["methods"][0]["records"][0]["raw_value"] == (1000, 22064000, 1e5)
+    point = db.inspect_value("water", "P", methods=("VDI",), point=2)
+    assert point["methods"][0]["records"][0]["value"]["value"] == 1e5
+    put(db.source_directory, "PSRK", "CAS\tTc\n7732-18-5\t640\n7732-18-5\t650\n")
+    report = db.inspect_value("7732-18-5", "Tc", methods=("PSRK",))
+    assert report["methods"][0]["status"] == "ambiguous_records"
+    assert report["value_conflict"]
+    with pytest.raises(TypeError):
+        db.inspect_value("Water", "Tc", methods="HEOS")
+
+
 def test_xml_original_units_and_correlations_are_preserved(tmp_path):
     put(tmp_path, "CHEMSEP_XML", '<compounds><compound><CAS value="7732-18-5"/>'
         '<CriticalVolume value="0.056" units="m3/kmol"/>'

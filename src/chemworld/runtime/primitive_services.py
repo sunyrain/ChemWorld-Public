@@ -21,6 +21,7 @@ from chemworld.foundation.solvents import (
     SolventInventory,
 )
 from chemworld.foundation.state import PhaseLedger
+from chemworld.runtime.action_values import action_float
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.world.actions import CATALYSTS, SOLVENTS
 from chemworld.world.mixtures import volumetric_heat_capacity, working_solvents
@@ -28,13 +29,8 @@ from chemworld.world.parameters import ChemWorldParameters
 from chemworld.world.thermal_kernel import account_temperature_transition
 
 
-def _action_float(action: dict[str, Any], key: str, default: float) -> float:
-    value = action.get(key, default)
-    return float(np.asarray(value).reshape(-1)[0])
-
-
 def _action_index(action: dict[str, Any], key: str, default: int, count: int) -> int:
-    return int(np.clip(int(_action_float(action, key, float(default))), 0, count - 1))
+    return int(np.clip(int(action_float(action, key, float(default))), 0, count - 1))
 
 
 class ChemWorldPrimitiveOperationServices:
@@ -118,7 +114,7 @@ class ChemWorldPrimitiveOperationServices:
             if not 0 <= component < len(feeds):
                 raise ValueError("Component is outside this mechanism's feed catalog")
             return {feeds[component]: float(action["amount_mol"])}
-        amount = float(np.clip(_action_float(action, "amount_mol", 0.003), 0.0, 0.040))
+        amount = float(np.clip(action_float(action, "amount_mol", 0.003), 0.0, 0.040))
         return self.species_view.reagent_charge_amounts(
             state,
             limiting_amount_mol=amount,
@@ -166,7 +162,7 @@ class ChemWorldPrimitiveOperationServices:
         )
 
     def add_solvent(self, state: WorldState, action: dict[str, Any]) -> WorldState:
-        volume = float(np.clip(_action_float(action, "volume_L", 0.025), 0.0, 0.080))
+        volume = float(np.clip(action_float(action, "volume_L", 0.025), 0.0, 0.080))
         solvent = _action_index(action, "solvent", 0, len(SOLVENTS))
         from chemworld.runtime.condensed_material_routing import add_background, background_model
 
@@ -232,7 +228,7 @@ class ChemWorldPrimitiveOperationServices:
 
     @staticmethod
     def catalyst_charge(action: dict[str, Any]) -> float:
-        return float(np.clip(_action_float(action, "catalyst_amount_mol", 0.00020), 0.0, 0.005))
+        return float(np.clip(action_float(action, "catalyst_amount_mol", 0.00020), 0.0, 0.005))
 
     def add_catalyst(self, state: WorldState, action: dict[str, Any]) -> WorldState:
         amount = self.catalyst_charge(action)
@@ -271,7 +267,7 @@ class ChemWorldPrimitiveOperationServices:
         from chemworld.runtime.aqueous_mineral import close_aqueous
         from chemworld.runtime.full_process_contract import withdraw_sample
 
-        volume = float(np.clip(_action_float(action, "sample_volume_L", 0.0001), 0.0, 0.002))
+        volume = float(np.clip(action_float(action, "sample_volume_L", 0.0001), 0.0, 0.002))
         return close_aqueous(withdraw_sample(state, volume)).replace(
             ledger=state.ledger.with_updates(
                 sample_consumed_L=state.ledger.sample_consumed_L + volume,
@@ -331,9 +327,9 @@ class ChemWorldPrimitiveOperationServices:
         )
 
     def evaporate(self, state: WorldState, action: dict[str, Any]) -> WorldState:
-        duration = float(np.clip(_action_float(action, "duration_s", 600.0), 0.0, 14_400.0))
+        duration = float(np.clip(action_float(action, "duration_s", 600.0), 0.0, 14_400.0))
         target_temperature = float(
-            np.clip(_action_float(action, "target_temperature_K", 328.15), 298.15, 390.0)
+            np.clip(action_float(action, "target_temperature_K", 328.15), 298.15, 390.0)
         )
         medium = working_solvents(state)
         heat_capacity = (

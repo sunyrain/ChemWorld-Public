@@ -19,21 +19,74 @@ __all__ = [
     "TRAJECTORY_ALIAS_WRITE_REMOVAL_VERSION",
     "TRAJECTORY_COMPATIBILITY_ALIASES",
     "TRAJECTORY_SCHEMA_VERSION",
+    "ActivityCalibration",
+    "ActivityFitParameter",
     "ChemSageDatabase",
     "ChemSageParseError",
+    "DiameterDistributionCalibration",
+    "MolecularGroupAssignment",
     "SBMLModel",
     "SubmissionManifest",
     "TdbDatabase",
     "TdbParseError",
     "TrajectoryLogger",
     "TrajectoryRecordPayload",
+    "UNIFACInteractionRecord",
+    "iter_ddbst_sqlite",
+    "iter_ddbst_text",
+    "load_helmholtz_fluid",
+    "load_helmholtz_phase_model",
     "load_jsonl",
+    "read_helmholtz_fluid",
+    "read_unifac_interactions",
+    "read_unifac_subgroups",
+    "select_unifac_interactions",
+    "twu_eos_component_from_record",
+    "unifac_model_from_assignments",
     "validate_record",
     "validate_records",
 ]
 
 
 def __getattr__(name):
+    if name == "DiameterDistributionCalibration":
+        from chemworld.data.particle_distribution_calibration import DiameterDistributionCalibration
+
+        globals()[name] = DiameterDistributionCalibration
+        return DiameterDistributionCalibration
+    if name == "twu_eos_component_from_record":
+        from chemworld.data.twu_eos import twu_eos_component_from_record
+
+        globals()[name] = twu_eos_component_from_record
+        return twu_eos_component_from_record
+    if name in {
+        "MolecularGroupAssignment", "UNIFACInteractionRecord",
+        "iter_ddbst_sqlite", "iter_ddbst_text", "read_unifac_interactions",
+        "read_unifac_subgroups", "select_unifac_interactions",
+        "unifac_model_from_assignments",
+    }:
+        from chemworld.data import unifac_sources
+
+        value = getattr(unifac_sources, name)
+        globals()[name] = value
+        return value
+    if name in {"load_helmholtz_fluid", "read_helmholtz_fluid"}:
+        from chemworld.data import helmholtz
+
+        value = getattr(helmholtz, name)
+        globals()[name] = value
+        return value
+    if name == "load_helmholtz_phase_model":
+        from chemworld.data.helmholtz_phase import load_helmholtz_phase_model
+
+        globals()[name] = load_helmholtz_phase_model
+        return load_helmholtz_phase_model
+    if name in {"ActivityCalibration", "ActivityFitParameter"}:
+        from chemworld.data import activity_calibration
+
+        value = getattr(activity_calibration, name)
+        globals()[name] = value
+        return value
     if name == "SBMLModel":
         from chemworld.data.sbml import SBMLModel
 

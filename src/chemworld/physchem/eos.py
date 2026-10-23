@@ -7,6 +7,7 @@ state with classical one-fluid mixing rules and fugacity coefficients.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import exp, isfinite, log, sqrt
@@ -14,7 +15,10 @@ from typing import Literal
 
 import numpy as np
 
+from chemworld.physchem.composition_math import _normalize_composition
+from chemworld.physchem.cubic_mixing import GibbsExcessMixingSpec
 from chemworld.physchem.eos_cards import eos_model_cards
+from chemworld.physchem.ppr78 import PPR78Spec
 
 R_J_PER_MOL_K = 8.31446261815324
 CubicModel = Literal["peng_robinson", "srk"]
@@ -27,6 +31,9 @@ class EOSComponentSpec:
     critical_temperature_K: float
     critical_pressure_Pa: float
     acentric_factor: float = 0.0
+    alpha_model: Literal["soave", "twu91"] = "soave"
+    alpha_coefficients: tuple[float, ...] = ()
+    alpha_provenance: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.component_id:
@@ -37,6 +44,18 @@ class EOSComponentSpec:
             raise ValueError("critical_pressure_Pa must be positive")
         if not isfinite(self.acentric_factor):
             raise ValueError("acentric_factor must be finite")
+        if self.alpha_model not in {"soave", "twu91"}:
+            raise ValueError("unsupported cubic alpha model")
+        if len(self.alpha_coefficients) != (3 if self.alpha_model == "twu91" else 0):
+            raise ValueError(
+                "Twu alpha needs three coefficients; Soave uses the EOS acentric factor")
+        if any(isinstance(v, bool) or not isfinite(v) for v in self.alpha_coefficients):
+            raise ValueError("cubic alpha coefficients must be finite")
+        object.__setattr__(self, "alpha_coefficients", tuple(self.alpha_coefficients))
+        if not isinstance(self.alpha_provenance, dict):
+            raise ValueError("alpha_provenance must be a JSON object")
+        object.__setattr__(self, "alpha_provenance",
+                           json.loads(json.dumps(self.alpha_provenance, allow_nan=False)))
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -44,6 +63,10 @@ class EOSComponentSpec:
             "critical_temperature_K": self.critical_temperature_K,
             "critical_pressure_Pa": self.critical_pressure_Pa,
             "acentric_factor": self.acentric_factor,
+            **({"alpha_model": self.alpha_model,
+                "alpha_coefficients": list(self.alpha_coefficients),
+                "alpha_provenance": json.loads(json.dumps(self.alpha_provenance))}
+               if self.alpha_model != "soave" or self.alpha_provenance else {}),
         }
 
 
@@ -128,15 +151,37 @@ class CubicEOSSpec:
     binary_interaction: dict[str, float] = field(default_factory=dict)
     binary_interaction_provenance: tuple[BinaryInteractionProvenance, ...] = ()
     volume_translation: tuple[VolumeTranslationSpec, ...] = ()
+    pure_parameterization: Literal["legacy", "pr78"] = "legacy"
+    predictive_interaction: PPR78Spec | None = None
+    ge_mixing: GibbsExcessMixingSpec | None = None
 
     def __post_init__(self) -> None:
         if self.model not in {"peng_robinson", "srk"}:
             raise ValueError(f"Unsupported cubic EOS model: {self.model}")
+        if self.pure_parameterization not in {"legacy", "pr78"}:
+            raise ValueError("unsupported cubic pure parameterization")
+        if self.pure_parameterization == "pr78" and self.model != "peng_robinson":
+            raise ValueError("PR78 parameterization requires Peng-Robinson EOS")
         if not self.components:
             raise ValueError("Cubic EOS requires at least one component")
         ids = [component.component_id for component in self.components]
         if len(ids) != len(set(ids)):
             raise ValueError("Duplicate EOS component ids are not allowed")
+        if self.ge_mixing is not None:
+            if tuple(ids) != self.ge_mixing.activity.component_ids:
+                raise ValueError("GE mixing activity identities/order must match EOS components")
+            if (self.binary_interaction or self.binary_interaction_provenance
+                    or self.predictive_interaction is not None):
+                raise ValueError("GE mixing cannot be combined with quadratic/PPR interactions")
+        if self.predictive_interaction is not None:
+            if self.pure_parameterization != "pr78":
+                raise ValueError("PPR78 requires explicit pr78 pure parameterization")
+            if any(component.alpha_model != "soave" for component in self.components):
+                raise ValueError("PPR78 requires its standard Soave alpha")
+            if set(self.predictive_interaction.groups) != set(ids):
+                raise ValueError("PPR78 group component identities must match EOS components")
+            if self.binary_interaction or self.binary_interaction_provenance:
+                raise ValueError("predictive and constant binary interactions cannot be combined")
         if any(not isfinite(value) for value in self.binary_interaction.values()):
             raise ValueError("binary interaction values must be finite")
         component_ids = set(ids)
@@ -174,6 +219,10 @@ class CubicEOSSpec:
             for record in values.get("binary_interaction_provenance", ()))
         values["volume_translation"] = tuple(VolumeTranslationSpec(**v)
                                               for v in values.get("volume_translation", ()))
+        if values.get("predictive_interaction") is not None:
+            values["predictive_interaction"] = PPR78Spec.from_dict(values["predictive_interaction"])
+        if values.get("ge_mixing") is not None:
+            values["ge_mixing"] = GibbsExcessMixingSpec.from_dict(values["ge_mixing"])
         return cls(**values)
 
     def to_dict(self) -> dict[str, object]:
@@ -188,6 +237,11 @@ class CubicEOSSpec:
             "volume_translation": [
                 translation.to_dict() for translation in self.volume_translation
             ],
+            **({"pure_parameterization": self.pure_parameterization}
+               if self.pure_parameterization != "legacy" else {}),
+            **({"predictive_interaction": self.predictive_interaction.to_dict()}
+               if self.predictive_interaction is not None else {}),
+            **({"ge_mixing": self.ge_mixing.to_dict()} if self.ge_mixing is not None else {}),
         }
 
 
@@ -200,6 +254,9 @@ class CubicPureParameters:
     alpha: float
     kappa: float
     da_alpha_dT: float
+    d2a_alpha_dT2: float = 0.0
+    d3a_alpha_dT3: float = 0.0
+    alpha_model: str = "soave"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -210,6 +267,9 @@ class CubicPureParameters:
             "alpha": self.alpha,
             "kappa": self.kappa,
             "da_alpha_dT": self.da_alpha_dT,
+            "d2a_alpha_dT2": self.d2a_alpha_dT2,
+            "d3a_alpha_dT3": self.d3a_alpha_dT3,
+            "alpha_model": self.alpha_model,
         }
 
 
@@ -223,12 +283,14 @@ class EOSMixtureParameters:
     b_values: tuple[float, ...]
     pure_parameters: tuple[CubicPureParameters, ...]
     binary_interaction_provenance: tuple[BinaryInteractionProvenance, ...] = ()
+    db_mix_dT: float = 0.0
 
     def to_dict(self) -> dict[str, object]:
         return {
             "a_mix": self.a_mix,
             "da_mix_dT": self.da_mix_dT,
             "b_mix": self.b_mix,
+            "db_mix_dT": self.db_mix_dT,
             "a_matrix": [list(row) for row in self.a_matrix],
             "da_matrix_dT": [list(row) for row in self.da_matrix_dT],
             "b_values": list(self.b_values),
@@ -457,10 +519,12 @@ def cubic_pure_parameters(
     *,
     model: CubicModel,
     temperature_K: float,
+    parameterization: Literal["legacy", "pr78"] = "legacy",
 ) -> CubicPureParameters:
-    if temperature_K <= 0:
+    from chemworld.physchem.cubic_alpha import cubic_alpha_response
+
+    if not isfinite(temperature_K) or temperature_K <= 0:
         raise ValueError("temperature_K must be positive")
-    tr_sqrt = sqrt(temperature_K / component.critical_temperature_K)
     omega = component.acentric_factor
     if model == "peng_robinson":
         omega_a = 0.45724
@@ -472,10 +536,17 @@ def cubic_pure_parameters(
         kappa = 0.480 + 1.574 * omega - 0.176 * omega**2
     else:
         raise ValueError(f"Unsupported cubic EOS model: {model}")
-    alpha_base = 1.0 + kappa * (1.0 - tr_sqrt)
-    alpha = alpha_base**2
-    d_alpha_dT = -kappa * alpha_base / (
-        component.critical_temperature_K * max(tr_sqrt, 1e-300)
+    if parameterization == "pr78":
+        from chemworld.physchem.ppr78 import PR78_OMEGA_A, PR78_OMEGA_B, pr78_kappa
+        if model != "peng_robinson":
+            raise ValueError("PR78 pure parameterization requires Peng-Robinson")
+        omega_a, omega_b, kappa = PR78_OMEGA_A, PR78_OMEGA_B, pr78_kappa(omega)
+    elif parameterization != "legacy":
+        raise ValueError("unsupported cubic pure parameterization")
+    alpha_response = cubic_alpha_response(
+        temperature_K=temperature_K, critical_temperature_K=component.critical_temperature_K,
+        model=component.alpha_model,
+        coefficients=component.alpha_coefficients if component.alpha_model == "twu91" else (kappa,),
     )
     a = (
         omega_a
@@ -488,11 +559,14 @@ def cubic_pure_parameters(
     return CubicPureParameters(
         component_id=component.component_id,
         a_c=a,
-        a_alpha=a * alpha,
+        a_alpha=a * alpha_response.alpha,
         b=b,
-        alpha=alpha,
+        alpha=alpha_response.alpha,
         kappa=kappa,
-        da_alpha_dT=a * d_alpha_dT,
+        da_alpha_dT=a * alpha_response.d_alpha_dT,
+        d2a_alpha_dT2=a * alpha_response.d2_alpha_dT2,
+        d3a_alpha_dT3=a * alpha_response.d3_alpha_dT3,
+        alpha_model=component.alpha_model,
     )
 
 
@@ -504,21 +578,39 @@ def cubic_mixture_parameters(
 ) -> EOSMixtureParameters:
     x = _composition_vector(spec, composition)
     pure = tuple(
-        cubic_pure_parameters(component, model=spec.model, temperature_K=temperature_K)
+        cubic_pure_parameters(component, model=spec.model, temperature_K=temperature_K,
+                              parameterization=spec.pure_parameterization)
         for component in spec.components
     )
+    if spec.ge_mixing is not None:
+        from chemworld.physchem.caloric_math import partial_derivative
+        from chemworld.physchem.cubic_mixing import cubic_mixing_expression
+
+        a_mix, b_mix = cubic_mixing_expression(spec, x, temperature_K)
+        da = partial_derivative(lambda v: cubic_mixing_expression(spec, x, v["T"])[0],
+                                {"T": temperature_K}, ("T",))
+        db = partial_derivative(lambda v: cubic_mixing_expression(spec, x, v["T"])[1],
+                                {"T": temperature_K}, ("T",))
+        return EOSMixtureParameters(a_mix, da, b_mix, (), (), tuple(p.b for p in pure),
+                                     pure, db_mix_dT=db)
     n = len(spec.components)
     a_matrix = [[0.0 for _ in range(n)] for _ in range(n)]
     da_matrix_dT = [[0.0 for _ in range(n)] for _ in range(n)]
     for i, left in enumerate(spec.components):
         for j, right in enumerate(spec.components):
             kij = _binary_interaction(spec, left.component_id, right.component_id)
+            dk_dT = 0.0
+            if spec.predictive_interaction is not None and i != j:
+                from chemworld.physchem.ppr78 import ppr78_interaction_response
+                response = ppr78_interaction_response(
+                    spec.predictive_interaction, left, right, temperature_K=temperature_K)
+                kij, dk_dT = response["k_ij"], response["dk_dT"]
             a_matrix[i][j] = sqrt(pure[i].a_alpha * pure[j].a_alpha) * (1.0 - kij)
             da_matrix_dT[i][j] = _cross_a_temperature_derivative(
                 pure[i],
                 pure[j],
                 kij=kij,
-            )
+            ) - sqrt(pure[i].a_alpha * pure[j].a_alpha) * dk_dT
     a_mix = sum(x[i] * x[j] * a_matrix[i][j] for i in range(n) for j in range(n))
     da_mix_dT = sum(
         x[i] * x[j] * da_matrix_dT[i][j] for i in range(n) for j in range(n)
@@ -975,6 +1067,12 @@ def cubic_fugacity_coefficients(
     pressure_Pa: float,
 ) -> dict[str, float]:
     x = _composition_vector(spec, composition)
+    if spec.ge_mixing is not None:
+        from chemworld.physchem.cubic_mixing import cubic_helmholtz_fugacities
+
+        volume = z_factor*R_J_PER_MOL_K*temperature_K/pressure_Pa
+        values = cubic_helmholtz_fugacities(spec, x, temperature_K, volume, z_factor)
+        return {key: exp(value) for key, value in zip(spec.component_ids, values, strict=True)}
     a_reduced, b_reduced = cubic_ab(
         mixture,
         temperature_K=temperature_K,
@@ -1048,6 +1146,25 @@ def cubic_residual_properties(
 ) -> CubicResidualProperties:
     _validate_tp(temperature_K, pressure_Pa)
     x = _composition_vector(spec, composition)
+    if spec.ge_mixing is not None:
+        from chemworld.physchem.caloric_math import partial_derivative
+        from chemworld.physchem.cubic_mixing import cubic_residual_helmholtz
+
+        volume = z_factor*R_J_PER_MOL_K*temperature_K/pressure_Pa
+        helmholtz = cubic_residual_helmholtz(spec, x, temperature_K, volume)
+        dA = partial_derivative(
+            lambda v: cubic_residual_helmholtz(spec, x, v["T"], volume),
+            {"T": temperature_K}, ("T",))
+        enthalpy = helmholtz-temperature_K*dA+R_J_PER_MOL_K*temperature_K*(z_factor-1)
+        entropy = -dA+R_J_PER_MOL_K*log(z_factor)
+        s1, s2 = _cubic_shape_constants(spec.model)
+        return CubicResidualProperties(
+            model=spec.model, z_factor=z_factor, root_selection_policy=root_selection_policy,
+            molar_residual_enthalpy_J_mol=enthalpy,
+            molar_residual_entropy_J_mol_K=entropy,
+            molar_residual_gibbs_J_mol=enthalpy-temperature_K*entropy,
+            departure_log_argument=(volume+s1*mixture.b_mix)/(volume+s2*mixture.b_mix),
+            da_mix_dT=mixture.da_mix_dT)
     a_reduced, b_reduced = cubic_ab(
         mixture,
         temperature_K=temperature_K,
@@ -1140,6 +1257,9 @@ def cubic_state_derivatives(
     if volume <= b or denominator <= 0:
         raise ValueError("EOS derivative is outside the physical volume domain")
     p_t = R_J_PER_MOL_K / (volume - b) - mixture.da_mix_dT / denominator
+    if mixture.db_mix_dT:
+        p_t += (R_J_PER_MOL_K*temperature_K/(volume-b)**2
+                +mixture.a_mix*((s1+s2)*volume+2*s1*s2*b)/denominator**2)*mixture.db_mix_dT
     p_v = (-R_J_PER_MOL_K * temperature_K / (volume - b) ** 2
            + mixture.a_mix * (2 * volume + (s1 + s2) * b) / denominator ** 2)
     if not isfinite(p_v) or p_v >= 0:
@@ -1175,17 +1295,6 @@ def _validate_tp(temperature_K: float, pressure_Pa: float) -> None:
         raise ValueError("temperature_K must be positive")
     if not isfinite(pressure_Pa) or pressure_Pa <= 0:
         raise ValueError("pressure_Pa must be positive")
-
-
-def _normalize_composition(composition: Mapping[str, float]) -> dict[str, float]:
-    if not composition:
-        raise ValueError("composition cannot be empty")
-    if any(value < 0 or not isfinite(value) for value in composition.values()):
-        raise ValueError("composition values must be finite and nonnegative")
-    total = sum(composition.values())
-    if total <= 0:
-        raise ValueError("composition must contain positive material")
-    return {component_id: float(value) / total for component_id, value in composition.items()}
 
 
 def _composition_vector(

@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from math import exp, isfinite, pi, sqrt
 
+from chemworld.physchem.composition_math import _positive_feed_amounts
+
 R_J_PER_MOL_K = 8.31446261815324
 DEFAULT_MAXIMUM_COOLING_RATE_K_S = 0.25
 SURFACE_SATURATION_MAX_LOADING_RATIO = 4.0
@@ -363,7 +365,7 @@ def cooling_crystallization(
     """Integrate a compact size-cohort cooling-crystallization model."""
 
     policy = CrystallizationExecutionSpec() if execution_spec is None else execution_spec
-    feed = _amounts(feed_amounts_mol)
+    feed = _positive_feed_amounts(feed_amounts_mol)
     if target_component not in feed or feed[target_component] <= 0.0:
         raise ValueError("target_component must have a positive feed amount")
     if impurity_component is not None and impurity_component not in feed:
@@ -753,17 +755,6 @@ def _weighted_quantile(
         if cumulative >= threshold:
             return cohort.diameter_m
     return max(cohort.diameter_m for cohort in cohorts)
-
-
-def _amounts(values: Mapping[str, float]) -> dict[str, float]:
-    if not values:
-        raise ValueError("feed_amounts_mol cannot be empty")
-    result = {str(key): float(value) for key, value in values.items()}
-    if any(value < 0.0 or not isfinite(value) for value in result.values()):
-        raise ValueError("feed_amounts_mol must contain finite nonnegative values")
-    if sum(result.values()) <= 0.0:
-        raise ValueError("feed_amounts_mol must contain positive total material")
-    return result
 
 
 def _component_balance_errors(

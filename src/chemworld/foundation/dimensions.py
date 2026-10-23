@@ -212,6 +212,7 @@ _DIMENSIONS = (
     _definition("amount", "mol", N, "physical", "Amount of substance."),
     _definition("amount_rate", "mol/s", N / T, "physical", "Amount or formal extent per time."),
     _definition("mass", "kg", M, "physical", "Mass."),
+    _definition("mass_flow", "kg/s", M / T, "transport", "Mass flow rate."),
     _definition("volume", "L", L**3, "physical", "Volume."),
     _definition("volume_flow", "m^3/s", L**3 / T, "transport", "Volumetric flow rate."),
     _definition("velocity", "m/s", L / T, "transport", "Linear flow velocity."),
@@ -224,6 +225,8 @@ _DIMENSIONS = (
                 "Fractional volume change per temperature interval."),
     _definition("time", "s", T, "physical", "Elapsed time."),
     _definition("pressure", "Pa", M / L / T**2, "physical", "Mechanical pressure."),
+    _definition("compressibility", "1/Pa", L * T**2 / M, "physical",
+                "Fractional volume response per pressure interval."),
     *(_definition(f"pressure_temperature_derivative_{order}", f"Pa/{suffix}",
                   M/L/T**2/THETA**order, "physical",
                   f"Order-{order} pressure derivative per kelvin temperature interval.")
@@ -257,6 +260,10 @@ _DIMENSIONS = (
                   "Higher temperature derivative of molar volume or second virial coefficient.")
       for order in (2, 3)),
     _definition("molar_area", "m^2/mol", L**2 / N, "physical", "Area per amount."),
+    _definition("manning_roughness", "s/m^(1/3)", T / L**(1/3), "physical",
+                "SI Manning empirical roughness, not dimensionless."),
+    _definition("chezy_coefficient", "m^0.5/s", L**0.5 / T, "physical",
+                "Chezy open-channel velocity coefficient."),
     _definition("solubility_parameter", "Pa^0.5", (M / L / T**2)**0.5, "physical",
                 "Square root of cohesive energy density."),
     _definition("parachor", "kg^0.25*m^3/(s^0.5*mol)", M**0.25 * L**3 / T**0.5 / N,

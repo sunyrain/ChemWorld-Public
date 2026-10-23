@@ -1,4 +1,4 @@
-"""Pressure corrections on explicit liquid reference conductivity reports.
+"""Dense-fluid conductivity using explicit volume or reference reports.
 
 DIPPR9G and Missenard as documented in Properties of Gases and Liquids, 5e.
 No EOS or saturation state is created. T/Tc K, P/Pc Pa, k W/(m K).
@@ -7,7 +7,14 @@ No EOS or saturation state is created. T/Tc K, P/Pc Pa, k W/(m K).
 from bisect import bisect_right
 from math import exp, expm1, isfinite
 
-from chemworld.physchem.caloric_math import FirstDerivative, derivative_values, scalar_value
+from chemworld.physchem.caloric_math import (
+    FirstDerivative,
+    derivative_values,
+    exponential,
+    exponential_minus_one,
+    logarithm,
+    scalar_value,
+)
 from chemworld.physchem.viscosity_kernels import _positive
 
 # Scientific Q table only, not upstream interpolation code or fitted splines.
@@ -30,6 +37,126 @@ _CHUNG_COEFFICIENTS = (
     (-5.8634, 12.801, 9.5893, 65.529),
     (91.089, 128.11, -54.217, 523.81),
 )
+
+
+def stiel_thodos_dense_conductivity(T, *, MW, Tc, Pc, Vc, Zc, Vm, kg):
+    """Stiel-Thodos three density branches, k in W/(m K).
+
+    MW g/mol, Pc Pa, Vc/Vm m³/mol. kg is the explicitly supplied dilute
+    conductivity at T; the fixed-kg/volume temperature partial is zero.
+    The piecewise empirical model has no smooth volume derivative at .5/2.
+    Its documented reduced-density range is below 2.8; no EOS is inferred.
+    """
+    for name, value in (
+        ("T", T),
+        ("MW", MW),
+        ("Tc", Tc),
+        ("Pc", Pc),
+        ("Vc", Vc),
+        ("Zc", Zc),
+        ("Vm", Vm),
+        ("kg", kg),
+    ):
+        _positive(value, name)
+    density = Vc / Vm
+    rho = scalar_value(density)
+    if rho >= 2.8:
+        raise ValueError("Stiel-Thodos requires reduced density Vc/Vm < 2.8")
+    if isinstance(density, FirstDerivative) and rho in (0.5, 2.0):
+        raise ValueError("Stiel-Thodos volume derivative at a density boundary requires a side")
+    if rho < 0.5:
+        residual = 0.0122 * exponential_minus_one(0.535 * density)
+    elif rho < 2:
+        residual = 0.0114 * (exponential(0.67 * density) - 1.069)
+    else:
+        residual = 0.0026 * (exponential(1.155 * density) + 2.016)
+    scale = 210 * (Tc * MW**3 / (Pc / 1e5) ** 4) ** (1 / 6)
+    return _positive(kg + residual / (scale * Zc**5), "Stiel-Thodos conductivity")
+
+
+def ely_hanley_dense_conductivity(
+    T, *, MW, Tc, Vc, Zc, omega, Cvm, Vm, correction_scope="translational"
+):
+    """Ely-Hanley with explicit scope for the X correction.
+
+    NIST TN1039 eq7-12, plus the X correction also reproduced in Klein
+    (2001), appendix A eq145-148. The rounded coefficients and .1617 g/cm³
+    reference density follow the Chemicals 1.5.2 coefficient set. The default
+    'translational' scope applies X to all three translational terms, as in
+    TN1039 eq30; 'dilute' applies X only to the first term, reproducing the
+    Chemicals 1.5.2 evaluation. Neither choice modifies the internal term.
+    These rounded coefficients do not reproduce the complete TN1039 model.
+    MW is
+    g/mol, Cvm is ideal-gas J/(mol K), Vc/Vm m³/mol; T and Vm remain actual
+    inputs even where the shape factors are clipped to Tr/Vr=2.
+    """
+    from chemworld.physchem.conductivity_kernels import (
+        _ely_dilute_parts,
+        _ely_methane_viscosity,
+    )
+
+    if correction_scope not in {"dilute", "translational"}:
+        raise ValueError("Ely-Hanley correction_scope must be dilute or translational")
+    for name, value in (
+        ("T", T),
+        ("MW", MW),
+        ("Tc", Tc),
+        ("Vc", Vc),
+        ("Zc", Zc),
+        ("Cvm", Cvm),
+        ("Vm", Vm),
+    ):
+        _positive(value, name)
+    if isinstance(omega, bool) or not isinstance(omega, int | float) or not isfinite(omega):
+        raise ValueError("acentric factor must be finite")
+    tr, vr = T / Tc, Vm / Vc
+    for label, ratio in (("Tr", tr), ("Vr", vr)):
+        if scalar_value(ratio) == 2 and isinstance(ratio, FirstDerivative):
+            raise ValueError(f"Ely-Hanley shape derivative at {label}=2 requires a side")
+    shape_t = tr if scalar_value(tr) <= 2 else 2.0
+    shape_v = vr if scalar_value(vr) <= 2 else 2.0
+    theta = 1 + (omega - 0.011) * (
+        0.09057 - 0.86276 * logarithm(shape_t) + (0.31664 - 0.46568 / shape_t) * (shape_v - 0.5)
+    )
+    psi = (
+        (
+            1
+            + (omega - 0.011)
+            * (0.39490 * (shape_v - 1.02355) - 0.93281 * (shape_v - 0.75464) * logarithm(shape_t))
+        )
+        * 0.288
+        / Zc
+    )
+    f = _positive(Tc * theta / 190.4, "Ely-Hanley temperature shape")
+    h = _positive(Vc * psi / 9.92e-5, "Ely-Hanley volume shape")
+    reference_t = T / f
+    reference_rho = 16.04 * h / (Vm * 1e6)  # g/cm³, not kg/m³
+    theta_slope = (
+        0.0
+        if scalar_value(tr) > 2
+        else (omega - 0.011) * (-0.86276 / T + (shape_v - 0.5) * 0.46568 * Tc / T**2)
+    )
+    correction = _positive((1 - T * theta_slope / theta) * 0.288 / Zc, "Ely-Hanley X base") ** 1.5
+    factor = (16.04 / MW * f) ** 0.5 / h ** (2 / 3)
+    dilute = 1944 * _ely_methane_viscosity(reference_t)
+    linear = (-0.2527692 + 0.33432859 * (1.12 - logarithm(reference_t / 168)) ** 2) * reference_rho
+    exponent = (12.47183 - 984.6252 / reference_t**1.5) * reference_rho**0.1
+    exponent += (
+        (reference_rho / 0.1617 - 1)
+        * reference_rho**0.5
+        * (0.3594685 + 69.79841 / reference_t - 872.8833 / reference_t**2)
+    )
+    residual = exponential(-7.19771 + 85.67822 / reference_t) * exponential_minus_one(exponent)
+    _, internal = _ely_dilute_parts(
+        T, {"MW": MW, "Tc": Tc, "Vc": Vc, "Zc": Zc, "omega": omega, "Cvm": Cvm}
+    )
+    # The two density terms are tabulated in mW/(m K).
+    density_terms = (linear + residual) / 1000
+    if correction_scope == "translational":
+        density_terms *= correction
+    return _positive(
+        (dilute * correction + density_terms) * factor + internal, "Ely-Hanley dense conductivity"
+    )
 
 
 def chung_dense_conductivity(T, *, MW, Tc, Vc, omega, Cvm, Vm, mu, dipole, association=0):

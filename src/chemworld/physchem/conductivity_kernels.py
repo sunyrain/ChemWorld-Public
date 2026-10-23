@@ -40,6 +40,10 @@ CONDUCTIVITY_METHODS = {
     "k_air_lemmon": ("rho", "", "gas"),
     "Eli_Hanley": ("MW Tc Vc Zc omega Cvm", "", "gas"),
     "Chung_dense": ("MW Tc Vc omega Cvm Vm mu dipole", "association", "gas"),
+    "Gharagheizi_gas": ("MW Tb Pc omega", "", "gas"),
+    "Stiel_Thodos_dense": ("MW Tc Pc Vc Zc Vm kg", "", "gas"),
+    "Eli_Hanley_dense": ("MW Tc Vc Zc omega Cvm Vm", "", "gas"),
+    "Ely_Hanley_dense_translational": ("MW Tc Vc Zc omega Cvm Vm", "", "gas"),
 }
 
 # Methane reference-viscosity polynomial, Ely-Hanley (1983), n=1..9.
@@ -93,7 +97,14 @@ def _chung_psi(T, tc, omega, cvm):
     return 1 + a * (0.215 + 0.28288 * a - 1.061 * b + 0.26665 * z) / denominator
 
 
-def _ely_dilute(T, p):
+def _ely_methane_viscosity(T):
+    """Methane dilute viscosity in Pa s from the shared scientific table."""
+    result = 1e-7 * sum(c * T ** ((n - 4) / 3) for n, c in enumerate(_ELY_METHANE_VISCOSITY, 1))
+    return _positive(result, "methane reference viscosity")
+
+
+def _ely_dilute_parts(T, p):
+    """Translational and internal dilute contributions, both in W/(m K)."""
     tr = T / p["Tc"]
     if scalar_value(tr) == 2 and isinstance(T, FirstDerivative):
         raise ValueError("Ely-Hanley shape derivative at Tr=2 requires a side")
@@ -104,16 +115,24 @@ def _ely_dilute(T, p):
     f = _positive(p["Tc"] / 190.4 * theta, "Ely-Hanley temperature shape")
     h = _positive(p["Vc"] / 9.92e-5 * psi, "Ely-Hanley volume shape")
     t0 = T / f  # Actual T continues to change above the reduced shape cutoff.
-    eta0 = 1e-7 * sum(c * t0 ** ((n - 4) / 3) for n, c in enumerate(_ELY_METHANE_VISCOSITY, 1))
-    _positive(eta0, "methane reference viscosity")
+    eta0 = _ely_methane_viscosity(t0)
     factor = (16.04 / p["MW"]) ** 0.5 * f**0.5 / h ** (2 / 3)
     eta = eta0 * factor * p["MW"] / 16.04
-    return 1944 * eta0 * factor + eta / (p["MW"] / 1000) * 1.32 * (p["Cvm"] - 1.5 * R)
+    return 1944 * eta0 * factor, eta / (p["MW"] / 1000) * 1.32 * (p["Cvm"] - 1.5 * R)
 
 
 def _formula(method, T, p):
     if method == "Eli_Hanley":
-        return _ely_dilute(T, p)
+        return sum(_ely_dilute_parts(T, p))
+    if method in {"Eli_Hanley_dense", "Ely_Hanley_dense_translational"}:
+        from chemworld.physchem.dense_conductivity import ely_hanley_dense_conductivity
+
+        scope = "dilute" if method == "Eli_Hanley_dense" else "translational"
+        return ely_hanley_dense_conductivity(T, correction_scope=scope, **p)
+    if method == "Stiel_Thodos_dense":
+        from chemworld.physchem.dense_conductivity import stiel_thodos_dense_conductivity
+
+        return stiel_thodos_dense_conductivity(T, **p)
     if method == "Chung_dense":
         from chemworld.physchem.dense_conductivity import chung_dense_conductivity
 
@@ -127,6 +146,18 @@ def _formula(method, T, p):
 
         return air_conductivity_background(T, p["rho"])
     mw = p.get("MW")
+    if method == "Gharagheizi_gas":
+        # Public Gharagheizi expression, completed by OpenPNM gas_pure_gismr.
+        # u/d regroup the mathematical equation; no upstream execution path.
+        u = 2 * p["omega"] + 3.2825
+        d = T * (1 - u / p["Tb"])
+        if scalar_value(d + u) == 0:
+            raise ValueError("Gharagheizi gas B denominator is singular")
+        b = d + 2 - u / (d + u)
+        pc_bar = p["Pc"] / 1e5
+        a = (d + u) * (pc_bar + 1.9876 * (b + 2 * p["omega"]) + 6.5243) ** 2
+        a /= mw * pc_bar * T
+        return 7.9505e-4 + 3.989e-5 * (T + a) - 5.419e-5 * mw
     if method == "Sheffy_Johnson":
         return 1.951 * (1 - 0.00126 * (T - p["Tm"])) / p["Tm"] ** 0.216 / mw**0.3
     if method == "Sato_Riedel":
@@ -221,7 +252,7 @@ def conductivity_derivatives(method, T, parameters, *, order=1):
     for key, value in parameters.items():
         if isinstance(value, bool) or not isinstance(value, int | float) or not isfinite(value):
             raise ValueError(f"{key} must be finite")
-        if key in {"MW", "Tm", "Tb", "Tc", "Pc", "Vc", "Zc", "Vm", "na", "Cvm", "mu"}:
+        if key in {"MW", "Tm", "Tb", "Tc", "Pc", "Vc", "Zc", "Vm", "na", "Cvm", "mu", "kg"}:
             _positive(value, key)
         if key in {"Hfus", "rho", "dipole", "association"}:
             _positive(value, key, zero=True)

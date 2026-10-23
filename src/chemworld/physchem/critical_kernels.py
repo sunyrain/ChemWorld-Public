@@ -1,13 +1,16 @@
 """Published critical-property estimates, in K, Pa and m³/mol.
 
 These empirical estimates do not locate a thermodynamic critical point.
-Equations come from the public chemicals 1.5.2 API documentation and cited
-literature; fitted scalar/radius data are scientific data, not copied code.
+Equations come from public documentation and cited literature. For
+Hekayati-Raeissi, mathematical expressions and scientific coefficients were
+read from chemicals 1.5.2's public implementation (paper not directly checked).
+The native algebra and validation below are independently implemented.
 """
 
-from math import isclose, isfinite, log, log10
+from math import fsum, isclose, isfinite, log, log10
 from types import MappingProxyType
 
+from chemworld.foundation.gas import GAS_R
 from chemworld.physchem.caloric_math import derivative_values
 from chemworld.physchem.vapor_pressure_kernels import pressure_logarithm
 
@@ -141,6 +144,80 @@ def critical_surface(*, method, Tc=None, Pc=None, Vc=None):
         Vc = volume_offset + slope * Tc / (Pc - pressure_offset)
     for key, value in (("Tc", Tc), ("Pc", Pc), ("Vc", Vc)):
         _positive(value, key)
+    return Tc, Pc, Vc
+
+
+def critical_compressibility(Tc, Pc, Vc):
+    """Definition Zc=Pc*Vc/(R*Tc), with explicit SI inputs, not a table value."""
+    for name, value in (("Tc", Tc), ("Pc", Pc), ("Vc", Vc)):
+        _positive(value, name)
+    return _positive(Pc * Vc / (GAS_R * Tc), "critical compressibility")
+
+
+def hekayati_raeissi_critical(*, MW, V_sat=None, Tc=None, Pc=None, Vc=None,
+                             saturation_temperature_K=298.15):
+    """Return (Tc [K], Pc [Pa], Vc [m³/mol]); MW is in g/mol.
+
+    Hekayati & Raeissi, doi:10.1002/aic.17004, equations 21--33 as
+    transcribed in chemicals 1.5.2. V_sat denotes saturated *liquid*
+    volume at 298.15 K. Supplied Vc selects the critical-volume model;
+    otherwise V_sat selects both the volume and Tc/Pc fits. These are
+    different fits: feeding the estimated Vc back in changes the model.
+
+    At least one of Tc/Pc and one of Vc/V_sat is required. All supplied
+    critical values are preserved, including when both Tc and Pc are
+    given; this is not a consistency fit of redundant inputs. All given
+    values must be finite and positive, even an unused V_sat. Positive
+    algebraic results do not establish a compound's fitted validity range.
+    """
+    _positive(MW, "MW")
+    for name, value in (("Tc", Tc), ("Pc", Pc), ("Vc", Vc), ("V_sat", V_sat)):
+        if value is not None:
+            _positive(value, name)
+    if Tc is None and Pc is None:
+        raise ValueError("Hekayati-Raeissi requires Tc or Pc")
+    if Vc is None and V_sat is None:
+        raise ValueError("Hekayati-Raeissi requires Vc or V_sat")
+    if V_sat is not None:
+        _finite(saturation_temperature_K, "saturation temperature")
+        if not isclose(saturation_temperature_K, 298.15, rel_tol=0, abs_tol=1e-10):
+            raise ValueError("V_sat must be saturated liquid volume at 298.15 K")
+
+    use_saturation = Vc is None
+    # The fitted volume coordinate is m³/kmol (numerically L/mol).
+    # Expand into monomials instead of reproducing upstream intermediate
+    # coefficient vectors/branch logic. fsum limits cancellation on summation.
+    try:
+        if use_saturation:
+            v = 1000 * V_sat
+            Vc = 1e-3 * fsum((
+                -2.636518 * v**3, .01048744 * MW * v, 1.222756 * v,
+                6.924349e-9 * MW**3, -1.102846e-5 * MW**2, .001871249 * MW,
+            ))
+            _positive(Vc, "estimated critical volume")
+        if Tc is None or Pc is None:
+            if use_saturation:
+                factor = fsum((
+                    -143.4646 * v**3, .1781802 * MW * v**2, 41.96576 * v**2,
+                    -3.443955e-5 * MW**2, .009812262 * MW, .1106396,
+                ))
+            else:
+                v = 1000 * Vc
+                factor = fsum((
+                    -.001822904 * MW * v**2, .00001947108 * MW**2 * v,
+                    3.794091 * v, -2.472981e-8 * MW**3,
+                ))
+            _positive(factor, "critical temperature/pressure fit factor")
+            if Tc is None:
+                Tc = Pc * factor / (1000 * GAS_R)
+            else:
+                Pc = 1000 * GAS_R * Tc / factor
+    except OverflowError as exc:
+        raise ValueError("Hekayati-Raeissi inputs exceed the numeric fit domain") from exc
+    for name, value in (("Tc", Tc), ("Pc", Pc), ("Vc", Vc)):
+        _positive(value, name)
+    if use_saturation and Tc <= 298.15:
+        raise ValueError("saturated liquid at 298.15 K requires Tc above 298.15 K")
     return Tc, Pc, Vc
 
 

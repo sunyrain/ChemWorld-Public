@@ -37,6 +37,7 @@ from chemworld.physchem.equilibrium_chemistry import (
     SolubilityProductSpec,
     solve_aqueous_electrolyte_equilibrium,
 )
+from chemworld.runtime.action_values import action_float
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.world.actions import ELECTROLYTE_PROFILES, SOLVENTS
 from chemworld.world.electrochemical_material_family import (
@@ -58,11 +59,6 @@ ELECTROCHEMICAL_SOLVENT_PARAMETERS = _HISTORICAL_MATERIALS.solvent_profiles
 AQUEOUS_ELECTROLYTE_PROFILE_PARAMETERS = ELECTROLYTE_MEDIUM_PROFILE_PARAMETERS
 
 
-def _action_float(action: dict[str, Any], key: str, default: float) -> float:
-    value = action.get(key, default)
-    return float(np.asarray(value).reshape(-1)[0])
-
-
 def _bounded_action_float(
     action: dict[str, Any],
     key: str,
@@ -72,7 +68,7 @@ def _bounded_action_float(
     high: float,
     inclusive_low: bool = True,
 ) -> float:
-    value = _action_float(action, key, default)
+    value = action_float(action, key, default)
     lower_ok = value >= low if inclusive_low else value > low
     if not np.isfinite(value) or not lower_ok or value > high:
         comparator = "<=" if inclusive_low else "<"

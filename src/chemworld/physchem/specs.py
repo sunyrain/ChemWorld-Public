@@ -807,12 +807,9 @@ def mass_fractions_from_mole_fractions(
     mole_fractions: Sequence[float],
 ) -> tuple[float, ...]:
     _validate_component_fraction_lengths(components, mole_fractions)
-    zs = _normalize_fractions(tuple(float(value) for value in mole_fractions))
-    weighted = tuple(z * _mw(component) for component, z in zip(components, zs, strict=True))
-    total = sum(weighted)
-    if total <= 0:
-        raise ValueError("Mixture molecular weight denominator must be positive")
-    return tuple(value / total for value in weighted)
+    from chemworld.physchem.composition_math import fraction_basis
+
+    return fraction_basis(mole_fractions, tuple(_mw(component) for component in components))
 
 
 def mole_fractions_from_mass_fractions(
@@ -820,12 +817,10 @@ def mole_fractions_from_mass_fractions(
     mass_fractions: Sequence[float],
 ) -> tuple[float, ...]:
     _validate_component_fraction_lengths(components, mass_fractions)
-    ws = _normalize_fractions(tuple(float(value) for value in mass_fractions))
-    weighted = tuple(w / _mw(component) for component, w in zip(components, ws, strict=True))
-    total = sum(weighted)
-    if total <= 0:
-        raise ValueError("Mixture mole-fraction denominator must be positive")
-    return tuple(value / total for value in weighted)
+    from chemworld.physchem.composition_math import fraction_basis
+
+    return fraction_basis(mass_fractions, tuple(_mw(component) for component in components),
+                          inverse=True)
 
 
 def normalize_component_token(value: str) -> str:
@@ -965,12 +960,9 @@ def _validate_fraction_vector(fractions: tuple[float, ...], name: str) -> None:
 
 
 def _normalize_fractions(fractions: tuple[float, ...]) -> tuple[float, ...]:
-    if any(value < 0 for value in fractions):
-        raise ValueError("Fractions cannot be negative")
-    total = sum(fractions)
-    if total <= 0:
-        raise ValueError("Fraction total must be positive")
-    return tuple(value / total for value in fractions)
+    from chemworld.physchem.composition_math import normalized_fractions
+
+    return normalized_fractions(fractions)
 
 
 def _validate_string_tuple(values: Sequence[str], field_name: str) -> None:

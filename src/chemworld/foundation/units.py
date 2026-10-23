@@ -36,6 +36,8 @@ COHERENT_SI_UNITS = ("dimensionless", "s", "m", "m^3", "mol", "kg", "K", "A", "P
 _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "K": ("temperature", "K", 1.0, 0.0),
     "degC": ("temperature", "K", 1.0, 273.15),
+    "degF": ("temperature", "K", 5.0 / 9.0, 273.15 - 32.0 * 5.0 / 9.0),
+    "degR": ("temperature", "K", 5.0 / 9.0, 0.0),
     "s": ("time", "s", 1.0, 0.0),
     "min": ("time", "s", 60.0, 0.0),
     "h": ("time", "s", 3600.0, 0.0),
@@ -51,7 +53,12 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "mol/L": ("concentration", "mol/L", 1.0, 0.0),
     "mol/m^3": ("concentration", "mol/L", 0.001, 0.0),
     "m/s": ("velocity", "m/s", 1.0, 0.0),
+    "s/m^(1/3)": ("manning_roughness", "s/m^(1/3)", 1.0, 0.0),
+    "m^0.5/s": ("chezy_coefficient", "m^0.5/s", 1.0, 0.0),
     "kg": ("mass", "kg", 1.0, 0.0),
+    "kg/s": ("mass_flow", "kg/s", 1.0, 0.0),
+    "kg/h": ("mass_flow", "kg/s", 1.0 / 3600.0, 0.0),
+    "g/s": ("mass_flow", "kg/s", 0.001, 0.0),
     "g": ("mass", "kg", 0.001, 0.0),
     "J": ("energy", "J", 1.0, 0.0),
     "kJ": ("energy", "J", 1000.0, 0.0),
@@ -66,6 +73,7 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "J/(mol*K)": ("molar_heat_capacity", "J/(mol*K)", 1.0, 0.0),
     "kJ/(mol*K)": ("molar_heat_capacity", "J/(mol*K)", 1000.0, 0.0),
     "g/mol": ("molecular_weight", "g/mol", 1.0, 0.0),
+    "kg/mol": ("molecular_weight", "g/mol", 1000.0, 0.0),
     "m^3/mol": ("molar_volume", "m^3/mol", 1.0, 0.0),
     "m^6/mol^2": ("third_virial_coefficient", "m^6/mol^2", 1.0, 0.0),
     "L^2/mol^2": ("third_virial_coefficient", "m^6/mol^2", 1e-6, 0.0),
@@ -105,6 +113,8 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "(mN/m)/K": ("surface_tension_per_temperature", "N/(m*K)", 0.001, 0.0),
     "W/(m^2*K)": ("heat_transfer_coefficient", "W/(m^2*K)", 1.0, 0.0),
     "Pa": ("pressure", "Pa", 1.0, 0.0),
+    "kPa": ("pressure", "Pa", 1000.0, 0.0),
+    "MPa": ("pressure", "Pa", 1e6, 0.0),
     "bar": ("pressure", "Pa", 100000.0, 0.0),
     "mmHg": ("pressure", "Pa", 133.32236842105263, 0.0),
     "A": ("electrical_current", "A", 1.0, 0.0),
@@ -130,6 +140,8 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "gas_volume_fraction": ("gas_volume_fraction", "gas_volume_fraction", 1.0, 0.0),
     "nm": ("length", "nm", 1.0, 0.0),
     "m": ("length", "nm", 1e9, 0.0),
+    "mm": ("length", "nm", 1e6, 0.0),
+    "inch": ("length", "nm", 25.4e6, 0.0),
     "um": ("length", "nm", 1e3, 0.0),
     "angstrom": ("length", "nm", 0.1, 0.0),
     "1/K": ("thermal_expansivity", "1/K", 1.0, 0.0),
@@ -168,6 +180,12 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
 
 # Temperature derivatives use intervals in kelvin (no absolute-temperature offset).
 # Derive pressure scales from the same table used by the original scalar quantity.
+_UNIT_TABLE.update({
+    f"1/{pressure_unit}": ("compressibility", "1/Pa", 1.0 / scale, 0.0)
+    for pressure_unit, (dimension, _, scale, _) in tuple(_UNIT_TABLE.items())
+    if dimension == "pressure"
+})
+
 _UNIT_TABLE.update({
     name: (f"pressure_temperature_derivative_{order}", f"Pa/{suffix}", scale, 0.0)
     for pressure_unit, (dimension, _, scale, _) in tuple(_UNIT_TABLE.items())

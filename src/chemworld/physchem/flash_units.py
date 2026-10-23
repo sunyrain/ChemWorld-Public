@@ -11,6 +11,7 @@ from typing import Any
 
 from scipy.optimize import brentq
 
+from chemworld.physchem.composition_math import _positive_feed_amounts
 from chemworld.physchem.equilibrium import (
     ActivityModelSpec,
     gamma_phi_k_value_report,
@@ -202,12 +203,9 @@ class VLEPropertyPackage:
     @classmethod
     def from_dict(cls, payload):
         from chemworld.physchem.eos import CubicEOSSpec
-        from chemworld.physchem.specs import ComponentSpec, PropertyCorrelation
 
         values = dict(payload)
-        values["packages"] = tuple(ComponentPropertyPackage(
-            ComponentSpec.from_dict(p["component"]),
-            tuple(PropertyCorrelation.from_dict(c) for c in p["correlations"]))
+        values["packages"] = tuple(ComponentPropertyPackage.from_dict(p)
             for p in values["packages"])
         values["gas_references"] = {k: CaloricReference(**v)
                                     for k, v in values["gas_references"].items()}
@@ -224,7 +222,7 @@ class VLEPropertyPackage:
     def canonical_amounts(self, amounts):
         components = tuple(package.component for package in self.packages)
         canonical = dict.fromkeys(self.component_ids, 0.0)
-        for alias, amount in _positive_amounts(amounts).items():
+        for alias, amount in _positive_feed_amounts(amounts).items():
             canonical[resolve_component_identifier(components, alias)] += amount
         return canonical
 
@@ -373,8 +371,12 @@ class VLEPropertyPackage:
             raise ValueError("nonconvex/uncertified liquid may require two liquid phases")
         # Asymmetric models can violate the simple symmetric bound: inspect
         # the exact cubic excess curvature at both ends, bounded by ideal >=4.
-        a12 = self.activity_model.parameters.get(f"A:{left}|{right}", 0)
-        a21 = self.activity_model.parameters.get(f"A:{right}|{left}", 0)
+        # The GE contract treats a single declared direction as symmetric.
+        # Stability must use that same pair, not invent a zero reverse term.
+        parameters = self.activity_model.parameters
+        ij, ji = f"A:{left}|{right}", f"A:{right}|{left}"
+        a12 = parameters[ij] if ij in parameters else parameters[ji]
+        a21 = parameters[ji] if ji in parameters else parameters[ij]
         if min(2 * a12 - 4 * a21, 2 * a21 - 4 * a12) < -4:
             raise ValueError("uncertified asymmetric liquid stability; LLE unsupported")
         if not isfinite(g(.5)):
@@ -646,7 +648,7 @@ def tp_flash_with_energy_balance(
         raise ValueError("tolerance must be finite and positive")
     if max_iterations <= 0:
         raise ValueError("max_iterations must be positive")
-    feed = _positive_amounts(feed_amounts_mol)
+    feed = _positive_feed_amounts(feed_amounts_mol)
     component_ids = tuple(feed)
     total_feed = sum(feed.values())
     overall = {component_id: amount / total_feed for component_id, amount in feed.items()}
@@ -733,17 +735,6 @@ def tp_flash_with_energy_balance(
         phase_status=phase.phase_status,
         warnings=tuple(warnings),
     )
-
-
-def _positive_amounts(values: Mapping[str, float]) -> dict[str, float]:
-    if not values:
-        raise ValueError("feed_amounts_mol cannot be empty")
-    result = {str(key): float(value) for key, value in values.items()}
-    if any(value < 0.0 or not isfinite(value) for value in result.values()):
-        raise ValueError("feed_amounts_mol must contain finite nonnegative values")
-    if sum(result.values()) <= 0.0:
-        raise ValueError("feed_amounts_mol must contain positive total material")
-    return result
 
 
 def _require_component_mapping(

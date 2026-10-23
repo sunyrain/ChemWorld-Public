@@ -128,6 +128,19 @@ def material_inventory(state):
 
 def local_thermodynamics(state, model):
     amounts, species_ids = material_inventory(state)
+    if model.pressure_law == "helmholtz":
+        # One original bulk inventory; only non-material support capacity may
+        # accompany it. The adapter itself validates fixed V and pure identity.
+        if amounts != state.species_amounts or set(amounts) != set(
+            model.thermodynamics.inventory_keys
+        ):
+            raise ValueError("Helmholtz thermal world requires its one declared bulk inventory")
+        thermo = replace(model.thermodynamics, support_heat_capacity_J_K=(
+            model.thermodynamics.support_heat_capacity_J_K + state.state_slots.heat_capacity()))
+        packed = CoupledState(amounts, state.temperature_K, state.volume_L,
+            state.vessel_elapsed_s.get(state.vessel_id, state.ledger.time_s))
+        thermo.validate_state(packed)
+        return thermo, packed
     if set(species_ids.values()) - model.thermodynamics.species.keys():
         raise ValueError("every physical inventory requires internal energy and heat capacity")
     thermo = replace(
@@ -232,16 +245,19 @@ def assemble_local_system(state, physics, modules, components):
             ),
             *(
                 ()
-                if model.pressure_law != "ideal_gas"
+                if model.pressure_law == "fixed_pressure"
                 else (
                     CoupledEvent(
                         "pressure_limit",
                         lambda candidate: (
                             model.maximum_pressure_Pa
-                            - sum(candidate.amounts_mol[key] for key in state.species_amounts)
-                            * R_J_PER_MOL_K
-                            * candidate.temperature_K
-                            / (candidate.volume_L / 1000)
+                            - (
+                                thermo.pressure_pa(candidate)
+                                if model.pressure_law == "helmholtz" else
+                                sum(candidate.amounts_mol[key] for key in state.species_amounts)
+                                * R_J_PER_MOL_K * candidate.temperature_K
+                                / (candidate.volume_L / 1000)
+                            )
                         ),
                     ),
                 )
@@ -257,6 +273,9 @@ def assemble_local_system(state, physics, modules, components):
 def pressure_for_state(state, model):
     if model.pressure_law == "fixed_pressure":
         return state.pressure_Pa
+    if model.pressure_law == "helmholtz":
+        return model.thermodynamics.pressure_pa(CoupledState(
+            state.species_amounts, state.temperature_K, state.volume_L))
     return (
         sum(state.species_amounts.values())
         * R_J_PER_MOL_K

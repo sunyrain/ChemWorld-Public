@@ -15,37 +15,12 @@ from chemworld.foundation import (
 )
 from chemworld.foundation.solvents import SolventInventory
 from chemworld.foundation.state import PhaseLedger, PhaseRecord
+from chemworld.runtime.action_values import action_float
 from chemworld.runtime.full_process_contract import population_active
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.runtime.vnext_downstream import run_duty_limited_distillation
 from chemworld.world.mixtures import working_solvents
 from chemworld.world.parameters import ChemWorldParameters
-
-
-def _action_float(action: dict[str, Any], key: str, default: float) -> float:
-    value = action.get(key, default)
-    return float(np.asarray(value).reshape(-1)[0])
-
-
-def _distillate_phase_amounts(
-    state: WorldState,
-    *,
-    target_species: tuple[str, ...],
-    impurity_species: tuple[str, ...],
-) -> tuple[float, float]:
-    if state.phases is None or "distillate" not in state.phases.phases:
-        return 0.0, 0.0
-    distillate = state.phases.phases["distillate"]
-    return (
-        sum(
-            float(distillate.species_amounts_mol.get(species_id, 0.0))
-            for species_id in target_species
-        ),
-        sum(
-            float(distillate.species_amounts_mol.get(species_id, 0.0))
-            for species_id in impurity_species
-        ),
-    )
 
 
 def _collect_distillate_fraction(
@@ -219,11 +194,11 @@ class ChemWorldDistillationServices:
             from chemworld.runtime.kernel_contracts import ModelProviderResult
             return ModelProviderResult({},success=False,outcome="rejected",
                 failure_reason="shortcut_full_reflux_unsupported")
-        duration = float(np.clip(_action_float(action, "duration_s", 1200.0), 0.0, 14_400.0))
+        duration = float(np.clip(action_float(action, "duration_s", 1200.0), 0.0, 14_400.0))
         target_temperature = float(
-            np.clip(_action_float(action, "target_temperature_K", 345.15), 298.15, 430.0)
+            np.clip(action_float(action, "target_temperature_K", 345.15), 298.15, 430.0)
         )
-        reflux = float(np.clip(_action_float(action, "reflux_ratio", 1.5), 0.0, 10.0))
+        reflux = float(np.clip(action_float(action, "reflux_ratio", 1.5), 0.0, 10.0))
         target_species = self.species_view.target_species_for_state(state)
         impurity_species = self.species_view.impurity_species_for_state(state)
         previous_phases = {} if state.phases is None else state.phases.phases
@@ -410,7 +385,7 @@ class ChemWorldDistillationServices:
         if (getattr(self.thermal, "column", None) is not None
                 and self.thermal.column.supports(state)):
             return self.thermal.column.collect_fraction(state,action)
-        fraction = float(np.clip(_action_float(action, "transfer_fraction", 0.90), 0.0, 1.0))
+        fraction = float(np.clip(action_float(action, "transfer_fraction", 0.90), 0.0, 1.0))
         target_species = self.species_view.target_species_for_state(state)
         impurity_species = self.species_view.impurity_species_for_state(state)
         phases = _collect_distillate_fraction(state, fraction=fraction)

@@ -8,22 +8,30 @@ The utility is an explicit fixed-temperature thermal boundary.
 from dataclasses import asdict, dataclass, field
 from math import isfinite
 from types import MappingProxyType
+from typing import Any
 
 import numpy as np
 
+from chemworld.physchem.differential_meters import (
+    DifferentialMeterSpec,
+    liquid_differential_meter_pressure,
+)
 from chemworld.physchem.enthalpy import caloric_temperature
+from chemworld.physchem.equilibrium import ActivityModelSpec
+from chemworld.physchem.flow_meters import LiquidOrificeSpec, liquid_orifice_pressure
+from chemworld.physchem.fluids_devices import LiquidControlValveSpec, liquid_valve_pressure_drop
+from chemworld.physchem.packed_beds import PackedBedSpec, packed_bed_pressure
 from chemworld.physchem.phase_inventory import PhaseInventoryRates, integrate_phase_inventory
 from chemworld.physchem.property_packages import ComponentPropertyPackage, evaluate_property_state
 from chemworld.physchem.property_reports import CaloricReference
-from chemworld.physchem.specs import ComponentSpec, PropertyCorrelation
 from chemworld.physchem.transport import (
+    FluidState,
     PipeSpec,
     PumpSpec,
     counterflow_effectiveness,
     internal_heat_transfer_coefficient,
     nusselt_internal_flow,
     overall_heat_transfer_coefficient,
-    packed_bed_pressure_drop_ergun,
     pipe_pressure_drop,
     prandtl_number,
     pump_operating_point,
@@ -37,10 +45,21 @@ class LiquidTransportProperties:
     temperature_bounds_K: tuple[float, float] = (280.0, 340.0)
     pressure_Pa: float = 101325.0
     caloric_references: dict[str, CaloricReference] | None = None
+    viscosity_pressure_parameters: dict[str, dict[str, float]] | None = None
+    volume_mixing_method: str | None = None
+    volume_mixing_parameters: dict[str, dict[str, float]] | None = None
+    volume_pressure_parameters: dict[str, float | str] | None = None
+    volume_mixing_note: str = ""
+    activity_model: ActivityModelSpec | None = None
 
     def __post_init__(self):
         if not self.packages or len(set(self.component_ids)) != len(self.packages):
             raise ValueError("liquid transport needs distinct component packages")
+        if self.activity_model is not None and (
+            not isinstance(self.activity_model, ActivityModelSpec)
+            or set(self.activity_model.component_ids) != set(self.component_ids)
+        ):
+            raise ValueError("transport activity model must match declared component identities")
         lo, hi = self.temperature_bounds_K
         if (
             not all(isfinite(x) for x in (lo, hi, self.pressure_Pa))
@@ -58,6 +77,58 @@ class LiquidTransportProperties:
         ):
             raise ValueError("liquid transport needs matching liquid H references at its pressure")
         object.__setattr__(self, "caloric_references", MappingProxyType(dict(references)))
+        parameters = self.viscosity_pressure_parameters or {}
+        fields = {"critical_temperature_K", "critical_pressure_Pa", "acentric_factor"}
+        if set(parameters) - set(self.component_ids) or any(
+            set(p) != fields or any(
+                isinstance(v, bool) or not isinstance(v, int | float) or not isfinite(v)
+                for v in p.values()
+            )
+            or p["critical_temperature_K"] <= 0 or p["critical_pressure_Pa"] <= 0
+            for p in parameters.values()
+        ):
+            raise ValueError("Lucas parameters require declared components and finite Tc/Pc/omega")
+        object.__setattr__(self, "viscosity_pressure_parameters", MappingProxyType({
+            key: MappingProxyType(dict(p)) for key, p in parameters.items()
+        }))
+        from chemworld.physchem.volume_mixtures import MIXTURE_VOLUME_METHODS
+
+        method = self.volume_mixing_method or "Amgat"
+        if method not in MIXTURE_VOLUME_METHODS:
+            raise ValueError("unknown transport volume mixing method")
+        volume_parameters = self.volume_mixing_parameters or {}
+        pressure_parameters = self.volume_pressure_parameters or {}
+        if method == "Amgat":
+            if volume_parameters or pressure_parameters:
+                raise ValueError("Amgat transport uses current pure volumes, not frozen parameters")
+        else:
+            fields = set(MIXTURE_VOLUME_METHODS[method]) - {"MWs"}
+            if not self.volume_mixing_note.strip():
+                raise ValueError("explicit volume mixing needs a source/scope note")
+            if set(volume_parameters) != set(self.component_ids) or any(
+                set(p) != fields for p in volume_parameters.values()
+            ):
+                raise ValueError("volume mixing parameters must match components and method fields")
+            if "P" in pressure_parameters:
+                raise ValueError("transport pressure belongs to the declared state")
+            # Validate the selected law at the existing application's two
+            # endpoints. Runtime evaluates each actual composition independently.
+            from chemworld.physchem.specs import MixtureSpec
+            from chemworld.physchem.volume_mixtures import mixture_volume_evaluation
+
+            for temperature in self.temperature_bounds_K:
+                mixture = MixtureSpec.from_mole_fractions(
+                    tuple(p.component for p in self.packages),
+                    (1 / len(self.packages),) * len(self.packages),
+                    phase_label="liquid", temperature_K=temperature, pressure_Pa=self.pressure_Pa,
+                )
+                mixture_volume_evaluation(mixture, method=method,
+                    component_parameters=volume_parameters, **pressure_parameters)
+        object.__setattr__(self, "volume_mixing_parameters", MappingProxyType({
+            key: MappingProxyType(dict(p)) for key, p in volume_parameters.items()
+        }))
+        object.__setattr__(self, "volume_pressure_parameters", MappingProxyType(
+            dict(pressure_parameters)))
 
     @property
     def component_ids(self):
@@ -91,6 +162,7 @@ class LiquidTransportProperties:
             phase="liquid",
             quantities=(quantity,),
             references=self.references,
+            activity_model=self.activity_model,
         )
         return sum(amounts.values()) * report.properties[quantity].value
 
@@ -98,7 +170,12 @@ class LiquidTransportProperties:
         if not self.temperature_bounds_K[0] <= temperature <= self.temperature_bounds_K[1]:
             raise ValueError("liquid transport request leaves its temperature domain")
         return liquid_transport_state(
-            self.packages, amounts, temperature, self.pressure_Pa, self.references
+            self.packages, amounts, temperature, self.pressure_Pa, self.references,
+            viscosity_pressure_parameters=self.viscosity_pressure_parameters,
+            volume_mixing_method=self.volume_mixing_method,
+            volume_mixing_parameters=self.volume_mixing_parameters,
+            volume_pressure_parameters=self.volume_pressure_parameters,
+            activity_model=self.activity_model,
         )
 
     def to_dict(self):
@@ -107,22 +184,37 @@ class LiquidTransportProperties:
             "temperature_bounds_K": list(self.temperature_bounds_K),
             "pressure_Pa": self.pressure_Pa,
             "caloric_references": {key: ref.to_dict() for key, ref in self.references.items()},
+            "viscosity_pressure_parameters": {
+                key: dict(p) for key, p in self.viscosity_pressure_parameters.items()
+            },
+            "volume_mixing_method": self.volume_mixing_method,
+            "volume_mixing_parameters": {
+                key: dict(p) for key, p in self.volume_mixing_parameters.items()
+            },
+            "volume_pressure_parameters": dict(self.volume_pressure_parameters),
+            "volume_mixing_note": self.volume_mixing_note,
+            **({"activity_model": self.activity_model.to_dict()}
+               if self.activity_model is not None else {}),
         }
 
     @classmethod
     def from_dict(cls, value):
         return cls(
             tuple(
-                ComponentPropertyPackage(
-                    ComponentSpec.from_dict(p["component"]),
-                    tuple(PropertyCorrelation.from_dict(c) for c in p["correlations"]),
-                )
+                ComponentPropertyPackage.from_dict(p)
                 for p in value["packages"]
             ),
             tuple(value["temperature_bounds_K"]),
             value["pressure_Pa"],
             ({key: CaloricReference(**ref) for key, ref in value["caloric_references"].items()}
              if "caloric_references" in value else None),
+            value.get("viscosity_pressure_parameters"),
+            value.get("volume_mixing_method"),
+            value.get("volume_mixing_parameters"),
+            value.get("volume_pressure_parameters"),
+            value.get("volume_mixing_note", ""),
+            (ActivityModelSpec(**value["activity_model"])
+             if value.get("activity_model") is not None else None),
         )
 
 
@@ -138,10 +230,21 @@ class TransportPathSpec:
     outer_h_W_m2_K: float = 500.0
     wall_thickness_m: float = 0.001
     wall_conductivity_W_m_K: float = 15.0
+    control_valve: LiquidControlValveSpec | None = None
+    orifice_meter: LiquidOrificeSpec | None = None
+    bed_method: str = "Ergun"
+    bed_tube_diameter_m: float | None = None
+    bed_sphericity: float = 1.0
+    differential_meter: DifferentialMeterSpec | None = None
 
     def __post_init__(self):
-        values = asdict(self)
+        values = {name: getattr(self, name) for name in self.__dataclass_fields__}
         values.pop("pipe")
+        values.pop("control_valve")
+        values.pop("orifice_meter")
+        values.pop("bed_method")
+        values.pop("bed_tube_diameter_m")
+        values.pop("differential_meter")
         if any(not isfinite(v) or v < 0 for v in values.values()):
             raise ValueError("path parameters must be finite and nonnegative")
         if self.pipe.elevation_change_m != 0:
@@ -158,20 +261,77 @@ class TransportPathSpec:
             or not 0.05 < self.void_fraction < 0.95
         ):
             raise ValueError("path geometry and utility domain are invalid")
+        PackedBedSpec(self.bed_method, self.bed_length_m or 1., self.particle_diameter_m,
+                      self.void_fraction, self.bed_sphericity, self.bed_tube_diameter_m)
+        if self.control_valve is not None and (
+            self.control_valve.outlet_diameter_m != self.pipe.diameter_m
+        ):
+            raise ValueError("valve outlet must match the connected pipe diameter")
+        if self.orifice_meter is not None and (
+            self.orifice_meter.pipe_diameter_m != self.pipe.diameter_m
+        ):
+            raise ValueError("orifice pipe bore must match the connected pipe")
+        if self.differential_meter is not None:
+            meter = self.differential_meter
+            if meter.pipe_diameter_m != self.pipe.diameter_m:
+                raise ValueError("differential meter bore must match the connected pipe")
+            if meter.reynolds_bounds is None or meter.installation_note == (
+                "Formula evaluation; installation validity not qualified"
+            ):
+                raise ValueError(
+                    "native meter path requires explicit Reynolds and installation scope"
+                )
+            if meter.specified_expansibility not in (None, 1):
+                raise ValueError("single-liquid path requires unit expansibility")
+            if meter.permanent_loss(1, 0.7) is None:
+                raise ValueError("native meter path requires an explicit permanent-loss relation")
 
-    def pressure_drop(self, fluid, flow):
+    def hydraulic_diagnostics(
+        self, fluid: FluidState, flow: float, *, downstream_pressure_Pa: float | None = None,
+        saturation_pressure_Pa: float | None = None, critical_pressure_Pa: float | None = None,
+        check_choking: bool = True,
+    ) -> dict[str, Any]:
         pressure = pipe_pressure_drop(
             self.pipe, fluid, volumetric_flow_m3_s=flow
         ).pressure_drop_total_Pa
+        diagnostics: dict[str, Any] = {"pipe_pressure_drop_Pa": pressure}
         if self.bed_length_m:
-            pressure += packed_bed_pressure_drop_ergun(
-                fluid=fluid,
-                superficial_velocity_m_s=flow / self.bed_area_m2,
-                bed_length_m=self.bed_length_m,
-                particle_diameter_m=self.particle_diameter_m,
-                void_fraction=self.void_fraction,
-            ).pressure_drop_Pa
-        return pressure
+            bed = packed_bed_pressure(
+                PackedBedSpec(self.bed_method, self.bed_length_m, self.particle_diameter_m,
+                              self.void_fraction, self.bed_sphericity, self.bed_tube_diameter_m),
+                fluid, superficial_velocity_m_s=flow / self.bed_area_m2,
+            )
+            diagnostics["packed_bed"] = bed.to_dict()
+            pressure += bed.pressure_drop_Pa
+        diagnostics["pipe_and_bed_pressure_drop_Pa"] = pressure
+        if self.orifice_meter is not None:
+            meter = liquid_orifice_pressure(self.orifice_meter,
+                mass_flow_kg_s=flow * fluid.density_kg_m3,
+                density_kg_m3=fluid.density_kg_m3, viscosity_Pa_s=fluid.viscosity_Pa_s)
+            diagnostics["orifice"] = meter.to_dict()
+            pressure += meter.permanent_pressure_loss_Pa
+        if self.differential_meter is not None:
+            differential = liquid_differential_meter_pressure(
+                self.differential_meter, fluid, mass_flow_kg_s=flow * fluid.density_kg_m3,
+            )
+            diagnostics["differential_meter"] = differential.to_dict()
+            pressure += differential.permanent_pressure_loss_Pa
+        if self.control_valve is not None:
+            if downstream_pressure_Pa is None or saturation_pressure_Pa is None or (
+                critical_pressure_Pa is None
+            ):
+                raise ValueError("installed IEC valve needs declared current liquid pressures")
+            valve = liquid_valve_pressure_drop(self.control_valve, fluid, flow_m3_s=flow,
+                downstream_pressure_Pa=downstream_pressure_Pa + pressure,
+                saturation_pressure_Pa=saturation_pressure_Pa,
+                critical_pressure_Pa=critical_pressure_Pa, check_choking=check_choking)
+            diagnostics["control_valve"] = valve.to_dict()
+            pressure += valve.pressure_drop_Pa
+        diagnostics["total_pressure_drop_Pa"] = pressure
+        return diagnostics
+
+    def pressure_drop(self, fluid, flow, **kwargs):
+        return self.hydraulic_diagnostics(fluid, flow, **kwargs)["total_pressure_drop_Pa"]
 
     def heat_rate(self, fluid, flow, temperature):
         if flow == 0 or self.exchanger_area_m2 == 0:
@@ -209,11 +369,22 @@ class TransportPathSpec:
         )
 
     def to_dict(self):
-        return asdict(self)
+        payload = {name: getattr(self, name) for name in self.__dataclass_fields__}
+        payload["pipe"] = asdict(self.pipe)
+        for name in ("control_valve", "orifice_meter", "differential_meter"):
+            if payload[name] is not None:
+                payload[name] = payload[name].to_dict()
+        return payload
 
     @classmethod
     def from_dict(cls, value):
-        return cls(**{**value, "pipe": PipeSpec(**value["pipe"])})
+        payload = {**value, "pipe": PipeSpec(**value["pipe"])}
+        for key, kind in (("control_valve", LiquidControlValveSpec),
+                          ("orifice_meter", LiquidOrificeSpec),
+                          ("differential_meter", DifferentialMeterSpec)):
+            if payload.get(key) is not None:
+                payload[key] = kind.from_dict(payload[key])
+        return cls(**payload)
 
 
 @dataclass(frozen=True)
@@ -245,6 +416,15 @@ class FiniteTransportSpec:
         lo, hi = self.properties.temperature_bounds_K
         if not lo <= self.path.utility_temperature_K <= hi:
             raise ValueError("utility temperature must be in liquid property domain")
+        if self.path.control_valve is not None:
+            if len(self.properties.packages) != 1:
+                raise ValueError("IEC valve requires one pure liquid property package")
+            package = self.properties.packages[0]
+            critical = package.component.metadata.get("critical_pressure_Pa")
+            if not isinstance(critical, int | float) or not isfinite(critical) or critical <= 0:
+                raise ValueError("IEC valve requires explicit critical_pressure_Pa metadata")
+            if not package.by_property("vapor_pressure"):
+                raise ValueError("IEC valve requires a current vapor-pressure correlation")
 
     def enthalpy(self, index, amounts, temperature):
         return self.properties.enthalpy(amounts, temperature) + self.capacities_j_k[index] * (
@@ -300,7 +480,8 @@ class TransportInventory:
 
 def transport_rates(spec, state, temperatures, requested_flow_m3_s):
     n, temperature = state.amounts_mol[0], temperatures[0]
-    if requested_flow_m3_s == 0 or not sum(n.values()):
+    valve_closed = spec.path.control_valve is not None and not spec.path.control_valve.is_open
+    if requested_flow_m3_s == 0 or not sum(n.values()) or valve_closed:
         zeros = np.zeros((2, len(spec.properties.component_ids)))
         return PhaseInventoryRates(zeros, np.zeros(2), 0.0, 0.0, ()), {
             "actual_flow_m3_s": 0.0,
@@ -311,12 +492,26 @@ def transport_rates(spec, state, temperatures, requested_flow_m3_s):
             "utility_heat_W": 0.0,
             "flow_limited": requested_flow_m3_s > 0,
             "source_temperature_K": temperature,
+            "control_valve_closed": valve_closed,
         }
     fluid, h, volume = spec.properties.evaluate(n, temperature)
+    valve_properties = {}
+    if spec.path.control_valve is not None:
+        package = spec.properties.packages[0]
+        valve_properties = {
+            "downstream_pressure_Pa": spec.properties.pressure_Pa,
+            "saturation_pressure_Pa": package.evaluate("vapor_pressure",
+                temperature_K=temperature, validity_policy="raise").to("Pa").value,
+            "critical_pressure_Pa": package.component.metadata["critical_pressure_Pa"],
+        }
     point = pump_operating_point(
-        spec.pump, requested_flow_m3_s, lambda flow: spec.path.pressure_drop(fluid, flow)
+        spec.pump, requested_flow_m3_s, lambda flow: spec.path.pressure_drop(
+            fluid, flow, **valve_properties, check_choking=False)
     )
     flow = point["actual_flow_m3_s"]
+    # Numerical pump trials may exceed choking, but the accepted material
+    # path must remain inside its declared single-liquid model.
+    devices = spec.path.hydraulic_diagnostics(fluid, flow, **valve_properties)
     amount_rates = np.array([n[k] * flow / volume for k in spec.properties.component_ids])
     rate = float(sum(amount_rates))
     hydraulic = point["hydraulic_power_W"]
@@ -365,6 +560,7 @@ def transport_rates(spec, state, temperatures, requested_flow_m3_s):
         "utility_heat_W": heat,
         "source_temperature_K": temperature,
         "source_viscosity_Pa_s": fluid.viscosity_Pa_s,
+        "hydraulic_devices": devices,
         "pump_outlet_enthalpy_margin_J_mol": outlet_margin if rate else None,
     }
 

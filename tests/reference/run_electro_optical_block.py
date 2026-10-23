@@ -489,21 +489,22 @@ def identifier_database(directory):
     return IdentifierDatabase(directory / "Identifiers")
 
 
-def native_card(database, record, **kwargs):
+def native_card(database, record, *, component=None, **kwargs):
     # Use actual native identifier/formula records; no fabricated carrier formula.
     sources = ("example-user", "inorganic", "anion", "cation", "pubchem-small", "pubchem-large")
-    component = identifier_database(database.source_directory).component(
-        record.cas_number, kind="cas", source_ids=sources, source_priority=sources
-    )
+    if component is None:
+        component = identifier_database(database.source_directory).component(
+            record.cas_number, kind="cas", source_ids=sources, source_priority=sources
+        )
     card = database.property_input(record.record_id, component, method=record.source_id, **kwargs)
     restored = PropertyInputCard.from_dict(json.loads(json.dumps(card.to_dict())))
     assert restored.to_dict() == card.to_dict()
     return restored
 
 
-def source_evaluation(database, record, standalone, **kwargs):
+def source_evaluation(database, record, standalone, *, component=None, **kwargs):
     try:
-        card = native_card(database, record, **kwargs)
+        card = native_card(database, record, component=component, **kwargs)
     except UnknownIdentifierError as exc:
         if not standalone:
             raise
@@ -525,7 +526,7 @@ def source_evaluation(database, record, standalone, **kwargs):
     )
 
 
-def optical_source_unit(database, record, raw, standalone=False):
+def optical_source_unit(database, record, raw, standalone=False, *, component=None):
     observation = RefractiveIndexObservation.from_record(record)
     restored = RefractiveIndexObservation.from_dict(json.loads(json.dumps(observation.to_dict())))
     assert restored == observation
@@ -550,7 +551,7 @@ def optical_source_unit(database, record, raw, standalone=False):
     if raw["RIT"]:
         assert observation.temperature.value == float(raw["RIT"]) == upstream[1]
         _, evaluate, integration = source_evaluation(
-            database, record, standalone, source_point=True
+            database, record, standalone, source_point=True, component=component
         )
         checks.append(
             compare(
@@ -601,7 +602,7 @@ def dipole_source_unit(database, record, raw):
     return dict(comparisons=checks, missing=0, unconsumed=0)
 
 
-def dielectric_source_unit(database, record, raw, standalone=False):
+def dielectric_source_unit(database, record, raw, standalone=False, *, component=None):
     def numeric(k):
         return None if raw[k] == "" else float(raw[k])
 
@@ -613,7 +614,7 @@ def dielectric_source_unit(database, record, raw, standalone=False):
     t, epsilon = numeric("T"), numeric("Permittivity")
     if t is not None and epsilon is not None and t > 0 and epsilon > 0:
         _, evaluate, integration = source_evaluation(
-            database, record, standalone, source_point=True
+            database, record, standalone, source_point=True, component=component
         )
         report = evaluate("relative_permittivity", temperature_K=t)
         checks.append(compare(report.value, epsilon))
@@ -631,7 +632,9 @@ def dielectric_source_unit(database, record, raw, standalone=False):
         and 0 < bounds[0] < bounds[1]
     )
     if buildable:
-        curve, evaluate, integration = source_evaluation(database, record, standalone)
+        curve, evaluate, integration = source_evaluation(
+            database, record, standalone, component=component
+        )
         p = [0 if v is None else v for v in coeff]
         for t in (bounds[0], sum(bounds) / 2, bounds[1]):
             expected = permittivity.permittivity_CRC(t, *p)

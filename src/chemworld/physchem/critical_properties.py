@@ -5,16 +5,18 @@ state. Original ConstantValue sources and unknown uncertainties are retained.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 
 from chemworld.data.constants import ConstantValue
-from chemworld.data.scientific_inputs import InputValue
+from chemworld.data.scientific_inputs import InputSource, InputValue
 from chemworld.foundation.units import Quantity
 from chemworld.physchem.critical_kernels import (
     acentric_factor_from_pressure,
     boiling_critical_temperature,
+    critical_compressibility,
     critical_surface,
+    hekayati_raeissi_critical,
     lee_kesler_acentric_factor,
     mersmann_kind_volume,
     mixture_critical_property,
@@ -24,7 +26,9 @@ from chemworld.physchem.elements import get_isotope
 from chemworld.physchem.eos import EOSComponentSpec
 
 _UNITS = {"Tc": "K", "Tb": "K", "Pc": "Pa", "Vc": "m^3/mol", "Psat": "Pa",
-          "omega": "dimensionless", "Stiel": "dimensionless"}
+          "omega": "dimensionless", "Stiel": "dimensionless", "Zc": "dimensionless"}
+_INPUT_UNITS = {**_UNITS, "MW": "g/mol", "V_sat": "m^3/mol",
+                "saturation_temperature_K": "K"}
 _DOCUMENTATION = "https://chemicals.readthedocs.io/chemicals.critical.html"
 _ACENTRIC = "https://chemicals.readthedocs.io/chemicals.acentric.html"
 
@@ -85,33 +89,38 @@ def _input(value, property_id, component_id, cas_number=""):
         if (value.property_id != property_id or value.kind != "pure_estimate"
                 or value.subject_ids != (component_id,)):
             raise ValueError("critical estimate property/identity does not match the consumer")
-        return value.quantity(_UNITS[property_id]).value
+        return value.quantity(_INPUT_UNITS[property_id]).value
     if isinstance(value, ConstantValue):
-        if value.field_id != property_id:
+        if value.field_id != value.record.source_field(property_id):
             raise ValueError("constant field does not match the requested property")
         identity = value.record.cas_number or value.record.source_key
         if identity not in {component_id, cas_number}:
             raise ValueError("constant identity does not match the consumer")
-        return value.quantity(_UNITS[property_id]).value
+        return value.quantity(_INPUT_UNITS[property_id]).value
     if isinstance(value, InputValue):
         if value.quality != "valid":
             raise ValueError("critical input is missing, invalid or outside its domain")
-        return value.to(_UNITS[property_id]).value
+        return value.to(_INPUT_UNITS[property_id]).value
     raise TypeError("critical consumer requires a CriticalEstimate, ConstantValue or InputValue")
 
 
-def estimate_critical_property(component, *, method, parameters):
+def estimate_critical_property(component, *, method, parameters, output_property=None):
     """Estimate one property for an existing ComponentSpec, preserving every input.
 
     Parameters use documented Tc/Pc/Vc/Tb/Psat/omega keys and SI units.
     Scalars are explicit caller inputs. Source-bearing values are checked
     against this component's identity and converted using the native units.
     No source discovery, fallback, or table mutation occurs.
+
+    Hekayati_Raeissi additionally accepts MW [g/mol], V_sat [m³/mol]
+    at 298.15 K, and optional saturation_temperature_K. Select
+    output_property='Tc', 'Pc' or 'Vc' when multiple fields are missing.
+    An already supplied field cannot be relabelled as an estimate.
     """
     c, records = {}, {}
     for name, value in parameters.items():
         if isinstance(value, (CriticalEstimate, ConstantValue, InputValue)):
-            if name not in _UNITS:
+            if name not in _INPUT_UNITS:
                 raise ValueError(f"no established critical input unit for {name}")
             c[name] = _input(value, name, component.identifier, component.cas_number)
             records[name] = value.to_dict()
@@ -126,6 +135,27 @@ def estimate_critical_property(component, *, method, parameters):
         result = dict(zip(("Tc", "Pc", "Vc"), values, strict=True))[field]
         if method == "Meissner_MPa":
             citation = "https://doi.org/10.17230/ingciencia.15.30.4"
+    elif method == "Hekayati_Raeissi":
+        values = hekayati_raeissi_critical(**c)
+        missing = [key for key in ("Tc", "Pc", "Vc") if c.get(key) is None]
+        field = output_property or (missing[0] if len(missing) == 1 else None)
+        if field is None:
+            raise ValueError(
+                "select output_property explicitly when several or no fields are missing")
+        if field not in missing:
+            raise ValueError(
+                "output_property must name a missing Tc, Pc or Vc, not a supplied value")
+        result = dict(zip(("Tc", "Pc", "Vc"), values, strict=True))[field]
+        records["model_basis"] = "V_sat_at_298.15_K" if c.get("Vc") is None else "supplied_Vc"
+        records["estimated_properties"] = missing
+        records["supplied_Tc_Pc_policy"] = "preserve_without_reconciliation"
+        if c.get("V_sat") is not None:
+            records.setdefault("saturation_temperature_K", 298.15)
+            records["unused_inputs"] = (["V_sat", "saturation_temperature_K"]
+                                        if c.get("Vc") is not None else [])
+        citation = ("https://doi.org/10.1002/aic.17004; equations 21-33 and coefficients "
+                    "from chemicals 1.5.2 public Hekayati_Raeissi implementation; "
+                    "original paper not directly verified")
     elif method == "Tb_Tc_relationship":
         Tb, Tc = boiling_critical_temperature(**c)
         field, result = ("Tc", Tc) if c.get("Tc") is None else ("Tb", Tb)
@@ -150,9 +180,68 @@ def estimate_critical_property(component, *, method, parameters):
     elif method == "Stiel_polar_factor":
         field, result = "Stiel", stiel_polar_factor(**c)
         citation = _ACENTRIC
+    elif method == "Zc_definition":
+        field, result = "Zc", critical_compressibility(**c)
     else:
         raise ValueError(f"unknown or not yet implemented critical estimate {method!r}")
+    if output_property is not None and output_property != field:
+        raise ValueError(f"method and inputs estimate {field}, not {output_property}")
     return CriticalEstimate((component.identifier,), field, result, method, records, citation)
+
+
+def critical_correlation_input(
+    component, *, family, method, parameters, temperature_range_K, source,
+    output="molar_volume", pressure_range_Pa=None, polar=None, correlation_id=None,
+):
+    """Bind selected constants/estimates to an original volume or virial input card.
+
+    The caller supplies an InputSource for this derived model; it is not a
+    replacement for the sources retained with each parameter. No inference of
+    missing values, parameter uncertainty, material validity or caloric datum.
+    Noncritical equation coefficients may be explicit scalars as before.
+    """
+    from chemworld.physchem.property_inputs import PropertyInputCard
+    from chemworld.physchem.property_packages import ComponentPropertyPackage
+    from chemworld.physchem.specs import ComponentUncertainty
+    from chemworld.physchem.virial_correlations import virial_correlation
+    from chemworld.physchem.volume_correlations import volume_correlation
+
+    if not isinstance(source, InputSource):
+        raise TypeError("critical-derived input needs an explicit InputSource")
+    values, origins = {}, {}
+    for name, value in parameters.items():
+        if isinstance(value, (CriticalEstimate, ConstantValue, InputValue)):
+            if name not in _INPUT_UNITS:
+                raise ValueError(f"no declared critical input unit for {name}")
+            values[name] = _input(value, name, component.identifier, component.cas_number)
+            origins[name] = value.to_dict()
+        else:
+            values[name] = value
+            origins[name] = {"value": value, "basis": "explicit caller coefficient"}
+    common = {"parameters": values, "temperature_range_K": temperature_range_K,
+              "source_note": source.provenance.citation, "correlation_id": correlation_id}
+    if family == "volume":
+        if polar is not None:
+            raise ValueError("volume equations require their own explicit polar coefficients")
+        curve = volume_correlation(method, **common, output=output,
+                                   pressure_range_Pa=pressure_range_Pa)
+    elif family == "virial":
+        if pressure_range_Pa is not None or output != "molar_volume":
+            raise ValueError("virial coefficient basis is defined by its method, independent of P")
+        curve = virial_correlation(method, **common, polar=polar)
+    else:
+        raise ValueError("critical-derived family must be volume or virial")
+    curve = replace(curve, metadata={**curve.metadata, "parameter_sources": origins,
+        "component_id": component.identifier, "source": source.provenance.to_dict(),
+        "parameter_basis": "explicit measured, derived or caller inputs; see parameter_sources",
+        "application_basis": "caller selected; no material validity inferred"})
+    return PropertyInputCard(
+        ComponentPropertyPackage(component, (curve,)), (source,),
+        {curve.correlation_id: ComponentUncertainty(
+            curve.correlation_id, unit=curve.output_unit, source_id=source.provenance.source_id,
+            coverage="unspecified", note="Derived model uncertainty not quantified",
+        )}, None, "Property model only; supply an explicit caloric model/reference separately",
+    )
 
 
 def acentric_estimate_from_correlation(component, curve, *, Tc, Pc, method, omega=None):

@@ -1,13 +1,19 @@
 """Check resources and actual installation of the sdist-built wheel."""
 
+import importlib.util
+import json
 import subprocess
 import sys
 import tarfile
 import zipfile
 from pathlib import Path
 
+import pytest
 
-def test_atomic_resources_survive_sdist_wheel_and_isolated_import(tmp_path):
+
+@pytest.fixture(scope="module")
+def installed_atomic_resources(tmp_path_factory):
+    tmp_path = tmp_path_factory.mktemp("atomic-install")
     root = Path(__file__).resolve().parents[1]
     # uv builds the wheel from the sdist, exercising the generated source index.
     subprocess.run(
@@ -104,6 +110,17 @@ assert abs(conductivity_value('Eli_Hanley', 373.15, MW=72.151, Tc=460.4,
 from chemworld.physchem import chung_dense_conductivity
 assert abs(chung_dense_conductivity(473, MW=42.081, Tc=364.9, Vc=184.6e-6,
     omega=.142, Cvm=82.67, Vm=172.1e-6, mu=1.34e-5, dipole=.4)-.06160569232570781) < 1e-12
+from chemworld.physchem import ely_hanley_dense_conductivity, stiel_thodos_dense_conductivity
+assert abs(conductivity_value('Gharagheizi_gas',580,MW=16.04246,Tb=111.66,
+    Pc=4599000,omega=.0115478)-.09594861261873211) < 1e-12
+assert abs(stiel_thodos_dense_conductivity(378.15,MW=44.013,Tc=309.6,Pc=7240000,
+    Vc=97.4e-6,Zc=.274,Vm=144e-6,kg=.0234)-.041245574404863684) < 1e-12
+packed_ely=dict(MW=42.081,Tc=364.9,Vc=1.81e-4,Zc=.274,omega=.144,Cvm=82.70,Vm=1.721e-4)
+packed_compatible=conductivity_value('Eli_Hanley_dense',473,**packed_ely)
+assert abs(packed_compatible-.06038475754109959) < 1e-12
+assert ely_hanley_dense_conductivity(473,**packed_ely) > packed_compatible
+assert conductivity_value('Ely_Hanley_dense_translational',473,**packed_ely) == (
+    ely_hanley_dense_conductivity(473,**packed_ely))
 from pathlib import Path
 import json
 from chemworld.physchem import (
@@ -495,6 +512,21 @@ assert eos_component_from_critical_inputs(packed_component, Tc=packed_Tc, Pc=pac
     omega=InputValue(.2, 'dimensionless', None, 'Explicit synthetic packed input')
     ).critical_pressure_Pa > 0
 assert mixture_critical_property('Li', (.5, .5), Tcs=(400, 500), Vcs=(.0002, .0002)) == 450
+from chemworld.physchem import hekayati_raeissi_critical, CubicEOSSpec, evaluate_cubic_eos
+packed_hr_component = ComponentSpec('packed-toluene', 'C7H8')
+packed_hr_inputs = {'MW':InputValue(.09213842,'kg/mol',None,'Explicit molecular weight'),
+    'V_sat':InputValue(.10686,'L/mol',None,'Saturated liquid at 298.15 K'),
+    'Pc':InputValue(41.08,'bar',None,'Explicit critical pressure')}
+packed_hr_Tc = estimate_critical_property(packed_hr_component, method='Hekayati_Raeissi',
+    parameters=packed_hr_inputs, output_property='Tc')
+assert abs(packed_hr_Tc.value-599.7965819136947) < 1e-9
+assert CriticalEstimate.from_dict(packed_hr_Tc.to_dict()) == packed_hr_Tc
+packed_hr_spec = eos_component_from_critical_inputs(packed_hr_component,Tc=packed_hr_Tc,
+    Pc=packed_hr_inputs['Pc'],omega=InputValue(.2,'dimensionless',None,'Explicit omega'))
+packed_hr_state = evaluate_cubic_eos(CubicEOSSpec('packed-hr','peng_robinson',(packed_hr_spec,)),
+    {'packed-toluene':1},temperature_K=700,pressure_Pa=1e6)
+assert packed_hr_state.molar_volume_m3_mol > 0
+assert hekayati_raeissi_critical(MW=92.13842,Vc=.000316,Pc=4108000)[0] > 0
 from chemworld.physchem import LennardJonesSpec, lennard_jones_collision_integral
 from chemworld.data.lennard_jones import LennardJonesDatabase
 assert len(LennardJonesDatabase(sys.argv[1] + '.external-data').catalog) == 2
@@ -817,7 +849,237 @@ packed_gas_run = packed_heating.advance(CoupledState({'packed-methane':2},300,10
 assert packed_gas_run.final_state.time_s == 1
 assert packed_gas_run.final_state.temperature_K > 300
 assert abs(packed_gas_run.energy_balance_residual_J) < 1e-4
+from dataclasses import replace as packed_replace
+from chemworld.physchem.property_inputs import PropertyInputCard
+from chemworld.physchem.specs import ComponentUncertainty
+from chemworld.physchem.transport_devices import LiquidTransportProperties, FiniteTransportSpec
+from chemworld.world.transport_world import synthetic_transport_properties, transport_world_spec
+from chemworld.physchem import ideal_gas_transport_state
+packed_transport_base = synthetic_transport_properties().packages[1]
+packed_transport_component = packed_replace(packed_transport_base.component, cas_number='64-17-5')
+packed_mu_path = Path(sys.argv[1] + '.external-data') / viscosity_data.source(
+    'DUTT_PRASAD_VISCOSITY').relative_path
+packed_mu_path.parent.mkdir(parents=True, exist_ok=True)
+packed_mu_path.write_text('CAS\\tChemical\\tA\\tB\\tC\\tTmin\\tTmax\\n'
+    '64-17-5\\tsynthetic source record\\t-2.8857\\t-1032.53\\t-55.95\\t248\\t348\\n')
+packed_mu_input = viscosity_data.property_input('64-17-5', packed_transport_component,
+    method='DUTT_PRASAD_VISCOSITY')
+packed_source = InputSource(DataSourceProvenance('packed-transport-companion', 0,
+    'Synthetic transport companions, not material measurements', version='1',
+    license='synthetic fixture'), 'synthetic')
+packed_curves = tuple(c for c in packed_transport_base.correlations
+    if c.property_id != 'liquid_viscosity') + (PropertyCorrelation(
+    'packed-psat','dippr101',{'A':9.903487552536127,'B':0},{'temperature':'K'},'Pa',
+    'vapor_pressure',{'temperature':(280,340)},'Synthetic saturation-pressure baseline'),)
+packed_companion = PropertyInputCard(ComponentPropertyPackage(packed_transport_component,
+    packed_curves),(packed_source,),{c.correlation_id:ComponentUncertainty(c.correlation_id,
+    unit=c.output_unit,source_id=packed_source.provenance.source_id,coverage='synthetic',
+    note='Declared companion, not material accuracy') for c in packed_curves},
+    CaloricReference(phase='liquid',pressure_Pa=2e5),'Explicit companion caloric datum')
+packed_complete = PropertyInputCard.combine((packed_mu_input,packed_companion),
+    reference_note='Explicit source-selected installed transport input')
+packed_complete = PropertyInputCard.from_json(json.dumps(packed_complete.to_dict()))
+packed_transport = LiquidTransportProperties((packed_complete.package,),(280,340),2e5,
+    {'ethanol':packed_complete.reference},{'ethanol':{'critical_temperature_K':572.2,
+    'critical_pressure_Pa':3.47e6,'acentric_factor':.236}})
+packed_flow = ChemWorldRuntime(composition=transport_world_spec(
+    FiniteTransportSpec(packed_transport)))
+packed_flow.reset(seed=24)
+assert packed_flow.execute({'operation':'set_flow_rate','flow_rate_mL_min':20}).info[
+    'transaction_status'] == 'committed'
+assert packed_flow.execute({'operation':'run_flow','duration_s':1}).info[
+    'transaction_status'] == 'committed'
+packed_flow_copy = ChemWorldRuntime.from_snapshot(json.loads(json.dumps(
+    packed_flow.snapshot().to_dict(),allow_nan=False)))
+for packed_session in (packed_flow,packed_flow_copy):
+    assert packed_session.execute({'operation':'run_flow','duration_s':1}).info[
+        'transaction_status'] == 'committed'
+assert packed_flow._state.to_dict() == packed_flow_copy._state.to_dict()
+packed_flow.close()
+packed_flow_copy.close()
+packed_gas_component = ComponentSpec('packed-transport-gas','N2',default_phase='gas')
+packed_gas_curves = tuple(PropertyCorrelation('packed-gas-'+prop,'dippr100',{'A':value},
+    {'temperature':'K'},unit,prop,{'temperature':(280,460)},'Synthetic installed gas',
+    {'phase':'gas'}) for prop,value,unit in (
+    ('ideal_gas_heat_capacity',30,'J/(mol*K)'),('gas_viscosity',2e-5,'Pa*s'),
+    ('thermal_conductivity',.03,'W/(m*K)')))
+packed_fluid,_,packed_volume = ideal_gas_transport_state(
+    (ComponentPropertyPackage(packed_gas_component,packed_gas_curves),),
+    {'packed-transport-gas':.01},400,1e5,
+    {'packed-transport-gas':CaloricReference(phase='gas')})
+assert packed_volume > 0 and packed_fluid.viscosity_Pa_s == 2e-5
+from chemworld.physchem import critical_correlation_input, critical_compressibility
+packed_zc = estimate_critical_property(packed_component, method='Zc_definition',
+    parameters={'Tc':packed_Tc,'Pc':packed_Pc,'Vc':packed_Vc})
+assert packed_zc.value == critical_compressibility(packed_Tc.value,packed_Pc.value,packed_Vc.value)
+packed_derived_card = critical_correlation_input(packed_component, family='volume',
+    method='Rackett', parameters={'Tc':packed_Tc,'Pc':packed_Pc,'Zc':packed_zc},
+    temperature_range_K=(280,340), source=packed_source)
+packed_derived_copy = PropertyInputCard.from_json(json.dumps(packed_derived_card.to_dict()))
+assert packed_derived_copy.package.correlations[0].metadata['parameter_sources'][
+    'Zc']['method'] == 'Zc_definition'
+assert packed_derived_copy.package.evaluate('liquid_molar_volume',temperature_K=300).value > 0
+packed_mixture_base = synthetic_transport_properties()
+packed_mixture = packed_replace(packed_mixture_base, volume_mixing_method='COSTALD_mixture',
+    volume_mixing_parameters={k:{'Tcs':600+50*i,'Vcs':.0002+.0001*i,'omegas':.2+.1*i}
+        for i,k in enumerate(packed_mixture_base.component_ids)},
+    volume_mixing_note='Explicit synthetic installed volume law; additive enthalpy')
+packed_mixture_copy = LiquidTransportProperties.from_dict(json.loads(json.dumps(
+    packed_mixture.to_dict())))
+assert packed_mixture_copy.evaluate({'water':.2,'ethanol':.8},300) == packed_mixture.evaluate(
+    {'water':.2,'ethanol':.8},300)
+packed_flow = ChemWorldRuntime(composition=transport_world_spec(FiniteTransportSpec(
+    packed_mixture_copy),feed_mole_fractions={'water':.8,'ethanol':.2},
+    receiver_mole_fractions={'water':.2,'ethanol':.8}))
+packed_flow.reset(seed=24)
+for packed_action in ({'operation':'set_flow_rate','flow_rate_mL_min':6},
+                      {'operation':'run_flow','duration_s':1}):
+    assert packed_flow.execute(packed_action).info['transaction_status'] == 'committed'
+packed_copy = ChemWorldRuntime.from_snapshot(json.loads(json.dumps(
+    packed_flow.snapshot().to_dict())))
+for packed_session in (packed_flow,packed_copy):
+    assert packed_session.execute({'operation':'run_flow','duration_s':1}).info[
+        'transaction_status'] == 'committed'
+assert packed_flow._state.to_dict() == packed_copy._state.to_dict()
+packed_flow.close()
+packed_copy.close()
+from chemworld.physchem import PropertySelectionPolicy
+from chemworld.examples.native_flash_research import synthetic_vle_properties
+from chemworld.physchem.flash_units import VLEPropertyPackage, tp_flash
+packed_vle = synthetic_vle_properties()
+packed_light = packed_vle.packages[0]
+packed_original_psat = packed_light.by_property('vapor_pressure')[0]
+packed_selected_psat = packed_replace(packed_original_psat, correlation_id='explicit-packed-psat',
+    coefficients={**packed_original_psat.coefficients,
+                  'A':math.log(1e5)+30000/8.31446261815324/345},
+    metadata={'source':{'source_id':'packed-selected-source','record_id':'explicit-row'}})
+packed_light = packed_replace(packed_light,
+    correlations=(*packed_light.correlations,packed_selected_psat)).with_selection({
+    'vapor_pressure':PropertySelectionPolicy('source_priority',
+                                            source_priority=('packed-selected-source',))})
+packed_selected_vle = packed_replace(packed_vle,packages=(packed_light,packed_vle.packages[1]))
+packed_selected_vle = VLEPropertyPackage.from_dict(json.loads(json.dumps(
+    packed_selected_vle.to_dict())))
+packed_selected_flash = tp_flash(packed_selected_vle,{'light':.5,'heavy':.5},
+    temperature_K=350,pressure_Pa=1e5,feed_enthalpy_J=1000)
+packed_default_flash = tp_flash(packed_vle,{'light':.5,'heavy':.5},
+    temperature_K=350,pressure_Pa=1e5)
+assert packed_default_flash.vapor_fraction > 0
+assert packed_selected_flash.vapor_fraction == 0
+assert abs(packed_selected_flash.total_enthalpy_j-(90*(350-298.15)-35000)) < 1e-6
+assert packed_selected_vle.packages[0].selection_report('vapor_pressure',temperature_K=350
+    ).selected_id == 'explicit-packed-psat'
+packed_query = fuel_db.inspect_value('64-17-5','RON',methods=('FLORIAN_LIMING_ANN',))
+assert packed_query['methods'][0]['records'][0]['value']['value'] == 100
+assert packed_query['selected_record_id'] is None
+packed_query = IdentifierDatabase(sys.argv[1] + '.missing-identities').inspect_search(
+    '7732-18-5',kind='cas',source_ids=('pubchem-small','absent'))
+assert [s['status'] for s in packed_query['sources']] == ['source_unavailable','unknown_method']
+assert packed_query['candidates'] == []
 assert 'chemicals' not in sys.modules
+from chemworld.physchem import (
+    dippr_temperature_response, dippr_parameter_jacobian, dippr_mixed_derivative,
+    dippr106_coefficients_from_point,
+)
+packed_dippr = PropertyCorrelation('packed-derivatives', 'dippr100',
+    {'A':25., 'B':.01, 'C':.0002}, {'temperature':'K'}, 'J/(mol*K)',
+    'ideal_gas_heat_capacity', {'temperature':(200,500)}, 'Synthetic installed test')
+packed_response = dippr_temperature_response(packed_dippr, temperature_K=300)
+assert all(abs(a-e) < 1e-12 for a,e in zip(packed_response.values, (46.,.13,.0004,0.)))
+assert dippr_parameter_jacobian(packed_dippr, [300], parameters=('B','C')).values == ((300,90000),)
+assert dippr_mixed_derivative(packed_dippr, temperature_K=300,
+    coordinates=('temperature','temperature','C')).value == 2
+packed_local = dippr106_coefficients_from_point(temperature_K=300,
+    critical_temperature_K=650, value=50000*(1-300/650)**.4,
+    first_derivative=-50000*.4/650*(1-300/650)**(-.6))
+assert abs(packed_local['A']-50000) < 1e-6 and abs(packed_local['B']-.4) < 1e-12
+assert all(name not in sys.modules for name in ('chemicals','mpmath'))
+from chemworld.data.correlation_calibration import CorrelationCalibration, CorrelationFitParameter
+from chemworld.data.scientific_inputs import ScientificRow, ScientificTable, QuantityColumn
+packed_fit_source = InputSource(DataSourceProvenance('packed-fit', 0, 'Synthetic installed Cp',
+    version='1', license='MIT'), 'synthetic')
+packed_fit_columns = (
+    QuantityColumn('temperature','K','condition',(200,500),'absolute temperature'),
+    QuantityColumn('value','J/(mol*K)','observation',(0,100),'synthetic Cp'),
+)
+packed_fit_rows = tuple(ScientificRow(str(i),'packed-fit',str(i),str(i),
+    'train' if i < 4 else 'validation', {
+        'temperature': InputValue(T,'K',0.,'exact synthetic input'),
+        'value': InputValue(30+.02*T,'J/(mol*K)',.1,'declared synthetic sigma'),
+    }) for i,T in enumerate((250.,300.,350.,400.,275.,375.)))
+packed_fit_table = ScientificTable('packed-fit','measurements',packed_fit_columns,
+    (packed_fit_source,), packed_fit_rows)
+packed_fit_curve = PropertyCorrelation('packed-fit-seed','dippr100',{'A':32.,'B':.01},
+    {'temperature':'K'},'J/(mol*K)','ideal_gas_heat_capacity',{'temperature':(240,450)})
+packed_fit = CorrelationCalibration(packed_fit_table, packed_fit_curve,
+    (CorrelationFitParameter('A',(10,60),32), CorrelationFitParameter('B',(.001,.1),.01)),
+    fitted_correlation_id='packed-fitted').fit(max_nfev=100)
+assert packed_fit['status'] == 'fitted' and packed_fit['validation']['weighted_rmse'] < 1e-8
+assert abs(packed_fit['estimate']['A']-30) < 1e-8 and abs(packed_fit['estimate']['B']-.02) < 1e-8
+assert packed_fit['identifiability']['rank'] == 2
+assert all(name not in sys.modules for name in ('chemicals','mpmath'))
+from chemworld.physchem import (
+    solve_stream_composition, partial_molar_properties, weighted_property,
+    heat_capacity_difference, acoustic_velocity, gravity_scale,
+)
+packed_flows, packed_zs, packed_ws = solve_stream_composition(
+    (2.,None,None),(None,.3,None),(None,None,350/518),(18.,44.,70.))
+assert all(abs(a-e)<1e-10 for a,e in zip(packed_flows,(2.,3.,5.)))
+assert abs(sum(x*p for x,p in zip(packed_zs,
+    partial_molar_properties(13.,(-5.,3.,9.),packed_zs)))-13) < 1e-12
+assert abs(weighted_property((.25,.75),(1.,9.),rule='power',exponent=1.5)-20.5**(2/3))<1e-12
+assert abs(heat_capacity_difference(300.,333.,-4e6)-8.316675)<1e-12
+assert acoustic_velocity(.025,-4e6,30.,21.7,molecular_weight=28.97)>300
+assert abs(gravity_scale(gravity_scale(850.,target='API'),source='API',target='density')-850)<1e-10
+assert all(name not in sys.modules for name in ('chemicals','mpmath'))
+import json
+from math import isclose
+from chemworld.data.helmholtz_phase import load_helmholtz_phase_model
+from chemworld.physchem import (
+    HelmholtzPhaseModel, HelmholtzTwoPhaseState,
+    HelmholtzEquilibriumIsochoricThermodynamics, solve_two_phase_state,
+    CoupledState, CoupledSystem, HeatFlux,
+)
+from chemworld.physchem.solver_backend import ODESolverPolicy
+# Self-authored polynomial alpha_r=delta**4/60-(2/3)*delta*tau.
+# It has analytic critical T=300 K, rho=1000 mol/m3; no external data.
+packed_heos_source = {
+    'INFO': {'NAME': 'packed-polynomial'},
+    'EOS': [{'gas_constant': 8.3, 'molar_mass': .04, 'T_max': 1500, 'p_max': 1e9,
+        'pseudo_pure': False,
+        'STATES': {'reducing': {'T': 300, 'rhomolar': 1000}, 'sat_min_liquid': {'T': 100}},
+        'alpha0': [{'type': 'IdealGasHelmholtzLead', 'a1': 0, 'a2': 0},
+                   {'type': 'IdealGasHelmholtzLogTau', 'a': 1.5}],
+        'alphar': [{'type': 'ResidualHelmholtzPower', 'n': [1/60, -2/3],
+                    'd': [4, 1], 't': [0, 1], 'l': [0, 0]}]}],
+    'STATES': {'critical': {'T': 300, 'rhomolar': 1000, 'p': 996000}},
+    'ANCILLARIES': {k: {'type': kind, 'T_r': 300, 'reducing_value': reducing,
+                        'Tmin': 100, 'Tmax': 300, 'n': [n], 't': [t], 'using_tau_r': tau}
+        for k, kind, reducing, n, t, tau in (
+            ('rhoL', 'rhoLnoexp', 1000, 2, .5, False),
+            ('rhoV', 'rhoV', 1000, -4, .5, False),
+            ('pS', 'pV', 996000, -4, 1, True))},
+}
+packed_heos = load_helmholtz_phase_model(packed_heos_source,
+    source='self-authored installed fixture')
+packed_heos = HelmholtzPhaseModel.from_dict(json.loads(json.dumps(packed_heos.to_dict())))
+packed_flash = solve_two_phase_state(packed_heos, {'T': 240, 'Q': .35})
+assert packed_flash.success and isinstance(packed_flash.state, HelmholtzTwoPhaseState)
+packed_mix = packed_flash.state
+assert isclose(packed_mix.enthalpy_J_mol, packed_mix.internal_energy_J_mol
+    + packed_mix.pressure_Pa/packed_mix.molar_density_mol_m3, rel_tol=1e-9)
+packed_volume = 2000/packed_mix.molar_density_mol_m3
+packed_thermal = HelmholtzEquilibriumIsochoricThermodynamics(packed_heos, 'fluid', packed_volume)
+packed_thermal = HelmholtzEquilibriumIsochoricThermodynamics.from_dict(
+    json.loads(json.dumps(packed_thermal.to_dict())))
+packed_initial = CoupledState({'fluid': 2}, 240, packed_volume)
+packed_process = CoupledSystem(packed_thermal, heat_flux=lambda _: HeatFlux(10),
+    policy=ODESolverPolicy('installed-two-phase', method='BDF', rtol=1e-11, atol=1e-13))
+packed_result = packed_process.advance(packed_initial, 1)
+assert abs(packed_thermal.internal_energy_j(packed_result.final_state)
+    -packed_thermal.internal_energy_j(packed_initial)-10) < 1e-4
+assert abs(packed_result.energy_balance_residual_J) < 1e-4
+assert all(name not in sys.modules for name in ('CoolProp','thermo','fluids'))
 print('packaged atomic resources OK')
 """
     # Native workflows use filesystem-backed bundled protocols. Importing the
@@ -839,3 +1101,56 @@ print('packaged atomic resources OK')
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "packaged atomic resources OK" in result.stdout
+    phase_probe = tmp_path / "installed_phase_probe.py"
+    phase_probe.write_text(
+        "import sys\nsys.path.insert(0, sys.argv[1])\n"
+        "import chemworld\nassert sys.argv[1] in chemworld.__file__\n"
+        + (root / "tests/reference/probe_conv23_install.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    phase_result = subprocess.run(
+        [sys.executable, "-I", str(phase_probe), str(target)],
+        cwd=tmp_path, check=False, capture_output=True, text=True,
+    )
+    assert phase_result.returncode == 0, phase_result.stdout + phase_result.stderr
+    engineering_probe = tmp_path / "installed_engineering_probe.py"
+    engineering_probe.write_text(
+        "import sys\nsys.path.insert(0, sys.argv[1])\n"
+        "import chemworld\nassert sys.argv[1] in chemworld.__file__\n"
+        + (root / "tests/reference/probe_conv30_install.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    return root, tmp_path, target, engineering_probe
+
+
+def test_atomic_resources_survive_sdist_wheel_and_isolated_import(installed_atomic_resources):
+    _root, tmp_path, target, engineering_probe = installed_atomic_resources
+    engineering_result = subprocess.run(
+        [sys.executable, "-I", str(engineering_probe), str(target)],
+        cwd=tmp_path, check=False, capture_output=True, text=True,
+    )
+    assert engineering_result.returncode == 0, engineering_result.stdout + engineering_result.stderr
+    print(engineering_result.stdout)
+
+
+@pytest.mark.reference
+def test_reference_environment_arrays_in_installed_wheel(installed_atomic_resources):
+    pytest.importorskip("fluids", reason="optional empirical MSIS/SPA reference arrays")
+    root, tmp_path, target, engineering_probe = installed_atomic_resources
+    # Reference parameter arrays are caller data generated before isolation;
+    # the installed child evaluates its own model without importing references.
+    engineering_data = {}
+    for family in ("msis", "solar"):
+        path = root / f"tests/reference/{family}_source_parameters.py"
+        loader = importlib.util.spec_from_file_location(f"install_{family}_inputs", path)
+        module = importlib.util.module_from_spec(loader)
+        loader.loader.exec_module(module)
+        engineering_data[family] = module.source_parameters().to_dict()
+    parameter_path = tmp_path / "caller_environment_parameters.json"
+    parameter_path.write_text(json.dumps(engineering_data), encoding="utf-8")
+    engineering_result = subprocess.run(
+        [sys.executable, "-I", str(engineering_probe), str(target), str(parameter_path)],
+        cwd=tmp_path, check=False, capture_output=True, text=True,
+    )
+    assert engineering_result.returncode == 0, engineering_result.stdout + engineering_result.stderr
+    print(engineering_result.stdout)

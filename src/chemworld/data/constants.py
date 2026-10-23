@@ -523,6 +523,68 @@ class ConstantDatabase:
     def value(self, identity, field_id, *, method, point=None):
         return self.record(identity, method=method).value(field_id, point=point)
 
+    def inspect_value(self, identity, field_id, *, methods=None, point=None):
+        """Explain every requested source, including unavailable and ambiguous data.
+
+        Unlike scalar candidates, this report retains missing fields, missing
+        units and unevaluated series/correlations. It neither selects a source
+        nor fills a value; the existing source records remain authoritative.
+        """
+        _lookup_key(identity)
+        if not isinstance(field_id, str) or not field_id.strip():
+            raise ValueError("inspection needs a nonempty field_id")
+        if isinstance(methods, str):
+            raise TypeError("methods must be a sequence of source IDs")
+        methods = (tuple(s.source_id for s in self.catalog)
+                   if methods is None else tuple(methods))
+        if len(set(methods)) != len(methods):
+            raise ValueError("duplicate constant methods")
+        reports, identities, quantities = [], set(), set()
+        for method in methods:
+            report = {"method": method, "records": []}
+            reports.append(report)
+            try:
+                source = self.source(method)
+                report["source"] = source.provenance.to_dict()
+                records = self.records_for(identity, method=method)
+            except (UnknownConstantMethodError, ConstantSourceUnavailableError,
+                    ConstantSourceFormatError) as exc:
+                report.update(status={UnknownConstantMethodError: "unknown_method",
+                    ConstantSourceUnavailableError: "source_unavailable",
+                    ConstantSourceFormatError: "invalid_source"}[type(exc)], error=str(exc))
+                continue
+            report["status"] = ("missing_identity" if not records
+                                else "ambiguous_records" if len(records) > 1 else "matched")
+            for record in records:
+                identities.add(record.cas_number or record.source_key)
+                item = {"record_id": record.record_id, "source_key": record.source_key,
+                        "cas_number": record.cas_number, "diagnostics": []}
+                report["records"].append(item)
+                try:
+                    value = record.value(field_id, point=point)
+                except ConstantFieldNotFoundError as exc:
+                    item["diagnostics"].append("missing_field")
+                    item["error"] = str(exc)
+                    continue
+                except NonScalarConstantError as exc:
+                    raw = record.raw(field_id)
+                    item["diagnostics"].append("non_scalar_or_point_required")
+                    item["error"] = str(exc)
+                    item["raw_value"] = ({"xml": raw.xml, "source_unit": raw.source_unit}
+                                         if isinstance(raw, SourceCorrelation) else raw)
+                    continue
+                item["value"] = value.to_dict()
+                if value.quality != "valid":
+                    item["diagnostics"].append(value.quality + "_value")
+                if value.unit is None:
+                    item["diagnostics"].append("missing_unit")
+                if not item["diagnostics"]:
+                    q = value.quantity()
+                    quantities.add((q.value, q.unit))
+        return {"identity": identity, "field_id": field_id, "point": point,
+                "methods": reports, "identity_conflict": len(identities) > 1,
+                "value_conflict": len(quantities) > 1, "selected_record_id": None}
+
     def candidates(self, identity, field_id, *, methods=None):
         methods = (tuple(source.source_id for source in self.catalog)
                    if methods is None else tuple(methods))

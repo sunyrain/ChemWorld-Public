@@ -24,6 +24,7 @@ from chemworld.physchem.crystallization_units import (
 )
 from chemworld.physchem.crystallization_validation import CrystallizationGridCase
 from chemworld.physchem.elements import molecular_weight
+from chemworld.runtime.action_values import action_float
 from chemworld.runtime.full_process_contract import (
     population_active,
     population_settings,
@@ -37,11 +38,6 @@ from chemworld.world.parameters import ChemWorldParameters
 from chemworld.world.thermal_kernel import account_temperature_transition
 
 DEFAULT_CRYSTAL_SEED_DIAMETER_M = 100.0e-6
-
-
-def _action_float(action: dict[str, Any], key: str, default: float) -> float:
-    value = action.get(key, default)
-    return float(np.asarray(value).reshape(-1)[0])
 
 
 def _effective_seed_diameter_m(crystallizer_settings: dict[str, Any]) -> float:
@@ -178,7 +174,7 @@ class ChemWorldCrystallizationServices:
         return molecular_weight(species.composition) / 1000.0
 
     def seed_charge(self, action: dict[str, Any], state=None) -> tuple[float, float]:
-        seed_mass = float(np.clip(_action_float(action, "seed_mass_g", 0.005), 0.0, 0.050))
+        seed_mass = float(np.clip(action_float(action, "seed_mass_g", 0.005), 0.0, 0.050))
         return seed_mass, seed_mass / 1000.0 / self._target_molecular_weight_kg_mol(state)
 
     def seed_crystals(self, state: WorldState, action: dict[str, Any]) -> WorldState:
@@ -302,9 +298,9 @@ class ChemWorldCrystallizationServices:
                 },
             }
             return result
-        duration = float(np.clip(_action_float(action, "duration_s", 1200.0), 0.0, 14_400.0))
+        duration = float(np.clip(action_float(action, "duration_s", 1200.0), 0.0, 14_400.0))
         target_temperature = float(
-            np.clip(_action_float(action, "target_temperature_K", 278.15), 250.0, 330.0)
+            np.clip(action_float(action, "target_temperature_K", 278.15), 250.0, 330.0)
         )
         crystallizer_settings = equipment_settings(state.equipment, "crystallizer")
         target_species = self.target_species(state)
@@ -682,8 +678,8 @@ class ChemWorldCrystallizationServices:
         dissolved_seed = float(crystal_settings.get("dissolved_seed_target_mol", 0.0))
         liquid_total = liquor.volume_L + cake_liquor.volume_L
         retained_liquid_fraction = cake_liquor.volume_L / max(liquid_total, 1e-12)
-        volume = _action_float(action, "volume_L", 0.015)
-        solvent = int(_action_float(action, "solvent", 0))
+        volume = action_float(action, "volume_L", 0.015)
+        solvent = int(action_float(action, "solvent", 0))
         if not 0.0001 <= volume <= 0.080 or solvent not in range(len(SOLVENTS)):
             raise ValueError("Invalid resuspension volume or solvent")
         sample_id = next(

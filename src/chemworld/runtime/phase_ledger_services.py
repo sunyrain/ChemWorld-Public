@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import numpy as np
-
 from chemworld.foundation import WorldState, process_with_metrics
 from chemworld.foundation.state import (
     EquipmentLedger,
@@ -13,6 +11,7 @@ from chemworld.foundation.state import (
     PhaseRecord,
     selected_phase_id,
 )
+from chemworld.runtime.action_values import action_float
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.world.separation_kernel import downstream_truth_values
 from chemworld.world.species_roles import PHASE_PRODUCT_AMOUNT_KEY
@@ -37,11 +36,6 @@ PHASE_PRIMARY_METADATA_KEYS = frozenset(
         "solvent_loss",
     }
 )
-
-
-def action_float(action: dict[str, Any], key: str, default: float) -> float:
-    value = action.get(key, default)
-    return float(np.asarray(value).reshape(-1)[0])
 
 
 def empty_phase(volume_L: float = 0.0) -> dict[str, float]:

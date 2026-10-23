@@ -374,21 +374,6 @@ def _validity_warnings(
     return tuple(warnings)
 
 
-def _choose_valid_correlation(
-    correlations: tuple[PropertyCorrelation, ...],
-    *,
-    temperature_K: float,
-    pressure_Pa: float | None,
-) -> PropertyCorrelation:
-    for correlation in correlations:
-        inputs = {"temperature": _convert_input(temperature_K, "K", correlation, "temperature")}
-        if pressure_Pa is not None:
-            inputs["pressure"] = _convert_input(pressure_Pa, "Pa", correlation, "pressure")
-        if not _validity_warnings(correlation, inputs):
-            return correlation
-    return correlations[0]
-
-
 def _ensure_finite_positive(value: float, correlation: PropertyCorrelation) -> None:
     if not isfinite(value):
         raise ValueError(f"Correlation returned non-finite value: {correlation.correlation_id}")
