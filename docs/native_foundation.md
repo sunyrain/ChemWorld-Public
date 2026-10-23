@@ -1,5 +1,217 @@
 # Native physical sessions
 
+## Thermodynamic and engineering APIs {#thermodynamic-and-engineering-apis}
+
+These examples run with the current Python package. Inputs carry physical units
+and explicit coefficients; outputs below are produced by the displayed code.
+The capability website also shows function signatures and a JSON/table toggle.
+
+Delivered thermodynamics includes activity derivatives and finite calibration,
+six UNIFAC variants with caller-supplied group data, Twu/PPR78 and GE cubic mixing,
+and a shared homogeneous-phase evaluator. Pure-fluid Helmholtz adds density roots,
+saturation, TP/PH/PS/T-rho flash and bounded thermal consumers. The example below
+isolates the ideal-gas limit; real-fluid use requires a sourced coefficient set
+and its application range. General associating/multifluid EOS remain future work.
+
+Engineering methods include friction, fittings, valves, meters, pumps, packed
+beds/towers, two-phase and open-channel flow, particle distributions and equipment
+geometry. Each declares its own physical assumptions and operating domain.
+
+### Pure-fluid Helmholtz state {#helmholtz-state}
+
+Self-authored ideal-gas coefficients demonstrate inputs in K and mol/m³ and dimensional properties. Real fluids require sourced coefficients; this call checks homogeneous local stability.
+
+```python
+import json
+from chemworld.physchem.helmholtz import HelmholtzFluid
+from chemworld.physchem.helmholtz_terms import HelmholtzTerm
+
+inputs = {'temperature_K': 400, 'molar_density_mol_m3': 20}
+
+fluid = HelmholtzFluid(
+    fluid_id="synthetic-monatomic", casrn="", molar_mass_kg_mol=0.04,
+    gas_constant_J_mol_K=8.3, reducing_temperature_K=300,
+    reducing_molar_density_mol_m3=1000, minimum_temperature_K=100,
+    maximum_temperature_K=1500, maximum_pressure_Pa=1e9,
+    ideal_terms=(
+        HelmholtzTerm("IdealGasHelmholtzLead", {"a1": 0, "a2": 0}),
+        HelmholtzTerm("IdealGasHelmholtzLogTau", {"a": 1.5}),
+    ), residual_terms=(), source="Self-authored ideal-gas demonstration",
+)
+state = fluid.state(**inputs)
+output = {key: state.to_dict()[key] for key in (
+    "pressure_Pa", "enthalpy_J_mol", "cp_J_mol_K", "cv_J_mol_K",
+    "compressibility_factor", "stability_scope",
+)}
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "pressure_Pa": 66400.0,
+  "enthalpy_J_mol": 8300.0,
+  "cp_J_mol_K": 20.75,
+  "cv_J_mol_K": 12.45,
+  "compressibility_factor": 1.0,
+  "stability_scope": "homogeneous_local_only"
+}
+```
+
+### Activity thermodynamics {#activity-thermodynamics}
+
+Synthetic binary Margules parameters demonstrate excess and partial-molar properties; A/B do not denote validated real materials.
+
+```python
+import json
+from chemworld.physchem.equilibrium import ActivityModelSpec
+from chemworld.physchem.activity_thermodynamics import activity_thermodynamic_report
+
+inputs = {'temperature_K': 343.15,
+ 'composition': {'A': 0.252, 'B': 0.748},
+ 'parameters': {'A:A|B': 1.2, 'A:B|A': 0.8}}
+
+model = ActivityModelSpec("synthetic-binary", ("A", "B"), "margules", inputs["parameters"])
+report = activity_thermodynamic_report(
+    model, inputs["composition"], temperature_K=inputs["temperature_K"])
+output = {key: report.to_dict()[key] for key in (
+    "activity_coefficients", "gibbs_excess_J_mol", "enthalpy_excess_J_mol",
+    "entropy_excess_J_mol_K", "partial_molar_gibbs_excess_J_mol",
+)}
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "activity_coefficients": {
+    "A": 1.7482386468981486,
+    "B": 1.0928664265178667
+  },
+  "gibbs_excess_J_mol": 591.1491189544142,
+  "enthalpy_excess_J_mol": 0.0,
+  "entropy_excess_J_mol_K": -1.7227134458820172,
+  "partial_molar_gibbs_excess_J_mol": {
+    "A": 1593.7711326575798,
+    "B": 253.367371022332
+  }
+}
+```
+
+### Property derivatives {#property-derivatives}
+
+An explicit heat-capacity correlation yields temperature derivatives and a selected-parameter Jacobian, retaining units and validity range. Parameters are synthetic.
+
+```python
+import json
+from chemworld.physchem.specs import PropertyCorrelation
+from chemworld.physchem.dippr import dippr_temperature_response, dippr_parameter_jacobian
+
+inputs = {'temperature_K': 300,
+ 'coefficients': {'A': 25.0, 'B': 30.0, 'C': 800.0, 'D': 10.0, 'E': 400.0}}
+
+curve = PropertyCorrelation(
+    "synthetic-capacity", "dippr107", inputs["coefficients"],
+    {"temperature": "K"}, "J/(mol*K)", "ideal_gas_heat_capacity",
+    {"temperature": (200, 500)}, "Synthetic API demonstration")
+response = dippr_temperature_response(curve, temperature_K=inputs["temperature_K"])
+jacobian = dippr_parameter_jacobian(curve, [inputs["temperature_K"]], parameters=["A", "C"])
+output = {"temperature_response": response.to_dict(), "parameter_jacobian": jacobian.to_dict()}
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "temperature_response": {
+    "correlation_id": "synthetic-capacity",
+    "temperature_K": 300,
+    "values": [
+      33.47979179011391,
+      0.05154913751893453,
+      -2.6191592747468737e-05,
+      -1.4136319377386219e-06
+    ],
+    "output_unit": "J/(mol*K)",
+    "warnings": [],
+    "temperature_basis": "K",
+    "orders": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "value_units": [
+      "J/(mol*K)",
+      "(J/(mol*K))/K^1",
+      "(J/(mol*K))/K^2",
+      "(J/(mol*K))/K^3"
+    ]
+  },
+  "parameter_jacobian": {
+    "temperatures_K": [
+      300
+    ],
+    "parameters": [
+      "A",
+      "C"
+    ],
+    "values": [
+      [
+        1.0,
+        -0.017602090544385513
+      ]
+    ],
+    "output_unit": "J/(mol*K)",
+    "warnings": [
+      []
+    ],
+    "parameter_basis": "declared source-coefficient coordinates, no normalization"
+  }
+}
+```
+
+### Engineering flow meter {#engineering-flow-meter}
+
+Calculate differential pressure from mass flow, then invert it to recover flow. Installation conditions, fluid parameters and the correlation domain must satisfy the declaration.
+
+```python
+import json
+from chemworld.physchem.flow_meters import LiquidOrificeSpec, liquid_orifice_pressure, liquid_orifice_mass_flow
+
+inputs = {'pipe_diameter_m': 0.07366,
+ 'orifice_diameter_m': 0.05,
+ 'mass_flow_kg_s': 7.0,
+ 'density_kg_m3': 999.1,
+ 'viscosity_Pa_s': 0.0011}
+
+spec = LiquidOrificeSpec(inputs["pipe_diameter_m"], inputs["orifice_diameter_m"], taps="corner",
+    installation_note="ISO concentric sharp edge; compliant straight runs and roughness assumed")
+properties = {key: inputs[key] for key in ("density_kg_m3", "viscosity_Pa_s")}
+forward = liquid_orifice_pressure(spec, mass_flow_kg_s=inputs["mass_flow_kg_s"], **properties)
+inverse = liquid_orifice_mass_flow(spec, differential_pressure_Pa=forward.differential_pressure_Pa,
+    **properties)
+output = {"forward": forward.to_dict(), "recovered_mass_flow_kg_s": inverse.mass_flow_kg_s}
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "forward": {
+    "mass_flow_kg_s": 7.0,
+    "reynolds": 109997.7391596048,
+    "discharge_coefficient": 0.6102129110865264,
+    "differential_pressure_Pa": 13455.336179859189,
+    "permanent_pressure_loss_Pa": 7213.34049191436,
+    "method": "iso5167"
+  },
+  "recovered_mass_flow_kg_s": 6.999999999999911
+}
+```
+
+---
+
 ## Pure virial coefficients
 
 `virial_correlation` declares seven second-virial methods (`Pitzer_Curl`,

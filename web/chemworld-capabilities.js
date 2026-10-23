@@ -1,6 +1,6 @@
 // Editorial navigation over the existing capability snapshot; not a runtime registry.
 window.CHEMWORLD_CAPABILITIES = {
-  "snapshot": "2026-10-22",
+  "snapshot": "2026-10-23",
   "registry": {
     "modules": 27,
     "components": 32,
@@ -168,7 +168,7 @@ window.CHEMWORLD_CAPABILITIES = {
                   "id": "calibration",
                   "name": "科学输入与有限参数标定",
                   "state": "done",
-                  "ability": "单位／来源／质量导入、有限参数拟合、留出验证与可辨识性。",
+                  "ability": "带来源科学输入、有限参数拟合、温度／参数导数及可辨识性诊断。",
                   "boundary": "显式参数白名单与固定数据分组。",
                   "example": "用冷却曲线估计热损失参数。",
                   "source": "docs/world-foundations.md",
@@ -234,9 +234,9 @@ window.CHEMWORLD_CAPABILITIES = {
                 {
                   "id": "conductivity",
                   "name": "导热方法族",
-                  "state": "partial",
-                  "ability": "多数纯物质、混合、稠密及水／空气导热已接入。",
-                  "boundary": "完整目录仍有三式待核实；父项未完成。",
+                  "state": "done",
+                  "ability": "纯物质、混合物与稠密流体关联式，水／空气方法、导数及来源输入。",
+                  "boundary": "各方法要求独立参数和有效域，来源身份审查仍在继续。",
                   "example": "由实际状态与导热系数计算换热响应。",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
@@ -301,13 +301,33 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "advanced-thermo",
-                  "name": "通用 EOS 与多相热力学",
-                  "state": "planned",
-                  "ability": "纯流体 Helmholtz、缔合与多流体 EOS、通用稳定性／闪蒸／相包络。",
-                  "boundary": "依赖完整物性与热力学方法交付。",
+                  "name": "纯流体 Helmholtz 热力学",
+                  "state": "done",
+                  "ability": "原生导数、热力学性质、密度求根、饱和、闪蒸及有限热过程消费。",
+                  "boundary": "显式提供来源系数和有效域；均相局部稳定不等同于完整相平衡。",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "热力学模型"
+                },
+                {
+                  "id": "activity-thermo",
+                  "name": "活度模型与立方混合规则",
+                  "state": "done",
+                  "ability": "超额与偏摩尔性质、六种 UNIFAC 变体、Twu／PPR78、GE 混合及共同相态求值。",
+                  "boundary": "基团分配、相互作用及来源参数须显式提供；模型一致性不等同于材料验证。",
+                  "source": "docs/native_foundation.md",
+                  "kind": "capability",
+                  "type": "科学模型"
+                },
+                {
+                  "id": "general-fluid-eos",
+                  "name": "缔合与多流体状态方程",
+                  "state": "planned",
+                  "ability": "未来扩展通用缔合／多流体模型与无约束相包络。",
+                  "boundary": "不在当前纯流体及选定立方／活度模型范围内。",
+                  "source": "docs/native_foundation.md",
+                  "kind": "capability",
+                  "type": "科学模型"
                 }
               ]
             }
@@ -602,6 +622,16 @@ window.CHEMWORLD_CAPABILITIES = {
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "输运模型"
+                },
+                {
+                  "id": "fluid-engineering",
+                  "name": "工程流体计算",
+                  "state": "done",
+                  "ability": "流量计、阀门、摩阻、管件、泵、气体／两相流、填料床／塔、明渠与设备几何。",
+                  "boundary": "独立关联式与有限设备消费，不是无约束流程网络求解器。",
+                  "source": "docs/native_foundation.md",
+                  "kind": "capability",
+                  "type": "科学模型"
                 }
               ]
             },

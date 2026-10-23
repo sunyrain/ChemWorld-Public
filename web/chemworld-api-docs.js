@@ -45,13 +45,20 @@
     HHV_J_mol:['高位热值','Higher heating value'], LHV_J_mol:['低位热值','Lower heating value'],
     finite_heat:['有限物料热量','Finite-material heat'], temperature_K:['温度','Temperature'],
     pressure_Pa:['压力','Pressure'], volume_L:['体积','Volume'], time_s:['时间','Time'],
+    enthalpy_J_mol:['摩尔焓','Molar enthalpy'], cp_J_mol_K:['定压摩尔热容','Molar heat capacity (constant pressure)'],
+    cv_J_mol_K:['定容摩尔热容','Molar heat capacity (constant volume)'],
+    molar_density_mol_m3:['摩尔密度','Molar density'], mass_flow_kg_s:['质量流率','Mass flow'],
+    recovered_mass_flow_kg_s:['反算质量流率','Recovered mass flow'],
+    differential_pressure_Pa:['差压','Differential pressure'], permanent_pressure_loss_Pa:['永久压降','Permanent pressure loss'],
+    compressibility_factor:['压缩因子','Compressibility factor'], stability_scope:['稳定性范围','Stability scope'],
     duration_s:['持续时间','Duration'], actual_duration_s:['实际持续时间','Actual duration'],
     enthalpy_J:['焓','Enthalpy'], status:['状态','Status'], operation:['操作','Operation'],
     value:['数值','Value'], unit:['单位','Unit'], uncertainty:['不确定度','Uncertainty'],
     quality:['质量标记','Quality'], sample_id:['样品标识','Sample ID'], channel_id:['通道标识','Channel ID'],
     valid_range:['有效范围','Valid range'], detection_limit:['检测限','Detection limit'],
   };
-  const unitSuffixes = [['_J_mol','J/mol'],['_mol_L','mol/L'],['_mol_s','mol/s'],['_mL_min','mL/min'],
+  const unitSuffixes = [['_J_mol_K','J/(mol·K)'],['_mol_m3','mol/m³'],['_kg_m3','kg/m³'],
+    ['_kg_s','kg/s'],['_Pa_s','Pa·s'],['_J_mol','J/mol'],['_mol_L','mol/L'],['_mol_s','mol/s'],['_mL_min','mL/min'],
     ['_g_mol','g/mol'],['_mol','mol'],['_J','J'],['_K','K'],['_Pa','Pa'],['_mL','mL'],['_L','L'],['_s','s']];
   const viewModes = new Map();
   const isObject = value => value !== null && typeof value === 'object';

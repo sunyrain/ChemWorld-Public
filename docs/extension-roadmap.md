@@ -1,62 +1,45 @@
 # Native extensions and model ranges
 
-Current development source includes the bounded models below. Each uses ChemWorld's
-native state, operation, observation and transaction contracts. Upstream packages
-provide equation references or optional numerical comparisons; they are not required
-to execute these models. These synthetic examples do not replace the full upstream
-packages or establish fidelity to a particular laboratory material.
+The current Python backend includes the models below. Scientific kernels expose
+explicit parameters and application ranges; connected worlds use ChemWorld's native
+state, operation, observation and transaction contracts. Optional upstream packages
+serve as numerical references, not production solver dependencies.
 
-| Area | Implemented native slice | Example or guide |
+| Area | Implemented scope | Guide |
 | --- | --- | --- |
-| Shared foundation | One session behind Gym, CLI and Agent; declared modules, owned material/equipment state, pre-commit balances, native units and serialized continuation | [Native sessions](native_foundation.md) |
-| Surface chemistry | Finite CO/O2 adsorption and oxidation, optional bulk reaction, shared thermal dynamics; reversible two-site model with coverage interactions and site exchange | `python -m chemworld.examples.native_multisite_surface` |
-| Thermal and phase processes | State-dependent properties, TP/PH flash, binary/ternary two-liquid stability, finite dynamic columns, concentration, adsorption/regeneration and crystal growth/redissolution | `python -m chemworld.examples.native_distillation_research`; `python -m chemworld.examples.native_crystal_research` |
-| Transport and electrodes | Finite tanks, pressure/power-limited pumping and heat exchange; conservative 1D planar/spherical diffusion and a finite diffusion/BV electrode | `python -m chemworld.examples.native_liquid_transport`; `python -m chemworld.examples.native_electrode_research` |
-| Batteries | Spherical single-particle diffusion, CC/CV/rest control, lumped synthetic thermodynamics and finite-solvent SEI/lithium loss | `python -m chemworld.examples.native_battery_degradation` |
-| Aqueous and mineral chemistry | Dilute carbonate/water equilibrium and finite calcite, with seeded dissolution/precipitation and phase-owned surface geometry at 298.15 K | `python -m chemworld.examples.native_mineral_research` |
-| Membranes | Finite feed/collection tanks, isothermal dilute-NaCl reverse osmosis, concentration polarization, persistent synthetic fouling and finite-water rinsing | `python -m chemworld.examples.native_membrane_fouling` |
-| Stochastic biochemistry | Constant-volume/temperature Gillespie events, reversible and explicit enzyme networks; integer additions, molecular capture and separate process/detector randomness | [Biochemical worlds](native_biochemical.md), [SSA](native_stochastic.md) |
-| Mechanisms and instruments | Bounded YAML/JSON import with P-log/Chebyshev and NASA7 gas thermodynamics; programmed chromatography with retained instrument state | [Mechanisms](native_mechanisms.md); `python -m chemworld.examples.programmed_chromatography --output chromatography-run` |
-| Binary solids | One/two substitutional phases, ideal mixing and L0/L1 Redlich–Kister terms; global supporting-line checks and thermal local-equilibrium paths | `python -m chemworld.examples.native_solid_solution` |
-| Shared laboratory time | One/two independent thermal or SSA vessels, one switched heater and one offline analyzer; FIFO requests, atomic time slices and delayed readings | [Shared laboratory clock](native_shared_lab.md) |
+| Shared foundation | Declared modules, owned state, common residual/DAE infrastructure, native units, finite calibration, saved continuation and replay across Python/Gym/CLI/Agent | [Native sessions](native_foundation.md) |
+| Thermodynamics and properties | Activity/excess properties, six UNIFAC variants, cubic alpha/mixing rules, pure-fluid Helmholtz properties/roots/saturation/flash, property derivatives and fitting | [Thermodynamic API examples](native_foundation.md#thermodynamic-and-engineering-apis) |
+| Engineering fluids | Friction, fittings, meters, valves, pumps, packed beds/towers, gas and two-phase flow, open channels, particle distributions, equipment geometry and atmospheric/solar calculations | [Engineering API](native_foundation.md#engineering-flow-meter) |
+| Surface and bulk reactions | Finite gas/bulk/surface reactions, multisite adsorption and oxidation, coverage interactions and common thermal dynamics | [Mechanisms](native_mechanisms.md) |
+| Separation and transport | Finite TP/PH flash, liquid stability, dynamic columns, adsorption/regeneration, crystallization, membrane flow/fouling/rinsing and conservative diffusion | [Continuous workflows](native_domains.md) |
+| Batteries and electrodes | SPM, bounded SPMe/DFN, particle distributions, finite-solvent SEI, selected impedance/SOH/OCV diagnostics, and persistent Thevenin RC/two-node thermal models | [Electrochemistry](native_foundation.md) |
+| Aqueous/mineral chemistry | Dilute carbonate equilibrium, finite calcite dissolution/precipitation and phase-owned surface geometry | [Continuous workflows](native_domains.md) |
+| Solid phases | Selected CALPHAD/ChemSage models and source inputs, finite equilibrium and thermal consumers | [Solid-phase models](native_foundation.md) |
+| Biochemistry | Deterministic and stochastic networks; supported SBML rules/events and SED-ML/COMBINE contracts | [Biochemical worlds](native_biochemical.md) |
+| Shared laboratory time | Finite heterogeneous vessel groups, declared open-flow systems, multiple persistent devices, FIFO measurement queues and delayed readings | [Shared clock](native_shared_lab.md) |
 
-In a checkout, prefix Python commands with `uv run --no-sync`. The package examples
-run without model credentials. The biochemical checkout example is
-`uv run --no-sync python examples/native_biochemical.py`.
+## Current boundaries
 
-## Integration scope and further scientific extensions
+Sources, units, phase assumptions and validity ranges are part of each model's input.
+An available equation does not imply a validated parameter set for every material.
+Source-table identity review, broader battery families and experiment interoperability
+remain active development. The implemented models do not replace every feature of
+CoolProp, thermo, chemicals, fluids, PyBaMM, pycalphad or COPASI.
 
-Shared time is an explicit session configuration. All enabled vessels then age together,
-and snapshots retain queued jobs, pending SSA events and unpublished readings. Local
-time remains the default. Shared mode supports sequential and keyed detector noise,
-with explicitly authored subsecond wait ranges. It excludes open flow and alternate
-phase strategies; see the guide for its full scope. The [integrated examples](native_domains.md)
-exercise seven continuous histories across four interfaces, both noise modes and
-fresh-process continuation. Wheel/sdist checks run the default-noise examples and
-their replays outside the checkout.
-
-Further scientific extensions need their own finite equations, parameters and reference
-cases: electrolyte-resolved battery models, plating/cracking, nonideal concentrated
-aqueous chemistry, membrane backflow and chemical cleaning, spatial surface kinetics,
-crystal breakage/agglomeration, non-isothermal hybrid SSA/ODE, and multi-sublattice solids.
-The implemented SPM, membrane and binary-solid slices are not complete
-PyBaMM, WaterTAP or CALPHAD equivalents.
+General associating/multifluid EOS, unrestricted phase envelopes and general flowsheet
+solution remain future work. The unified CPU kernel redesign is a plan: compiled
+execution, SIMD and a new default backend are not included in this snapshot.
+Local vessel time remains the default; shared time is enabled explicitly and only
+advances the model combinations supported by its guide.
 
 ## Reference and reuse practice
 
-Relevant scientific references include [Cantera](https://github.com/Cantera/cantera),
-[PyBaMM](https://github.com/pybamm-team/PyBaMM),
-[Reaktoro](https://github.com/reaktoro/reaktoro),
-[WaterTAP](https://github.com/watertap-org/watertap),
-[IDAES](https://github.com/IDAES/idaes-pse),
-[COPASI](https://github.com/copasi/COPASI),
-[RMG-Py](https://github.com/ReactionMechanismGenerator/RMG-Py),
-[CatMAP](https://github.com/SUNCAT-Center/catmap) and
-[pycalphad](https://github.com/pycalphad/pycalphad).
+Models are checked against analytical limits, conservation and finite reference cases.
+Independent implementation and numerical agreement do not remove attribution or
+license obligations on reused source material or data. Engineering reference methods
+include source-derived tables and formulas with provenance; the public project does
+not claim that every method was developed without source access. Caller-supplied
+fluid/data files retain their own licenses and are not implicitly bundled here.
 
-New models start with explicit equations, operating ranges, ownership and exchange
-rules. Native implementations share the existing solver/session and are checked against
-analytical limits, conservation and finite reference cases. A copied data fixture keeps
-its source and license, such as the Cantera 3.1.0 mechanism under
-`tests/fixtures/mechanisms/`. Upstream solver dependencies remain optional.
-Independent implementation does not remove license obligations on reused code or data.
+See [current foundation](current-foundation.md) for synchronization and validation
+details, and [installation](getting_started.md) for the supported environment.

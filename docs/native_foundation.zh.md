@@ -1,6 +1,214 @@
-# 原生物理课程
+# 原生物理会话
 
-> 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#guides/chemworld/native_foundation)。
+## 热力学与工程接口 {#thermodynamic-and-engineering-apis}
+
+以下示例使用当前 Python 包，输入包含物理单位及显式系数；输出由展示代码实际生成。
+能力网站同时提供函数签名和 JSON／键值表切换。
+
+已交付热力学包括活度导数与有限拟合、由调用方提供基团数据的六种 UNIFAC 变体、
+Twu／PPR78 与 GE 立方混合，以及共同均相求值接口。纯流体 Helmholtz 支持密度求根、
+饱和、TP／PH／PS／T-rho 闪蒸及有限热过程。下面用理想气体极限演示接口；真实流体
+需要显式来源系数与适用范围。通用缔合／多流体 EOS 仍待扩展。
+
+工程方法覆盖摩阻、管件、阀门、流量计、泵、填料床／塔、两相流、明渠、粒径分布
+及设备几何，各方法保留自己的物理假设与工作域。
+
+### 纯流体 Helmholtz 状态 {#helmholtz-state}
+
+自编理想气体系数演示：输入 K 与 mol/m³，输出有量纲物性。真实流体需提供来源系数；此处只检查均相局部稳定。
+
+```python
+import json
+from chemworld.physchem.helmholtz import HelmholtzFluid
+from chemworld.physchem.helmholtz_terms import HelmholtzTerm
+
+inputs = {'temperature_K': 400, 'molar_density_mol_m3': 20}
+
+fluid = HelmholtzFluid(
+    fluid_id="synthetic-monatomic", casrn="", molar_mass_kg_mol=0.04,
+    gas_constant_J_mol_K=8.3, reducing_temperature_K=300,
+    reducing_molar_density_mol_m3=1000, minimum_temperature_K=100,
+    maximum_temperature_K=1500, maximum_pressure_Pa=1e9,
+    ideal_terms=(
+        HelmholtzTerm("IdealGasHelmholtzLead", {"a1": 0, "a2": 0}),
+        HelmholtzTerm("IdealGasHelmholtzLogTau", {"a": 1.5}),
+    ), residual_terms=(), source="Self-authored ideal-gas demonstration",
+)
+state = fluid.state(**inputs)
+output = {key: state.to_dict()[key] for key in (
+    "pressure_Pa", "enthalpy_J_mol", "cp_J_mol_K", "cv_J_mol_K",
+    "compressibility_factor", "stability_scope",
+)}
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "pressure_Pa": 66400.0,
+  "enthalpy_J_mol": 8300.0,
+  "cp_J_mol_K": 20.75,
+  "cv_J_mol_K": 12.45,
+  "compressibility_factor": 1.0,
+  "stability_scope": "homogeneous_local_only"
+}
+```
+
+### 活度热力学 {#activity-thermodynamics}
+
+合成二元 Margules 参数用于展示超额和偏摩尔性质；组分 A/B 不代表经过验证的真实材料。
+
+```python
+import json
+from chemworld.physchem.equilibrium import ActivityModelSpec
+from chemworld.physchem.activity_thermodynamics import activity_thermodynamic_report
+
+inputs = {'temperature_K': 343.15,
+ 'composition': {'A': 0.252, 'B': 0.748},
+ 'parameters': {'A:A|B': 1.2, 'A:B|A': 0.8}}
+
+model = ActivityModelSpec("synthetic-binary", ("A", "B"), "margules", inputs["parameters"])
+report = activity_thermodynamic_report(
+    model, inputs["composition"], temperature_K=inputs["temperature_K"])
+output = {key: report.to_dict()[key] for key in (
+    "activity_coefficients", "gibbs_excess_J_mol", "enthalpy_excess_J_mol",
+    "entropy_excess_J_mol_K", "partial_molar_gibbs_excess_J_mol",
+)}
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "activity_coefficients": {
+    "A": 1.7482386468981486,
+    "B": 1.0928664265178667
+  },
+  "gibbs_excess_J_mol": 591.1491189544142,
+  "enthalpy_excess_J_mol": 0.0,
+  "entropy_excess_J_mol_K": -1.7227134458820172,
+  "partial_molar_gibbs_excess_J_mol": {
+    "A": 1593.7711326575798,
+    "B": 253.367371022332
+  }
+}
+```
+
+### 物性导数 {#property-derivatives}
+
+显式热容关联式给出温度导数与所选参数的 Jacobian，保留单位与有效域；这是合成参数示例。
+
+```python
+import json
+from chemworld.physchem.specs import PropertyCorrelation
+from chemworld.physchem.dippr import dippr_temperature_response, dippr_parameter_jacobian
+
+inputs = {'temperature_K': 300,
+ 'coefficients': {'A': 25.0, 'B': 30.0, 'C': 800.0, 'D': 10.0, 'E': 400.0}}
+
+curve = PropertyCorrelation(
+    "synthetic-capacity", "dippr107", inputs["coefficients"],
+    {"temperature": "K"}, "J/(mol*K)", "ideal_gas_heat_capacity",
+    {"temperature": (200, 500)}, "Synthetic API demonstration")
+response = dippr_temperature_response(curve, temperature_K=inputs["temperature_K"])
+jacobian = dippr_parameter_jacobian(curve, [inputs["temperature_K"]], parameters=["A", "C"])
+output = {"temperature_response": response.to_dict(), "parameter_jacobian": jacobian.to_dict()}
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "temperature_response": {
+    "correlation_id": "synthetic-capacity",
+    "temperature_K": 300,
+    "values": [
+      33.47979179011391,
+      0.05154913751893453,
+      -2.6191592747468737e-05,
+      -1.4136319377386219e-06
+    ],
+    "output_unit": "J/(mol*K)",
+    "warnings": [],
+    "temperature_basis": "K",
+    "orders": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "value_units": [
+      "J/(mol*K)",
+      "(J/(mol*K))/K^1",
+      "(J/(mol*K))/K^2",
+      "(J/(mol*K))/K^3"
+    ]
+  },
+  "parameter_jacobian": {
+    "temperatures_K": [
+      300
+    ],
+    "parameters": [
+      "A",
+      "C"
+    ],
+    "values": [
+      [
+        1.0,
+        -0.017602090544385513
+      ]
+    ],
+    "output_unit": "J/(mol*K)",
+    "warnings": [
+      []
+    ],
+    "parameter_basis": "declared source-coefficient coordinates, no normalization"
+  }
+}
+```
+
+### 工程流量计 {#engineering-flow-meter}
+
+先由质量流率计算压差，再由压差反算流率。安装条件、流体参数和关联式适用域须满足声明。
+
+```python
+import json
+from chemworld.physchem.flow_meters import LiquidOrificeSpec, liquid_orifice_pressure, liquid_orifice_mass_flow
+
+inputs = {'pipe_diameter_m': 0.07366,
+ 'orifice_diameter_m': 0.05,
+ 'mass_flow_kg_s': 7.0,
+ 'density_kg_m3': 999.1,
+ 'viscosity_Pa_s': 0.0011}
+
+spec = LiquidOrificeSpec(inputs["pipe_diameter_m"], inputs["orifice_diameter_m"], taps="corner",
+    installation_note="ISO concentric sharp edge; compliant straight runs and roughness assumed")
+properties = {key: inputs[key] for key in ("density_kg_m3", "viscosity_Pa_s")}
+forward = liquid_orifice_pressure(spec, mass_flow_kg_s=inputs["mass_flow_kg_s"], **properties)
+inverse = liquid_orifice_mass_flow(spec, differential_pressure_Pa=forward.differential_pressure_Pa,
+    **properties)
+output = {"forward": forward.to_dict(), "recovered_mass_flow_kg_s": inverse.mass_flow_kg_s}
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "forward": {
+    "mass_flow_kg_s": 7.0,
+    "reynolds": 109997.7391596048,
+    "discharge_coefficient": 0.6102129110865264,
+    "differential_pressure_Pa": 13455.336179859189,
+    "permanent_pressure_loss_Pa": 7213.34049191436,
+    "method": "iso5167"
+  },
+  "recovered_mass_flow_kg_s": 6.999999999999911
+}
+```
+
+---
+
+## 会话与表面反应示例
 
 这些开发示例使用已安装的当前运行时环境，无需 API 密钥或 Cantera。它们描述了一个有限的合成 CO 氧化模型，而不是一个通用的化学预测模型或新发布的版本。Python 3.11 或 3.12 是验证目标。
 

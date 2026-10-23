@@ -83,6 +83,100 @@ finally:
 
 
 add(
+    "helmholtz-state", "advanced-thermo",
+    """
+from chemworld.physchem.helmholtz import HelmholtzFluid
+from chemworld.physchem.helmholtz_terms import HelmholtzTerm
+""",
+    {"temperature_K": 400, "molar_density_mol_m3": 20},
+    """
+fluid = HelmholtzFluid(
+    fluid_id="synthetic-monatomic", casrn="", molar_mass_kg_mol=0.04,
+    gas_constant_J_mol_K=8.3, reducing_temperature_K=300,
+    reducing_molar_density_mol_m3=1000, minimum_temperature_K=100,
+    maximum_temperature_K=1500, maximum_pressure_Pa=1e9,
+    ideal_terms=(
+        HelmholtzTerm("IdealGasHelmholtzLead", {"a1": 0, "a2": 0}),
+        HelmholtzTerm("IdealGasHelmholtzLogTau", {"a": 1.5}),
+    ), residual_terms=(), source="Self-authored ideal-gas demonstration",
+)
+state = fluid.state(**inputs)
+output = {key: state.to_dict()[key] for key in (
+    "pressure_Pa", "enthalpy_J_mol", "cp_J_mol_K", "cv_J_mol_K",
+    "compressibility_factor", "stability_scope",
+)}
+""",
+    ["chemworld.physchem.helmholtz:HelmholtzFluid", "chemworld.physchem.helmholtz:HelmholtzFluid.state"],
+    "自编理想气体系数演示：输入 K 与 mol/m³，输出有量纲物性。真实流体需提供来源系数；此处只检查均相局部稳定。",
+    "Self-authored ideal-gas coefficients demonstrate inputs in K and mol/m³ and dimensional properties. Real fluids require sourced coefficients; this call checks homogeneous local stability.",
+)
+
+add(
+    "activity-properties", "activity-thermo",
+    """
+from chemworld.physchem.equilibrium import ActivityModelSpec
+from chemworld.physchem.activity_thermodynamics import activity_thermodynamic_report
+""",
+    {"temperature_K": 343.15, "composition": {"A": 0.252, "B": 0.748},
+     "parameters": {"A:A|B": 1.2, "A:B|A": 0.8}},
+    """
+model = ActivityModelSpec("synthetic-binary", ("A", "B"), "margules", inputs["parameters"])
+report = activity_thermodynamic_report(
+    model, inputs["composition"], temperature_K=inputs["temperature_K"])
+output = {key: report.to_dict()[key] for key in (
+    "activity_coefficients", "gibbs_excess_J_mol", "enthalpy_excess_J_mol",
+    "entropy_excess_J_mol_K", "partial_molar_gibbs_excess_J_mol",
+)}
+""",
+    ["chemworld.physchem.equilibrium:ActivityModelSpec", "chemworld.physchem.activity_thermodynamics:activity_thermodynamic_report"],
+    "合成二元 Margules 参数用于展示超额和偏摩尔性质；组分 A/B 不代表经过验证的真实材料。",
+    "Synthetic binary Margules parameters demonstrate excess and partial-molar properties; A/B do not denote validated real materials.",
+)
+
+add(
+    "property-derivatives", "calibration caloric",
+    """
+from chemworld.physchem.specs import PropertyCorrelation
+from chemworld.physchem.dippr import dippr_temperature_response, dippr_parameter_jacobian
+""",
+    {"temperature_K": 300, "coefficients": {"A": 25., "B": 30., "C": 800., "D": 10., "E": 400.}},
+    """
+curve = PropertyCorrelation(
+    "synthetic-capacity", "dippr107", inputs["coefficients"],
+    {"temperature": "K"}, "J/(mol*K)", "ideal_gas_heat_capacity",
+    {"temperature": (200, 500)}, "Synthetic API demonstration")
+response = dippr_temperature_response(curve, temperature_K=inputs["temperature_K"])
+jacobian = dippr_parameter_jacobian(curve, [inputs["temperature_K"]], parameters=["A", "C"])
+output = {"temperature_response": response.to_dict(), "parameter_jacobian": jacobian.to_dict()}
+""",
+    ["chemworld.physchem.dippr:dippr_temperature_response", "chemworld.physchem.dippr:dippr_parameter_jacobian"],
+    "显式热容关联式给出温度导数与所选参数的 Jacobian，保留单位与有效域；这是合成参数示例。",
+    "An explicit heat-capacity correlation yields temperature derivatives and a selected-parameter Jacobian, retaining units and validity range. Parameters are synthetic.",
+)
+
+add(
+    "flow-meter-inverse", "fluid-engineering transport",
+    """
+from chemworld.physchem.flow_meters import LiquidOrificeSpec, liquid_orifice_pressure, liquid_orifice_mass_flow
+""",
+    {"pipe_diameter_m": 0.07366, "orifice_diameter_m": 0.05, "mass_flow_kg_s": 7.,
+     "density_kg_m3": 999.1, "viscosity_Pa_s": 0.0011},
+    """
+spec = LiquidOrificeSpec(inputs["pipe_diameter_m"], inputs["orifice_diameter_m"], taps="corner",
+    installation_note="ISO concentric sharp edge; compliant straight runs and roughness assumed")
+properties = {key: inputs[key] for key in ("density_kg_m3", "viscosity_Pa_s")}
+forward = liquid_orifice_pressure(spec, mass_flow_kg_s=inputs["mass_flow_kg_s"], **properties)
+inverse = liquid_orifice_mass_flow(spec, differential_pressure_Pa=forward.differential_pressure_Pa,
+    **properties)
+output = {"forward": forward.to_dict(), "recovered_mass_flow_kg_s": inverse.mass_flow_kg_s}
+""",
+    ["chemworld.physchem.flow_meters:LiquidOrificeSpec", "chemworld.physchem.flow_meters:liquid_orifice_pressure", "chemworld.physchem.flow_meters:liquid_orifice_mass_flow"],
+    "先由质量流率计算压差，再由压差反算流率。安装条件、流体参数和关联式适用域须满足声明。",
+    "Calculate differential pressure from mass flow, then invert it to recover flow. Installation conditions, fluid parameters and the correlation domain must satisfy the declaration.",
+)
+
+
+add(
     "identity",
     "identity identity-elements identity-formula",
     "from dataclasses import asdict\nfrom chemworld.physchem import ComponentSpec, get_element, get_isotope",

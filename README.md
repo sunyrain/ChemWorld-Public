@@ -50,6 +50,7 @@ distribution scope, or explore the [interactive timeline](https://sunyrain.githu
 
 | Date | Capability update |
 | --- | --- |
+| **2026-10-23** | **Native thermodynamics and engineering calculations.** Pure-fluid Helmholtz properties, saturation and flash join activity models, six UNIFAC variants and cubic mixing rules. Property derivatives and fitting share explicit source contracts; flow meters, valves, pumps, two-phase flow and equipment geometry broaden engineering calculations. |
 | **2026-10-21–22** | **Scientific solvers, property data and interoperability.** Shared residual/DAE infrastructure; bounded battery models and diagnostics; sourced virial gas properties and thermal processes; persistent Thevenin circuits. Selected CALPHAD/ChemSage models and SBML/SED-ML subsets extend interoperability. |
 | **2026-10-20** | **A composable native foundation.** Gas, bulk and surface reactions alongside separation, membranes, crystallization, mineral and solid phases, and stochastic networks. Shared time, retained devices and measurement queues connect Python, Gym, CLI and Agent workflows with continuation and exact replay. |
 | **2026-10-09–13** | **A programmable laboratory and research records.** Identified samples, multiple vessels, material ports, persistent control and finite streams; configurable synthetic NMR/IR/MS spectra and repeated recrystallization. Complete histories and versioned hypothesis notebooks accompany a local research-workbench prototype in the main repository. |
