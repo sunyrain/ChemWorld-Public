@@ -647,6 +647,67 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#thermodynamic-and-engineering-apis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Thermodynamic and engineering APIs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Thermodynamic and engineering APIs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#helmholtz-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pure-fluid Helmholtz state
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#activity-thermodynamics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Activity thermodynamics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#property-derivatives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Property derivatives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#engineering-flow-meter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Engineering flow meter
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#pure-virial-coefficients" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1097,6 +1158,189 @@
 
 
 <h1 id="native-physical-sessions">Native physical sessions<a class="headerlink" href="#native-physical-sessions" title="Permanent link">&para;</a></h1>
+<h2 id="thermodynamic-and-engineering-apis">Thermodynamic and engineering APIs<a class="headerlink" href="#thermodynamic-and-engineering-apis" title="Permanent link">&para;</a></h2>
+<p>These examples run with the current Python package. Inputs carry physical units
+and explicit coefficients; outputs below are produced by the displayed code.
+The capability website also shows function signatures and a JSON/table toggle.</p>
+<p>Delivered thermodynamics includes activity derivatives and finite calibration,
+six UNIFAC variants with caller-supplied group data, Twu/PPR78 and GE cubic mixing,
+and a shared homogeneous-phase evaluator. Pure-fluid Helmholtz adds density roots,
+saturation, TP/PH/PS/T-rho flash and bounded thermal consumers. The example below
+isolates the ideal-gas limit; real-fluid use requires a sourced coefficient set
+and its application range. General associating/multifluid EOS remain future work.</p>
+<p>Engineering methods include friction, fittings, valves, meters, pumps, packed
+beds/towers, two-phase and open-channel flow, particle distributions and equipment
+geometry. Each declares its own physical assumptions and operating domain.</p>
+<h3 id="helmholtz-state">Pure-fluid Helmholtz state<a class="headerlink" href="#helmholtz-state" title="Permanent link">&para;</a></h3>
+<p>Self-authored ideal-gas coefficients demonstrate inputs in K and mol/m³ and dimensional properties. Real fluids require sourced coefficients; this call checks homogeneous local stability.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.helmholtz</span><span class="w"> </span><span class="kn">import</span> <span class="n">HelmholtzFluid</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.helmholtz_terms</span><span class="w"> </span><span class="kn">import</span> <span class="n">HelmholtzTerm</span>
+
+<span class="n">inputs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;temperature_K&#39;</span><span class="p">:</span> <span class="mi">400</span><span class="p">,</span> <span class="s1">&#39;molar_density_mol_m3&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">}</span>
+
+<span class="n">fluid</span> <span class="o">=</span> <span class="n">HelmholtzFluid</span><span class="p">(</span>
+    <span class="n">fluid_id</span><span class="o">=</span><span class="s2">&quot;synthetic-monatomic&quot;</span><span class="p">,</span> <span class="n">casrn</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">molar_mass_kg_mol</span><span class="o">=</span><span class="mf">0.04</span><span class="p">,</span>
+    <span class="n">gas_constant_J_mol_K</span><span class="o">=</span><span class="mf">8.3</span><span class="p">,</span> <span class="n">reducing_temperature_K</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span>
+    <span class="n">reducing_molar_density_mol_m3</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">minimum_temperature_K</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+    <span class="n">maximum_temperature_K</span><span class="o">=</span><span class="mi">1500</span><span class="p">,</span> <span class="n">maximum_pressure_Pa</span><span class="o">=</span><span class="mf">1e9</span><span class="p">,</span>
+    <span class="n">ideal_terms</span><span class="o">=</span><span class="p">(</span>
+        <span class="n">HelmholtzTerm</span><span class="p">(</span><span class="s2">&quot;IdealGasHelmholtzLead&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;a1&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;a2&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}),</span>
+        <span class="n">HelmholtzTerm</span><span class="p">(</span><span class="s2">&quot;IdealGasHelmholtzLogTau&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;a&quot;</span><span class="p">:</span> <span class="mf">1.5</span><span class="p">}),</span>
+    <span class="p">),</span> <span class="n">residual_terms</span><span class="o">=</span><span class="p">(),</span> <span class="n">source</span><span class="o">=</span><span class="s2">&quot;Self-authored ideal-gas demonstration&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">state</span> <span class="o">=</span> <span class="n">fluid</span><span class="o">.</span><span class="n">state</span><span class="p">(</span><span class="o">**</span><span class="n">inputs</span><span class="p">)</span>
+<span class="n">output</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">state</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()[</span><span class="n">key</span><span class="p">]</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="p">(</span>
+    <span class="s2">&quot;pressure_Pa&quot;</span><span class="p">,</span> <span class="s2">&quot;enthalpy_J_mol&quot;</span><span class="p">,</span> <span class="s2">&quot;cp_J_mol_K&quot;</span><span class="p">,</span> <span class="s2">&quot;cv_J_mol_K&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;compressibility_factor&quot;</span><span class="p">,</span> <span class="s2">&quot;stability_scope&quot;</span><span class="p">,</span>
+<span class="p">)}</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">allow_nan</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;pressure_Pa&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">66400.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;enthalpy_J_mol&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">8300.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;cp_J_mol_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">20.75</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;cv_J_mol_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">12.45</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;compressibility_factor&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;stability_scope&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;homogeneous_local_only&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="activity-thermodynamics">Activity thermodynamics<a class="headerlink" href="#activity-thermodynamics" title="Permanent link">&para;</a></h3>
+<p>Synthetic binary Margules parameters demonstrate excess and partial-molar properties; A/B do not denote validated real materials.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.equilibrium</span><span class="w"> </span><span class="kn">import</span> <span class="n">ActivityModelSpec</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.activity_thermodynamics</span><span class="w"> </span><span class="kn">import</span> <span class="n">activity_thermodynamic_report</span>
+
+<span class="n">inputs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;temperature_K&#39;</span><span class="p">:</span> <span class="mf">343.15</span><span class="p">,</span>
+ <span class="s1">&#39;composition&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;A&#39;</span><span class="p">:</span> <span class="mf">0.252</span><span class="p">,</span> <span class="s1">&#39;B&#39;</span><span class="p">:</span> <span class="mf">0.748</span><span class="p">},</span>
+ <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;A:A|B&#39;</span><span class="p">:</span> <span class="mf">1.2</span><span class="p">,</span> <span class="s1">&#39;A:B|A&#39;</span><span class="p">:</span> <span class="mf">0.8</span><span class="p">}}</span>
+
+<span class="n">model</span> <span class="o">=</span> <span class="n">ActivityModelSpec</span><span class="p">(</span><span class="s2">&quot;synthetic-binary&quot;</span><span class="p">,</span> <span class="p">(</span><span class="s2">&quot;A&quot;</span><span class="p">,</span> <span class="s2">&quot;B&quot;</span><span class="p">),</span> <span class="s2">&quot;margules&quot;</span><span class="p">,</span> <span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;parameters&quot;</span><span class="p">])</span>
+<span class="n">report</span> <span class="o">=</span> <span class="n">activity_thermodynamic_report</span><span class="p">(</span>
+    <span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;composition&quot;</span><span class="p">],</span> <span class="n">temperature_K</span><span class="o">=</span><span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;temperature_K&quot;</span><span class="p">])</span>
+<span class="n">output</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">report</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()[</span><span class="n">key</span><span class="p">]</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="p">(</span>
+    <span class="s2">&quot;activity_coefficients&quot;</span><span class="p">,</span> <span class="s2">&quot;gibbs_excess_J_mol&quot;</span><span class="p">,</span> <span class="s2">&quot;enthalpy_excess_J_mol&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;entropy_excess_J_mol_K&quot;</span><span class="p">,</span> <span class="s2">&quot;partial_molar_gibbs_excess_J_mol&quot;</span><span class="p">,</span>
+<span class="p">)}</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">allow_nan</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;activity_coefficients&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;A&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.7482386468981486</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;B&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0928664265178667</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;gibbs_excess_J_mol&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">591.1491189544142</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;enthalpy_excess_J_mol&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;entropy_excess_J_mol_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">-1.7227134458820172</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;partial_molar_gibbs_excess_J_mol&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;A&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1593.7711326575798</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;B&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">253.367371022332</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="property-derivatives">Property derivatives<a class="headerlink" href="#property-derivatives" title="Permanent link">&para;</a></h3>
+<p>An explicit heat-capacity correlation yields temperature derivatives and a selected-parameter Jacobian, retaining units and validity range. Parameters are synthetic.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.specs</span><span class="w"> </span><span class="kn">import</span> <span class="n">PropertyCorrelation</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.dippr</span><span class="w"> </span><span class="kn">import</span> <span class="n">dippr_temperature_response</span><span class="p">,</span> <span class="n">dippr_parameter_jacobian</span>
+
+<span class="n">inputs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;temperature_K&#39;</span><span class="p">:</span> <span class="mi">300</span><span class="p">,</span>
+ <span class="s1">&#39;coefficients&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;A&#39;</span><span class="p">:</span> <span class="mf">25.0</span><span class="p">,</span> <span class="s1">&#39;B&#39;</span><span class="p">:</span> <span class="mf">30.0</span><span class="p">,</span> <span class="s1">&#39;C&#39;</span><span class="p">:</span> <span class="mf">800.0</span><span class="p">,</span> <span class="s1">&#39;D&#39;</span><span class="p">:</span> <span class="mf">10.0</span><span class="p">,</span> <span class="s1">&#39;E&#39;</span><span class="p">:</span> <span class="mf">400.0</span><span class="p">}}</span>
+
+<span class="n">curve</span> <span class="o">=</span> <span class="n">PropertyCorrelation</span><span class="p">(</span>
+    <span class="s2">&quot;synthetic-capacity&quot;</span><span class="p">,</span> <span class="s2">&quot;dippr107&quot;</span><span class="p">,</span> <span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;coefficients&quot;</span><span class="p">],</span>
+    <span class="p">{</span><span class="s2">&quot;temperature&quot;</span><span class="p">:</span> <span class="s2">&quot;K&quot;</span><span class="p">},</span> <span class="s2">&quot;J/(mol*K)&quot;</span><span class="p">,</span> <span class="s2">&quot;ideal_gas_heat_capacity&quot;</span><span class="p">,</span>
+    <span class="p">{</span><span class="s2">&quot;temperature&quot;</span><span class="p">:</span> <span class="p">(</span><span class="mi">200</span><span class="p">,</span> <span class="mi">500</span><span class="p">)},</span> <span class="s2">&quot;Synthetic API demonstration&quot;</span><span class="p">)</span>
+<span class="n">response</span> <span class="o">=</span> <span class="n">dippr_temperature_response</span><span class="p">(</span><span class="n">curve</span><span class="p">,</span> <span class="n">temperature_K</span><span class="o">=</span><span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;temperature_K&quot;</span><span class="p">])</span>
+<span class="n">jacobian</span> <span class="o">=</span> <span class="n">dippr_parameter_jacobian</span><span class="p">(</span><span class="n">curve</span><span class="p">,</span> <span class="p">[</span><span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;temperature_K&quot;</span><span class="p">]],</span> <span class="n">parameters</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;A&quot;</span><span class="p">,</span> <span class="s2">&quot;C&quot;</span><span class="p">])</span>
+<span class="n">output</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;temperature_response&quot;</span><span class="p">:</span> <span class="n">response</span><span class="o">.</span><span class="n">to_dict</span><span class="p">(),</span> <span class="s2">&quot;parameter_jacobian&quot;</span><span class="p">:</span> <span class="n">jacobian</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()}</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">allow_nan</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;temperature_response&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;correlation_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;synthetic-capacity&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;temperature_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;values&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="mf">33.47979179011391</span><span class="p">,</span>
+<span class="w">      </span><span class="mf">0.05154913751893453</span><span class="p">,</span>
+<span class="w">      </span><span class="mf">-2.6191592747468737e-05</span><span class="p">,</span>
+<span class="w">      </span><span class="mf">-1.4136319377386219e-06</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;output_unit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;J/(mol*K)&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;warnings&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">    </span><span class="nt">&quot;temperature_basis&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;K&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;orders&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">      </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">      </span><span class="mi">2</span><span class="p">,</span>
+<span class="w">      </span><span class="mi">3</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;value_units&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="s2">&quot;J/(mol*K)&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">&quot;(J/(mol*K))/K^1&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">&quot;(J/(mol*K))/K^2&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">&quot;(J/(mol*K))/K^3&quot;</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;parameter_jacobian&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;temperatures_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="mi">300</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;parameters&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="s2">&quot;A&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="s2">&quot;C&quot;</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;values&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">[</span>
+<span class="w">        </span><span class="mf">1.0</span><span class="p">,</span>
+<span class="w">        </span><span class="mf">-0.017602090544385513</span>
+<span class="w">      </span><span class="p">]</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;output_unit&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;J/(mol*K)&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;warnings&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">[]</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;parameter_basis&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;declared source-coefficient coordinates, no normalization&quot;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="engineering-flow-meter">Engineering flow meter<a class="headerlink" href="#engineering-flow-meter" title="Permanent link">&para;</a></h3>
+<p>Calculate differential pressure from mass flow, then invert it to recover flow. Installation conditions, fluid parameters and the correlation domain must satisfy the declaration.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.flow_meters</span><span class="w"> </span><span class="kn">import</span> <span class="n">LiquidOrificeSpec</span><span class="p">,</span> <span class="n">liquid_orifice_pressure</span><span class="p">,</span> <span class="n">liquid_orifice_mass_flow</span>
+
+<span class="n">inputs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;pipe_diameter_m&#39;</span><span class="p">:</span> <span class="mf">0.07366</span><span class="p">,</span>
+ <span class="s1">&#39;orifice_diameter_m&#39;</span><span class="p">:</span> <span class="mf">0.05</span><span class="p">,</span>
+ <span class="s1">&#39;mass_flow_kg_s&#39;</span><span class="p">:</span> <span class="mf">7.0</span><span class="p">,</span>
+ <span class="s1">&#39;density_kg_m3&#39;</span><span class="p">:</span> <span class="mf">999.1</span><span class="p">,</span>
+ <span class="s1">&#39;viscosity_Pa_s&#39;</span><span class="p">:</span> <span class="mf">0.0011</span><span class="p">}</span>
+
+<span class="n">spec</span> <span class="o">=</span> <span class="n">LiquidOrificeSpec</span><span class="p">(</span><span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;pipe_diameter_m&quot;</span><span class="p">],</span> <span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;orifice_diameter_m&quot;</span><span class="p">],</span> <span class="n">taps</span><span class="o">=</span><span class="s2">&quot;corner&quot;</span><span class="p">,</span>
+    <span class="n">installation_note</span><span class="o">=</span><span class="s2">&quot;ISO concentric sharp edge; compliant straight runs and roughness assumed&quot;</span><span class="p">)</span>
+<span class="n">properties</span> <span class="o">=</span> <span class="p">{</span><span class="n">key</span><span class="p">:</span> <span class="n">inputs</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="k">for</span> <span class="n">key</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;density_kg_m3&quot;</span><span class="p">,</span> <span class="s2">&quot;viscosity_Pa_s&quot;</span><span class="p">)}</span>
+<span class="n">forward</span> <span class="o">=</span> <span class="n">liquid_orifice_pressure</span><span class="p">(</span><span class="n">spec</span><span class="p">,</span> <span class="n">mass_flow_kg_s</span><span class="o">=</span><span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;mass_flow_kg_s&quot;</span><span class="p">],</span> <span class="o">**</span><span class="n">properties</span><span class="p">)</span>
+<span class="n">inverse</span> <span class="o">=</span> <span class="n">liquid_orifice_mass_flow</span><span class="p">(</span><span class="n">spec</span><span class="p">,</span> <span class="n">differential_pressure_Pa</span><span class="o">=</span><span class="n">forward</span><span class="o">.</span><span class="n">differential_pressure_Pa</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">properties</span><span class="p">)</span>
+<span class="n">output</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;forward&quot;</span><span class="p">:</span> <span class="n">forward</span><span class="o">.</span><span class="n">to_dict</span><span class="p">(),</span> <span class="s2">&quot;recovered_mass_flow_kg_s&quot;</span><span class="p">:</span> <span class="n">inverse</span><span class="o">.</span><span class="n">mass_flow_kg_s</span><span class="p">}</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">allow_nan</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;forward&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;mass_flow_kg_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">7.0</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;reynolds&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">109997.7391596048</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;discharge_coefficient&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.6102129110865264</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;differential_pressure_Pa&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">13455.336179859189</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;permanent_pressure_loss_Pa&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">7213.34049191436</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;iso5167&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;recovered_mass_flow_kg_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">6.999999999999911</span>
+<span class="p">}</span>
+</code></pre></div>
+<hr />
 <h2 id="pure-virial-coefficients">Pure virial coefficients<a class="headerlink" href="#pure-virial-coefficients" title="Permanent link">&para;</a></h2>
 <p><code>virial_correlation</code> declares seven second-virial methods (<code>Pitzer_Curl</code>,
 <code>Abbott</code>, <code>Tsonopoulos</code>, <code>Tsonopoulos_extended</code>, <code>Oconnell_Prausnitz</code>, <code>Xiang</code>,

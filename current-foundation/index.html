@@ -541,6 +541,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#previous-public-synchronization-22-october" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Previous public synchronization: 22 October
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#milestone-dates-and-distribution-scope" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -804,6 +815,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#previous-public-synchronization-22-october" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Previous public synchronization: 22 October
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#milestone-dates-and-distribution-scope" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -907,6 +929,45 @@
 
 <h1 id="current-foundation">Current foundation<a class="headerlink" href="#current-foundation" title="Permanent link">&para;</a></h1>
 <h2 id="source-synchronization">Source synchronization<a class="headerlink" href="#source-synchronization" title="Permanent link">&para;</a></h2>
+<p>The <strong>23 October 2026</strong> update advances the public foundation from <code>8a17e23b</code>
+to committed source <code>963d23f1</code>. The Python backend now includes:</p>
+<ul>
+<li><strong>Thermodynamic models:</strong> activity-derived excess and partial-molar properties,
+  finite calibration, six UNIFAC variants, Twu/PPR78 and GE cubic mixing rules,
+  and a common homogeneous-phase property interface.</li>
+<li><strong>Pure-fluid Helmholtz:</strong> native derivatives, thermodynamic properties, density
+  roots, saturation, flash and bounded thermal/process consumers. Fluid coefficients
+  and their provenance are supplied explicitly; no upstream solver is required.</li>
+<li><strong>Property methods:</strong> temperature and parameter derivatives, correlation fitting,
+  scientific conversions and explicit property-selection policies. Data identity
+  review remains in progress; this is not complete coverage of every source table.</li>
+<li><strong>Engineering calculations:</strong> friction and fittings, meters, valves, pumps,
+  packed beds/towers, two-phase and open-channel flow, particle distributions,
+  equipment/tank geometry and atmosphere/solar methods. Correlations have individual
+  application ranges; they do not collectively constitute a general flowsheet solver.</li>
+<li><strong>Maintenance:</strong> shared composition/action helpers replace repeated code. Golden
+  regression expectations have been attributed to their runtime versions; frozen
+  historical reports and their original results remain unchanged.</li>
+</ul>
+<p>The <a href="../native_foundation/">native API guide</a> includes runnable inputs and outputs.
+The capability website adds examples for Helmholtz, activity thermodynamics,
+property derivatives and flow-meter inversion, retaining JSON and readable tables.
+The CPU kernel redesign remains a <strong>plan</strong>; the shipped implementation uses the
+native Python backend. This synchronization is a development source update,
+not a PyPI release, new scientific qualification or performance record.</p>
+<p>Windows / Python 3.11 focused integration initially passed <strong>769/771</strong> checks.
+The two failures were an optional reference-data setup in the install test and a
+SciPy-version-dependent golden value. After separating optional empirical inputs
+and retaining version-specific expectations at the original tolerance, the affected
+selection passed <strong>17 checks</strong>, with <strong>1 optional reference check skipped</strong>. That
+reference install check separately passed on Python 3.12 with reference packages.
+These overlapping runs are not added together. The actual sdist-to-wheel install,
+all <strong>70 executable documentation examples</strong>, three public-boundary checks, Ruff,
+the strict bilingual build and <strong>26 browser checks</strong> pass.</p>
+<p>Repository-wide typing remains unfinished: mypy reports 3,378 errors versus 3,255
+on the preceding public snapshot in the same environment. This update does not
+claim a green full quality pipeline or new cross-platform scientific qualification.</p>
+<h3 id="previous-public-synchronization-22-october">Previous public synchronization: 22 October<a class="headerlink" href="#previous-public-synchronization-22-october" title="Permanent link">&para;</a></h3>
 <p>The <strong>22 October 2026</strong> update imports committed foundation work through source
 revision <code>8a17e23b</code>, advancing the previous <code>8dc31912</code> snapshot. It includes:</p>
 <ul>
@@ -1081,7 +1142,7 @@ advances all enabled vessels and schedules equipment queues and delayed readings
 its supported combinations are listed in the <a href="../native_shared_lab/">shared laboratory guide</a>.
 The gas plenum does not dissolve or react with the liquid. The mixed-tank electrical
 channel is an idealized two-electron model; the separate native battery domain uses
-a bounded single-particle model. World-noise shift modes can include a simultaneous
+bounded SPM, SPMe/DFN and equivalent-circuit models with explicit parameter sets. World-noise shift modes can include a simultaneous
 physical-parameter change; they should not be treated as pure noise interventions.</p>
 <h2 id="historical-reproduction">Historical reproduction<a class="headerlink" href="#historical-reproduction" title="Permanent link">&para;</a></h2>
 <p>The checked-in evidence reports, original manifest and tutorial outputs remain

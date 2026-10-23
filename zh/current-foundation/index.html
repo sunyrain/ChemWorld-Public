@@ -541,6 +541,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#10-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        上次公开同步：10 月 22 日
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -782,6 +793,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#10-22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        上次公开同步：10 月 22 日
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -863,6 +885,33 @@
 
 <h1 id="_1">当前基座<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
 <h2 id="source-synchronization">本次源码同步<a class="headerlink" href="#source-synchronization" title="Permanent link">&para;</a></h2>
+<p><strong>2026 年 10 月 23 日</strong>将公开基座从 <code>8a17e23b</code> 同步到已提交源码 <code>963d23f1</code>。
+本次原生 Python 后端更新包括：</p>
+<ul>
+<li><strong>热力学模型</strong>：由活度势导出超额性质与偏摩尔性质、有限参数拟合、六种 UNIFAC 变体、
+  Twu／PPR78 与 GE 立方混合规则，以及共同均相物性接口。</li>
+<li><strong>纯流体 Helmholtz</strong>：原生导数、热力学性质、密度求根、饱和、闪蒸与有限热过程消费。
+  流体系数及来源由调用方显式提供，运行无需上游求解器。</li>
+<li><strong>物性方法</strong>：温度／参数导数、关联式拟合、科学量转换和显式物性选择策略。
+  数据身份审查仍在继续，尚不表示所有来源表均已完整覆盖。</li>
+<li><strong>工程计算</strong>：摩阻与管件、流量计、阀门、泵、填料床／塔、两相流与明渠、粒径分布、
+  设备／储罐几何及大气／太阳方法。每类关联式保留适用范围，不等同于通用流程求解器。</li>
+<li><strong>维护收束</strong>：组合与动作解析复用共同实现；回归基线已完成版本归因，历史冻结报告及
+  原始结果保持原样。</li>
+</ul>
+<p><a href="../native_foundation/">原生 API 指南</a>提供可运行输入和输出。能力网站新增 Helmholtz、
+活度热力学、物性导数和流量计反算示例，继续提供 JSON 与键值表两种结果视图。
+CPU 内核重构仍属<strong>规划</strong>，当前交付使用原生 Python 后端。本次是开发源码同步，
+不是新的 PyPI 版本、科学资格验证或性能纪录。</p>
+<p>Windows／Python 3.11 定向集成首轮 <strong>769/771</strong> 通过。两项失败分别是安装测试
+依赖可选参考数据，以及 SciPy 版本导致的 golden 数值差异。拆分可选经验参数检查并
+按锁定版本保留原容差后，受影响选择 <strong>17 项通过、1 项可选参考检查跳过</strong>；该参考
+安装检查在具备参考包的 Python 3.12 环境中另行通过。两轮有重叠，不拼接分母。
+实际 sdist→wheel 安装、<strong>70 个文档示例</strong>、3 项公开边界检查、全仓 Ruff、严格双语
+构建及 <strong>26 项浏览器检查</strong>通过。</p>
+<p>全仓类型检查仍未收敛：同环境下 mypy 从前一公开快照的 3,255 项报错变为 3,378 项。
+本次不声称整个质量流水线全绿，也未新增跨平台科学资格验证。</p>
+<h3 id="10-22">上次公开同步：10 月 22 日<a class="headerlink" href="#10-22" title="Permanent link">&para;</a></h3>
 <p><strong>2026 年 10 月 22 日</strong>更新将公开基座从 <code>8dc31912</code> 同步到已提交源码 <code>8a17e23b</code>，包含：</p>
 <ul>
 <li>外部密度／体积来源（含 CRC 维里数据）及保留来源信息的临界常数输入。</li>

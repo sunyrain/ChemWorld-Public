@@ -1,7 +1,7 @@
 // Generated English preview edition.
 // Editorial navigation over the existing capability snapshot; not a runtime registry.
 window.CHEMWORLD_CAPABILITIES = {
-  "snapshot": "2026-10-22",
+  "snapshot": "2026-10-23",
   "registry": {
     "modules": 27,
     "components": 32,
@@ -169,7 +169,7 @@ window.CHEMWORLD_CAPABILITIES = {
                   "id": "calibration",
                   "name": "Scientific inputs & finite calibration",
                   "state": "done",
-                  "ability": "Unit/Source/Quality Import, Finite Parameter Fitting, and Verification with Recognizability.",
+                  "ability": "Sourced scientific inputs, finite parameter fitting, temperature/parameter derivatives and identifiability diagnostics.",
                   "boundary": "Explicit parameter whitelist and fixed data grouping.",
                   "example": "Estimate thermal loss parameters using cooling curves.",
                   "source": "docs/world-foundations.md",
@@ -235,9 +235,9 @@ window.CHEMWORLD_CAPABILITIES = {
                 {
                   "id": "conductivity",
                   "name": "Thermal conductivity methods",
-                  "state": "partial",
-                  "ability": "Many pure substances, mixtures, dense materials, and water/air-conductive materials have been connected.",
-                  "boundary": "The complete table of contents still has three entries that need verification; the parent item is incomplete.",
+                  "state": "done",
+                  "ability": "Pure-fluid, mixture and dense-fluid correlations; water/air methods, derivatives and sourced inputs.",
+                  "boundary": "Each method requires its own parameters and validity range; source identity review continues.",
                   "example": "Calculate the heat transfer response based on the actual state and the thermal conductivity coefficient.",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
@@ -302,13 +302,33 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "advanced-thermo",
-                  "name": "General EOS & multiphase thermodynamics",
-                  "state": "planned",
-                  "ability": "Pure fluid Helmholtz, associating and multi-fluid EOS, general stability/boiling point/phase envelope.",
-                  "boundary": "Relies on complete material properties and thermodynamic methods for delivery.",
+                  "name": "Pure-fluid Helmholtz thermodynamics",
+                  "state": "done",
+                  "ability": "Native derivatives, thermodynamic properties, density roots, saturation, flash and bounded thermal consumers.",
+                  "boundary": "Explicit source coefficients and validity range. Homogeneous local stability alone does not establish phase equilibrium.",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "Thermodynamic model"
+                },
+                {
+                  "id": "activity-thermo",
+                  "name": "Activity models & cubic mixing",
+                  "state": "done",
+                  "ability": "Excess and partial-molar properties, six UNIFAC variants, Twu/PPR78, GE mixing and common phase evaluation.",
+                  "boundary": "Group assignments, interactions and source parameters are explicit; model agreement is not material validation.",
+                  "source": "docs/native_foundation.md",
+                  "kind": "capability",
+                  "type": "Scientific model"
+                },
+                {
+                  "id": "general-fluid-eos",
+                  "name": "Associating & multifluid EOS",
+                  "state": "planned",
+                  "ability": "Future general associating/multifluid models and unrestricted phase envelopes.",
+                  "boundary": "Not included in the current pure-fluid and selected cubic/activity model scope.",
+                  "source": "docs/native_foundation.md",
+                  "kind": "capability",
+                  "type": "Scientific model"
                 }
               ]
             }
@@ -603,6 +623,16 @@ window.CHEMWORLD_CAPABILITIES = {
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "Transport model"
+                },
+                {
+                  "id": "fluid-engineering",
+                  "name": "Engineering fluid calculations",
+                  "state": "done",
+                  "ability": "Meters, valves, friction, fittings, pumps, gas/two-phase flow, packed beds/towers, open channels and equipment geometry.",
+                  "boundary": "Individual correlations and finite device consumers; not an unrestricted process-network solver.",
+                  "source": "docs/native_foundation.md",
+                  "kind": "capability",
+                  "type": "Scientific model"
                 }
               ]
             },
