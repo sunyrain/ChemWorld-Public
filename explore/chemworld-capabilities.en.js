@@ -1,12 +1,12 @@
 // Generated English preview edition.
 // Editorial navigation over the existing capability snapshot; not a runtime registry.
 window.CHEMWORLD_CAPABILITIES = {
-  "snapshot": "2026-10-23",
+  "snapshot": "2026-10-24",
   "registry": {
-    "modules": 27,
-    "components": 32,
+    "modules": 31,
+    "components": 38,
     "operations": 51,
-    "measurements": 26
+    "measurements": 27
   },
   "tree": [
     {
@@ -323,12 +323,22 @@ window.CHEMWORLD_CAPABILITIES = {
                 {
                   "id": "general-fluid-eos",
                   "name": "Associating & multifluid EOS",
-                  "state": "planned",
-                  "ability": "Future general associating/multifluid models and unrestricted phase envelopes.",
-                  "boundary": "Not included in the current pure-fluid and selected cubic/activity model scope.",
+                  "state": "partial",
+                  "ability": "PC-SAFT, SAFT, association and multifluid homogeneous responses, with selected local stability, TP/caloric flash and process consumers.",
+                  "boundary": "Models and parameter sources are explicit; local branch solutions do not guarantee global equilibrium for arbitrary mixtures.",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "Scientific model"
+                },
+                {
+                  "id": "working-fluids",
+                  "name": "Water, ice, humid air & incompressible fluids",
+                  "kind": "capability",
+                  "state": "finite",
+                  "type": "Working-fluid properties",
+                  "ability": "Independent properties and state solutions for IF97 water/steam, ice, humid air and sourced incompressible fluids.",
+                  "boundary": "Explicit region, phase and parameter ranges per fluid; not coverage of every real fluid.",
+                  "source": "docs/native_foundation.md"
                 }
               ]
             }
@@ -481,14 +491,13 @@ window.CHEMWORLD_CAPABILITIES = {
                 },
                 {
                   "id": "descriptor-catalysis",
-                  "name": "Descriptor maps & degree of rate control",
-                  "state": "planned",
-                  "ability": "Descriptors/Scales, steady-state catalytic diagrams, and control degrees.",
-                  "boundary": "Subsequent transportation, mechanism, and catalytic process delivery.",
+                  "name": "Descriptors, surface steady states & rate control",
+                  "state": "finite",
+                  "ability": "Explicit surface thermochemistry, descriptor relations, finite-condition steady maps and rate-control analysis.",
+                  "boundary": "Bounded by declared sites, networks, parameters and steady branches; not an empirical catalyst calibration.",
                   "source": "docs/native_mechanisms.md",
                   "kind": "capability",
-                  "type": "Catalytic model",
-                  "derivedFrom": "flame-catalysis"
+                  "type": "Catalytic model"
                 }
               ]
             },
@@ -500,20 +509,20 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "kinetic-expansion",
-                  "name": "Mechanism generation & reactor networks",
-                  "state": "planned",
-                  "ability": "Complete thermochemical/mechanistic analysis, open reactor network, sensitivity and pressure-dependent generation.",
-                  "boundary": "The complete workflow for Cantera and RMG requires further development and refinement.",
+                  "name": "Mechanism generation & finite reactor networks",
+                  "state": "partial",
+                  "ability": "Imported gas/surface mechanisms, molecular graphs and rules, core–edge growth, RRKM/energy-grain/QSD, finite gas networks and sensitivities.",
+                  "boundary": "Uses finite rule and parameter libraries; complete Cantera/RMG workflows and databases are not covered.",
                   "source": "docs/native_mechanisms.md",
                   "kind": "capability",
                   "type": "Reaction system"
                 },
                 {
                   "id": "flame-catalysis",
-                  "name": "1D flames & multicomponent reacting flows",
-                  "state": "planned",
-                  "ability": "Multi-component reaction flows and one-dimensional flames.",
-                  "boundary": "Subsequent transportation, mechanism, and catalytic process delivery.",
+                  "name": "1D multicomponent reacting transport",
+                  "state": "finite",
+                  "ability": "Finite-volume reaction, species diffusion, Stefan–Maxwell fluxes and finite feed/collector stocks.",
+                  "boundary": "Restricted to the declared low-Mach transport and boundary models; general freely propagating flames are not delivered.",
                   "source": "docs/native_mechanisms.md",
                   "kind": "capability",
                   "type": "Reaction flow model"
@@ -644,10 +653,10 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "flowsheet",
-                  "name": "General flowsheets & rigorous unit models",
-                  "state": "planned",
-                  "ability": "Compressible/two-phase flow, universal control system, strict separation, and circuit/process optimization.",
-                  "boundary": "Fluids/A complete workflow for IDAES is still pending delivery.",
+                  "name": "Serial units, single recycle & process design",
+                  "state": "finite",
+                  "ability": "Molecular thermodynamics drives compression/expansion, heat exchange and flash, serial paths, single recycle, finite receivers and bounded design.",
+                  "boundary": "Explicit feed, feasible domain and local branches; not an arbitrary-topology flowsheet solver.",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "Process model"
@@ -788,14 +797,13 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "battery-aging",
-                  "name": "Complex aging & long-term cycling",
-                  "state": "planned",
-                  "ability": "Battery aging and long-term cycling due to coupling.",
-                  "boundary": "The model was extended along the lines of battery models, thermal coupling, and aging dependence.",
+                  "name": "Finite plating, SEI & deactivation",
+                  "state": "partial",
+                  "ability": "Finite active/metallic lithium stocks, reversible/irreversible plating and selected battery-family side-reaction coupling.",
+                  "boundary": "Some independent qualification blocks retain failures; no universal lifetime prediction or complete long-term cycling validation.",
                   "source": "docs/native_domains.md",
                   "kind": "capability",
-                  "type": "Aging model",
-                  "derivedFrom": "phase-diagram"
+                  "type": "Aging model"
                 }
               ]
             },
@@ -842,10 +850,10 @@ window.CHEMWORLD_CAPABILITIES = {
                 },
                 {
                   "id": "phase-diagram",
-                  "name": "Global multicomponent equilibria & phase diagrams",
-                  "state": "planned",
-                  "ability": "Multiple-component global multi-phase equilibrium and phase diagram.",
-                  "boundary": "Relying on global phase selection and multi-phase thermodynamics.",
+                  "name": "Multiphase CEF & binary/ternary diagrams",
+                  "state": "finite",
+                  "ability": "Declared multiphase CEF TP/PH equilibrium, latent heat, binary tracing and ternary isothermal nodes, tie lines and three-phase regions.",
+                  "boundary": "Finite phase sets and searches retain failed nodes; no global uniqueness or infinite-resolution continuous boundary guarantee.",
                   "source": "docs/native_domains.md",
                   "kind": "capability",
                   "type": "Solid-state thermodynamics model"
@@ -909,10 +917,10 @@ window.CHEMWORLD_CAPABILITIES = {
                 },
                 {
                   "id": "water-expansion",
-                  "name": "Full electrolyte & water-treatment processes",
-                  "state": "planned",
-                  "ability": "Database water phase, reaction transport, distributed RO, NF/electrochemical analysis, and process economics.",
-                  "boundary": "Reaktoro/WaterTAP: Complete workflows are ready for delivery.",
+                  "name": "Sourced aqueous chemistry & finite treatment",
+                  "state": "partial",
+                  "ability": "Sourced aqueous/mineral models, nonideal activities, reactive transport and headspace; RO/NF/MD/ED, adsorption/resin/GAC, clarification and cake washing.",
+                  "boundary": "Each model retains salinity, temperature, pressure, phase and feed limits; not complete Reaktoro/WaterTAP coverage.",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "Water treatment model"
@@ -937,8 +945,8 @@ window.CHEMWORLD_CAPABILITIES = {
                   "id": "ssa",
                   "name": "Integer Gillespie SSA",
                   "state": "finite",
-                  "ability": "Quality impact propensity, integer measurement, persistent events, and the RNG.",
-                  "boundary": "Constant volume/temperature; no automatic ODE/SSA mixing switch.",
+                  "ability": "Gillespie direct, Gibson–Bruck next-reaction, explicit-partition hybrid ODE/jump dynamics and bounded tau-leap.",
+                  "boundary": "Separate algorithm contracts; tau-leap is approximate, without arbitrary automatic partitioning or spatial kMC.",
                   "example": "Low-copy-number A⇌B reactions or enzyme binding and catalysis.",
                   "source": "docs/native_biochemical.md",
                   "kind": "capability",
@@ -982,10 +990,10 @@ window.CHEMWORLD_CAPABILITIES = {
                 },
                 {
                   "id": "bio-analysis",
-                  "name": "Full biochemical kinetics & systems analysis",
-                  "state": "planned",
-                  "ability": "Deterministic/Stochastic/Mixed Processes, Steady-State, Control Analysis, Noise and Parameter Estimation.",
-                  "boundary": "The complete workflow for COPASI is still pending delivery.",
+                  "name": "Biochemical steady states, fitting & finite-time analysis",
+                  "state": "finite",
+                  "ability": "SBML steady/control analysis, parameter fitting and profiles, elementary flux modes and finite-time perturbations within the conservation subspace.",
+                  "boundary": "Restricted to supported reaction ODEs/rules; finite-time growth is not evidence of asymptotic chaos.",
                   "source": "docs/native_biochemical.md",
                   "kind": "capability",
                   "type": "System analysis"

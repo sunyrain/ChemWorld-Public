@@ -541,6 +541,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#10-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        上次公开同步：10 月 23 日
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#10-22" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -793,6 +804,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#10-23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        上次公开同步：10 月 23 日
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#10-22" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -885,6 +907,62 @@
 
 <h1 id="_1">当前基座<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
 <h2 id="source-synchronization">本次源码同步<a class="headerlink" href="#source-synchronization" title="Permanent link">&para;</a></h2>
+<p><strong>2026 年 10 月 24 日</strong>将公开基座从 <code>963d23f1</code> 推进至已提交源码 <code>a6d88a582</code>。
+这段开发区间共有 <strong>359 次提交、75 个 CONV 任务或子任务转为完成</strong>；它们是交付切片，
+不等于 75 个独立物理模型。56 个主任务在此快照为 <strong>28 完成、4 已认领、24 待办</strong>。
+实际注册表从 27 增至 <strong>31 个模块</strong>、32 增至 <strong>38 类部件</strong>、26 增至 <strong>27 种仪器</strong>，
+继续提供 <strong>51 种操作</strong>。</p>
+<table>
+<thead>
+<tr>
+<th>领域</th>
+<th>本次公开范围</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>工质与分子热力学</td>
+<td>IF97 水/蒸汽、冰、湿空气、不可压缩工质；选定分子/缔合/多流体响应、局部稳定性与 TP/量热闪蒸</td>
+</tr>
+<tr>
+<td>过程与反应网络</td>
+<td>串联单元、单回路和有限接收器；气相/表面机理导入、图规则生成、core–edge 扩展、RRKM/能粒/QSD、有限反应器网络及一维反应输运</td>
+</tr>
+<tr>
+<td>水相与水处理</td>
+<td>来源化活度、矿物、反应输运与顶空；RO/NF/MD/ED、压力回收、吸附、树脂/GAC、澄清、沉淀、过滤及滤饼洗涤</td>
+</tr>
+<tr>
+<td>固相与系统分析</td>
+<td>多相 CEF TP/PH、二元/三元相图；next-reaction、混合 ODE/跳跃与 tau-leap；SBML 稳态/控制、拟合、剖面、通量模式和有限时域扰动</td>
+</tr>
+<tr>
+<td>电池</td>
+<td>扩展电极/材料族、控制与热模型、析锂、复合电极及 MSMR 阻抗；各族分别保留验证状态</td>
+</tr>
+<tr>
+<td>运行时与维护</td>
+<td>轨迹 v0.3 规范字段与历史读取、公共辅助收束、恒温 Jacobian 修复及混合系统生命周期修复</td>
+</tr>
+</tbody>
+</table>
+<p><a href="https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh#index/working-fluids">能力索引</a>
+提供可执行输入及实际输出，支持 JSON 与键值表视图。72 个目录条目用于归纳实现，
+其中 <strong>71 个已有可运行示例</strong>，包含有限模型和开发中模型；真实硬件桥接仍为规划。
+这一数量不代表科学资格验证通过率。</p>
+<p><strong>验证边界。</strong> 复合电极及 MSMR 阻抗已完成固定验证块；Newman–Tobias 阻抗仍保留
+<strong>3/8</strong> 的结果。半电池、析锂、Axen、铅酸和空间模型仍有已记录缺口，分子热力学主任务
+也尚在推进。本次更新不声明全面替代上游库、任意流程或通用火焰求解、普适材料验证或 SOTA。</p>
+<p><strong>CPU 进度。</strong> CPU-01 完成了 Python 覆盖、合同与成本基线；26 个基准单位保留
+24 通过、1 超时、1 失败。C++ 执行、SIMD 和新默认后端尚未交付。
+本次为开发源码更新，不是新包版本发布或新增正式科学资格。</p>
+<p>Windows / Python 3.11 重点集成最终 <strong>367/367 通过</strong>。首轮新增电控可选字段导致
+1 项动作采样失败，修复后重跑通过；同一修复已回写主仓库 <code>bd5302485</code>，原失败保留。
+实际 sdist→wheel 安装通过，1 项可选实测参考检查跳过。<strong>8,335 项测试无收集错误</strong>，
+这不代表全量测试通过。<strong>81 个可执行文档示例</strong>、3 项公开边界检查及 Ruff 通过。
+网站构建与浏览器结果另记于下。</p>
+<p>全仓类型检查和更广泛的独立资格仍未收束；下方历史 mypy 数量属于上次快照，本次未重新测量。</p>
+<h3 id="10-23">上次公开同步：10 月 23 日<a class="headerlink" href="#10-23" title="Permanent link">&para;</a></h3>
 <p><strong>2026 年 10 月 23 日</strong>将公开基座从 <code>8a17e23b</code> 同步到已提交源码 <code>963d23f1</code>。
 本次原生 Python 后端更新包括：</p>
 <ul>

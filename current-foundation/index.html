@@ -541,6 +541,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#previous-public-synchronization-23-october" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Previous public synchronization: 23 October
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#previous-public-synchronization-22-october" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -815,6 +826,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#previous-public-synchronization-23-october" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Previous public synchronization: 23 October
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#previous-public-synchronization-22-october" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -929,6 +951,70 @@
 
 <h1 id="current-foundation">Current foundation<a class="headerlink" href="#current-foundation" title="Permanent link">&para;</a></h1>
 <h2 id="source-synchronization">Source synchronization<a class="headerlink" href="#source-synchronization" title="Permanent link">&para;</a></h2>
+<p>The <strong>24 October 2026</strong> public update advances committed source from <code>963d23f1</code>
+to <code>a6d88a582</code>. Across that development interval, 359 commits closed <strong>75 CONV
+task/subtask rows</strong>; these are delivery slices, not 75 independent physical models.
+The 56 parent tasks stand at <strong>28 complete, 4 claimed and 24 pending</strong> at this snapshot.
+The installed registry expands from 27 to <strong>31 modules</strong>, 32 to <strong>38 component types</strong>,
+and 26 to <strong>27 instruments</strong>; it retains <strong>51 operations</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>New public scope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Working fluids and molecular thermodynamics</td>
+<td>IF97 water/steam, ice, humid air and incompressible fluids; selected molecular/association/multifluid responses, local stability and TP/caloric flash</td>
+</tr>
+<tr>
+<td>Processes and reaction networks</td>
+<td>Serial units, single recycle and finite receivers; imported gas/surface mechanisms, graph/rule generation, core–edge growth, RRKM/energy-grain/QSD, finite reactor networks and 1D reacting transport</td>
+</tr>
+<tr>
+<td>Aqueous chemistry and treatment</td>
+<td>Sourced activities, minerals, reactive transport and headspace; RO/NF/MD/ED, pressure recovery, adsorption, resin/GAC, clarification, precipitation, filtration and cake washing</td>
+</tr>
+<tr>
+<td>Solid phases and systems analysis</td>
+<td>Multiphase CEF TP/PH and binary/ternary diagrams; next-reaction, hybrid ODE/jump and tau-leap; SBML steady/control analysis, fitting, profiles, flux modes and finite-time perturbations</td>
+</tr>
+<tr>
+<td>Batteries</td>
+<td>Additional electrode/material families, control and thermal variants, plating, composite and MSMR impedance; qualification remains model-specific</td>
+</tr>
+<tr>
+<td>Runtime and maintenance</td>
+<td>Canonical trajectory v0.3 fields with historical reads, common helpers, corrected isothermal Jacobians and hybrid lifecycle handling</td>
+</tr>
+</tbody>
+</table>
+<p>The <a href="https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#index/working-fluids">capability index</a>
+provides executable inputs and actual outputs, with JSON and readable-table views.
+Its 72 editorial capability entries group many implementations: <strong>71 have executable
+examples</strong>, including finite and in-development models; the hardware bridge remains planned.
+This count is not a scientific qualification pass rate.</p>
+<p><strong>Qualification boundaries.</strong> Composite and MSMR impedance have completed their fixed
+blocks; Newman–Tobias impedance retains a <strong>3/8</strong> result. Half-cell, plating, Axen,
+lead-acid and spatial variants retain recorded gaps. The molecular parent programme
+also remains active. No full upstream-library replacement, unrestricted flowsheet,
+general flame solver, universal material validation or SOTA claim follows from this update.</p>
+<p><strong>CPU work.</strong> CPU-01 delivered a Python coverage/contract/cost baseline: its 26-unit
+benchmark retained 24 passes, one timeout and one failure. C++ execution, SIMD and
+a new default backend have not been delivered. This is a development source update,
+not a new package release or new formal scientific qualification.</p>
+<p>Windows / Python 3.11 focused integration passed <strong>367/367</strong> checks after fixing
+one action-sampling regression introduced by the expanded optional electrical controls.
+The same fix is retained in the main repository (<code>bd5302485</code>). The first failed attempt
+is retained in the integration record. The actual sdist-to-wheel install passed, with
+one optional empirical reference check skipped. <strong>8,335 tests collect without errors</strong>;
+this is not a full-suite pass. All <strong>81 executable documentation examples</strong>, three
+public-boundary checks and Ruff pass. The strict bilingual documentation build and <strong>26 browser checks</strong> pass, including all 14 featured API pages in both languages and layouts from 320 to 1440 pixels.</p>
+<p>Repository-wide typing and broader independent qualification remain unfinished; the
+historical mypy counts below describe the previous snapshot, not a new typing run.</p>
+<h3 id="previous-public-synchronization-23-october">Previous public synchronization: 23 October<a class="headerlink" href="#previous-public-synchronization-23-october" title="Permanent link">&para;</a></h3>
 <p>The <strong>23 October 2026</strong> update advances the public foundation from <code>8a17e23b</code>
 to committed source <code>963d23f1</code>. The Python backend now includes:</p>
 <ul>

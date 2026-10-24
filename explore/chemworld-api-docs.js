@@ -57,7 +57,7 @@
     quality:['质量标记','Quality'], sample_id:['样品标识','Sample ID'], channel_id:['通道标识','Channel ID'],
     valid_range:['有效范围','Valid range'], detection_limit:['检测限','Detection limit'],
   };
-  const unitSuffixes = [['_J_mol_K','J/(mol·K)'],['_mol_m3','mol/m³'],['_kg_m3','kg/m³'],
+  const unitSuffixes = [['_J_kg_K','J/(kg·K)'],['_J_kg','J/kg'],['_m_s','m/s'],['_J_mol_K','J/(mol·K)'],['_mol_m3','mol/m³'],['_kg_m3','kg/m³'],
     ['_kg_s','kg/s'],['_Pa_s','Pa·s'],['_J_mol','J/mol'],['_mol_L','mol/L'],['_mol_s','mol/s'],['_mL_min','mL/min'],
     ['_g_mol','g/mol'],['_mol','mol'],['_J','J'],['_K','K'],['_Pa','Pa'],['_mL','mL'],['_L','L'],['_s','s']];
   const viewModes = new Map();

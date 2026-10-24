@@ -647,6 +647,45 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#working-fluids-and-molecular-processes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        工质与分子过程
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="工质与分子过程">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#if97" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        IF97：液态水
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pc-saft" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PC-SAFT：局部混合物响应
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#thermodynamic-and-engineering-apis" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1125,13 +1164,91 @@
 
 
 <h1 id="_1">原生物理会话<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<h2 id="working-fluids-and-molecular-processes">工质与分子过程<a class="headerlink" href="#working-fluids-and-molecular-processes" title="Permanent link">&para;</a></h2>
+<p>10 月 24 日更新加入原生水/蒸汽、冰、湿空气、不可压缩工质、分子状态方程和有限过程路径。以下代码使用已安装的公开包。<a href="https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh#index/working-fluids">能力索引</a>还提供机理生成、表面控制、过滤、三元平衡、析锂和 SBML 分析的函数签名、输入表与 JSON/键值表输出。</p>
+<h3 id="if97">IF97：液态水<a class="headerlink" href="#if97" title="Permanent link">&para;</a></h3>
+<p>IF97 液态水 TP 求解；焓和热容按质量计。冰、湿空气和不可压缩工质各有独立的范围合同。</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.water_if97_solvers</span><span class="w"> </span><span class="kn">import</span> <span class="n">water_if97_tp</span>
+
+<span class="n">inputs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;temperature_K&#39;</span><span class="p">:</span> <span class="mi">300</span><span class="p">,</span> <span class="s1">&#39;pressure_Pa&#39;</span><span class="p">:</span> <span class="mi">3000000</span><span class="p">,</span> <span class="s1">&#39;phase&#39;</span><span class="p">:</span> <span class="s1">&#39;liquid&#39;</span><span class="p">}</span>
+
+<span class="n">state</span> <span class="o">=</span> <span class="n">water_if97_tp</span><span class="p">(</span><span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;temperature_K&quot;</span><span class="p">],</span> <span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;pressure_Pa&quot;</span><span class="p">],</span> <span class="n">phase</span><span class="o">=</span><span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;phase&quot;</span><span class="p">])</span>
+<span class="n">output</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">allow_nan</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;region&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;temperature_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;pressure_Pa&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3000000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;mass_density_kg_m3&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">997.8529400984821</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;enthalpy_J_kg&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">115331.27302143883</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;internal_energy_J_kg&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">112324.81798237875</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;entropy_J_kg_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">392.2947924026257</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;cp_J_kg_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">4173.012184067787</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;cv_J_kg_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">4121.201603587441</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;speed_of_sound_m_s&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1507.73920966903</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;gibbs_energy_J_kg&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">-2357.164699348876</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;isothermal_compressibility_Pa_inv&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">4.4638212280219395e-10</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;thermal_expansion_K_inv&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.0002773545334266113</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;stability_scope&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;IF97_stable_region&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;specific_volume_m3_kg&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.001002151679686694</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="pc-saft">PC-SAFT：局部混合物响应<a class="headerlink" href="#pc-saft" title="Permanent link">&para;</a></h3>
+<p>合成二元 PC-SAFT 局部均相响应；机械稳定性不等于全局相稳定性，参数不代表真实物质。</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.pcsaft</span><span class="w"> </span><span class="kn">import</span> <span class="n">PCSAFTModel</span><span class="p">,</span> <span class="n">SAFTSegment</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem.molecular_eos</span><span class="w"> </span><span class="kn">import</span> <span class="n">molecular_eos_state</span>
+
+<span class="n">inputs</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;temperature_K&#39;</span><span class="p">:</span> <span class="mi">400</span><span class="p">,</span>
+ <span class="s1">&#39;molar_density_mol_m3&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span>
+ <span class="s1">&#39;mole_fractions&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mf">0.3</span><span class="p">,</span> <span class="mf">0.7</span><span class="p">]}</span>
+
+<span class="n">model</span> <span class="o">=</span> <span class="n">PCSAFTModel</span><span class="p">(</span>
+    <span class="p">(</span><span class="n">SAFTSegment</span><span class="p">(</span><span class="s2">&quot;light&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mf">3.4e-10</span><span class="p">,</span> <span class="mi">120</span><span class="p">,</span> <span class="s2">&quot;synthetic&quot;</span><span class="p">),</span>
+     <span class="n">SAFTSegment</span><span class="p">(</span><span class="s2">&quot;heavy&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mf">3.8e-10</span><span class="p">,</span> <span class="mi">180</span><span class="p">,</span> <span class="s2">&quot;synthetic&quot;</span><span class="p">)),</span>
+    <span class="p">((</span><span class="mi">0</span><span class="p">,</span> <span class="mf">0.02</span><span class="p">),</span> <span class="p">(</span><span class="mf">0.02</span><span class="p">,</span> <span class="mi">0</span><span class="p">)),</span> <span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">1000</span><span class="p">),</span> <span class="s2">&quot;synthetic&quot;</span><span class="p">)</span>
+<span class="n">state</span> <span class="o">=</span> <span class="n">molecular_eos_state</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;temperature_K&quot;</span><span class="p">],</span>
+    <span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;molar_density_mol_m3&quot;</span><span class="p">],</span> <span class="nb">tuple</span><span class="p">(</span><span class="n">inputs</span><span class="p">[</span><span class="s2">&quot;mole_fractions&quot;</span><span class="p">]))</span>
+<span class="n">output</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">ensure_ascii</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">allow_nan</span><span class="o">=</span><span class="kc">False</span><span class="p">))</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;temperature_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">400</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;molar_density_mol_m3&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;mole_fractions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="mf">0.3</span><span class="p">,</span>
+<span class="w">    </span><span class="mf">0.7</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;pressure_Pa&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">66375.50309041252</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;compressibility_factor&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.9978922592287066</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;residual_helmholtz_J_mol&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">-7.017506251226959</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;residual_internal_energy_J_mol&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">-17.109782171114848</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;residual_enthalpy_J_mol&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">-24.119674911785385</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;residual_entropy_J_mol_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">-0.025230689799719725</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;residual_cv_J_mol_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.017203159119927498</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;residual_cp_J_mol_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.10310302534629337</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;dP_dT_rho_Pa_K&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">166.79375449322313</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;dP_drho_T_Pa_m3_mol&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3311.7804844346783</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;mechanically_stable&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;log_fugacity_coefficients&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="mf">0.0010175146195439816</span><span class="p">,</span>
+<span class="w">    </span><span class="mf">-0.0034472285464053946</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;stability_scope&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;homogeneous_mechanical_only&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;energy_reference&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ideal_gas_at_same_T_rho_composition&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
 <h2 id="thermodynamic-and-engineering-apis">热力学与工程接口<a class="headerlink" href="#thermodynamic-and-engineering-apis" title="Permanent link">&para;</a></h2>
 <p>以下示例使用当前 Python 包，输入包含物理单位及显式系数；输出由展示代码实际生成。
 能力网站同时提供函数签名和 JSON／键值表切换。</p>
 <p>已交付热力学包括活度导数与有限拟合、由调用方提供基团数据的六种 UNIFAC 变体、
 Twu／PPR78 与 GE 立方混合，以及共同均相求值接口。纯流体 Helmholtz 支持密度求根、
 饱和、TP／PH／PS／T-rho 闪蒸及有限热过程。下面用理想气体极限演示接口；真实流体
-需要显式来源系数与适用范围。通用缔合／多流体 EOS 仍待扩展。</p>
+需要显式来源系数与适用范围。现已加入选定分子、缔合与多流体模型，分别保留局部适用域与参数来源。</p>
 <p>工程方法覆盖摩阻、管件、阀门、流量计、泵、填料床／塔、两相流、明渠、粒径分布
 及设备几何，各方法保留自己的物理假设与工作域。</p>
 <h3 id="helmholtz-state">纯流体 Helmholtz 状态<a class="headerlink" href="#helmholtz-state" title="Permanent link">&para;</a></h3>

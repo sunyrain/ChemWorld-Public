@@ -762,91 +762,65 @@
 
 
 <h1 id="native-extensions-and-model-ranges">Native extensions and model ranges<a class="headerlink" href="#native-extensions-and-model-ranges" title="Permanent link">&para;</a></h1>
-<p>The current Python backend includes the models below. Scientific kernels expose
-explicit parameters and application ranges; connected worlds use ChemWorld's native
-state, operation, observation and transaction contracts. Optional upstream packages
-serve as numerical references, not production solver dependencies.</p>
+<p>The public Python backend now includes the following bounded model families.
+The <a href="../current-foundation/">current foundation</a> records source and qualification status;
+the <a href="../native_foundation/">API guide</a> gives executable input/output examples.</p>
 <table>
 <thead>
 <tr>
 <th>Area</th>
 <th>Implemented scope</th>
-<th>Guide</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Shared foundation</td>
-<td>Declared modules, owned state, common residual/DAE infrastructure, native units, finite calibration, saved continuation and replay across Python/Gym/CLI/Agent</td>
-<td><a href="../native_foundation/">Native sessions</a></td>
+<td>Owned state, residual/DAE infrastructure, local/shared clocks, finite resources, queued measurements, exact continuation and replay</td>
 </tr>
 <tr>
-<td>Thermodynamics and properties</td>
-<td>Activity/excess properties, six UNIFAC variants, cubic alpha/mixing rules, pure-fluid Helmholtz properties/roots/saturation/flash, property derivatives and fitting</td>
-<td><a href="../native_foundation/#thermodynamic-and-engineering-apis">Thermodynamic API examples</a></td>
+<td>Thermodynamics</td>
+<td>Activity/UNIFAC/cubic models, Helmholtz, IF97/ice/humid air/incompressible fluids, selected molecular/association/multifluid EOS, local stability and flash</td>
 </tr>
 <tr>
-<td>Engineering fluids</td>
-<td>Friction, fittings, meters, valves, pumps, packed beds/towers, gas and two-phase flow, open channels, particle distributions, equipment geometry and atmospheric/solar calculations</td>
-<td><a href="../native_foundation/#engineering-flow-meter">Engineering API</a></td>
+<td>Engineering processes</td>
+<td>Fluid correlations, serial molecular units, single recycle, finite receivers and bounded design</td>
 </tr>
 <tr>
-<td>Surface and bulk reactions</td>
-<td>Finite gas/bulk/surface reactions, multisite adsorption and oxidation, coverage interactions and common thermal dynamics</td>
-<td><a href="../native_mechanisms/">Mechanisms</a></td>
+<td>Reactions and transport</td>
+<td>Imported gas/surface chemistry, finite graph/rule growth, energy grains, reactor networks, wall/piston/heat coupling and bounded 1D transport</td>
 </tr>
 <tr>
-<td>Separation and transport</td>
-<td>Finite TP/PH flash, liquid stability, dynamic columns, adsorption/regeneration, crystallization, membrane flow/fouling/rinsing and conservative diffusion</td>
-<td><a href="../native_domains/">Continuous workflows</a></td>
-</tr>
-<tr>
-<td>Batteries and electrodes</td>
-<td>SPM, bounded SPMe/DFN, particle distributions, finite-solvent SEI, selected impedance/SOH/OCV diagnostics, and persistent Thevenin RC/two-node thermal models</td>
-<td><a href="../native_foundation/">Electrochemistry</a></td>
-</tr>
-<tr>
-<td>Aqueous/mineral chemistry</td>
-<td>Dilute carbonate equilibrium, finite calcite dissolution/precipitation and phase-owned surface geometry</td>
-<td><a href="../native_domains/">Continuous workflows</a></td>
+<td>Aqueous and separation</td>
+<td>Sourced aqueous/mineral chemistry, reactive transport, headspace, RO/NF/MD/ED, adsorption, resin/GAC, precipitation, clarification, filtration and washing</td>
 </tr>
 <tr>
 <td>Solid phases</td>
-<td>Selected CALPHAD/ChemSage models and source inputs, finite equilibrium and thermal consumers</td>
-<td><a href="../native_foundation/">Solid-phase models</a></td>
+<td>Selected CALPHAD/ChemSage models, multiphase CEF TP/PH, finite binary/ternary diagram searches</td>
 </tr>
 <tr>
-<td>Biochemistry</td>
-<td>Deterministic and stochastic networks; supported SBML rules/events and SED-ML/COMBINE contracts</td>
-<td><a href="../native_biochemical/">Biochemical worlds</a></td>
+<td>Batteries</td>
+<td>SPM/SPMe/DFN, particle distributions, composite/MSMR/half-cell and other finite families, selected controls/thermal models, SEI/plating, impedance and SOH</td>
 </tr>
 <tr>
-<td>Shared laboratory time</td>
-<td>Finite heterogeneous vessel groups, declared open-flow systems, multiple persistent devices, FIFO measurement queues and delayed readings</td>
-<td><a href="../native_shared_lab/">Shared clock</a></td>
+<td>Stochastic and biochemical analysis</td>
+<td>Direct/next-reaction, explicit-partition hybrid dynamics and bounded tau-leap; SBML/SED-ML subsets, steady/control analysis, fitting, profiles, flux modes and finite-time growth</td>
 </tr>
 </tbody>
 </table>
 <h2 id="current-boundaries">Current boundaries<a class="headerlink" href="#current-boundaries" title="Permanent link">&para;</a></h2>
-<p>Sources, units, phase assumptions and validity ranges are part of each model's input.
-An available equation does not imply a validated parameter set for every material.
-Source-table identity review, broader battery families and experiment interoperability
-remain active development. The implemented models do not replace every feature of
-CoolProp, thermo, chemicals, fluids, PyBaMM, pycalphad or COPASI.</p>
-<p>General associating/multifluid EOS, unrestricted phase envelopes and general flowsheet
-solution remain future work. The unified CPU kernel redesign is a plan: compiled
-execution, SIMD and a new default backend are not included in this snapshot.
-Local vessel time remains the default; shared time is enabled explicitly and only
-advances the model combinations supported by its guide.</p>
+<p>Each model declares its sources, units, phases and validity ranges. Some are synthetic
+demonstrations; others carry sourced parameters. A delivered equation does not validate
+every material. Battery and molecular parent programmes remain active even where
+individual submodels have passed their fixed comparisons.</p>
+<p>Arbitrary-topology flowsheets, general freely propagating flames, unrestricted global
+phase envelopes, complete upstream databases and universal long-term aging remain outside
+the delivered scope. CPU-01 establishes the Python baseline; compiled execution and SIMD
+remain future work. See <a href="../native_shared_lab/">shared time</a> for supported couplings.</p>
 <h2 id="reference-and-reuse-practice">Reference and reuse practice<a class="headerlink" href="#reference-and-reuse-practice" title="Permanent link">&para;</a></h2>
-<p>Models are checked against analytical limits, conservation and finite reference cases.
-Independent implementation and numerical agreement do not remove attribution or
-license obligations on reused source material or data. Engineering reference methods
-include source-derived tables and formulas with provenance; the public project does
-not claim that every method was developed without source access. Caller-supplied
-fluid/data files retain their own licenses and are not implicitly bundled here.</p>
-<p>See <a href="../current-foundation/">current foundation</a> for synchronization and validation
-details, and <a href="../getting_started/">installation</a> for the supported environment.</p>
+<p>Production models run through the native Python backend. Optional upstream solvers serve
+as independent references. Analytical limits, conservation and fixed comparison cases
+check the implemented slices; numerical agreement does not remove source/data attribution
+or license obligations. Caller-supplied databases retain their own licenses.</p>
 
 
 
