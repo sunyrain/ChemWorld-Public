@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from math import isfinite, sqrt
 from typing import Any
 
-from chemworld.physchem.caloric_math import partial_derivative
+from chemworld.physchem.caloric_math import compensated_sum, partial_derivative
 from chemworld.physchem.helmholtz_terms import HelmholtzTerm
 from chemworld.physchem.second_order_pair import SecondOrderPair
 
@@ -95,14 +95,16 @@ class HelmholtzFluid:
         """Evaluate a dimensionless contribution; accepts shared derivative seeds."""
         if kind not in {"ideal", "residual", "total"}:
             raise ValueError("Helmholtz contribution must be ideal, residual or total")
-        value = 0.0
+        contributions = []
         if kind in {"ideal", "total"}:
-            value += self.ideal_prefactor * sum(
-                term.evaluate(delta, tau, self.reducing_temperature_K) for term in self.ideal_terms)
+            contributions.append(self.ideal_prefactor * compensated_sum(
+                term.evaluate(delta, tau, self.reducing_temperature_K)
+                for term in self.ideal_terms))
         if kind in {"residual", "total"}:
-            value += sum(term.evaluate(delta, tau, self.reducing_temperature_K)
-                         for term in self.residual_terms)
-        return value
+            contributions.append(compensated_sum(
+                term.evaluate(delta, tau, self.reducing_temperature_K)
+                for term in self.residual_terms))
+        return compensated_sum(contributions)
 
     def alpha_derivative(self, kind: str, *, delta: float, tau: float,
                          delta_order: int = 0, tau_order: int = 0) -> float:
@@ -193,6 +195,10 @@ class HelmholtzFluid:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> HelmholtzFluid:
+        if data.get("model") == "chemworld_molecular_helmholtz_v1":
+            from chemworld.physchem.molecular_consumers import MolecularHelmholtzFluid
+
+            return MolecularHelmholtzFluid.from_dict(data)
         values = dict(data)
         if values.pop("model", None) != "chemworld_pure_helmholtz_v1":
             raise ValueError("unknown native Helmholtz model")

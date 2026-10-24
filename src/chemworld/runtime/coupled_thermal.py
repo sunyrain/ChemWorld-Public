@@ -14,6 +14,7 @@ from chemworld.foundation import WorldState
 from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger
 from chemworld.foundation.state_ownership import StateSlots
 from chemworld.physchem.coupled_system import (
+    DEFAULT_COUPLED_ODE_POLICY,
     CoupledEvent,
     CoupledState,
     CoupledSystem,
@@ -128,13 +129,14 @@ def material_inventory(state):
 
 def local_thermodynamics(state, model):
     amounts, species_ids = material_inventory(state)
-    if model.pressure_law == "helmholtz":
+    if model.uses_eos_pressure:
         # One original bulk inventory; only non-material support capacity may
-        # accompany it. The adapter itself validates fixed V and pure identity.
+        # accompany it. The adapter itself validates fixed V and composition.
         if amounts != state.species_amounts or set(amounts) != set(
             model.thermodynamics.inventory_keys
         ):
-            raise ValueError("Helmholtz thermal world requires its one declared bulk inventory")
+            raise ValueError(
+                "EOS thermal world requires its one declared bulk inventory")
         thermo = replace(model.thermodynamics, support_heat_capacity_J_K=(
             model.thermodynamics.support_heat_capacity_J_K + state.state_slots.heat_capacity()))
         packed = CoupledState(amounts, state.temperature_K, state.volume_L,
@@ -253,7 +255,7 @@ def assemble_local_system(state, physics, modules, components):
                             model.maximum_pressure_Pa
                             - (
                                 thermo.pressure_pa(candidate)
-                                if model.pressure_law == "helmholtz" else
+                                if model.uses_eos_pressure else
                                 sum(candidate.amounts_mol[key] for key in state.species_amounts)
                                 * R_J_PER_MOL_K * candidate.temperature_K
                                 / (candidate.volume_L / 1000)
@@ -266,6 +268,13 @@ def assemble_local_system(state, physics, modules, components):
         conservation_laws=laws,
         inventory_scales_mol={key: max(value, 1e-8) for key, value in amounts.items()},
         isothermal=isothermal,
+        # Small water temperature changes must still meet the unchanged energy
+        # closure budget. Refine the original BDF policy, not the acceptance
+        # tolerance or a second integrator; its exact policy is in diagnostics.
+        policy=(replace(DEFAULT_COUPLED_ODE_POLICY,
+                        solver_id=f"chemworld_{model.pressure_law}_coupled_bdf_v1",
+                        rtol=1e-11, atol=1e-13)
+                if model.pressure_law in {"if97", "humid_air"} else DEFAULT_COUPLED_ODE_POLICY),
     )
     return system, initial
 
@@ -273,7 +282,7 @@ def assemble_local_system(state, physics, modules, components):
 def pressure_for_state(state, model):
     if model.pressure_law == "fixed_pressure":
         return state.pressure_Pa
-    if model.pressure_law == "helmholtz":
+    if model.uses_eos_pressure:
         return model.thermodynamics.pressure_pa(CoupledState(
             state.species_amounts, state.temperature_K, state.volume_L))
     return (
@@ -306,6 +315,16 @@ class CoupledThermalRuntime:
             and state.vessel_id in self.composition.physics.models_of("thermal")
             and state.vessel_id not in self.composition.physics.models_of("crystal")
         )
+
+    def validate_state(self, state):
+        """Validate saved owned inventory through its original process declarations."""
+        system, initial = assemble_local_system(
+            state,
+            self.composition.physics,
+            self.modules,
+            self.composition.components,
+        )
+        system.validate_state(initial)
 
     def advance(self, state, action, *, heat, jacket_program=None):
         if jacket_program is not None:

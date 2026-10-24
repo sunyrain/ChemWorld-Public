@@ -50,8 +50,25 @@ def declaration(value):
     return value
 
 
+def _execution_contract(binding):
+    """Exclude only module display notes, including legacy v2 bindings.
+
+    Every executable declaration and unknown field still participates in exact
+    equality. Do not recursively strip metadata from model or operation inputs.
+    """
+    result = dict(binding)
+    modules = result.get("modules")
+    if isinstance(modules, list):
+        result["modules"] = [
+            {key: value for key, value in module.items() if key != "scope_notes"}
+            if isinstance(module, Mapping) else module
+            for module in modules
+        ]
+    return result
+
+
 def execution_binding(session):
-    return {
+    return _execution_contract({
         "runtime": RUNTIME_SEMANTICS_ID,
         "modules": declaration(session.domain_modules.modules),
         "operation_order": list(session.action_codec.operation_types),
@@ -59,7 +76,7 @@ def execution_binding(session):
         "scipy_version": scipy.__version__,
         "python_version": platform.python_version(),
         "rng": session._rng.bit_generator.__class__.__name__,
-    }
+    })
 
 
 def session_configuration(session):
@@ -181,7 +198,7 @@ def capture_session(session):
 
 def restore_continuation(session, snapshot):
     payload = SessionSnapshot.from_dict(snapshot.to_dict()).payload
-    if execution_binding(session) != payload["execution"]:
+    if execution_binding(session) != _execution_contract(payload["execution"]):
         raise ValueError("session execution contracts changed; explicit migration required")
     state = restore_state(payload["world_state"], require_order=True)
     # State readers migrate historical equipment/material representations at

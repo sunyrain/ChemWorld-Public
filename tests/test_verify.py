@@ -110,7 +110,6 @@ def test_verify_records_rejects_tampered_trajectory(tmp_path) -> None:
         output_path=path,
     )
     records = load_jsonl(path)
-    records[0]["reward"] = 999.0
     records[0]["evaluation_outcome"]["online_transition_reward"] = 999.0
     result = verify_records(records)
     assert not result.verified
@@ -130,7 +129,6 @@ def test_verify_records_rejects_tampered_observation(tmp_path) -> None:
         output_path=path,
     )
     records = load_jsonl(path)
-    records[-1]["observation"]["score"] = 0.0
     records[-1]["environment_outcome"]["observation"]["score"] = 0.0
 
     result = verify_records(records)

@@ -12,7 +12,7 @@ from chemworld.world.operations import OPERATION_TYPES
 
 PHASES = ("reactor_liquid", "aqueous", "organic")
 MECHANISM_SCHEMA_VERSION = "chemworld_mechanism_v1"
-TRAJECTORY_REQUIRED_KEYS = {
+TRAJECTORY_V02_REQUIRED_KEYS = {
     "schema_version",
     "env_version",
     "world_family_version",
@@ -79,6 +79,10 @@ TRAJECTORY_REQUIRED_KEYS = {
     "explanation",
 }
 
+TRAJECTORY_REQUIRED_KEYS = TRAJECTORY_V02_REQUIRED_KEYS - {
+    "benchmark_task_id", "observation", "reward", "agent_view", "leaderboard_score",
+}
+
 ACTION_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "ChemWorld event action",
@@ -141,12 +145,30 @@ TRAJECTORY_SCHEMA: dict[str, Any] = {
     "properties": {
         "schema_version": {
             "type": "string",
-            "const": "chemworld-trajectory-0.2",
+            "const": "chemworld-trajectory-0.3",
         },
         "run_id": {"type": "string", "minLength": 1},
-        "environment_outcome": {"type": "object"},
-        "agent_visible_observation": {"type": "object"},
-        "evaluation_outcome": {"type": "object"},
+        "task_id": {"type": "string", "minLength": 1},
+        "environment_outcome": {
+            "type": "object", "required": ["observation"],
+            "properties": {"observation": {"type": "object"}},
+        },
+        "agent_visible_observation": {
+            "type": "object", "required": ["observation", "views", "observed_reward"],
+            "properties": {
+                "observation": {"type": "object"}, "views": {"type": "object"},
+                "observed_reward": {"type": "number"},
+            },
+        },
+        "evaluation_outcome": {
+            "type": "object", "required": ["online_transition_reward", "leaderboard_score"],
+            "properties": {
+                "online_transition_reward": {"type": "number"},
+                "leaderboard_score": {"type": ["number", "null"]},
+            },
+        },
+        "benchmark_task_id": False, "observation": False, "reward": False,
+        "agent_view": False, "leaderboard_score": False,
     },
 }
 

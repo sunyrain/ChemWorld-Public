@@ -8,6 +8,7 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
+from chemworld.data.records import trajectory_value
 from chemworld.task_design import SERIOUS_TASK_DESIGNS
 from chemworld.tasks import get_task
 
@@ -99,15 +100,15 @@ def evaluate_layered_records(
         _required_observation(record, contract.primary_task_metric) for record in terminal_records
     ]
     objective_values = [
-        _finite_float(record["leaderboard_score"], "leaderboard_score")
+        _finite_float(trajectory_value(record, 'leaderboard_score'), "leaderboard_score")
         for record in terminal_records
     ]
     terminal_costs = [float(attempt["total_cost"]) for attempt in attempts if attempt["complete"]]
     observed_risks = [
-        _finite_float(record["observation"]["safety_risk"], "safety_risk")
+        _finite_float(trajectory_value(record, 'observation')["safety_risk"], "safety_risk")
         for record in records
-        if isinstance(record.get("observation"), dict)
-        and record["observation"].get("safety_risk") is not None
+        if isinstance(trajectory_value(record, 'observation', None), dict)
+        and trajectory_value(record, 'observation').get("safety_risk") is not None
     ]
     flags = [
         record.get("constraint_flags", {})
@@ -121,7 +122,9 @@ def evaluate_layered_records(
         bool(item.get("precondition_failed")) or bool(item.get("constitution_failed"))
         for item in flags
     )
-    rewards = [_finite_float(record.get("reward", 0.0), "reward") for record in records]
+    rewards = [
+        _finite_float(trajectory_value(record, "reward", 0.0), "reward") for record in records
+    ]
     measurement_cost = sum(float(attempt["measurement_cost"]) for attempt in attempts)
     process_costs = [float(attempt["process_cost"]) for attempt in attempts]
     max_risks = [
@@ -276,7 +279,7 @@ def _attempt_summaries(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     current: list[dict[str, Any]] = []
     for record in records:
         current.append(record)
-        if record.get("leaderboard_score") is not None:
+        if trajectory_value(record, 'leaderboard_score', None) is not None:
             attempts.append(_summarize_attempt(current, complete=True))
             current = []
     if current:
@@ -290,10 +293,10 @@ def _summarize_attempt(
     complete: bool,
 ) -> dict[str, Any]:
     risks = [
-        _finite_float(record["observation"]["safety_risk"], "safety_risk")
+        _finite_float(trajectory_value(record, 'observation')["safety_risk"], "safety_risk")
         for record in records
-        if isinstance(record.get("observation"), dict)
-        and record["observation"].get("safety_risk") is not None
+        if isinstance(trajectory_value(record, 'observation', None), dict)
+        and trajectory_value(record, 'observation').get("safety_risk") is not None
     ]
     measurement_cost = sum(
         _finite_float(record.get("measurement_cost", 0.0), "measurement_cost") for record in records
@@ -344,14 +347,14 @@ def attempt_total_cost(records: list[dict[str, Any]]) -> float:
 
 def _last_observed_value(records: list[dict[str, Any]], key: str) -> float:
     for record in reversed(records):
-        observation = record.get("observation")
+        observation = trajectory_value(record, 'observation', None)
         if isinstance(observation, dict) and observation.get(key) is not None:
             return _finite_float(observation[key], key)
     raise ValueError(f"experiment has no observed {key!r}")
 
 
 def _required_observation(record: dict[str, Any], key: str) -> float:
-    observation = record.get("observation")
+    observation = trajectory_value(record, 'observation', None)
     if not isinstance(observation, dict) or observation.get(key) is None:
         raise ValueError(f"successful final assay is missing required {key!r}")
     return _finite_float(observation[key], key)

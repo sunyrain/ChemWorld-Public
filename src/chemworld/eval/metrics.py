@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from chemworld.data.records import trajectory_value
+
 EVALUATION_METRICS_VERSION = "chemworld-evaluation-metrics-0.3"
 
 
@@ -111,7 +113,7 @@ def evaluate_records(
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("threshold must be in [0, 1]")
 
-    leaderboard_values = [record.get("leaderboard_score") for record in records]
+    leaderboard_values = [trajectory_value(record, 'leaderboard_score', None) for record in records]
     finite_leaderboard_values = [
         _finite_float(value, "leaderboard_score")
         for value in leaderboard_values
@@ -128,7 +130,7 @@ def evaluate_records(
     )
     scored_mask = np.asarray([value is not None for value in leaderboard_values])
     best_curve = np.maximum.accumulate(official_scores)
-    observations = [record["observation"] for record in records]
+    observations = [trajectory_value(record, 'observation') for record in records]
     flags = [record.get("constraint_flags", {}) for record in records]
 
     unsafe = np.asarray([bool(flag.get("unsafe", False)) for flag in flags])
@@ -360,7 +362,7 @@ def evaluate_records(
     return EvaluationResult(
         agent_name=_agent_name(records),
         env_id=str(first["env_id"]),
-        benchmark_task_id=first.get("benchmark_task_id"),
+        benchmark_task_id=trajectory_value(first, 'benchmark_task_id', None),
         world_split=str(first["world_split"]),
         seed=int(first["seed"]),
         episode_mode=str(first.get("episode_mode", "single_experiment")),

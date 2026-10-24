@@ -20,12 +20,16 @@ SUPPORTED_RATE_LAW_EQUATION_IDS = (
     "third_body_arrhenius",
     "lindemann_falloff",
     "troe_falloff",
+    "sri_falloff",
+    "tsang_falloff",
+    "blowers_masel",
     "pressure_log",
     "chebyshev",
     "catalytic_activity",
     "catalyst_deactivation",
     "langmuir_hinshelwood",
     "michaelis_menten",
+    "energy_grain_collision",
 )
 
 
@@ -138,12 +142,12 @@ class ReactionSpec:
         if self.reverse_orders and not self.reversible:
             raise ValueError("reverse_orders require a reversible reaction")
 
-    @staticmethod
-    def _validate_orders(orders: Mapping[str, float], *, direction: str) -> None:
+    def _validate_orders(self, orders: Mapping[str, float], *, direction: str) -> None:
+        allow_negative = self.metadata.get("negative_orders", False) is True
         for species_id, order in orders.items():
             if not str(species_id).strip():
                 raise ValueError(f"{direction} reaction-order species id cannot be empty")
-            if float(order) < 0.0 or not isfinite(float(order)):
+            if (float(order) < 0.0 and not allow_negative) or not isfinite(float(order)):
                 raise ValueError(
                     f"{direction} reaction order for {species_id!r} must be finite and nonnegative"
                 )

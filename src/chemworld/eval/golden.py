@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from chemworld.data.records import trajectory_value
 from chemworld.eval.metrics import evaluate_records
 from chemworld.tasks import CORE_TASK_IDS, TASK_REGISTRY
 
@@ -104,7 +105,7 @@ def summarize_golden_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     if not records:
         raise ValueError("Cannot summarize an empty golden trajectory")
     first = records[0]
-    task_id = str(first.get("benchmark_task_id") or first["task_id"])
+    task_id = str(trajectory_value(first, 'benchmark_task_id', None) or first["task_id"])
     task = TASK_REGISTRY[task_id]
     metrics = evaluate_records(records, threshold=task.threshold).to_dict()
     final_record = records[-1]
@@ -129,10 +130,10 @@ def summarize_golden_records(records: list[dict[str, Any]]) -> dict[str, Any]:
             "terminated": bool(final_record["terminated"]),
             "truncated": bool(final_record["truncated"]),
             "leaderboard_score": round_public_value(
-                final_record.get("leaderboard_score")
+                trajectory_value(final_record, 'leaderboard_score', None)
             ),
-            "reward": round_public_value(final_record.get("reward")),
-            "observation": _observation_summary(final_record.get("observation", {})),
+            "reward": round_public_value(trajectory_value(final_record, 'reward', None)),
+            "observation": _observation_summary(trajectory_value(final_record, 'observation', {})),
             "processed_estimate": round_public_value(
                 final_record.get("processed_estimate", {})
             ),
@@ -146,7 +147,7 @@ def summarize_golden_records(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "step": int(record["step"]),
                 "operation_type": record.get("operation_type"),
                 "action": round_public_value(record["action"]),
-                "reward": round_public_value(record["reward"]),
+                "reward": round_public_value(trajectory_value(record, 'reward')),
                 "terminated": bool(record["terminated"]),
                 "truncated": bool(record["truncated"]),
                 "transaction_status": record.get("transaction_status"),
@@ -165,12 +166,12 @@ def summarize_golden_records(records: list[dict[str, Any]]) -> dict[str, Any]:
                 "preconditions": round_public_value(record.get("preconditions", {})),
                 "observed_keys": list(record.get("observed_keys", [])),
                 "observed_mask": round_public_value(record.get("observed_mask", {})),
-                "observation": _observation_summary(record.get("observation", {})),
+                "observation": _observation_summary(trajectory_value(record, 'observation', {})),
                 "processed_estimate": round_public_value(
                     record.get("processed_estimate", {})
                 ),
                 "leaderboard_score": round_public_value(
-                    record.get("leaderboard_score")
+                    trajectory_value(record, 'leaderboard_score', None)
                 ),
                 "measurement_cost": round_public_value(
                     record.get("measurement_cost", 0.0)

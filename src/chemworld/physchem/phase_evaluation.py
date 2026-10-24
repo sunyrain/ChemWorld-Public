@@ -179,6 +179,8 @@ class PhasePropertyModel:
         volume_model: Any = None,
         transport_models: Mapping[str, Any] | None = None,
         helmholtz_model: Any = None,
+        water_model: Any = None,
+        incompressible_model: Any = None,
         model_id: str = "native-phase-property-model",
     ) -> None:
         if phase not in {"gas", "liquid", "solid"} or not model_id or not packages:
@@ -204,6 +206,23 @@ class PhasePropertyModel:
             or references
         ):
             raise ValueError("pure Helmholtz uses its own phase/caloric reference exclusively")
+        if water_model is not None:
+            from chemworld.physchem.water_if97_properties import IF97WaterModel
+
+            if (not isinstance(water_model, IF97WaterModel) or len(ids) != 1
+                    or phase == "solid" or any(value is not None for value in
+                        (eos, activity_model, volume_model, helmholtz_model)) or references):
+                raise ValueError("IF97 water uses its own pure phase/caloric reference exclusively")
+            water_model.validate_component(components[0])
+        if incompressible_model is not None:
+            from chemworld.physchem.incompressible_properties import IncompressibleMaterialModel
+
+            if (not isinstance(incompressible_model, IncompressibleMaterialModel)
+                    or phase != "liquid" or references or transport_models
+                    or any(value is not None for value in
+                           (eos, activity_model, volume_model, helmholtz_model, water_model))):
+                raise ValueError("incompressible liquid requires an exclusive property declaration")
+            incompressible_model.validate_components(components)
         ref: dict[str, Any] = {}
         for alias, value in (references or {}).items():
             key = resolve_component_identifier(components, alias)
@@ -245,6 +264,11 @@ class PhasePropertyModel:
             "transport_models": transports,
             "helmholtz_model": None if helmholtz_model is None else helmholtz_model.to_dict(),
         }
+        # Preserve existing declarations/serialized evidence when water is not selected.
+        if water_model is not None:
+            payload["water_model"] = water_model.to_dict()
+        if incompressible_model is not None:
+            payload["incompressible_model"] = incompressible_model.to_dict()
         object.__setattr__(
             self, "_definition_json", json.dumps(payload, allow_nan=False, sort_keys=True)
         )
@@ -266,12 +290,19 @@ class PhasePropertyModel:
 
     @staticmethod
     def _decode(payload: Mapping[str, Any]) -> dict[str, Any]:
-        from chemworld.physchem.eos import CubicEOSSpec
+        from chemworld.physchem.eos import fluid_eos_from_dict
         from chemworld.physchem.equilibrium import ActivityModelSpec
         from chemworld.physchem.helmholtz_solvers import HelmholtzPhaseModel
+        from chemworld.physchem.incompressible_properties import IncompressibleMaterialModel
         from chemworld.physchem.property_packages import ComponentPropertyPackage
+        from chemworld.physchem.water_if97_properties import IF97WaterModel
 
         values = dict(payload)
+        water = values.get("water_model")
+        values["water_model"] = None if water is None else IF97WaterModel.from_dict(water)
+        incompressible = values.get("incompressible_model")
+        values["incompressible_model"] = (None if incompressible is None
+            else IncompressibleMaterialModel.from_dict(incompressible))
         if values.pop("model") != "phase_property_model_v1":
             raise ValueError("unknown phase property model schema")
         values["packages"] = tuple(
@@ -279,7 +310,7 @@ class PhasePropertyModel:
         )
         values["references"] = {k: CaloricReference(**v) for k, v in values["references"].items()}
         for name, constructor in (
-            ("eos", CubicEOSSpec.from_dict),
+            ("eos", fluid_eos_from_dict),
             ("volume_model", PropertyCorrelation.from_dict),
             ("helmholtz_model", HelmholtzPhaseModel.from_dict),
         ):
@@ -307,6 +338,15 @@ class PhasePropertyModel:
         """Structural availability; validity and selected sources are checked at T/P."""
         d = self._decode(self.to_dict())
         packages, phase, refs = d["packages"], d["phase"], d["references"]
+        if d["incompressible_model"] is not None:
+            available = d["incompressible_model"].available_quantities()
+            available.update(dict.fromkeys(("cv", "dU_dT_V", "speed_of_sound",
+                "chemical_potential", "activity_coefficient", "fugacity_coefficient",
+                "surface_tension"), False))
+            return _freeze({key: {"supported": value,
+                "condition": "Explicit incompressible material; source T/x/phase validity applies"
+                if value else "Not supplied by the incompressible correlation model"}
+                for key, value in available.items()})
         state = phase == "gas" or d["eos"] is not None
         base_phase = "gas" if d["eos"] is not None else phase
         internal = bool(refs) and all(r.energy_basis == "internal_energy" for r in refs.values())
@@ -364,6 +404,10 @@ class PhasePropertyModel:
             supported = dict.fromkeys(
                 (*_STATE_FIELDS, "molar_volume", "dV_dT_P", "dV_dP_T", "chemical_potential"), True
             )
+        if d["water_model"] is not None:
+            from chemworld.physchem.water_if97_properties import IF97_PROPERTY_QUANTITIES
+
+            supported = dict.fromkeys(IF97_PROPERTY_QUANTITIES, True)
         for key in _TRANSPORT_UNITS:
             prop = phase + "_viscosity" if key == "viscosity" else key
             supported[key] = key in d["transport_models"] or (
@@ -450,9 +494,14 @@ class PhasePropertyModel:
         core = [q for q in quantities if q not in explicit]
         if any(isinstance(v, PhaseTransportSpec) and v.method == "LBC" for v in explicit.values()):
             core = list(dict.fromkeys((*core, "molar_volume")))
-        if d["helmholtz_model"] is not None:
+        if d["incompressible_model"] is not None:
+            report = evaluate_property_state(
+                packages, amounts, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+                phase=d["phase"], quantities=core, validity_policy=validity_policy,
+                incompressible_model=d["incompressible_model"])
+        elif d["helmholtz_model"] is not None or d["water_model"] is not None:
             if validity_policy != "raise":
-                raise ValueError("Helmholtz phase evaluation requires strict source validity")
+                raise ValueError("Helmholtz/IF97 phase evaluation requires strict source validity")
             report = (
                 packages[0].evaluate_state(
                     temperature_K=temperature_K,
@@ -460,6 +509,7 @@ class PhasePropertyModel:
                     phase=d["phase"],
                     quantities=core,
                     helmholtz_model=d["helmholtz_model"],
+                    water_model=d["water_model"],
                 )
                 if core
                 else StatePropertyReport(

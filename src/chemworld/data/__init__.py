@@ -1,6 +1,7 @@
 """Data schemas, trajectory logging, and validation helpers."""
 
 from chemworld.data.logging import TrajectoryLogger, load_jsonl
+from chemworld.data.records import trajectory_value
 from chemworld.data.schema import (
     OUTCOME_LAYER_FIELDS,
     SUPPORTED_TRAJECTORY_SCHEMA_VERSIONS,
@@ -13,6 +14,7 @@ from chemworld.data.submission import SUBMISSION_SCHEMA_VERSION, SubmissionManif
 from chemworld.data.validation import validate_record, validate_records
 
 __all__ = [
+    "GAUSSIAN_KNOWN_SIGMA",
     "OUTCOME_LAYER_FIELDS",
     "SUBMISSION_SCHEMA_VERSION",
     "SUPPORTED_TRAJECTORY_SCHEMA_VERSIONS",
@@ -25,6 +27,9 @@ __all__ = [
     "ChemSageParseError",
     "DiameterDistributionCalibration",
     "MolecularGroupAssignment",
+    "MultifluidSourceCatalog",
+    "SBMLCalibration",
+    "SBMLCalibrationParameter",
     "SBMLModel",
     "SubmissionManifest",
     "TdbDatabase",
@@ -32,15 +37,25 @@ __all__ = [
     "TrajectoryLogger",
     "TrajectoryRecordPayload",
     "UNIFACInteractionRecord",
+    "bind_incompressible_liquid",
+    "incompressible_catalog",
+    "incompressible_fluid",
     "iter_ddbst_sqlite",
     "iter_ddbst_text",
     "load_helmholtz_fluid",
     "load_helmholtz_phase_model",
+    "load_incompressible_fluid",
     "load_jsonl",
+    "load_multifluid_catalog",
+    "load_multifluid_model",
     "read_helmholtz_fluid",
+    "read_multifluid_catalog",
+    "read_multifluid_model",
     "read_unifac_interactions",
     "read_unifac_subgroups",
+    "sbml_profile_likelihood",
     "select_unifac_interactions",
+    "trajectory_value",
     "twu_eos_component_from_record",
     "unifac_model_from_assignments",
     "validate_record",
@@ -49,6 +64,41 @@ __all__ = [
 
 
 def __getattr__(name):
+    if name in {"sbml_profile_likelihood", "GAUSSIAN_KNOWN_SIGMA"}:
+        from chemworld.data import sbml_profile
+
+        value = getattr(sbml_profile, name)
+        globals()[name] = value
+        return value
+    if name in {"SBMLCalibration", "SBMLCalibrationParameter"}:
+        from chemworld.data import sbml_calibration
+
+        value = getattr(sbml_calibration, name)
+        globals()[name] = value
+        return value
+    if name in {"MultifluidSourceCatalog", "load_multifluid_catalog", "read_multifluid_catalog"}:
+        from chemworld.data import multifluid_catalog
+
+        value = getattr(multifluid_catalog, name)
+        globals()[name] = value
+        return value
+    if name in {"load_multifluid_model", "read_multifluid_model"}:
+        from chemworld.data import multifluid
+
+        value = getattr(multifluid, name)
+        globals()[name] = value
+        return value
+    if name == "bind_incompressible_liquid":
+        from chemworld.data.incompressible_bindings import bind_incompressible_liquid
+
+        globals()[name] = bind_incompressible_liquid
+        return bind_incompressible_liquid
+    if name in {"load_incompressible_fluid", "incompressible_catalog", "incompressible_fluid"}:
+        from chemworld.data import incompressible
+
+        value = getattr(incompressible, name)
+        globals()[name] = value
+        return value
     if name == "DiameterDistributionCalibration":
         from chemworld.data.particle_distribution_calibration import DiameterDistributionCalibration
 

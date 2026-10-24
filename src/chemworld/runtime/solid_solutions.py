@@ -28,6 +28,8 @@ def solid_record(state):
 
 
 def solid_model(state, composition=None):
+    from chemworld.runtime.calphad_thermal import CalphadThermalSpec
+
     record = solid_record(state)
     if record is None:
         raise ValueError("no material model is installed")
@@ -35,10 +37,12 @@ def solid_model(state, composition=None):
         if composition is None or composition.physics is None:
             raise ValueError("CEF material requires its declared physical model binding")
         model = composition.physics.models_of("calphad_material").get(state.vessel_id)
-        if not isinstance(model, CefMaterialSpec) or record.settings != {
+        if not isinstance(model, (CefMaterialSpec, CalphadThermalSpec)) or record.settings != {
             "model_id": "calphad_material", "vessel": state.vessel_id,
         }:
             raise ValueError("CEF material record must reference its sole declared model")
+        if isinstance(model, CalphadThermalSpec):
+            return model
         phases = tuple(state.phases.phases.values())
         if len(phases) == 1:
             if "site_fractions" not in phases[0].metadata:
@@ -97,6 +101,13 @@ def install_solid(state, model, equilibrium):
 
 
 def solid_enthalpy(state, model):
+    from chemworld.runtime.calphad_thermal import (
+        CalphadThermalSpec,
+        calphad_inventory_enthalpy_j,
+    )
+
+    if isinstance(model, CalphadThermalSpec):
+        return calphad_inventory_enthalpy_j(state, model)
     if isinstance(model, CefMaterialSpec):
         if len(state.phases.phases) != 1:
             raise ValueError("CEF material requires its one committed phase")
@@ -122,6 +133,13 @@ def solid_enthalpy(state, model):
 
 
 def validate_solid(state, model):
+    from chemworld.runtime.calphad_thermal import (
+        CalphadThermalSpec,
+        validate_calphad_thermal_state,
+    )
+
+    if isinstance(model, CalphadThermalSpec):
+        return validate_calphad_thermal_state(state, model)
     if state.state_slots.slots or not isclose(state.pressure_Pa, model.pressure_Pa, abs_tol=1e-7):
         raise ValueError(
             "solid local equilibrium has no extra coupled inventory or variable pressure"
@@ -161,16 +179,31 @@ class SolidSolutionRuntime:
     supported_operations = ("heat", "wait", "pause_control", "resume_control")
 
     def __init__(self, composition=None):
+        from chemworld.runtime.calphad_thermal import CalphadThermalRuntime
+
         self.composition = composition
+        self.calphad_thermal = CalphadThermalRuntime(composition)
 
     def supports(self, state):
         return solid_record(state) is not None
 
+    def validate_state(self, state):
+        from chemworld.runtime.calphad_thermal import CalphadThermalSpec
+
+        if isinstance(solid_model(state, self.composition), CalphadThermalSpec):
+            self.calphad_thermal.validate_state(state)
+
     def temperature_bounds_k(self, state):
+        from chemworld.runtime.calphad_thermal import CalphadThermalSpec
+
         model = solid_model(state, self.composition)
+        if isinstance(model, CalphadThermalSpec):
+            return self.calphad_thermal.temperature_bounds_k(state)
         return model.minimum_temperature_K, model.maximum_temperature_K
 
     def reconcile_initialization(self, transition):
+        from chemworld.runtime.calphad_thermal import CalphadThermalSpec
+
         # Material replacement does not replace the specimen holder. Its
         # sensible heat equilibrates with the declared fresh solid inventory.
         if transition.receipt.get("scope") not in {"material", "batch"}:
@@ -183,6 +216,8 @@ class SolidSolutionRuntime:
             if not self.supports(state):
                 continue
             model = solid_model(state, self.composition)
+            if isinstance(model, CalphadThermalSpec):
+                continue
             retained_heat = model.support_heat_capacity_J_K * (
                 receipt["previous_temperature_K"] - state.temperature_K
             )
@@ -194,16 +229,18 @@ class SolidSolutionRuntime:
                 "total_enthalpy_J": target,
                 "temperature_K": equilibrium.temperature_K,
             }
-        if not changed:
-            return transition
-        local = locals_.pop(active.vessel_id)
-        return replace(
-            transition,
-            state=local.replace(inactive_vessels=locals_),
-            receipt={**transition.receipt, "solid_equilibration": changed},
-        )
+        if changed:
+            local = locals_.pop(active.vessel_id)
+            transition = replace(
+                transition,
+                state=local.replace(inactive_vessels=locals_),
+                receipt={**transition.receipt, "solid_equilibration": changed},
+            )
+        return self.calphad_thermal.reconcile_initialization(transition)
 
     def validate_world(self):
+        from chemworld.runtime.calphad_thermal import CalphadThermalSpec
+
         if self.composition is None or self.composition.physics is None:
             return
         states = self.composition.physics.initial_states
@@ -214,10 +251,13 @@ class SolidSolutionRuntime:
             raise ValueError("solid equilibrium declaration must match installed material model")
         if not installed:
             return
+        self.calphad_thermal.validate_world()
         network = self.composition.physics.network
         for vessel in installed:
             state = states[vessel]
             model = solid_model(state, self.composition)
+            if isinstance(model, CalphadThermalSpec):
+                continue
             components = [c for c in self.composition.components if c.vessel == vessel
                           and c.kind in {"solid_solution", "calphad_phase"}]
             expected_kind = ("calphad_phase" if isinstance(model, CefMaterialSpec)
@@ -245,7 +285,13 @@ class SolidSolutionRuntime:
                 raise ValueError("solid exceeds finite vessel capacity")
 
     def advance(self, state, action, *, heat=False, jacket_program=None):
+        from chemworld.runtime.calphad_thermal import CalphadThermalSpec
+
         model = solid_model(state, self.composition)
+        if isinstance(model, CalphadThermalSpec):
+            return self.calphad_thermal.advance(
+                state, action, heat=heat, jacket_program=jacket_program,
+            )
         record, device = connected_device(state, required=False)
         try:
             if jacket_program is not None:

@@ -35,6 +35,8 @@ from chemworld.eval.cross_world_infrastructure_qualification import (
     _world_state_sections,
     recipe_cases,
 )
+from chemworld.eval.report_io import git_output as _git
+from chemworld.eval.report_io import write_report_outputs
 from chemworld.eval.verify import verify_records
 from chemworld.tasks import TASK_CONTRACT_VERSION, TaskSpec, get_task
 
@@ -140,17 +142,6 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise DeterministicUseCaseProtocolError(f"JSON root must be an object: {path}")
     return payload
-
-
-def _git(root: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return completed.stdout.strip()
 
 
 def _resolve_repository_path(root: Path, relative_path: str | Path) -> Path:
@@ -1562,32 +1553,13 @@ def write_outputs(
 ) -> tuple[Path, Path]:
     """Write JSON and Markdown together, refusing replacement by default."""
 
-    report_path = Path(output_path)
-    resolved_markdown = (
-        Path(markdown_path) if markdown_path is not None else report_path.with_suffix(".md")
+    return write_report_outputs(
+        report,
+        render_markdown=render_markdown,
+        output_path=output_path,
+        markdown_path=markdown_path,
+        allow_existing=allow_existing,
     )
-    if report_path.resolve() == resolved_markdown.resolve():
-        raise ValueError("JSON and Markdown outputs must use distinct paths")
-    occupied = [path for path in (report_path, resolved_markdown) if path.exists()]
-    if occupied and not allow_existing:
-        rendered = ", ".join(str(path) for path in occupied)
-        raise FileExistsError(
-            f"refusing to replace or overwrite completed output: {rendered}"
-        )
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    resolved_markdown.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
-        + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    resolved_markdown.write_text(
-        render_markdown(report),
-        encoding="utf-8",
-        newline="\n",
-    )
-    return report_path, resolved_markdown
 
 
 __all__ = [

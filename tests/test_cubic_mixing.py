@@ -10,6 +10,7 @@ from chemworld.physchem.cubic_mixing import (
     cubic_helmholtz_fugacities,
     cubic_mixing_expression,
     cubic_residual_helmholtz,
+    quadratic_cubic_mixing,
 )
 from chemworld.physchem.eos import (
     CubicEOSSpec,
@@ -23,6 +24,22 @@ from chemworld.physchem.regular_solution import regular_solution_model
 from chemworld.physchem.unifac import UNIFACSubgroup, unifac_activity_model
 
 RULES = ("huron_vidal", "mhv", "mhv1", "mhv2", "wong_sandler")
+
+
+def test_explicit_covolume_interactions_preserve_analytic_composition_response():
+    def volume(values, interactions=None):
+        return quadratic_cubic_mixing(
+            [values["x"], 1-values["x"]], [1., 4.], [2., 6.],
+            [[0., .1], [.1, 0.]], covolume_interactions=interactions)[1]
+    pair = [[0., .25], [.25, 0.]]
+    assert volume({"x": .3}) == pytest.approx(4.8)
+    assert volume({"x": .3}, [[0., 0.], [0., 0.]]) == pytest.approx(4.8)
+    # b=6-4x-2x(1-x): cross correction changes both first and second response.
+    assert volume({"x": .3}, pair) == pytest.approx(4.38)
+    assert partial_derivative(lambda v: volume(v, pair), {"x": .3}, ("x",)) == pytest.approx(-4.8)
+    assert partial_derivative(lambda v: volume(v, pair), {"x": .3}, ("x", "x")) == pytest.approx(4.)
+    with pytest.raises(ValueError, match="covolume interaction dimensions"):
+        volume({"x": .3}, [[0.]])
 
 
 def case(rule, model="peng_robinson", n=3):

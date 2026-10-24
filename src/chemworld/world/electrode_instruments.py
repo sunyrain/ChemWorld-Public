@@ -48,6 +48,8 @@ def read_thevenin(state, action, rng):
 
 
 def electrode_instrument_specs():
+    from chemworld.world.thevenin_analysis import thevenin_analysis_instrument_spec
+
     thevenin = electrical_instrument_spec("thevenin_meter", read_thevenin)
     thevenin = replace(thevenin, contract=replace(thevenin.contract,
         input_state_schema={**thevenin.contract.input_state_schema, "required_phase": "formal"}))
@@ -55,6 +57,7 @@ def electrode_instrument_specs():
         electrical_instrument_spec("electrical_meter", read_electrical),
         electrical_instrument_spec("battery_meter", read_battery),
         thevenin,
+        thevenin_analysis_instrument_spec(),
     )
 
 

@@ -18,8 +18,8 @@ from chemworld.physchem.battery_thevenin import (
     thevenin_fields,
     thevenin_system,
 )
+from chemworld.physchem.battery_thevenin_control import thevenin_control_program
 from chemworld.physchem.coupled_system import CoupledEvent, CoupledState
-from chemworld.physchem.reactor_shared import ScalarControlProgram
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.control_program import electrical_device
 from chemworld.runtime.kernel_contracts import ModelProviderResult
@@ -67,7 +67,7 @@ def unpack_thevenin(state):
     slot = slots[0]
     physical = CoupledState({}, p["reference_frame_temperature_K"], p["housing_volume_L"],
                             state.ledger.time_s, coordinates=slot.values)
-    program = ScalarControlProgram(**record.settings["electrical_control"]["program"])
+    program = thevenin_control_program(record.settings["electrical_control"]["program"])
     return record, slot, spec, physical, program
 
 

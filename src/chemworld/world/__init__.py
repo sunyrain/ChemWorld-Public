@@ -128,9 +128,13 @@ __all__ = [
     "WorldCompositionDiagnostic",
     "WorldCompositionError",
     "WorldCompositionSpec",
+    "analyze_calphad_ternary_world",
+    "analyze_catalytic_world",
     "apply_equilibrium_entity_panel",
     "apply_material_law_counterfactual",
     "axes_for_task",
+    "build_molecular_cascade_world",
+    "build_molecular_flash_separator_world",
     "check_world_composition_compatibility",
     "compile_recipe",
     "compile_world_composition",
@@ -152,7 +156,34 @@ __all__ = [
     "material_law_counterfactual_hash",
     "nmr_spectrum",
     "pairwise_covering_rows",
+    "suspension_treatment_world_spec",
     "uvvis_spectrum",
     "validate_recipe",
     "world_law_spec",
 ]
+
+
+def __getattr__(name: str):
+    if name == "suspension_treatment_world_spec":
+        from chemworld.world.suspension_treatment_world import suspension_treatment_world_spec
+
+        return suspension_treatment_world_spec
+    if name == "analyze_calphad_ternary_world":
+        from chemworld.world.calphad_ternary_analysis import analyze_calphad_ternary_world
+
+        return analyze_calphad_ternary_world
+    if name == "build_molecular_flash_separator_world":
+        from chemworld.world.molecular_flash_separator_world import (
+            build_molecular_flash_separator_world,
+        )
+
+        return build_molecular_flash_separator_world
+    if name == "analyze_catalytic_world":
+        from chemworld.world.catalysis_analysis import analyze_catalytic_world
+
+        return analyze_catalytic_world
+    if name == "build_molecular_cascade_world":
+        from chemworld.world.molecular_cascade_world import build_molecular_cascade_world
+
+        return build_molecular_cascade_world
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

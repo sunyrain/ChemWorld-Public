@@ -131,7 +131,9 @@ def test_import_rejects_whole_invalid_mechanism(mutation):
         node["equation"] = "A => 2 B"
     elif mutation == "unknown":
         node["equation"] = "A => C"
-    elif mutation in {"SRI", "orders", "unknown_field"}:
+    elif mutation == "orders":
+        node["orders"] = {"A": -1}  # A negative order still requires explicit opt-in.
+    elif mutation in {"SRI", "unknown_field"}:
         node[mutation] = {"A": 1}
     elif mutation == "negative_A":
         node.clear()

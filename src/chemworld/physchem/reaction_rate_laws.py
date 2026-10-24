@@ -37,6 +37,28 @@ def evaluate_rate_law(
     if temperature_K <= 0:
         raise ValueError("temperature_K must be positive")
     params = reaction.rate_law.parameters
+    _declared_temperature_validity(params, temperature_K)
+    if reaction.rate_law.equation_id == "energy_grain_collision":
+        from chemworld.physchem.energy_grain_master_equation import (
+            evaluate_energy_grain_collision_rate,
+        )
+
+        return evaluate_energy_grain_collision_rate(
+            reaction,
+            concentrations_mol_L=concentrations_mol_L,
+            temperature_K=temperature_K,
+            activity_coefficients=activity_coefficients,
+        )
+    if params.get("mechanism_schema") == "cantera-gas-v2":
+        from chemworld.physchem.mechanism_rates import evaluate_mechanism_rate
+
+        if activity_coefficients is not None:
+            raise ValueError(
+                "imported ideal-gas mechanisms do not use liquid activity coefficients"
+            )
+        return evaluate_mechanism_rate(
+            reaction, concentrations_mol_L=concentrations_mol_L,
+            temperature_K=temperature_K, species_thermo=species_thermo)
     equation_id = reaction.rate_law.equation_id
     if equation_id == "runtime_owned":
         runtime_model_id = str(params["runtime_model_id"])
@@ -294,6 +316,10 @@ def gas_forward_rate_constant(
     reaction: ReactionSpec, concentrations: Mapping[str, float], temperature_K: float
 ) -> float:
     params, law = reaction.rate_law.parameters, reaction.rate_law.equation_id
+    if params.get("mechanism_schema") == "cantera-gas-v2":
+        from chemworld.physchem.mechanism_rates import mechanism_forward_rate_constant
+
+        return mechanism_forward_rate_constant(reaction, concentrations, temperature_K)
     if law in {"pressure_log", "chebyshev"}:
         if params.get("pressure_basis") != "ideal_gas":
             raise ValueError("network pressure kinetics require explicit ideal_gas pressure basis")
@@ -358,7 +384,21 @@ def rate_driving_quantities(
     return quantities
 
 
+def _declared_temperature_validity(params: Mapping[str, Any], temperature_K: float) -> None:
+    """Optional source validity survives generation/export, including zero reactant flux."""
+    if "valid_temperature_range_K" not in params:
+        return
+    bounds = params["valid_temperature_range_K"]
+    if (not isinstance(bounds, (tuple, list)) or len(bounds) != 2
+            or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not isfinite(v)
+                   for v in bounds) or not 0 < bounds[0] < bounds[1]):
+        raise ValueError("invalid explicitly declared kinetic temperature range")
+    if not isfinite(temperature_K) or not bounds[0] <= temperature_K <= bounds[1]:
+        raise ValueError("temperature outside explicitly declared kinetic validity")
+
+
 def arrhenius_k(params: Mapping[str, object], temperature_K: float) -> float:
+    _declared_temperature_validity(params, temperature_K)
     if temperature_K <= 0.0 or not isfinite(temperature_K):
         raise ValueError("temperature_K must be finite and positive")
     A = float_param(params, "A", default=float_param(params, "k", default=0.0))

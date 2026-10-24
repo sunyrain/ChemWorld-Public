@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from chemworld.data.records import trajectory_value
 from chemworld.eval.metrics import evaluate_records
 from chemworld.tasks import TASK_REGISTRY
 from chemworld.world.scoring import TaskScoringContract, task_score_observation
@@ -51,7 +52,7 @@ class ScoringAuditResult:
 
 def _record_task_id(records: list[dict[str, Any]]) -> str:
     first = records[0]
-    return str(first.get("benchmark_task_id") or first["task_id"])
+    return str(trajectory_value(first, 'benchmark_task_id', None) or first["task_id"])
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -97,7 +98,7 @@ def audit_scoring_contract(
                     message="record scoring contract hash does not match task contract",
                 )
             )
-        observation = record.get("observation", {})
+        observation = trajectory_value(record, 'observation', {})
         recomputed_score = task_score_observation(contract=contract, values=observation)
         observed_score = _float_or_none(observation.get("score"))
         if observed_score is not None:
@@ -124,7 +125,7 @@ def audit_scoring_contract(
             if successful_measurement and observed_score is not None
             else 0.0
         )
-        reward = _float_or_none(record.get("reward"))
+        reward = _float_or_none(trajectory_value(record, 'reward', None))
         observed_reward = _float_or_none(record.get("observed_reward"))
         for reward_field, value in (("reward", reward), ("observed_reward", observed_reward)):
             if value is not None:
@@ -150,7 +151,7 @@ def audit_scoring_contract(
             and record.get("instrument") == "final_assay"
             and not precondition_failed
         )
-        leaderboard_score = _float_or_none(record.get("leaderboard_score"))
+        leaderboard_score = _float_or_none(trajectory_value(record, 'leaderboard_score', None))
         if is_final_assay:
             final_assay_count += 1
             leaderboard_error = abs((leaderboard_score or 0.0) - recomputed_score)
@@ -211,9 +212,9 @@ def audit_scoring_contract(
     evaluation = evaluate_records(records, threshold=task.threshold)
     official_best = max(
         (
-            float(record["leaderboard_score"])
+            float(trajectory_value(record, 'leaderboard_score'))
             for record in records
-            if record.get("leaderboard_score") is not None
+            if trajectory_value(record, 'leaderboard_score', None) is not None
         ),
         default=0.0,
     )

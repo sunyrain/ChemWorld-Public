@@ -12,6 +12,7 @@ from typing import Any
 import pandas as pd
 
 from chemworld.data.logging import load_jsonl, to_builtin
+from chemworld.data.records import trajectory_value
 from chemworld.data.submission import git_commit
 from chemworld.data.validation import validate_records
 
@@ -75,7 +76,7 @@ def _agent_trace_memory_note(entry: dict[str, Any]) -> str | None:
 
 
 def flatten_record(record: dict[str, Any]) -> dict[str, Any]:
-    observation = record.get("observation", {})
+    observation = trajectory_value(record, 'observation', {})
     flags = record.get("constraint_flags", {})
     trace = record.get("agent_trace", [])
     latest_trace = _latest_agent_trace_entry(record)
@@ -85,7 +86,7 @@ def flatten_record(record: dict[str, Any]) -> dict[str, Any]:
         "campaign_id": record.get("campaign_id"),
         "experiment_index": record.get("experiment_index"),
         "operation_id": record.get("operation_id"),
-        "benchmark_task_id": record.get("benchmark_task_id"),
+        "benchmark_task_id": trajectory_value(record, 'benchmark_task_id', None),
         "scenario_id": record.get("scenario_id"),
         "world_split": record.get("world_split"),
         "world_family_version": record.get("world_family_version"),
@@ -111,8 +112,8 @@ def flatten_record(record: dict[str, Any]) -> dict[str, Any]:
         "mechanism_hash": record.get("mechanism_hash"),
         "scoring_contract_hash": record.get("scoring_contract_hash"),
         "observation_contract_hash": record.get("observation_contract_hash"),
-        "reward": record.get("reward"),
-        "leaderboard_score": record.get("leaderboard_score"),
+        "reward": trajectory_value(record, 'reward', None),
+        "leaderboard_score": trajectory_value(record, 'leaderboard_score', None),
         "yield": observation.get("yield"),
         "selectivity": observation.get("selectivity"),
         "conversion": observation.get("conversion"),
@@ -137,9 +138,11 @@ def flatten_record(record: dict[str, Any]) -> dict[str, Any]:
             to_builtin(record.get("evaluation_outcome", {})),
             sort_keys=True,
         ),
-        "agent_view": json.dumps(to_builtin(record.get("agent_view", {})), sort_keys=True),
+        "agent_view": json.dumps(
+            to_builtin(trajectory_value(record, "agent_view", {})), sort_keys=True,
+        ),
         "lab_report": json.dumps(
-            to_builtin(record.get("agent_view", {}).get("lab_report", {})),
+            to_builtin(trajectory_value(record, 'agent_view', {}).get("lab_report", {})),
             sort_keys=True,
         ),
         "agent_trace": json.dumps(to_builtin(record.get("agent_trace", [])), sort_keys=True),
@@ -367,7 +370,10 @@ def _outcome_counts(records: list[dict[str, Any]]) -> dict[str, Any]:
 def dataset_card(path: str | Path) -> dict[str, Any]:
     records = load_dataset_records(path)
     task_ids = sorted(
-        {str(record.get("benchmark_task_id") or record.get("task_id")) for record in records}
+        {
+            str(trajectory_value(record, "benchmark_task_id", None) or record.get("task_id"))
+            for record in records
+        }
     )
     seeds = sorted({int(record["seed"]) for record in records})
     world_law_versions = sorted({str(record.get("world_family_version")) for record in records})

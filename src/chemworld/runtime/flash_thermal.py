@@ -19,6 +19,13 @@ from chemworld.runtime.kernel_contracts import ModelProviderResult
 
 def inventory_enthalpy_j(state, model):
     """Derive H from the primary phase inventory, including pure plateaus."""
+    from chemworld.runtime.molecular_flash_thermal import (
+        MolecularFlashThermalSpec,
+        molecular_flash_inventory_enthalpy_j,
+    )
+
+    if isinstance(model, MolecularFlashThermalSpec):
+        return molecular_flash_inventory_enthalpy_j(state, model)
     inventories = {
         kind: dict.fromkeys(model.properties.component_ids, 0.0) for kind in ("liquid", "gas")
     }
@@ -62,6 +69,13 @@ def install_flash(state, model, result):
 
 
 def validate_flash_state(state, model):
+    from chemworld.runtime.molecular_flash_thermal import (
+        MolecularFlashThermalSpec,
+        validate_molecular_flash_state,
+    )
+
+    if isinstance(model, MolecularFlashThermalSpec):
+        return validate_molecular_flash_state(state, model)
     if not (model.properties.temperature_bounds_K[0] <= state.temperature_K
             <= model.stop_temperature_K + 1e-7):
         raise ValueError("flash state leaves its declared thermal operating range")
@@ -95,13 +109,18 @@ class FlashThermalRuntime:
         return state.replace(pressure_Pa=model.pressure_Pa)
 
     def __init__(self, composition):
+        from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalRuntime
+
         self.composition = composition
+        self.molecular = MolecularFlashThermalRuntime(composition)
 
     def supports(self, state):
         return (self.composition is not None and self.composition.physics is not None
                 and state.vessel_id in self.composition.physics.models_of("flash"))
 
     def advance(self, state, action, *, heat, jacket_program=None):
+        if self.molecular.supports(state):
+            return self.molecular.advance(state, action, heat=heat, jacket_program=jacket_program)
         model = self.composition.physics.models_of("flash")[state.vessel_id]
         record, device = connected_device(state, required=False)
         try:
@@ -192,7 +211,12 @@ class FlashThermalRuntime:
 
 
 def exchange_flash_packet(source, target, physics, amounts, *, fraction=0, fixed_source=False):
+    from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalSpec
+
     model = physics.models_of("flash")[target.vessel_id]
+    if any(isinstance(physics.models_of("flash").get(vessel), MolecularFlashThermalSpec)
+           for vessel in (source.vessel_id, target.vessel_id)):
+        raise ValueError("molecular two-phase caloric branch does not declare material transfer")
     if source.state_slots.slots or target.state_slots.slots:
         raise ValueError("flash packets do not support extra owned slots in this slice")
     source_model = model if fixed_source else physics.models_of("flash").get(source.vessel_id)

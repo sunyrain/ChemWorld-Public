@@ -5,8 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-TRAJECTORY_SCHEMA_VERSION = "chemworld-trajectory-0.2"
-LEGACY_TRAJECTORY_SCHEMA_VERSIONS = ("chemworld-trajectory-0.1",)
+TRAJECTORY_SCHEMA_VERSION = "chemworld-trajectory-0.3"
+LEGACY_TRAJECTORY_SCHEMA_VERSIONS = (
+    "chemworld-trajectory-0.1", "chemworld-trajectory-0.2",
+)
+# Historical read aliases, never materialized by the current writer.
 TRAJECTORY_COMPATIBILITY_ALIASES = (
     "benchmark_task_id",
     "observation",
@@ -33,7 +36,6 @@ class TrajectoryRecordPayload:
     world_family_version: str
     task_id: str
     env_id: str
-    benchmark_task_id: str | None
     world_split: str
     objective: str
     budget: int
@@ -65,8 +67,6 @@ class TrajectoryRecordPayload:
     environment_outcome: dict[str, Any]
     agent_visible_observation: dict[str, Any]
     evaluation_outcome: dict[str, Any]
-    observation: dict[str, float | None]
-    reward: float
     terminated: bool
     truncated: bool
     constraint_flags: dict[str, bool]
@@ -86,6 +86,5 @@ class TrajectoryRecordPayload:
     measurement_cost: float = 0.0
     sample_consumed: float = 0.0
     observed_reward: float = 0.0
-    leaderboard_score: float | None = None
     reward_source: str | None = None
     explanation: dict[str, Any] = field(default_factory=dict)

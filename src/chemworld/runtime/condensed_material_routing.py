@@ -350,7 +350,7 @@ def reconcile_thermal_initialization(previous, fresh, transition, physics):
         thermal = model.thermodynamics
         initial_t, retained_t = templates[name].temperature_K, old[name].temperature_K
         reference = thermal.reference_temperature_K
-        if model.pressure_law == "helmholtz":
+        if model.uses_eos_pressure:
             from chemworld.physchem.coupled_system import CoupledState
 
             introduced = thermal.internal_energy_j(CoupledState(

@@ -106,8 +106,8 @@ def test_mobile_carrier_moves_with_bound_molecules_and_signed_energy_packet():
             name: before.state_slots.slots[0].values[name] * 0.4
             for name in before.state_slots.slots[0].values
         }
-        initial_energy = _energy(before, world.physics.thermal_models["reactor"]) + _energy(
-            before.inactive_vessels["waste"], world.physics.thermal_models["waste"]
+        initial_energy = _energy(before, world.physics.models_of('thermal')["reactor"]) + _energy(
+            before.inactive_vessels["waste"], world.physics.models_of('thermal')["waste"]
         )
         execute(
             session,
@@ -118,8 +118,10 @@ def test_mobile_carrier_moves_with_bound_molecules_and_signed_energy_packet():
         )
         moved = session._state.inactive_vessels["waste"].state_slots.slots[0]
         assert moved.values == pytest.approx(expected, abs=1e-12)
-        final_energy = _energy(session._state, world.physics.thermal_models["reactor"]) + _energy(
-            session._state.inactive_vessels["waste"], world.physics.thermal_models["waste"]
+        final_energy = _energy(
+            session._state, world.physics.models_of("thermal")["reactor"]
+        ) + _energy(
+            session._state.inactive_vessels["waste"], world.physics.models_of("thermal")["waste"]
         )
         assert final_energy == pytest.approx(initial_energy, abs=1e-6)
     finally:
@@ -144,7 +146,7 @@ def test_material_reset_preserves_fixed_carrier_loading_and_mixes_retained_energ
         assert state.ledger == before.ledger
         assert state.equipment == before.equipment
         assert 298.15 < state.temperature_K < before.temperature_K
-        assert _energy(state, world.physics.thermal_models["reactor"]) == pytest.approx(
+        assert _energy(state, world.physics.models_of('thermal')["reactor"]) == pytest.approx(
             retained, abs=1e-6
         )
     finally:
@@ -204,9 +206,9 @@ def test_warm_finite_supply_carries_nonzero_energy_once():
     states["wash_supply"] = states["wash_supply"].replace(temperature_K=310)
     models = {name: replace(model, condensed_background=replace(
         model.condensed_background, feed_temperature_K=310))
-        for name,model in physics.thermal_models.items()}
+        for name,model in physics.models_of('thermal').items()}
     payload = world.to_dict()
-    physics = replace(physics, initial_states=states, thermal_models=models)
+    physics = replace(physics, initial_states=states, models={**physics.models, 'thermal': models})
     payload["physics"] = physics.to_dict()
     session = ChemWorldRuntime(composition=type(world).from_dict(payload))
     session.reset(seed=22)

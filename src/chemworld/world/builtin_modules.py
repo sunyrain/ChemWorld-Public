@@ -50,7 +50,33 @@ def _instruments():
     )
 
 
+def _named_electrical_fields():
+    return (
+        ActionFieldSpec("control_mode", choices=("current", "voltage", "power", "resistance",
+            "differential_power", "differential_resistance", "cccv"), required=False),
+        ActionFieldSpec("power_W", "W", (-100., 100.), required=False),
+        ActionFieldSpec("resistance_Ohm", "Ohm", (1e-6, 1e6), required=False),
+        ActionFieldSpec("current_limit_A", "A", (-10., 10.), required=False),
+        ActionFieldSpec("branch_lower_A", "A", (-10., 10.), required=False),
+        ActionFieldSpec("branch_upper_A", "A", (-10., 10.), required=False),
+    )
+
+
 BUILTIN_MODULES = (
+    DomainModuleSpec(
+        module_id="molecular_process",
+        scope_notes=("Declared external source through homogeneous serial units or one recycle "
+                     "loop into one finite receiver; wait and snapshots; local clock only.",),
+        components=(("molecular_process", ComponentCapability(
+            operations=("wait",), interfaces=("material", "temperature"),
+            state_owners=("phases",),
+        )),),
+        models=(physics_models.MOLECULAR_PROCESS,),
+        advance_strategies=(AdvanceStrategySpec(
+            "molecular-process-receiver", factories.molecular_process,
+        ),),
+        dependencies=("thermal",),
+    ),
     DomainModuleSpec(
         module_id="lab_schedule",
         scope_notes=("Single process; finite independent closed systems with explicitly declared "
@@ -93,8 +119,13 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="solid_solution",
-        scope_notes=("Finite binary equilibrium or explicitly selected native TDB/CEF phase; "
-                     "local constitution and thermal equilibrium; no global phase selection.",),
+        scope_notes=("Finite binary equilibrium, selected native TDB/CEF phase, or declared "
+                     "multiphase CEF PH equilibrium with latent heat and finite thermal device; "
+                     "finite phase and tangent search, without global uniqueness claims. "
+                     "Fixed-T/P neutral vacancy-free ternary CEF sections retain requested "
+                     "composition nodes, tie lines/triangles and failed points; read-only "
+                     "world queries solve the exact current elemental composition, "
+                     "without interpolating continuous boundaries or replacing live inventory.",),
         components=(("solid_solution", ComponentCapability(
             operations=("heat", "wait", "pause_control", "resume_control"),
             interfaces=("material", "temperature"), state_owners=("solid_phase_equilibrium",),
@@ -111,11 +142,14 @@ BUILTIN_MODULES = (
     DomainModuleSpec(
         module_id="mineral_kinetics",
         scope_notes=("Finite calcite dissolution/precipitation with fast aqueous equilibrium; "
-                     "fixed 298.15 K, explicit surface geometry; no mineral nucleation.",),
+                     "fixed 298.15 K; or declared database minerals at fixed TP with "
+                     "fast aqueous reactions, finite seeded surface and same-reference heat/work. "
+                     "Database mode currently permits wait only; no mineral nucleation.",),
         components=(("mineral_kinetics", ComponentCapability(
             operations=("add_component", "wait", "sample", "route_material"),
             interfaces=("material", "aqueous_equilibrium"),
-            state_owners=("phases", "calcite_surface_reference"),
+            state_owners=("phases", "calcite_surface_reference",
+                          "declared_mineral_surface_reference"),
             outputs=("aqueous", "calcite"), input_ports=("aqueous", "calcite"),
         )),),
         advance_strategies=(("finite-calcite-kinetics", factories.mineral_kinetics),),
@@ -124,7 +158,10 @@ BUILTIN_MODULES = (
     DomainModuleSpec(
         module_id="sbml",
         scope_notes=("Formal 3D SBML quantity coordinates and supported transverse events; "
-                     "no declared chemical formula, carrier mass or heat model.",),
+                     "no declared chemical formula, carrier mass or heat model. Read-only "
+                     "finite-time perturbation growth for smooth autonomous reaction ODEs "
+                     "uses an explicit mol metric and the original stoichiometric subspace; "
+                     "no event/rate-rule tangents or asymptotic chaos claim.",),
         components=(("sbml_model", ComponentCapability(
             operations=("wait", "set_model_parameters"), minimum_operations=1,
             interfaces=("formal_quantities",),
@@ -149,40 +186,73 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="stochastic",
-        scope_notes=("Integer Gillespie direct; constant volume/temperature mass action; "
-                     "persistent event and RNG; not spatial kMC or automatic ODE/SSA switching.",),
+        scope_notes=("Integer Gillespie direct or explicit Gibson-Bruck next-reaction; "
+                     "constant volume/temperature mass action, persistent channel clocks and RNG; "
+                     "or declared fixed-partition continuous/stochastic feedback with integrated "
+                     "hazards, no cross-partition net conversion and no consuming sampling; "
+                     "not spatial kMC, tau-leaping or automatic ODE/SSA switching.",),
         components=(("stochastic", ComponentCapability(
             operations=("wait",), interfaces=("material",), minimum_operations=1,
             state_owners=("phases", "stochastic_continuation"),
         )),),
         advance_strategies=(AdvanceStrategySpec(
+            # Stable dispatcher key; the physical declaration selects the algorithm.
             "gillespie-direct", factories.stochastic, shared_clock=True,
         ),),
+        models=(physics_models.STOCHASTIC_HYBRID,),
         dependencies=("thermal",),
     ),
     DomainModuleSpec(
         module_id="ro_membrane",
-        scope_notes=("Finite ideal dilute NaCl RO at 298.15 K; synthetic deposited foulant "
-                     "and finite rinse; no reverse drive, membrane holdup "
-                     "or full WaterTAP flowsheet.",),
+        scope_notes=("Finite ideal dilute NaCl RO at 298.15 K with deposited foulant/rinse, "
+                     "or declared binary-electrolyte axial RO with pressure loss, "
+                     "same-source aqueous calorics and three finite tanks; "
+                     "or ideal dilute multi-ion Donnan/steric/Born NF with a resolved pore "
+                     "and a mixed-feed 0D module; "
+                     "or a periodic internal AEM/CEM electrodialysis pair with two finite "
+                     "liquids, signed ion/water transfer and bounded CC/CV control; "
+                     "or two-tank direct-contact Knudsen membrane distillation with finite "
+                     "heat/cooling and signed water/energy transfer; model-specific "
+                     "T/P/salinity bounds and operations, no membrane holdup or full WaterTAP "
+                     "flowsheet.",),
         components=(("ro_membrane", ComponentCapability(
-            operations=("set_flow_rate", "run_flow", "wait"),
+            operations=("set_flow_rate", "run_flow", "heat", "wait", "pause_control",
+                        "resume_control", "configure_electrical_control"),
             interfaces=("material", "flow_rate", "temperature"),
             state_owners=("liquid_transport_enthalpy_v1", "membrane_bound_foulant_v1"),
         )),),
         advance_strategies=(AdvanceStrategySpec(
             "finite-dilute-ro", factories.ro_membrane, shared_clock=True,
         ),),
-        dependencies=("continuous_flow",),
+        dependencies=("continuous_flow", "electrical_control"),
     ),
     DomainModuleSpec(
         module_id="finite_transport",
         scope_notes=("Finite pump, pipe, tanks and authored heat exchange; bounded working point; "
+                     "or four finite tanks and two pumps exchanging countercurrent heat at "
+                     "declared UA with independent circuit flows; "
+                     "or declared isothermal zero-order liquid treatment chains with finite "
+                     "product/concentrate stocks and receipt-based engineering economics; "
+                     "or finite pump-fed neutral reactive holdup with ideal overflow to a "
+                     "finite product tank, volume-compatible chemistry and one shared bath; "
+                     "or finite neutral aqueous mixed-contact adsorption and rinse with "
+                     "persistent competitive loading, five liquid stocks and one shared bath; "
+                     "or finite ideal-dilute Na/Ca resin exchange with counterion release, "
+                     "salt regeneration and rinse across six liquid stocks, weighted fixed "
+                     "resin charge and one shared bath; "
+                     "or finite neutral suspensions with a declared jar-test endpoint, "
+                     "explicit dispersed/floc particle phases, empirical clarification "
+                     "into actual clear-water/wet-sludge tanks, and mixing/pump work; "
+                     "no additive-driven coagulation prediction or settling dynamics; "
+                     "the adsorption-world feed also supports read-only single-solute fresh "
+                     "GAC design and breakthrough queries at fixed influent, using actual "
+                     "pump flow and feed volume above pickup; not remaining-life prediction "
+                     "for existing LDF media. These are declared finite models, "
                      "not arbitrary multiphase process-network simulation.",),
         components=(("finite_transport", ComponentCapability(
             operations=("set_flow_rate", "run_flow", "wait"),
             interfaces=("material", "flow_rate", "temperature"),
-            state_owners=("liquid_transport_enthalpy_v1",),
+            state_owners=("liquid_transport_enthalpy_v1", "finite_suspension_enthalpy"),
         )),),
         advance_strategies=(AdvanceStrategySpec(
             "finite-pump-transport", factories.finite_transport, shared_clock=True,
@@ -190,10 +260,85 @@ BUILTIN_MODULES = (
         dependencies=("continuous_flow",),
     ),
     DomainModuleSpec(
+        module_id="gas_reactor_network",
+        scope_notes=("Finite isothermal ideal-gas reactors, storage and collection nodes; "
+                     "declared molar/mass flow and one-way pressure valves; shared time, "
+                     "material transfers and bath heat; or explicit per-node energy with "
+                     "finite vessel heat capacities, source-temperature enthalpy transport, "
+                     "environment/neighbor heat exchange and one queued anchor heater. "
+                     "Complete imported ideal surfaces can share the same gas network, owned "
+                     "site stocks and calorics. Also sealed or finite-feed/collector isothermal "
+                     "low-Mach planar cells with common grid pressure, independent tank pressures, "
+                     "continuity-derived bulk flow and whole-mixture diffusion; prescribed "
+                     "boundary molar flow has no momentum or compressor model. "
+                     "Alternatively one constant-load finite-stroke ideal-gas piston with "
+                     "actual EOS volume and separately booked pressure work, without surfaces "
+                     "or spatial cells. Constant-volume energy networks can instead declare "
+                     "one finite-heat-capacity wall with its own persistent temperature, "
+                     "gas contact conduction and grey radiation/conduction to an environment. "
+                     "No wall/piston, wall/surface or wall/spatial coupling; "
+                     "no piston inertia, spatial flame field or arbitrary "
+                     "member heat queues. Sourced finite harmonic state counting can compile "
+                     "one-well RRKM channels into the original energy-grain populations and "
+                     "bath collisions, with explicit ZPE and quantization; no rotor, tunneling "
+                     "or general pressure-rate reduction. Read-only single-well QSD rates, "
+                     "product branches and spectral gaps use current original grains and "
+                     "actual bath inventory or explicit fixed T/bath-pressure grids; "
+                     "no dynamic reduction, total-pressure PLog or new heat/inventory model.",),
+        components=(("gas_reactor_network", ComponentCapability(
+            operations=("wait",), minimum_operations=1,
+            interfaces=("material", "temperature"), state_owners=("gas_network_accounting_v1",),
+        )),),
+        advance_strategies=(AdvanceStrategySpec(
+            "finite-isothermal-gas-network", factories.gas_reactor_network, shared_clock=True,
+        ),),
+        dependencies=("thermal",),
+    ),
+    DomainModuleSpec(
+        module_id="aqueous_reactive_transport",
+        scope_notes=("Sealed one-dimensional ideal-dilute aqueous transport at fixed T/P; "
+                     "finite stationary water, zero solute partial volumes, zero-current "
+                     "electrodiffusion, fast equilibrium and declared slow neutral conversion. "
+                     "Also finite feed/collector throughflow with conservative upwind advection, "
+                     "common mechanical dispersion and actual water/solute/enthalpy transfer; "
+                     "prescribed kinematic flow at common T/P, without a pump model. "
+                     "Strictly positive ions; no pressure flow, mineral or external circuit.",),
+        components=(("aqueous_reactive_transport", ComponentCapability(
+            operations=("wait",), minimum_operations=1,
+            interfaces=("material", "aqueous_equilibrium"), state_owners=("phases",),
+        )),),
+        advance_strategies=(AdvanceStrategySpec(
+            "finite-aqueous-reactive-transport", factories.aqueous_reactive_transport,
+            shared_clock=True,
+        ),),
+        dependencies=("thermal",),
+    ),
+    DomainModuleSpec(
+        module_id="aqueous_gas_transfer",
+        scope_notes=("Finite ideal-gas headspace and ideal aqueous liquid in one rigid "
+                     "isothermal vessel; reversible sourced gas/liquid transfer and fast "
+                     "aqueous reactions, actual gas pressure and same-reference internal-energy "
+                     "bath duty; optional seeded pure-mineral kinetics with actual solid "
+                     "volume displacing the headspace. Nonvolatile solvent, fixed liquid volume "
+                     "and zero solute partial volumes; no infinite gas source, pressure flow "
+                     "or spontaneous mineral nucleation.",),
+        components=(("aqueous_gas_transfer", ComponentCapability(
+            operations=("wait",), minimum_operations=1,
+            interfaces=("material", "aqueous_equilibrium"), state_owners=("phases",),
+        )),),
+        advance_strategies=(AdvanceStrategySpec(
+            "finite-aqueous-gas-transfer", factories.aqueous_gas_transfer,
+        ),),
+        dependencies=("thermal",),
+    ),
+    DomainModuleSpec(
         module_id="aqueous_mineral",
         scope_notes=("Authored finite aqueous acid/base/complexation and mineral equilibrium; "
                      "explicit thermodynamic data and ionic-strength domain, "
-                     "not a geochemical database.",),
+                     "not a geochemical database. Also finite same-T/P solution mixing, "
+                     "nonideal equilibrium precipitation and dilution with liquid-only packets, "
+                     "original solid inventory, same-reference enthalpy and pressure-volume work; "
+                     "instantaneous equilibrium, not nucleation kinetics.",),
         components=(("aqueous_mineral", ComponentCapability(
             operations=("add_component", "wait", "sample"),
             interfaces=("material", "aqueous_equilibrium"), state_owners=("phases",),
@@ -295,6 +440,7 @@ BUILTIN_MODULES = (
                     ActionFieldSpec("potential_V", "V", (-10.0, 10.0), required=False),
                     ActionFieldSpec("current_A", "A", (-10.0, 10.0), required=False),
                     ActionFieldSpec("ramp_duration_s", "s", (0.0, 14400.0), required=False),
+                    *_named_electrical_fields(),
                 ),
                 function=factories.configure_electrical_control,
                 affected_ledgers=("equipment", "process"),
@@ -316,6 +462,7 @@ BUILTIN_MODULES = (
                     ActionFieldSpec("stop_voltage_below_V", "V", (-10.0, 10.0), required=False),
                     ActionFieldSpec("stop_voltage_above_V", "V", (-10.0, 10.0), required=False),
                     ActionFieldSpec("stop_abs_current_A", "A", (0.0, 10.0), required=False),
+                    *_named_electrical_fields(),
                 ),
                 function=factories.queue_electrical_stage,
                 affected_ledgers=("equipment", "process"),
@@ -340,10 +487,33 @@ BUILTIN_MODULES = (
                      "with conservative electrolyte transport; shared native cycling. "
                      "Explicit isothermal DFN has coupled spatial reactions and a fixed synthetic "
                      "qualification at 24 through-plane cells per region / 64 radial cells. "
+                     "Explicit isothermal Newman-Tobias uses two average lithium inventories "
+                     "and spatial porous electrical fields, without radial diffusion or dynamic "
+                     "salt; its fixed CV grid-inventory qualification remains open. "
                      "Development MPM adds shared-potential size populations with independent "
                      "inventories; independent MPM scientific qualification remains pending. "
+                     "Isothermal single-material SPM/MPM may declare current-sigmoid OCP "
+                     "or one persistent Axen hysteresis coordinate per electrode; "
+                     "no hysteresis thermal/SEI coupling or equilibrium-SOH interpretation. "
+                     "Through-thickness thermal SPM uses three finite layers and two collectors, "
+                     "constant net OCV and local BV temperature feedback with ambient cooling; "
+                     "no arbitrary external thermal device or general material thermal claim. "
+                     "Isothermal MSMR-SPM uses one or two explicit reactions per electrode "
+                     "with potential-driven radial diffusion and shared branch kinetics; "
+                     "no MSMR thermal, EIS or automatic equilibrium-SOH claim. "
+                     "Composite SPM supports two independent negative material phases and one "
+                     "positive phase with single-valued monotone OCV, including internal exchange "
+                     "at zero terminal current; no thermal/SEI, EIS, SOH or energy closure. "
+                     "Positive-working half-cell SPM uses finite lithium metal with explicitly "
+                     "fixed geometry; no half-cell thermal/SEI, EIS, SOH or energy closure. "
                      "Coarser meshes and other parameters need convergence checks; "
-                     "not wet-lab validation. No PyBaMM runtime backend.",),
+                     "Closed volume-consistent isothermal lead-acid LOQS uses six real "
+                     "chemical inventories and the same runtime; no heat, side reactions, "
+                     "EIS or automatic SOH. Synthetic parameters are not wet-lab validation. "
+                     "Split OCV-R uses two finite mean Li inventories, separate electrode OCV "
+                     "and capacity, and series resistance; no particle diffusion, BV or heat. "
+                     "Its EIS and equilibrium SOH reuse the same declared inventory model. "
+                     "No PyBaMM runtime backend.",),
         components=(
             (
                 "battery_spm",
@@ -357,6 +527,17 @@ BUILTIN_MODULES = (
                         "resume_control",
                     ),
                     interfaces=("electrical_control", "spatial_diffusion"),
+                    state_owners=("battery_inventory",),
+                ),
+            ),
+            (
+                "battery_cell",
+                ComponentCapability(
+                    operations=(
+                        "configure_electrical_control", "queue_electrical_stage", "wait",
+                        "pause_control", "resume_control",
+                    ),
+                    interfaces=("electrical_control",),
                     state_owners=("battery_inventory",),
                 ),
             ),
@@ -462,7 +643,9 @@ BUILTIN_MODULES = (
             ),
         ),
         models=(physics_models.FLASH,),
-        scope_notes=("Finite TP/PH closure with explicit phase/caloric models; "
+        scope_notes=("Finite TP/PH closure with explicit phase/caloric models, including "
+                     "simultaneous two-phase molecular PH on a declared local branch with "
+                     "finite thermal devices and explicit constant-pressure boundary work; "
                      "no simultaneous undeclared kinetic process.",),
         components=(
             (
@@ -1061,7 +1244,7 @@ BUILTIN_MODULES = (
                         (
                             "duration_range_s",
                             ParameterRule(
-                                value_kind="range", unit="s", minimum=1.0, maximum=14400.0
+                                value_kind="range", unit="s", minimum=1e-6, maximum=14400.0
                             ),
                         ),
                     ),
@@ -1302,6 +1485,11 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="crystallization",
+        scope_notes=("Authored crystal seeding, cooling and wet-cake operations; also "
+                     "declared same-T/P instantaneous aqueous mineral filtration into "
+                     "two finite empty receivers, with explicit solid capture and mother-liquid "
+                     "retention, actual leaked solids, wet-cake washing and repeat separation. "
+                     "Database filtration has no drying, pressure-drop or filtration-rate model.",),
         advance_strategies=(
             AdvanceStrategySpec(
                 "finite-crystal-population-temperature", factories.crystal_thermal,
@@ -1409,6 +1597,17 @@ BUILTIN_MODULES = (
             ),
         ),
         components=(
+            (
+                "aqueous_filter",
+                ComponentCapability(
+                    operations=("filter_crystals",),
+                    minimum_operations=1,
+                    interfaces=("material", "phase"),
+                    dependencies=("aqueous_mineral",),
+                    outputs=("cake", "filtrate"),
+                    input_ports=(),
+                ),
+            ),
             (
                 "crystal_thermal",
                 ComponentCapability(
@@ -1655,7 +1854,8 @@ BUILTIN_MODULES = (
                         "flow_rate_mL_min", "mL/min", (0.0, 20.0), (), runtime_bounds=(0.0, 20.0)
                     ),
                     ActionFieldSpec("residence_time_s", "s", (1.0, 7200.0), (), required=False),
-                    ActionFieldSpec("flow_path", "categorical", choices=("process", "rinse"),
+                    ActionFieldSpec("flow_path", "categorical",
+                                    choices=("process", "rinse", "left", "right"),
                                     required=False),
                 ),
                 affected_ledgers=("process", "equipment"),

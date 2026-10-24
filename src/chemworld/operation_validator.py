@@ -266,7 +266,7 @@ class OperationValidator:
         low: float,
         high: float,
     ) -> tuple[float, float]:
-        """Narrow a static schema to its current public feasibility domain."""
+        """Resolve declared bounds and current public physical feasibility."""
 
         dynamic_low = low
         dynamic_high = high
@@ -323,12 +323,16 @@ class OperationValidator:
             .get(f"{bounds_operation}:{field}", authored)
         )
         if authored is not None:
-            if (state.lab_clock is not None and operation_type == "wait"
-                    and field == "duration_s"):
-                # A declared lab time resolution is a native clock domain,
-                # not a relaxation of the historical batch-operation schema.
-                rule = dict(self.action_codec.modules.components()[
-                    "lab_schedule"].parameters)["duration_range_s"]
+            if operation_type in {"heat", "wait"} and field == "duration_s":
+                # The component owns an explicitly declared clock range. The
+                # static action lower bound is only the undeclared default.
+                owner = (
+                    "lab_schedule" if state.lab_clock is not None and operation_type == "wait"
+                    else "thermal"
+                )
+                rule = dict(self.action_codec.modules.components()[owner].parameters)[
+                    "duration_range_s"
+                ]
                 dynamic_low = rule.minimum
             dynamic_low = max(dynamic_low, authored[0])
             dynamic_high = min(dynamic_high, authored[1])
@@ -1057,6 +1061,10 @@ class OperationValidator:
         physics = None if self.material_router is None else self.material_router.physics
         return None if physics is None else physics.models_of("crystal").get(state.vessel_id)
 
+    def _has_hybrid_model(self, state: WorldState) -> bool:
+        physics = None if self.material_router is None else self.material_router.physics
+        return physics is not None and state.vessel_id in physics.models_of("stochastic_hybrid")
+
     def _payload_checks(
         self,
         operation_type: str,
@@ -1187,7 +1195,9 @@ class OperationValidator:
                     self.material_router.feed_error(state, payload) is None
                 )
         if operation_type in {"add_reagent", "add_component"} and "amount_mol" in payload:
-            if state.process.stochastic_continuation is not None:
+            if self._has_hybrid_model(state):
+                checks["hybrid_material_input_disabled"] = False
+            elif state.process.stochastic_continuation is not None:
                 from chemworld.foundation.discrete_inventory import MAX_COUNT, mol_to_counts
 
                 try:
@@ -1581,6 +1591,10 @@ class OperationValidator:
     def _maximum_safe_reagent_amount_mol(self, state: WorldState, *, single: bool = False) -> float:
         """Invert the public pressure law to bound one reagent charge safely."""
 
+        if self._has_hybrid_model(state):
+            # The declared fixed partition does not support material dosing;
+            # its continuous stock must never be interpreted as integer SSA.
+            return 0.0
         if state.process.stochastic_continuation is not None:
             from chemworld.foundation.discrete_inventory import AVOGADRO, MAX_COUNT, mol_to_counts
 

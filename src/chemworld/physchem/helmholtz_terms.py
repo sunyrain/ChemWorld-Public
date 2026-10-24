@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Any
 
 from chemworld.physchem.caloric_math import (
+    compensated_sum,
     derivative_depth,
     exponential,
     exponential_minus_one,
@@ -194,14 +195,14 @@ def _residual(term: HelmholtzTerm, delta: Any, tau: Any) -> Any:
         strength = contact * exponential_minus_one(c["epsilonbar"] * tau) * c["kappabar"]
         fraction = 2 / (1 + (1 + 4 * strength * delta)**0.5)
         return c["a"] * c["m"] * (logarithm(fraction) - fraction / 2 + 0.5)
-    value = 0.0
+    contributions = []
     for i, n in enumerate(c["n"]):
         p = {key: values[i] for key, values in c.items()}
         if kind == "NonAnalytic":
             theta = 1 - tau + p["A"] * _absolute_power(delta - 1, 1 / p["beta"])
             discriminant = theta**2 + p["B"] * _absolute_power(delta - 1, 2 * p["a"])
-            value += n * nonnegative_power(discriminant, p["b"]) * delta * exponential(
-                -p["C"] * (delta - 1)**2 - p["D"] * (tau - 1)**2)
+            contributions.append(n * nonnegative_power(discriminant, p["b"]) * delta * exponential(
+                -p["C"] * (delta - 1)**2 - p["D"] * (tau - 1)**2))
             continue
         exponent = 0.0
         if kind in {"Power", "Lemmon2005"}:
@@ -217,5 +218,5 @@ def _residual(term: HelmholtzTerm, delta: Any, tau: Any) -> Any:
             exponent = -p["eta"] * (delta - p["epsilon"])**2 - p["beta"] * (tau-p["gamma"])**2
         elif kind == "GaoB":
             exponent = p["eta"] * (delta-p["epsilon"])**2 + 1/(p["b"]+p["beta"]*(tau-p["gamma"])**2)
-        value += n * delta**p["d"] * tau**p["t"] * exponential(exponent)
-    return value
+        contributions.append(n * delta**p["d"] * tau**p["t"] * exponential(exponent))
+    return compensated_sum(contributions)

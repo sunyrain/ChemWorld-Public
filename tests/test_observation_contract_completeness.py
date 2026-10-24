@@ -7,6 +7,7 @@ import pytest
 
 import chemworld  # noqa: F401
 from chemworld.data.logging import load_jsonl
+from chemworld.data.records import trajectory_value
 from chemworld.envs.spaces import OBSERVATION_KEYS
 from chemworld.eval.metrics import evaluate_records
 from chemworld.eval.runner import make_agent, run_agent
@@ -46,10 +47,10 @@ def test_equilibrium_metrics_flow_through_gym_rl_and_trajectory(tmp_path) -> Non
 
     assert measurement_records
     assert any(
-        record["observation"]["equilibrium_confidence"] is not None
+        trajectory_value(record, 'observation')["equilibrium_confidence"] is not None
         for record in measurement_records
     )
-    latest_agent_view = measurement_records[-1]["agent_view"]
+    latest_agent_view = trajectory_value(measurement_records[-1], 'agent_view')
     rl_keys = latest_agent_view["rl"]["keys"]
     assert "pH_normalized" in rl_keys
     assert "equilibrium_confidence" in rl_keys

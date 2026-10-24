@@ -52,8 +52,11 @@ def thermal_world(ambient):
     models = dict(base.physics.models_of("thermal"))
     models["reactor"] = replace(models["reactor"], environment_temperature_K=ambient)
     return replace(
-        base, modules=modules,
-        physics=replace(base.physics, thermal_models=models, modules=modules),
+        base,
+        modules=modules,
+        physics=replace(
+            base.physics, models={**base.physics.models, "thermal": models}, modules=modules
+        ),
     )
 
 

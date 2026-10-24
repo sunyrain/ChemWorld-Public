@@ -119,9 +119,11 @@ def test_fixed_histories_match_native_gym_cli_agent_and_replay(
                 (2500, 0, 5000, 0), (0, 2500, 0, 5000),
             )))
     if case == "stopped":
-        models = dict(spec.physics.thermal_models)
+        models = dict(spec.physics.models_of('thermal'))
         models["reactor"] = replace(models["reactor"], stop_temperature_K=355)
-        spec = replace(spec, physics=replace(spec.physics, thermal_models=models))
+        spec = replace(
+            spec, physics=replace(spec.physics, models={**spec.physics.models, "thermal": models})
+        )
     sequence = actions(assay)
     kwargs = {"composition": spec, "observation_noise_mode": noise, "seed": 12}
     expected = []

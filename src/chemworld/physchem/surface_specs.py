@@ -152,6 +152,10 @@ class MultisiteSurfaceSpec:
 
 
 def surface_spec_from_dict(payload):
+    if payload.get("model") == "descriptor-catalysis-v1":
+        from chemworld.physchem.catalysis_network import CatalyticMechanismSpec
+
+        return CatalyticMechanismSpec.from_dict(payload)
     values = dict(payload)
     kind = values.pop("model")
     if kind == "legacy-five-step":

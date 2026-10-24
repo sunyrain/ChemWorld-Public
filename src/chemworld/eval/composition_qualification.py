@@ -6,7 +6,6 @@ import copy
 import hashlib
 import json
 import math
-import subprocess
 import tempfile
 import time
 from collections import Counter
@@ -29,6 +28,7 @@ from chemworld.eval.cross_world_infrastructure_qualification import (
     recipe_cases,
     run_task_world_unit,
 )
+from chemworld.eval.report_io import git_output as _git
 from chemworld.eval.verify import verify_records
 from chemworld.foundation import equipment_settings
 from chemworld.foundation.public_leakage import audit_public_payload
@@ -208,17 +208,6 @@ def _sha256_value(value: Any) -> str:
 
 def _sha256_path(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _git(root: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return completed.stdout.strip()
 
 
 def _reference_protocol() -> dict[str, Any]:

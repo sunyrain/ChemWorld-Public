@@ -56,6 +56,13 @@ class Ledger:
     flow_pump_work_J: float = 0.0
     flow_electrical_work_J: float = 0.0
     analysis_time_s: float = 0.0
+    # Signed upstream process utilities already carried by the inlet enthalpy.
+    # They are not direct heat/work on the receiving vessel.
+    flow_heat_J: float = 0.0
+    flow_shaft_work_J: float = 0.0
+    # Signed work done by material on its pressure boundary (positive expansion).
+    # A closed isobaric process obeys delta U = heat_in - boundary_work_J.
+    boundary_work_J: float = 0.0
 
     def with_updates(self, **updates: float) -> Ledger:
         return replace(self, **updates)

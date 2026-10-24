@@ -2569,7 +2569,7 @@ def test_cli_scenarios_validation_render_and_dataset(tmp_path, capsys) -> None:
     flattened = export_dataset(trajectory, output=tmp_path / "copy.jsonl", format="jsonl")
     assert card["record_count"] == len(records)
     assert card["schema_version"] == "chemworld-dataset-card-0.4"
-    assert card["trajectory_schema_versions"] == ["chemworld-trajectory-0.2"]
+    assert card["trajectory_schema_versions"] == ["chemworld-trajectory-0.3"]
     assert card["protocol_hashes"]["task_contract_hashes"] == [records[0]["task_contract_hash"]]
     assert card["protocol_hashes"]["runtime_profile_hashes"] == [records[0]["runtime_profile_hash"]]
     assert card["protocol_hashes"]["mechanism_hashes"] == [records[0]["mechanism_hash"]]

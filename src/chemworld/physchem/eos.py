@@ -459,6 +459,15 @@ class EOSState:
         }
 
 
+def fluid_eos_from_dict(data):
+    """Decode a fixed supported fluid declaration, without dynamic imports."""
+    if data.get("model") == "chemworld-molecular-property-eos-v1":
+        from chemworld.physchem.molecular_properties import MolecularEOSSpec
+
+        return MolecularEOSSpec.from_dict(data)
+    return CubicEOSSpec.from_dict(data)
+
+
 def ideal_gas_molar_volume(temperature_K: float, pressure_Pa: float) -> float:
     _validate_tp(temperature_K, pressure_Pa)
     return R_J_PER_MOL_K * temperature_K / pressure_Pa

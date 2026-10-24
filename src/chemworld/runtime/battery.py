@@ -1,4 +1,4 @@
-"""Equipment-owned SPM inventory and one declared shared advance strategy."""
+"""Equipment-owned electrochemical inventory and one shared advance strategy."""
 
 from dataclasses import replace
 
@@ -10,7 +10,6 @@ from chemworld.foundation.state_ownership import (
     StateSlotSpec,
 )
 from chemworld.physchem.battery_models import (
-    BATTERY_COORDINATES,
     advance_battery,
     battery_control_current,
     battery_readout,
@@ -25,13 +24,29 @@ from chemworld.runtime.kernel_contracts import ModelProviderResult
 
 BATTERY_TYPE = "single_particle_battery"
 BATTERY_STATE_TYPE = "battery-lithium-and-charge-v1"
+LEAD_ACID_BATTERY_TYPE = "electrochemical_battery"
+LEAD_ACID_STATE_TYPE = "battery-lead-acid-inventory-and-charge-v1"
+
+
+def battery_equipment_type(spec):
+    return (LEAD_ACID_BATTERY_TYPE
+            if getattr(spec, "model_family", None) in {
+                "lead-acid-loqs-isothermal-v1", "split-ocvr-isothermal-v1"}
+            else BATTERY_TYPE)
+
+
+def battery_state_type(spec):
+    return (LEAD_ACID_STATE_TYPE
+            if getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1"
+            else BATTERY_STATE_TYPE)
 
 
 def battery_record(state):
     records = [
         r
         for r in state.equipment.equipment.values()
-        if r.equipment_type == BATTERY_TYPE and r.attached_vessel_id == state.vessel_id
+        if r.equipment_type in {BATTERY_TYPE, LEAD_ACID_BATTERY_TYPE}
+        and r.attached_vessel_id == state.vessel_id
     ]
     if len(records) > 1:
         raise ValueError("this battery system requires exactly one installed cell")
@@ -39,12 +54,14 @@ def battery_record(state):
 
 
 def initial_battery_slot(record, spec):
+    if record.equipment_type != battery_equipment_type(spec):
+        raise ValueError("battery chemistry must match its declared equipment type")
     initial = spec.initial_state()
     declaration = StateSlotSpec(
         f"{record.equipment_id}:inventory",
         "equipment",
         record.equipment_id,
-        BATTERY_STATE_TYPE,
+        battery_state_type(spec),
         (
             *(
                 StateFieldSpec(key, "mol", species_id=species)
@@ -52,6 +69,10 @@ def initial_battery_slot(record, spec):
             ),
             StateFieldSpec("discharged_charge_C", "C", minimum=None),
             StateFieldSpec("delivered_work_J", "J", minimum=None),
+            *(StateFieldSpec(key, "dimensionless", mixing="equal", minimum=-1.0)
+              for key in spec.hysteresis_keys),
+            *(StateFieldSpec(key, "K", mixing="equal", minimum=None)
+              for key in getattr(spec, "thermal_coordinate_keys", ())),
         ),
         mechanism_id=spec.model_id,
         batch_reset="preserve",
@@ -64,14 +85,14 @@ def initial_battery_slot(record, spec):
 def unpack_battery(state):
     record = battery_record(state)
     if record is None:
-        raise ValueError("no SPM battery is installed")
+        raise ValueError("no electrochemical battery is installed")
     spec = battery_spec_from_dict(record.settings["physical_model"])
     slots = [
         s
         for s in state.state_slots.slots
         if s.spec.owner_kind == "equipment"
         and s.spec.owner_id == record.equipment_id
-        and s.spec.state_type == BATTERY_STATE_TYPE
+        and s.spec.state_type == battery_state_type(spec)
     ]
     if len(slots) != 1 or slots[0].spec != initial_battery_slot(record, spec).spec:
         raise ValueError("battery must retain its declared inventory layout and ownership")
@@ -83,7 +104,7 @@ def unpack_battery(state):
         state.temperature_K,
         state.volume_L,
         state.ledger.time_s,
-        coordinates={key: slot.values[key] for key in BATTERY_COORDINATES},
+        coordinates={key: slot.values[key] for key in spec.coordinate_keys},
     )
     programme = ScalarControlProgram(**record.settings["electrical_control"]["program"])
     return record, slot, spec, physical, programme
@@ -100,11 +121,14 @@ class BatteryRuntime:
 
     def temperature_bounds_k(self, state):
         _, _, spec, _, _ = unpack_battery(state)
-        return None if spec.thermal is None else (
+        # A thickness model has real temperatures but no declared contact
+        # for the laboratory's movable lumped heater.
+        return None if (spec.thermal is None or getattr(spec, "model_family", None)
+                        == "spm-spatial-thermal-v1") else (
             spec.thermal.minimum_temperature_K, spec.thermal.maximum_temperature_K)
 
     def reconcile_initialization(self, transition):
-        # All active Li and lumped cell heat belong to the physical equipment;
+        # All cell inventory and any declared heat belong to the physical equipment;
         # replacing surrounding material/housing cannot cool or recharge it.
         state = transition.state
         locals_ = {state.vessel_id: state.replace(inactive_vessels={}), **state.inactive_vessels}
@@ -135,7 +159,8 @@ class BatteryRuntime:
                        receipt={**transition.receipt, "battery_initialization": changed})
 
     def validate_world(self):
-        declared = {c.vessel for c in self.composition.components if c.kind == "battery_spm"}
+        declared = {c.vessel for c in self.composition.components
+                    if c.kind in {"battery_spm", "battery_cell"}}
         installed = {
             v for v, s in self.composition.physics.initial_states.items() if self.supports(s)
         }
@@ -169,6 +194,10 @@ class BatteryRuntime:
             ):
                 raise ValueError("SPM cannot bind another kinetic or thermal strategy")
 
+    # Snapshot restoration asks the shared coordinator for this contract.
+    # Keep one physical validator for initialization, restore and advancement.
+    validate_state = validate
+
     def advance_controlled(self, state, action, control_stage, **kwargs):
         stage, index = control_stage
         _, _, spec, _, programme = unpack_battery(state)
@@ -196,6 +225,7 @@ class BatteryRuntime:
                 success=False,
                 outcome="rejected",
                 failure_reason="battery_requires_shared_thermal_device",
+                diagnostics={},
             )
         thermal_record, device = connected_device(state, required=False)
         try:
@@ -283,9 +313,10 @@ class BatteryRuntime:
                 "solver": dict(result.solver_diagnostic),
                 "stopping_event": result.stopping_event,
                 "battery_conservation": dict(result.conservation_residuals),
-                "energy_scope": "synthetic OCV chemical energy and lumped heat capacity"
-                if spec.thermal
-                else f"isothermal {spec.model_id}; full cell heat balance not modelled",
+                "energy_scope": result.solver_diagnostic.get(
+                    "energy_scope", "synthetic OCV chemical energy and lumped heat capacity"
+                    if spec.thermal
+                    else f"isothermal {spec.model_id}; full cell heat balance not modelled"),
                 "energy_balance_residual_J": result.energy_balance_residual_J,
                 "electrical_control": {
                     "charge_C": final.coordinates["discharged_charge_C"],

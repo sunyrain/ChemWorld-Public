@@ -31,6 +31,7 @@ from chemworld.agents.task_recipes import (
 )
 from chemworld.campaign_resources import derive_campaign_resource_delta
 from chemworld.data.logging import TrajectoryLogger, load_jsonl, observation_to_json
+from chemworld.eval.report_io import git_output as _git
 from chemworld.eval.verify import verify_records
 from chemworld.foundation.public_leakage import audit_public_payload
 from chemworld.tasks import TASK_CONTRACT_VERSION, TaskSpec, list_tasks
@@ -74,17 +75,6 @@ def _sha256_path(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _git(root: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return completed.stdout.strip()
 
 
 def load_protocol(path: str | Path) -> dict[str, Any]:

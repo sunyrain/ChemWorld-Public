@@ -30,6 +30,7 @@ from chemworld.runtime.full_process_contract import (
     population_settings,
     seed_provenance_active,
 )
+from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.runtime.material_routing import _active, _contents
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.world.actions import SOLVENTS
@@ -142,10 +143,12 @@ class ChemWorldCrystallizationServices:
         species_view: MechanismSpeciesView,
         *,
         thermal=None,
+        physics=None,
     ) -> None:
         self.world = world
         self.species_view = species_view
         self.thermal = thermal
+        self.physics = physics
         self.runtime_provider: Any | None = None
         self.last_provider_execution: dict[str, Any] = {}
 
@@ -779,7 +782,14 @@ class ChemWorldCrystallizationServices:
             ),
         )
 
-    def filter_crystals(self, state: WorldState) -> WorldState:
+    def filter_crystals(self, state: WorldState) -> WorldState | ModelProviderResult:
+        from chemworld.runtime.aqueous_filtration import (
+            aqueous_filter_record,
+            filter_aqueous_suspension,
+        )
+
+        if aqueous_filter_record(state) is not None:
+            return filter_aqueous_suspension(state, self.physics)
         if self.thermal is not None and self.thermal.crystal.is_native(state):
             return self.thermal.crystal.filter(state)
         target_species = self.target_species(state)

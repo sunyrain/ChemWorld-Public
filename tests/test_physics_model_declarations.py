@@ -218,5 +218,35 @@ def test_model_storage_is_instance_owned_and_legacy_readers_do_not_store_a_copy(
     base.models["thermal"].pop("receiver")
     assert sibling.to_dict() == before
     changed = replace(sibling, thermal_models={})
+    canonical = replace(sibling, models={**sibling.models, "thermal": {}})
+    assert canonical.to_dict() == changed.to_dict()
+    assert canonical.models_of("surface") == sibling.models_of("surface")
     assert changed.models["thermal"] == {}
     assert sibling.to_dict() == before
+
+
+@pytest.mark.parametrize("model_id", [
+    "thermal", "flash", "liquid", "column", "concentration", "crystal", "sorbent", "surface",
+])
+def test_canonical_constructor_and_replace_preserve_other_model_families(model_id):
+    base = surface_world_spec().physics
+    before = base.to_dict()
+    declarations = base.modules.model_specs()
+    models = {**base.models, model_id: {}}
+    old = replace(base, **{declarations[model_id].legacy_field: {}})
+    canonical = replace(base, models=models)
+    assert canonical.to_dict() == old.to_dict()
+    common = {
+        "parameter_seed": base.parameter_seed, "feed_sources": base.feed_sources,
+        "lab_clock": base.lab_clock, "advance_bindings": base.advance_bindings,
+        "modules": base.modules,
+    }
+    legacy = CompositionPhysics(
+        base.network, base.initial_states, **common,
+        **{declarations[key].legacy_field: bindings for key, bindings in models.items()},
+    )
+    current = CompositionPhysics(base.network, base.initial_states, **common, models=models)
+    assert current.to_dict() == legacy.to_dict() == canonical.to_dict()
+    for other in base.models.keys() - {model_id}:
+        assert canonical.models_of(other) == base.models_of(other)
+    assert base.to_dict() == before

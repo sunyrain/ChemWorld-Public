@@ -114,6 +114,9 @@ class ModelProviderResult:
     state: WorldState | None = None
     actual_duration_s: float = 0.0
     measurement_state: WorldState | None = None
+    # Optional local heat increments for a grouped physical advance. The group's
+    # resource ledger is aggregate; it must not overwrite an anchor's local heat.
+    vessel_thermal_deltas: Mapping[str, Mapping[str, float]] | None = None
 
     def __post_init__(self) -> None:
         outcome = self.outcome or ("success" if self.success else "numerical_failure")
@@ -130,6 +133,17 @@ class ModelProviderResult:
             raise ValueError("successful provider result cannot include failure_reason")
         if not self.success and not str(self.failure_reason or "").strip():
             raise ValueError("failed provider result requires failure_reason")
+        if self.vessel_thermal_deltas is not None:
+            fields = {"energy_jacket_J", "heat_reaction_J", "heat_loss_J"}
+            if not self.success or any(
+                not isinstance(vessel, str) or not vessel or set(values) - fields
+                or any(isinstance(v, bool) or not isfinite(v) for v in values.values())
+                for vessel, values in self.vessel_thermal_deltas.items()
+            ):
+                raise ValueError("local thermal deltas require successful finite declared changes")
+            object.__setattr__(self, "vessel_thermal_deltas", {
+                vessel: dict(values) for vessel, values in self.vessel_thermal_deltas.items()
+            })
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -141,6 +155,9 @@ class ModelProviderResult:
             "provenance": list(self.provenance),
             "outcome": self.outcome,
             "actual_duration_s": self.actual_duration_s,
+            **({"vessel_thermal_deltas": {
+                vessel: dict(values) for vessel, values in self.vessel_thermal_deltas.items()
+            }} if self.vessel_thermal_deltas is not None else {}),
         }
 
 

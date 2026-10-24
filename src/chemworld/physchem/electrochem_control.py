@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from math import ceil, isfinite
 from typing import Literal
+
+from chemworld._serialization import canonical_json_sha256
 
 ControlMode = Literal["potentiostatic", "galvanostatic"]
 ControlProfile = Literal["ramp", "hold"]
@@ -343,13 +343,7 @@ def verify_electrochemical_control_replay(
 
 
 def _sha256(payload: object) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_json_sha256(payload, ensure_ascii=True)
 
 
 def _clip(value: float, low: float, high: float) -> float:

@@ -70,7 +70,7 @@ def liquid_transport_state(
     packages, amounts, temperature_K, pressure_Pa, references, *,
     viscosity_pressure_parameters=None, volume_mixing_method=None,
     volume_mixing_parameters=None, volume_pressure_parameters=None,
-    activity_model=None,
+    activity_model=None, incompressible_model=None,
 ):
     """Declared volume, log-viscosity and DIPPR9H mixture closure.
 
@@ -84,6 +84,22 @@ def liquid_transport_state(
     """
     from chemworld.physchem.property_packages import evaluate_property_state
     from chemworld.physchem.transport import FluidState
+
+    if incompressible_model is not None:
+        if (references or activity_model is not None or viscosity_pressure_parameters
+                or volume_mixing_method is not None or volume_mixing_parameters
+                or volume_pressure_parameters):
+            raise ValueError("incompressible transport uses its own caloric/volume/transport fits")
+        report = evaluate_property_state(
+            packages, amounts, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+            phase="liquid", quantities=("cp", "enthalpy", "density", "molar_volume",
+                                       "viscosity", "thermal_conductivity"),
+            incompressible_model=incompressible_model)
+        values = {key: value.value for key, value in report.properties.items()}
+        mass_per_mole = report.model_details["molar_mass_kg_mol"]
+        return (FluidState(values["density"], values["viscosity"], values["cp"]/mass_per_mole,
+                           values["thermal_conductivity"]), values["enthalpy"],
+                sum(report.component_amounts_mol.values())*values["molar_volume"])
 
     report = evaluate_property_state(
         packages,

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from chemworld.data.logging import load_jsonl
+from chemworld.data.records import trajectory_value
 from chemworld.eval.layered_evaluation import TaskEvaluationContract, evaluate_layered_records
 from chemworld.eval.metrics import EVALUATION_METRICS_VERSION, evaluate_records
 from chemworld.eval.result_artifacts import (
@@ -132,8 +133,9 @@ def _run_adversarial_probes(workspace: Path) -> dict[str, bool]:
 
 def _record_source_mismatch_rejected(records: list[dict[str, Any]], trajectory: Path) -> bool:
     changed = copy.deepcopy(records)
-    changed_reward = float(changed[0].get("reward", 0.0)) + 0.01
-    changed[0]["reward"] = changed_reward
+    changed_reward = float(trajectory_value(changed[0], "reward", 0.0)) + 0.01
+    if "reward" in changed[0]:
+        changed[0]["reward"] = changed_reward
     if isinstance(changed[0].get("evaluation_outcome"), dict):
         # Keep the v0.2 compatibility alias internally coherent so this probe
         # reaches the exact source-byte binding rather than the earlier schema
@@ -182,9 +184,16 @@ def _binding_tamper_rejected(result: dict[str, Any]) -> bool:
 def _nonfinite_objective_rejected(records: list[dict[str, Any]]) -> bool:
     changed = copy.deepcopy(records)
     terminal = next(
-        record for record in reversed(changed) if record.get("leaderboard_score") is not None
+        record for record in reversed(changed)
+        if trajectory_value(record, "leaderboard_score", None) is not None
     )
-    terminal["leaderboard_score"] = math.nan
+    if isinstance(terminal.get("evaluation_outcome"), dict):
+        terminal["evaluation_outcome"]["leaderboard_score"] = math.nan
+        # This probe tests the evaluator's finite-value guard independently of
+        # duplicate-alias consistency, which has its own validation tests.
+        terminal.pop("leaderboard_score", None)
+    else:
+        terminal["leaderboard_score"] = math.nan
     try:
         evaluate_records(changed)
     except ValueError as exc:
@@ -218,7 +227,10 @@ def _online_reward_decoy_is_excluded(records: list[dict[str, Any]]) -> bool:
     reference = evaluate_records(records)
     changed = copy.deepcopy(records)
     for record in changed:
-        record["reward"] = 1.0
+        if isinstance(record.get("evaluation_outcome"), dict):
+            record["evaluation_outcome"]["online_transition_reward"] = 1.0
+        if "reward" in record:
+            record["reward"] = 1.0
         record["observed_reward"] = 1.0
     decoy = evaluate_records(changed)
     return (

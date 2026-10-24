@@ -83,6 +83,14 @@ def _set_energy(state, model, energy):
 def exchange_packet(source, target, physics, amounts, *, fraction=0.0, fixed_source=False):
     """Return two local candidates and the executed packet's thermal receipt."""
     from chemworld.runtime.aqueous_mineral import aqueous_record, exchange_aqueous_packet
+    from chemworld.runtime.aqueous_mineral_kinetics import database_mineral_record
+    from chemworld.runtime.aqueous_reactive_transport import aqueous_transport_members
+
+    if {source.vessel_id, target.vessel_id} & aqueous_transport_members(physics):
+        raise ValueError("sealed aqueous spatial cells reject external material packets")
+
+    if database_mineral_record(source) is not None or database_mineral_record(target) is not None:
+        raise ValueError("declared mineral kinetics has no material-transfer geometry contract yet")
 
     if aqueous_record(target) is not None:
         return exchange_aqueous_packet(source, target, physics, amounts,
@@ -214,15 +222,27 @@ def add_finite_feed(state, physics, action):
 
 
 def route_gas_packet(state, physics, action):
+    from chemworld.runtime.aqueous_mineral_kinetics import database_mineral_record
+    from chemworld.runtime.aqueous_reactive_transport import aqueous_transport_members
     from chemworld.runtime.component_network import resolve_material_connection
+    from chemworld.runtime.humid_air_material import humid_air_model, route_humid_air_packet
     from chemworld.runtime.mineral_kinetics import kinetic_record, route_mineral_phase
 
+    sealed_aqueous = aqueous_transport_members(physics)
+    if state.vessel_id in sealed_aqueous:
+        raise ValueError("sealed aqueous spatial cells reject external material routing")
+    if database_mineral_record(state) is not None:
+        raise ValueError("declared mineral kinetics has no material-transfer geometry contract yet")
+    if humid_air_model(state, physics) is not None:
+        return route_humid_air_packet(state, physics, action)
     if kinetic_record(state) is not None:
         return route_mineral_phase(state, physics, action)
     from chemworld.runtime.condensed_material_routing import background_model
 
     edge, fraction = resolve_material_connection(state, action, source_ports={"out"})
     target = state.inactive_vessels[edge["target_vessel"]]
+    if target.vessel_id in sealed_aqueous:
+        raise ValueError("sealed aqueous spatial cells reject external material routing")
     target_occupied = (target.volume_L > 0 if background_model(target,physics) is not None
                        else fsum(target.species_amounts.values()) > 1e-12)
     if target_occupied and action["mixing"] != 1:

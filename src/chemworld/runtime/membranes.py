@@ -1,4 +1,4 @@
-"""Native finite RO strategy using common flow, transaction and lifecycle paths."""
+"""Finite membrane models on common flow, thermal, transaction and lifecycle paths."""
 
 from dataclasses import replace
 from math import isclose
@@ -179,15 +179,41 @@ def unpack_membrane(state):
 
 
 class MembraneRuntime:
-    supported_operations = ("set_flow_rate", "run_flow", "wait")
+    supported_operations = ("set_flow_rate", "run_flow", "configure_electrical_control", "wait")
 
     def __init__(self, composition=None):
+        from chemworld.runtime.distributed_ro import DistributedRORuntime
+        from chemworld.runtime.electrodialysis import ElectrodialysisRuntime
+        from chemworld.runtime.membrane_distillation import MembraneDistillationRuntime
+        from chemworld.runtime.nanofiltration import NanofiltrationRuntime
+        from chemworld.runtime.osmotic_membrane import OsmoticMembraneRuntime
+
         self.composition = composition
+        self.distributed = DistributedRORuntime(composition)
+        self.distillation = MembraneDistillationRuntime(composition)
+        self.nanofiltration = NanofiltrationRuntime(composition)
+        self.electrodialysis = ElectrodialysisRuntime(composition)
+        self.osmotic = OsmoticMembraneRuntime(composition)
+        self.adapters = (
+            self.distributed, self.distillation, self.nanofiltration, self.electrodialysis,
+            self.osmotic,
+        )
 
     def supports(self, state):
-        return membrane_record(state) is not None
+        legacy = membrane_record(state) is not None
+        matches = sum(adapter.supports(state) for adapter in self.adapters) + int(legacy)
+        if matches > 1:
+            raise ValueError("one membrane anchor cannot own competing physical models")
+        return matches == 1
+
+    def validate_state(self, state):
+        if self.osmotic.supports(state):
+            self.osmotic.validate_state(state)
 
     def shared_system(self, state, strategy_id):
+        for adapter in self.adapters:
+            if adapter.supports(state):
+                return adapter.shared_system(state, strategy_id)
         from chemworld.foundation.lab_clock import SharedAdvanceSystem
         from chemworld.runtime.shared_systems import connection_ids
 
@@ -203,10 +229,10 @@ class MembraneRuntime:
 
     @property
     def protected_lifecycle_vessels(self):
-        result = set()
+        result = set().union(*(a.protected_lifecycle_vessels for a in self.adapters))
         if self.composition is not None and self.composition.physics is not None:
             for state in self.composition.physics.initial_states.values():
-                if self.supports(state):
+                if membrane_record(state) is not None:
                     spec = MembraneSpec.from_dict(membrane_record(state).settings["physical_model"])
                     if spec.fouling:
                         result.add(spec.fouling.wash_vessel_id)
@@ -216,9 +242,9 @@ class MembraneRuntime:
     def preserved_source_vessels(self):
         if self.composition is None or self.composition.physics is None:
             return set()
-        result = set()
+        result = set().union(*(a.preserved_source_vessels for a in self.adapters))
         for state in self.composition.physics.initial_states.values():
-            if self.supports(state):
+            if membrane_record(state) is not None:
                 spec = MembraneSpec.from_dict(membrane_record(state).settings["physical_model"])
                 result.update(membrane_liquid_ids(state, spec))
         return result
@@ -229,6 +255,15 @@ class MembraneRuntime:
         declared = {c.vessel for c in self.composition.components if c.kind == "ro_membrane"}
         if installed != declared:
             raise ValueError("declared membranes must match installed devices")
+        members = set()
+        for vessel in installed:
+            system = self.shared_system(states[vessel], "finite-dilute-ro")
+            if members.intersection(system.vessels):
+                raise ValueError("finite membrane systems cannot share physical tank inventory")
+            members.update(system.vessels)
+        for adapter in self.adapters:
+            adapter.validate_world()
+        installed = {v for v in installed if membrane_record(states[v]) is not None}
         collectors = set()
         for vessel in installed:
             state = states[vessel].replace(
@@ -275,6 +310,9 @@ class MembraneRuntime:
                         raise ValueError("rinsing requires declared finite wash and waste ports")
 
     def configure_flow(self, state, action):
+        for adapter in self.adapters:
+            if adapter.supports(state):
+                return adapter.configure_flow(state, action)
         record, spec, _ = unpack_membrane(state)
         return configure_liquid_flow(
             state,
@@ -284,6 +322,9 @@ class MembraneRuntime:
         )
 
     def advance(self, state, action, *, heat=False, jacket_program=None):
+        for adapter in self.adapters:
+            if adapter.supports(state):
+                return adapter.advance(state, action, heat=heat, jacket_program=jacket_program)
         record, spec, inventory = unpack_membrane(state)
         if (
             heat

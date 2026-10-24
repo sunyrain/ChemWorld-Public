@@ -202,7 +202,7 @@ class VLEPropertyPackage:
 
     @classmethod
     def from_dict(cls, payload):
-        from chemworld.physchem.eos import CubicEOSSpec
+        from chemworld.physchem.eos import fluid_eos_from_dict
 
         values = dict(payload)
         values["packages"] = tuple(ComponentPropertyPackage.from_dict(p)
@@ -216,7 +216,7 @@ class VLEPropertyPackage:
         model["component_ids"] = tuple(model["component_ids"])
         values["activity_model"] = ActivityModelSpec(**model)
         if values["vapor_eos"] is not None:
-            values["vapor_eos"] = CubicEOSSpec.from_dict(values["vapor_eos"])
+            values["vapor_eos"] = fluid_eos_from_dict(values["vapor_eos"])
         return cls(**values)
 
     def canonical_amounts(self, amounts):

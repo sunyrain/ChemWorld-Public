@@ -74,7 +74,7 @@ def make_env(*, bulk=False, surface=False, device=None, temperature=350.0, budge
         "composition_id": "shared-heater-test",
         "components": [{"kind": kind, "parameters": {}} for kind in kinds],
         "physics": CompositionPhysics(
-            network, {"reactor": state}, thermal_models={"reactor": model}
+            network, {"reactor": state}, models={'thermal': {'reactor': model}}
         ).to_dict(),
         "task": {
             "objective": "observe thermal response",
@@ -176,12 +176,14 @@ def test_event_stop_keeps_actual_time_energy_and_inventory():
 
     env = make_env(surface=True)
     spec = env.compiled_composition.spec
-    models = {"reactor": replace(spec.physics.thermal_models["reactor"], stop_temperature_K=350.1)}
+    models = {
+        "reactor": replace(spec.physics.models_of("thermal")["reactor"], stop_temperature_K=350.1)
+    }
     env = ChemWorldEnv(
         composition=compile_world_composition(
             replace(
                 spec,
-                physics=replace(spec.physics, thermal_models=models),
+                physics=replace(spec.physics, models={**spec.physics.models, 'thermal': models}),
             )
         )
     )
@@ -356,7 +358,7 @@ def test_thermal_capability_is_physical_and_passive_body_can_still_evolve():
     assert env._state.ledger.energy_jacket_J == 0
     assert env._state.ledger.heat_loss_J > 0
     unmodelled = compile_world_composition(
-        replace(spec, physics=replace(physics, thermal_models={}), task=task)
+        replace(spec, physics=replace(physics, models={**physics.models, 'thermal': {}}), task=task)
     )
     assert set(unmodelled.task_spec.allowed_operations) == {"terminate"}
     with pytest.raises(WorldCompositionError, match="configure_control"):

@@ -87,7 +87,7 @@ def check_domain_transition(name, spec, before, after, action):
     elif name == "distillation" and action.get("full_reflux"):
         from chemworld.runtime.dynamic_column import read_column
 
-        model = spec.physics.column_models[before.vessel_id]
+        model = spec.physics.models_of('column')[before.vessel_id]
         left, right = (read_column(state, model) for state in (before, after))
         assert left.amounts_mol[-1] == right.amounts_mol[-1]
         assert left.withdrawn_product_mol == right.withdrawn_product_mol
@@ -110,8 +110,8 @@ def check_domain_transition(name, spec, before, after, action):
         )
 
         model, thermal = (
-            spec.physics.crystal_models["reactor"],
-            spec.physics.thermal_models["reactor"],
+            spec.physics.models_of('crystal')["reactor"],
+            spec.physics.models_of('thermal')["reactor"],
         )
         population_from_state(after, model)
         change = crystal_inventory_energy(after, model, thermal) - crystal_inventory_energy(

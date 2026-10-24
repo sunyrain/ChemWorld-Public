@@ -5,7 +5,14 @@ from dataclasses import replace
 
 import pytest
 
-from chemworld.physchem.battery_thevenin import CELL_T, SOC, WORK, thevenin_fields
+from chemworld.physchem.battery_thevenin import (
+    CELL_T,
+    SOC,
+    WORK,
+    thevenin_fields,
+    thevenin_system,
+)
+from chemworld.physchem.reactor_shared import ScalarControlProgram
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.runtime.thevenin import METER, unpack_thevenin
 from chemworld.world.composition import WorldCompositionSpec
@@ -309,3 +316,114 @@ def test_later_measurement_slice_failure_preserves_queued_job_and_detector_rng(m
         for field in ("cost", "risk"):
             after[ledger][field] = initial[ledger][field]
     assert after == initial  # Includes original queue and lab detector RNG.
+
+
+def test_diffusion_profile_has_one_owner_and_material_reset_preserves_clock_and_resources():
+    from chemworld.campaign_resources import CampaignResourceCard
+    from chemworld.examples.native_thevenin import diffusion_spec
+
+    spec = diffusion_spec(cells=8)
+    card = CampaignResourceCard(card_id="diffusion-single-clock", operation_attempt_limit=20,
+        vessel_start_limit=3, final_assay_limit=1, nonfinal_instrument_use_limit=2,
+        stock_limits={})
+    runtime = session(spec, campaign_resource_card=card)
+    execute(runtime, {"operation": "configure_electrical_control", "current_A": .2})
+    execute(runtime, {"operation": "wait", "duration_s": 2.})
+    reading = execute(runtime, {"operation": "measure", "instrument": METER})
+    before = runtime._state
+    record, slot, model, physical, program = unpack_thevenin(before)
+    assert len(before.state_slots.slots) == 1
+    assert set(slot.values) == {c.name for c in spec.coordinate_declarations}
+    assert len(spec.diffusion.coordinate_keys) == 7
+    assert any(slot.values[key] != 0 for key in spec.diffusion.coordinate_keys)
+    fields = thevenin_fields(model, physical, program)
+    assert fields["surface_soc"] < fields["soc"]
+    assert sum(w*z for w, z in zip(model.diffusion.weights, fields["distributed_soc"],
+                                   strict=True)) == pytest.approx(fields["soc"], abs=1e-15)
+    assert reading.info["actual_duration_s"] == 1.
+    assert before.ledger.time_s == physical.time_s == 3.
+    assert physical.coordinates[SOC] == pytest.approx(.694, abs=1e-10)
+    assert before.ledger.flow_electrical_work_J == pytest.approx(-physical.coordinates[WORK])
+    assert before.ledger.sample_consumed_L == 0.
+    assert runtime._campaign_resource_ledger.instrument_uses == {METER: 1}
+    assert runtime._campaign_resource_ledger.nonfinal_instrument_uses == 1
+    assert {c.channel_id for c in reading.observation.channels} == {
+        "terminal_potential", "electrical_current"}  # No hidden SOC/profile truth channel.
+    runtime.reset(options={"scope": "material", "vessel_ids": [before.vessel_id]})
+    retained_record, retained_slot, _, _, _ = unpack_thevenin(runtime._state)
+    assert retained_record == record and retained_slot == slot
+    assert runtime._state.ledger.time_s == 3.
+    snapshot = json.loads(json.dumps(runtime.snapshot().to_dict(), sort_keys=True, allow_nan=False))
+    restored = ChemWorldRuntime.from_snapshot(snapshot)
+    assert unpack_thevenin(restored._state)[1] == slot
+    for instance in (runtime, restored):
+        execute(instance, {"operation": "configure_electrical_control", "current_A": 0.})
+        execute(instance, {"operation": "wait", "duration_s": 1.})
+    assert runtime._state.to_dict() == restored._state.to_dict()
+    assert runtime._state.ledger.time_s == 4.
+    assert unpack_thevenin(runtime._state)[1].values != slot.values
+
+
+def test_diffusion_surface_stop_commits_only_partial_measurement_time_and_retains_profile():
+    from chemworld.examples.native_thevenin import diffusion_spec
+
+    spec = replace(fixture(0, initial_soc=.005), diffusion=diffusion_spec(cells=8).diffusion)
+    program = ScalarControlProgram(((0., .5),), "A")
+    expected = thevenin_system(spec, program).advance(spec.initial_state(), 1.)
+    assert 0 < expected.actual_duration_s < 1.
+    runtime = session(spec)
+    execute(runtime, {"operation": "configure_electrical_control", "current_A": .5})
+    result = execute(runtime, {"operation": "measure", "instrument": METER})
+    assert result.info["operation_outcome"] == "stopped"
+    assert result.info["measurement_status"] in {"failed", "invalid", "not_observed"}
+    assert runtime._state.lab_clock.stopped
+    actual = unpack_thevenin(runtime._state)[3]
+    assert actual.time_s == pytest.approx(expected.actual_duration_s, abs=1e-10)
+    assert runtime._state.ledger.time_s == actual.time_s
+    assert result.info["actual_duration_s"] == actual.time_s
+    assert actual.coordinates[SOC] > 0.
+    assert spec.diffusion.surface_soc(actual.coordinates[SOC], actual.coordinates) == pytest.approx(
+        0., abs=2e-14)
+    assert all(z > 0 for z in spec.diffusion.profile(actual.coordinates[SOC], actual.coordinates))
+    # Runtime state/model serialization can change the finite-difference/Newton
+    # roundoff path; compare the physical coordinates within solver accuracy.
+    assert dict(actual.coordinates) == pytest.approx(
+        dict(expected.final_state.coordinates), rel=1e-8, abs=1e-10)
+    assert runtime._state.ledger.flow_electrical_work_J == pytest.approx(-actual.coordinates[WORK])
+    assert runtime._state.ledger.sample_consumed_L == 0.
+
+
+@pytest.mark.parametrize("noise", ("keyed", "sequential"))
+def test_diffusion_agent_replay_and_sorted_snapshot_fresh_process_continuation(tmp_path, noise):
+    from chemworld.examples.native_thevenin import diffusion_spec, run, workflow
+    from test_native_domains_end_to_end import (
+        test_snapshot_resume_in_middle_of_real_workflow as resume,
+    )
+
+    spec = diffusion_spec(cells=8)
+    report = run(tmp_path / (noise+"-diffusion.jsonl"), noise=noise, spec=spec,
+                 include_impedance_analysis=True)
+    assert report["steps"] == report["replay_steps"] == 10
+    # The checkpoint is after CC acquisition and entering rest: this restores a
+    # genuine nonuniform profile, not merely a fresh uniform specification.
+    resume("Thevenin-diffusion", noise, tmp_path,
+           recipe=workflow(spec, include_impedance_analysis=True), sort_keys=True)
+
+
+@pytest.mark.parametrize("defect", ("missing", "internal", "surface"))
+def test_diffusion_snapshot_rejects_missing_or_physically_invalid_spatial_state(defect):
+    from chemworld.examples.native_thevenin import diffusion_spec
+
+    spec = diffusion_spec(cells=8)
+    runtime = session(spec)
+    payload = runtime.snapshot().to_dict()
+    values = next(iter(payload["world_state"]["state_slots"].values()))["values"]
+    if defect == "missing":
+        del values[spec.diffusion.coordinate_keys[0]]
+    elif defect == "internal":
+        values[spec.diffusion.coordinate_keys[0]] = .5
+        values[spec.diffusion.coordinate_keys[1]] = -.1
+    else:
+        values[spec.diffusion.coordinate_keys[0]] = -.3
+    with pytest.raises(ValueError):
+        ChemWorldRuntime.from_snapshot(json.loads(json.dumps(payload, allow_nan=False)))

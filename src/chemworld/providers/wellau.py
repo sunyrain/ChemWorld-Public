@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import urllib.error
@@ -10,6 +9,7 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
+from chemworld._serialization import canonical_json_sha256 as _canonical_sha256
 from chemworld.providers.deepseek import DeepSeekAPIError, DeepSeekClient
 
 DEFAULT_BASE_URL = "https://api.wellau.com/v1"
@@ -153,17 +153,6 @@ class WellAUClient(DeepSeekClient):
             raise WellAUAPIError("WellAU connection failed", retryable=True) from exc
         except TimeoutError as exc:
             raise WellAUAPIError("WellAU request timed out", retryable=True) from exc
-
-
-def _canonical_sha256(payload: dict[str, Any]) -> str:
-    encoded = json.dumps(
-        payload,
-        allow_nan=False,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 __all__ = [

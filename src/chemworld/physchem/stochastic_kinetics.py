@@ -8,7 +8,7 @@ subtraction, fractional molecules, automatic ODE switch or hidden upstream.
 
 import json
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from math import comb, factorial, fsum, isfinite, log
 
@@ -28,6 +28,7 @@ __all__ = [
     "EventBudgetError",
     "EventChannel",
     "StochasticAdvance",
+    "StochasticLeap",
     "StochasticSpec",
     "advance_stochastic",
     "compile_channels",
@@ -37,6 +38,8 @@ __all__ = [
     "validate_counts",
 ]
 
+TAU_ALGORITHM = "adaptive-explicit-tau-leap-v1"
+
 
 @dataclass(frozen=True)
 class StochasticSpec:
@@ -44,17 +47,34 @@ class StochasticSpec:
     temperature_K: float = 298.15
     max_events_per_advance: int = 1_000_000
     algorithm: str = "gillespie-direct-v1"
+    tau_policy: object = None
 
     def __post_init__(self):
         if any(not isfinite(x) or x <= 0 for x in (self.volume_L, self.temperature_K)):
             raise ValueError("SSA requires finite positive constant volume and temperature")
         if type(self.max_events_per_advance) is not int or self.max_events_per_advance <= 0:
             raise ValueError("SSA event budget must be a positive integer")
-        if self.algorithm != "gillespie-direct-v1":
+        if self.algorithm not in {"gillespie-direct-v1", "gibson-bruck-next-reaction-v1",
+                                  TAU_ALGORITHM}:
             raise ValueError("unsupported stochastic algorithm")
+        if self.algorithm == TAU_ALGORITHM:
+            from chemworld.physchem.stochastic_tau_leap import TauLeapPolicy
+
+            policy = self.tau_policy
+            if not isinstance(policy, TauLeapPolicy):
+                policy = TauLeapPolicy.from_dict(policy)
+            object.__setattr__(self, "tau_policy", policy)
+        elif self.tau_policy is not None:
+            raise ValueError("tau_policy requires the explicit tau-leap algorithm")
 
     def to_dict(self):
-        return asdict(self)
+        # Keep the historical exact-method codec and field order unchanged.
+        result = {"volume_L": self.volume_L, "temperature_K": self.temperature_K,
+                  "max_events_per_advance": self.max_events_per_advance,
+                  "algorithm": self.algorithm}
+        if self.tau_policy is not None:
+            result["tau_policy"] = self.tau_policy.to_dict()
+        return result
 
 
 @dataclass(frozen=True)
@@ -119,11 +139,13 @@ def compile_channels(network, spec):
     return tuple(channels)
 
 
-def initial_continuation(seed, time_s=0.0):
+def initial_continuation(seed, time_s=0.0, *, algorithm="gillespie-direct-v1"):
     if type(seed) is not int or seed < 0 or not isfinite(time_s) or time_s < 0:
         raise ValueError("SSA seed/time must be explicit nonnegative values")
+    if algorithm not in {"gillespie-direct-v1", "gibson-bruck-next-reaction-v1", TAU_ALGORITHM}:
+        raise ValueError("unsupported stochastic algorithm")
     return {
-        "algorithm": "gillespie-direct-v1",
+        "algorithm": algorithm,
         "time_s": float(time_s),
         "rng_state": deepcopy(np.random.PCG64(seed).state),
         "pending": None,
@@ -133,13 +155,25 @@ def initial_continuation(seed, time_s=0.0):
 
 
 def _signature(counts, channels, spec):
+    values = [counts, [asdict(c) for c in channels], spec.volume_L, spec.temperature_K]
+    if spec.algorithm == TAU_ALGORITHM:
+        values.extend((spec.algorithm, spec.tau_policy.to_dict()))
     return sha256(
         json.dumps(
-            [counts, [asdict(c) for c in channels], spec.volume_L, spec.temperature_K],
+            values,
             sort_keys=True,
             allow_nan=False,
         ).encode()
     ).hexdigest()
+
+
+@dataclass(frozen=True)
+class StochasticLeap:
+    """Aggregate integer firings at a numerical endpoint, not SSA event times."""
+
+    start_time_s: float
+    end_time_s: float
+    reaction_counts: tuple
 
 
 @dataclass(frozen=True)
@@ -148,10 +182,28 @@ class StochasticAdvance:
     continuation: dict
     events: tuple
     actual_duration_s: float
+    work: dict = field(default_factory=dict)
+    batches: tuple = ()
 
 
 class EventBudgetError(RuntimeError):
     """Numerical work limit, not a physical event; candidate must roll back."""
+
+
+def _direct_pending(propensities, total, time, rng):
+    """Original direct draw order, shared with the declared tau SSA fallback."""
+    event_time = time - log(1.0 - rng.random()) / total
+    if not isfinite(event_time) or event_time <= time:
+        raise ArithmeticError("SSA event time cannot be represented")
+    target = rng.random() * total
+    cumulative = 0.0
+    index = len(propensities) - 1
+    for i, propensity in enumerate(propensities):
+        cumulative += propensity
+        if target < cumulative:
+            index = i
+            break
+    return {"time_s": event_time, "channel": index}
 
 
 def advance_stochastic(network, counts, continuation, duration_s):
@@ -182,10 +234,18 @@ def advance_stochastic(network, counts, continuation, duration_s):
     rng = np.random.Generator(np.random.PCG64())
     rng.bit_generator.state = state["rng_state"]
     signature = _signature(counts, channels, spec)
+    if spec.algorithm == TAU_ALGORITHM:
+        from chemworld.physchem.stochastic_tau_leap import advance_tau_leap
+
+        return advance_tau_leap(channels, counts, state, spec, rng, duration_s, signature)
     if state["signature"] != signature:
         # A genuine instantaneous inventory/rate intervention invalidates the
         # old exponential event, but preserves the independent process stream.
         state["pending"] = None
+    if spec.algorithm == "gibson-bruck-next-reaction-v1":
+        from chemworld.physchem.stochastic_next_reaction import advance_next_reaction
+
+        return advance_next_reaction(channels, counts, state, spec, rng, duration_s)
     pending = state["pending"]
     if pending is not None and (
         not isfinite(pending["time_s"])
@@ -196,32 +256,25 @@ def advance_stochastic(network, counts, continuation, duration_s):
         raise ValueError("invalid pending SSA event")
     time = start
     events = []
+    evaluations = draws = 0
     while duration_s > 0:
         if pending is None:
             propensities = [c.propensity(counts) for c in channels]
+            evaluations += len(channels)
             total = fsum(propensities)
             if not isfinite(total):
                 raise ValueError("nonfinite total SSA propensity")
             if total == 0:
                 break
-            event_time = time - log(1.0 - rng.random()) / total
-            if not isfinite(event_time) or event_time <= time:
-                raise ArithmeticError("SSA event time cannot be represented")
-            target = rng.random() * total
-            cumulative = 0.0
-            index = len(channels) - 1
-            for i, propensity in enumerate(propensities):
-                cumulative += propensity
-                if target < cumulative:
-                    index = i
-                    break
-            pending = {"time_s": event_time, "channel": index}
+            pending = _direct_pending(propensities, total, time, rng)
+            draws += 2
         if pending["time_s"] > end:
             break
         if len(events) >= spec.max_events_per_advance:
             raise EventBudgetError("SSA event budget exceeded; candidate not committed")
         time = pending["time_s"]
         channel = channels[pending["channel"]]
+        evaluations += 1
         if channel.propensity(counts) <= 0:
             raise ValueError("pending event is incompatible with current inventory")
         for key, change in channel.changes:
@@ -236,4 +289,7 @@ def advance_stochastic(network, counts, continuation, duration_s):
         signature=_signature(counts, channels, spec),
         events_committed=state["events_committed"] + len(events),
     )
-    return StochasticAdvance(counts, state, tuple(events), duration_s)
+    return StochasticAdvance(
+        counts, state, tuple(events), duration_s,
+        {"propensity_evaluations": evaluations, "random_draws": draws},
+    )

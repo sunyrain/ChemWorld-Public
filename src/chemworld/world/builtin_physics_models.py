@@ -24,6 +24,10 @@ def _decode_crystal(payload):
 
 
 def _decode_calphad_material(payload):
+    if payload.get("model_type") == "calphad_multiphase_thermal_v1":
+        from chemworld.runtime.calphad_thermal import CalphadThermalSpec
+
+        return CalphadThermalSpec.from_dict(payload)
     from chemworld.physchem.calphad_material import CefMaterialSpec
 
     return CefMaterialSpec.from_dict(payload)
@@ -33,6 +37,26 @@ def _decode_sbml(payload):
     from chemworld.physchem.sbml_system import SBMLSystemSpec
 
     return SBMLSystemSpec.from_dict(payload)
+
+
+def _decode_stochastic_hybrid(payload):
+    from chemworld.physchem.stochastic_hybrid import StochasticHybridSpec
+
+    return StochasticHybridSpec.from_dict(payload)
+
+
+def _decode_molecular_process(payload):
+    from chemworld.runtime.molecular_process_runtime import MolecularProcessReceiverSpec
+
+    return MolecularProcessReceiverSpec.from_dict(payload)
+
+
+def _decode_flash(payload):
+    if payload.get("model_type") == "molecular_flash_thermal_v1":
+        from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalSpec
+
+        return MolecularFlashThermalSpec.from_dict(payload)
+    return FlashSystemSpec.from_dict(payload)
 
 
 def _calphad_material(physics, spec):
@@ -63,15 +87,15 @@ def _thermal(physics, spec):
         required = set(model.thermodynamics.inventory_keys) & bulk_species
         if not required <= state.species_amounts.keys():
             raise ValueError("initial state omits a declared local thermal inventory")
-        if model.pressure_law == "helmholtz":
-            _without_processes(spec, (name,), "pure-fluid Helmholtz thermal")
+        if model.uses_eos_pressure:
+            _without_processes(spec, (name,), "declared EOS thermal")
         if name not in physics.models_of("crystal"):
             assemble_local_system(state, physics, spec.modules, spec.components)
 
 
 def _thermal_feed(source, model):
-    if model.pressure_law == "helmholtz":
-        raise ValueError("Helmholtz world feed needs an explicitly declared EOS enthalpy port")
+    if model.uses_eos_pressure:
+        raise ValueError("EOS world feed needs an explicitly declared EOS enthalpy port")
     if set(source.species_amounts) <= set(model.thermodynamics.inventory_keys):
         for key, amount in source.species_amounts.items():
             if amount:
@@ -91,7 +115,10 @@ def _flash(physics, spec):
 
 def _flash_feed(source, model):
     from chemworld.runtime.flash_thermal import inventory_enthalpy_j
+    from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalSpec
 
+    if isinstance(model, MolecularFlashThermalSpec):
+        raise ValueError("molecular two-phase caloric branch does not declare material feeds")
     if set(source.species_amounts) != set(model.properties.component_ids):
         raise ValueError("finite flash source must share its component identities")
     inventory_enthalpy_j(source, model)
@@ -207,7 +234,7 @@ THERMAL = PhysicsModelSpec(
 FLASH = PhysicsModelSpec(
     "flash",
     "1",
-    FlashSystemSpec.from_dict,
+    _decode_flash,
     _encode,
     legacy_field="flash_models",
     component_kind="vapor_liquid_equilibrium",
@@ -280,5 +307,13 @@ CALPHAD_MATERIAL = PhysicsModelSpec(
     component_kind="calphad_phase", exclusive_group="thermal_evolution",
     validate_world=_calphad_material,
 )
+MOLECULAR_PROCESS = PhysicsModelSpec(
+    "molecular_process", "1", _decode_molecular_process, _encode,
+    component_kind="molecular_process", exclusive_group="thermal_evolution",
+)
 SBML = PhysicsModelSpec("sbml", "1", _decode_sbml, _encode,
                        component_kind="sbml_model", exclusive_group="thermal_evolution")
+STOCHASTIC_HYBRID = PhysicsModelSpec(
+    "stochastic_hybrid", "1", _decode_stochastic_hybrid, _encode,
+    exclusive_group="thermal_evolution",
+)

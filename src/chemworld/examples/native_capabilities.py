@@ -64,6 +64,60 @@ def bound_capabilities(session):
     }
 
 
+def execution_inventory(registry=None):
+    """Project installed declarations without inferring compiled or thread-safe support.
+
+    An exported function or a model codec is not a scientific qualification result.
+    Task-specific evidence belongs to the existing workstream records. This view also
+    works in an installed package, without reading repository task documents.
+    """
+    from chemworld.physchem import _MODULE_EXPORTS
+
+    registry = registry or DomainModuleRegistry.default()
+
+    def address(function):
+        return f"{function.__module__}:{function.__qualname__}"
+
+    declarations = {module.module_id: module for module in registry.modules}
+    rows = capability_rows(registry)
+    for row in rows:
+        module = declarations[row["module"]]
+        row["execution"] = {
+            "python": "installed_declaration; validity_depends_on_bound_world",
+            "cpu_lowering": "not_declared",
+            "thread_safety": "not_declared",
+            "continuation": "runtime_session_v2; model_specific_qualification_required",
+            "model_codecs": [
+                {
+                    "id": model.model_id,
+                    "version": model.version,
+                    "binding": model.binding,
+                    "decode": address(model.decode),
+                    "encode": address(model.encode),
+                }
+                for model in module.models
+            ],
+            "advance_bindings": [
+                {
+                    "id": strategy.strategy_id,
+                    "factory": address(strategy.factory),
+                    "shared_clock": strategy.shared_clock,
+                    "timed_measurements": strategy.timed_measurements,
+                }
+                for strategy in module.advance_strategies
+            ],
+        }
+    return {
+        "schema": "chemworld-execution-inventory-v1",
+        "scope": "Generated installed entry points, not scientific qualification or CPU support.",
+        "modules": rows,
+        "public_physchem": [
+            {"module": "chemworld.physchem." + module, "symbols": list(symbols)}
+            for module, symbols in sorted(_MODULE_EXPORTS.items())
+        ],
+    }
+
+
 def markdown():
     rows = [
         "# Installed native capability declarations",
@@ -94,7 +148,9 @@ def markdown():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    parser.add_argument(
+        "--format", choices=("markdown", "json", "execution-json"), default="markdown"
+    )
     parser.add_argument("--composition", type=Path, help="Export bound public contracts as JSON")
     args = parser.parse_args()
     if args.composition:
@@ -108,7 +164,10 @@ def main():
         finally:
             session.close()
         return
-    print(markdown() if args.format == "markdown" else json.dumps(capability_rows(), indent=2))
+    if args.format == "execution-json":
+        print(json.dumps(execution_inventory(), indent=2))
+    else:
+        print(markdown() if args.format == "markdown" else json.dumps(capability_rows(), indent=2))
 
 
 if __name__ == "__main__":

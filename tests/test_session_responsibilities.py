@@ -151,14 +151,16 @@ def test_batch_only_rejection_is_reported_in_the_settled_receipt():
 
 def test_stopped_acquisition_settles_actual_time_in_each_budget_scope():
     spec = surface_world_spec(include_surface=False)
-    models = dict(spec.physics.thermal_models)
+    models = dict(spec.physics.models_of('thermal'))
     models["reactor"] = replace(models["reactor"], minimum_temperature_K=349.99)
     components = tuple(
         replace(c, parameters={**c.parameters, "temperature_range_K": [349.99, 430]})
         if c.kind == "thermal" and c.vessel == "reactor" else c for c in spec.components
     )
     spec = replace(
-        spec, components=components, physics=replace(spec.physics, thermal_models=models),
+        spec,
+        components=components,
+        physics=replace(spec.physics, models={**spec.physics.models, "thermal": models}),
     )
     session = ChemWorldRuntime(composition=spec, campaign_resource_card=resource_card())
     session.reset(seed=12)

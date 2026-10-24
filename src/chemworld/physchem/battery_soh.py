@@ -141,7 +141,9 @@ class ElectrodeSOHSpec:
         if self.known not in {"cyclable_lithium", "cell_capacity"}:
             raise ValueError("SOH known quantity must be cyclable_lithium or cell_capacity")
         if not all(isinstance(c, ElectrodeOCV) for c in (self.negative_ocv, self.positive_ocv)):
-            raise ValueError("SOH requires two explicit electrode OCV curves")
+            raise ValueError(
+                "SOH requires two explicit single-valued equilibrium electrode OCV curves"
+            )
 
     def to_dict(self):
         return _to_dict(self)
@@ -164,7 +166,10 @@ class HalfCellSOHSpec:
     def __post_init__(self):
         _validate(self, ("working_capacity_C",))
         if not isinstance(self.working_ocv, ElectrodeOCV):
-            raise ValueError("half-cell SOH requires a working electrode OCV versus Li/Li+")
+            raise ValueError(
+                "half-cell SOH requires a single-valued equilibrium working electrode OCV "
+                "versus Li/Li+"
+            )
 
     def to_dict(self):
         return _to_dict(self)
@@ -721,6 +726,60 @@ def _battery_soh_inputs(spec, state=None):
     from chemworld.physchem.battery_models import F, _energy_bins
     from chemworld.physchem.data_conflicts import DataSourceProvenance
 
+    if getattr(spec, "plating", None) is not None:
+        raise ValueError("lithium plating automatic equilibrium-SOH/SOC mapping is unsupported")
+    if getattr(spec, "model_family", None) == "split-ocvr-isothermal-v1":
+        state = spec.initial_state() if state is None else state
+        curves = []
+        lithium_C = 0.0
+        for electrode in ("negative", "positive"):
+            key = electrode + ":Li"
+            if key not in state.amounts_mol:
+                raise ValueError("active electrode inventory is missing")
+            amount = _finite(state.amounts_mol[key])
+            capacity = getattr(spec, electrode + "_capacity_C")
+            low = getattr(spec, electrode + "_minimum_fraction")
+            high = getattr(spec, electrode + "_maximum_fraction")
+            if not low * (capacity / F) <= amount <= high * (capacity / F):
+                raise ValueError("active electrode inventory is outside its physical capacity")
+            lithium_C += F * amount
+            ocv = getattr(spec, electrode + "_ocv")
+            curves.append(
+                replace(
+                    ocv,
+                    stoichiometry_domain=(
+                        max(low, ocv.stoichiometry_domain[0]),
+                        min(high, ocv.stoichiometry_domain[1]),
+                    ),
+                )
+            )
+        return ElectrodeSOHSpec(
+            *curves,
+            spec.negative_capacity_C,
+            spec.positive_capacity_C,
+            spec.minimum_voltage_V,
+            spec.maximum_voltage_V,
+            lithium_C,
+        )
+    if getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1":
+        raise ValueError("lead-acid LOQS equilibrium-SOH/SOC mapping is unsupported")
+    if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
+        raise ValueError("Newman-Tobias equilibrium-SOH mapping is unsupported")
+    if getattr(spec, "model_family", None) == "msmr-spm-isothermal-v1":
+        raise ValueError("MSMR equilibrium-SOH mapping is unsupported")
+    if getattr(spec, "model_family", None) == "spm-spatial-thermal-v1":
+        raise ValueError("spatial thermal automatic equilibrium-SOH mapping is unsupported")
+    if getattr(spec, "model_family", None) == "composite-spm-isothermal-v1":
+        raise ValueError("composite automatic equilibrium-SOH mapping is unsupported")
+    if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
+        raise ValueError("finite half-cell dynamics have no automatic equilibrium-SOH mapping")
+    for electrode in ("negative", "positive"):
+        ocp = getattr(spec, electrode + "_ocp", None)
+        if ocp is not None and ocp.mode != "single":
+            raise ValueError(
+                "equilibrium SOH does not accept operational OCP branches; "
+                "supply explicit equilibrium ElectrodeOCV references to ElectrodeSOHSpec"
+            )
     state = spec.initial_state() if state is None else state
     li = 0.0
     for _, particle, keys in _energy_bins(spec):
@@ -761,7 +820,12 @@ def _battery_soh_inputs(spec, state=None):
 
 
 def soh_from_battery(spec, state=None, *, policy=DEFAULT_ISOLATION_POLICY, sensitivity=True):
-    """Read active-electrode Li totals; salt/SEI product never count as cyclable Li."""
+    """Read active Li totals for a single-valued equilibrium battery declaration.
+
+    Operational OCP branches are not implicitly replaced by their midpoint or a
+    chosen history. A separate explicit equilibrium-reference SOH declaration
+    remains available through :class:`ElectrodeSOHSpec`.
+    """
     return solve_electrode_soh(
         _battery_soh_inputs(spec, state), policy=policy, sensitivity=sensitivity
     )
@@ -771,13 +835,30 @@ def battery_spec_at_soc(spec, result, soc, *, branch=None):
     """Prepare a NEW initial config. Never resets a live inventory, clock or device."""
     from chemworld.physchem.battery_models import F
 
+    if getattr(spec, "plating", None) is not None:
+        raise ValueError("lithium plating automatic equilibrium-SOH/SOC mapping is unsupported")
+    if getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1":
+        raise ValueError("lead-acid LOQS equilibrium-SOH/SOC mapping is unsupported")
+    if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
+        raise ValueError("Newman-Tobias equilibrium-SOH mapping is unsupported")
+    if getattr(spec, "model_family", None) == "msmr-spm-isothermal-v1":
+        raise ValueError("MSMR equilibrium-SOH mapping is unsupported")
+    if getattr(spec, "model_family", None) == "spm-spatial-thermal-v1":
+        raise ValueError("spatial thermal automatic SOC configuration mapping is unsupported")
+    if getattr(spec, "model_family", None) == "composite-spm-isothermal-v1":
+        raise ValueError("composite automatic SOC configuration mapping is unsupported")
+    if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
+        raise ValueError("finite half-cell dynamics have no automatic SOC configuration mapping")
+    split = getattr(spec, "model_family", None) == "split-ocvr-isothermal-v1"
+    negative_capacity = spec.negative_capacity_C if split else F * spec.negative.capacity_mol
+    positive_capacity = spec.positive_capacity_C if split else F * spec.positive.capacity_mol
     if (
         not isinstance(result.spec, ElectrodeSOHSpec)
         or not np.isclose(
-            result.spec.negative_capacity_C, F * spec.negative.capacity_mol, rtol=1e-12, atol=0.0
+            result.spec.negative_capacity_C, negative_capacity, rtol=1e-12, atol=0.0
         )
         or not np.isclose(
-            result.spec.positive_capacity_C, F * spec.positive.capacity_mol, rtol=1e-12, atol=0.0
+            result.spec.positive_capacity_C, positive_capacity, rtol=1e-12, atol=0.0
         )
     ):
         raise ValueError("SOH capacities do not match this full battery")

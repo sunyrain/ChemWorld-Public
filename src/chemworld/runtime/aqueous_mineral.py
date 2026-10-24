@@ -5,6 +5,7 @@ against those amounts before a measurement, and never used as material stock.
 """
 
 from dataclasses import replace
+from json import dumps, loads
 from math import fsum, isclose
 
 from chemworld.foundation import species_with_added_initial_amounts
@@ -231,7 +232,13 @@ class AqueousMineralRuntime:
         self.composition = composition
 
     def supports(self, state):
+        from chemworld.runtime.aqueous_precipitation import precipitation_record
+
         record = aqueous_record(state)
+        if precipitation_record(state) is not None:
+            if record is not None:
+                raise ValueError("declared and carbonate aqueous owners cannot share a vessel")
+            return True
         return record is not None and "mineral_kinetics" not in record.settings
 
     def validate_world(self):
@@ -243,9 +250,28 @@ class AqueousMineralRuntime:
         if installed != declared:
             raise ValueError("native aqueous compartments require their declared equilibrium owner")
         for vessel in installed:
-            validate_aqueous_vessel(physics.initial_states[vessel], physics)
+            from chemworld.runtime.aqueous_precipitation import (
+                precipitation_record,
+                validate_precipitation_vessel,
+            )
+
+            state = physics.initial_states[vessel]
+            if precipitation_record(state) is not None:
+                validate_precipitation_vessel(state, physics)
+                from chemworld.runtime.aqueous_filtration import validate_aqueous_filter_declaration
+
+                validate_aqueous_filter_declaration(state, physics, check_connections=False)
+            else:
+                validate_aqueous_vessel(state, physics)
 
     def advance(self, state, action, *, heat=False, jacket_program=None):
+        from chemworld.runtime.aqueous_precipitation import (
+            advance_precipitation,
+            precipitation_record,
+        )
+
+        if precipitation_record(state) is not None:
+            return advance_precipitation(state, action, heat=heat, jacket_program=jacket_program)
         if heat or jacket_program is not None:
             return ModelProviderResult(
                 {},
@@ -274,3 +300,26 @@ class AqueousMineralRuntime:
                 "not_covered": ["caloric_closure", "temperature_extrapolation", "PV_work"],
             },
         )
+
+    def validate_state(self, state):
+        from chemworld.runtime.aqueous_precipitation import (
+            precipitation_record,
+            validate_precipitation_state,
+        )
+
+        record = precipitation_record(state)
+        if record is not None:
+            if self.composition is not None and self.composition.physics is not None:
+                original = self.composition.physics.initial_states.get(state.vessel_id)
+                expected = precipitation_record(original)
+                if expected is None or loads(dumps(record.settings)) != loads(
+                    dumps(expected.settings)
+                ):
+                    raise ValueError(
+                        "precipitation declaration differs from original world configuration"
+                    )
+            validate_precipitation_state(state)
+            if self.composition is not None and self.composition.physics is not None:
+                from chemworld.runtime.aqueous_filtration import validate_aqueous_filter_declaration
+
+                validate_aqueous_filter_declaration(state, self.composition.physics)

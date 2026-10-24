@@ -131,7 +131,9 @@ def test_queries_and_sampling_preserve_snapshot_and_native_battery_contract():
             })["valid"]
         rng = np.random.default_rng(4)
         for _ in range(6):
-            action = session.sample_valid_action(rng, operation="configure_electrical_control")
+            action = session.sample_valid_action(
+                rng, operation="configure_electrical_control", max_attempts=1
+            )
             if "current_A" in action:
                 assert current["bounds"]["low"] <= action["current_A"] <= current["bounds"]["high"]
             assert session.validate_action(action)["valid"]

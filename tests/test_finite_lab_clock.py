@@ -207,7 +207,9 @@ def test_four_system_earliest_stop_aligns_all_clocks_and_keeps_committed_history
     spec = finite_world(4)
     thermal = dict(spec.physics.models_of("thermal"))
     thermal["reactor"] = replace(thermal["reactor"], stop_temperature_K=299)
-    spec = replace(spec, physics=replace(spec.physics, thermal_models=thermal))
+    spec = replace(
+        spec, physics=replace(spec.physics, models={**spec.physics.models, "thermal": thermal})
+    )
     runtime = session(spec)
     try:
         execute(runtime, "wait", duration_s=1)
@@ -248,7 +250,7 @@ def test_thermal_stop_rewinds_ssa_candidates_to_the_actual_common_endpoint(noise
     spec = replace(
         spec,
         physics=replace(
-            spec.physics, initial_states=states, thermal_models=thermal,
+            spec.physics, initial_states=states, models={**spec.physics.models, 'thermal': thermal},
             lab_clock=replace(spec.physics.lab_clock, heater_id="heater"),
         ),
         task=replace(spec.task, operations=(*spec.task.operations, "queue_lab_heat")),

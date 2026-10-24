@@ -62,7 +62,7 @@ def inputs(*, equilibrium=False):
         "components": [{"kind": "thermal", "parameters": {}}],
         "vessels": [{"id": "reactor", "capacity_L": volume}],
         "physics": CompositionPhysics(network, {"reactor": state},
-            thermal_models={"reactor": model}).to_dict(),
+            models={'thermal': {'reactor': model}}).to_dict(),
         "task": {"objective": "heat a declared homogeneous pure fluid", "budget": 20,
             "operations": ["heat", "wait", "pause_control", "resume_control", "terminate"],
             "instruments": []},

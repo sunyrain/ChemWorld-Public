@@ -11,6 +11,7 @@ from types import MappingProxyType
 from chemworld.data.sbml import SBMLModel
 from chemworld.foundation.dimensions import dimension_definition
 from chemworld.foundation.units import COHERENT_SI_UNITS, unit_spec
+from chemworld.physchem.caloric_math import scalar_value
 from chemworld.physchem.coordinate_events import _finite_real, _integer
 from chemworld.physchem.sbml_events import SBMLTriggerRoots, sbml_coordinate_events
 from chemworld.physchem.sbml_kinetics import SBMLKinetics, sbml_continuous_system
@@ -184,7 +185,7 @@ class SBMLSystemSpec:
                 value = (volumes[name] if observable.kind == "volume" else amounts[name]
                          if observable.kind == "amount" else
                          amounts[name]/volumes[self.frame._species[name].get("compartment")])
-            if not isfinite(value):
+            if not isfinite(scalar_value(value)):
                 raise ValueError("nonfinite formal readout")
             result[observable.channel_id] = value
         return result

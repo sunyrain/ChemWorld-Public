@@ -31,6 +31,15 @@ def configure_electrical_control(state, action):
     """Set one supported source programme; physical advancement remains shared."""
     record = electrical_device(state)
     settings = record.settings["electrical_control"]
+    from chemworld.runtime.thevenin_control import NAMED_FIELDS
+
+    if settings.get("named_control_modes"):
+        from chemworld.runtime.thevenin_control import configured_program
+
+        program = configured_program(state, record, action)
+        return _configured_electrical(state, record, settings, program)
+    if NAMED_FIELDS & action.keys():
+        raise ValueError("this electrical source does not declare named circuit controls")
     fields = [
         (name, unit, limits)
         for name, unit, limits in (("potential_V", "V", "limits_V"), ("current_A", "A", "limits_A"))
@@ -39,6 +48,8 @@ def configure_electrical_control(state, action):
     if len(fields) != 1:
         raise ValueError("configure exactly one electrical control quantity")
     name, unit, limit_key = fields[0]
+    if unit not in settings.get("supported_units", ("A", "V")):
+        raise ValueError("electrical source does not support this control unit")
     if limit_key not in settings:
         raise ValueError("electrical source does not support this control mode")
     target = float(action[name])
@@ -56,6 +67,10 @@ def configure_electrical_control(state, action):
         else ((time, old.value_at(time)), (time + duration, target))
     )
     program = ScalarControlProgram(points, unit, mode="linear")
+    return _configured_electrical(state, record, settings, program)
+
+
+def _configured_electrical(state, record, settings, program):
     return state.replace(
         equipment=upsert_equipment_record(
             state.equipment,
@@ -128,22 +143,36 @@ def queue_electrical_stage(state, action):
     settings["stage_offset"] = index
     if len(stages) >= 32:
         raise ValueError("a control programme contains at most 32 pending stages")
+    target = program["target"] if "control_mode" in program else program
     stage = {
-        "unit": program["unit"],
-        "target": program["setpoints"][-1][1],
+        "unit": target["unit"],
+        "target": target["setpoints"][-1][1],
         "stage_duration_s": duration,
         **stops,
     }
+    if "control_mode" in program:
+        stage["program"] = program
     settings.update(stages=[*stages, stage], status="running")
     settings.setdefault("stage_index", 0)
     settings.setdefault("stage_elapsed_s", 0.0)
     settings.setdefault("elapsed_s", 0.0)
     if not stages:
         settings["stage_elapsed_s"] = 0.0
-        settings["program"] = ScalarControlProgram(
-            ((state.ledger.time_s, stage["target"]),), stage["unit"]
-        ).to_dict()
-    return _store_electrical(state, settings)
+        settings["program"] = _electrical_stage_program(stage, state.ledger.time_s)
+    candidate = _store_electrical(state, settings)
+    if not stages and settings.get("named_control_modes"):
+        from chemworld.runtime.thevenin_control import validate_active_program
+
+        validate_active_program(candidate)
+    return candidate
+
+
+def _electrical_stage_program(stage, time_s):
+    if "program" in stage:
+        from chemworld.runtime.thevenin_control import stage_program
+
+        return stage_program(stage["program"], time_s)
+    return ScalarControlProgram(((time_s, stage["target"]),), stage["unit"]).to_dict()
 
 
 def electrical_control_error(state, action):
@@ -155,7 +184,7 @@ def electrical_control_error(state, action):
             else configure_electrical_control
         )
         builder(state, action)
-    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+    except (KeyError, TypeError, ValueError, ArithmeticError, RuntimeError) as exc:
         return str(exc)
     return None
 
@@ -196,13 +225,22 @@ def advance_electrical_program(state, action, advance):
             settings["stage_elapsed_s"] = 0.0
             if settings["stage_index"] == offset + len(settings["stages"]):
                 settings["status"] = "completed"
-                unit, target = "A", 0.0
+                next_stage = {"unit": "A", "target": 0.0}
             else:
                 next_stage = settings["stages"][settings["stage_index"] - offset]
-                unit, target = next_stage["unit"], next_stage["target"]
-            settings["program"] = ScalarControlProgram(
-                ((candidate.ledger.time_s, target),), unit
-            ).to_dict()
+            settings["program"] = _electrical_stage_program(next_stage, candidate.ledger.time_s)
+            if settings.get("named_control_modes"):
+                from chemworld.runtime.thevenin_control import validate_active_program
+
+                try:
+                    validate_active_program(_store_electrical(candidate, settings))
+                except (ValueError, ArithmeticError, RuntimeError) as exc:
+                    return candidate, ModelProviderResult({}, {
+                        "control_activation_error": str(exc),
+                        "attempted_stage_index": settings["stage_index"],
+                        "attempted_stage_time_s": candidate.ledger.time_s,
+                    }, success=False, outcome="numerical_failure",
+                        failure_reason="electrical_stage_activation_failed")
             result = replace(result, outcome="success")
         return candidate, result
 

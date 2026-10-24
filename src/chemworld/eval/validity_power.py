@@ -17,6 +17,7 @@ from chemworld.agents.task_recipes import (
     task_recipe_dimension,
     task_recipe_event_count,
 )
+from chemworld.data.records import trajectory_value
 from chemworld.tasks import SERIOUS_TASK_IDS, get_task
 
 VALIDITY_POWER_SCHEMA_VERSION = "chemworld-validity-power-audit-0.1"
@@ -44,7 +45,7 @@ def campaign_record_prefix(
     terminal_indices = [
         index
         for index, record in enumerate(records)
-        if record.get("leaderboard_score") is not None
+        if trajectory_value(record, 'leaderboard_score', None) is not None
     ]
     if len(terminal_indices) < complete_experiments:
         raise ValueError(

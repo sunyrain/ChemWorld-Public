@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 
 from chemworld.agents.llm import LLMReplayAgent, ToolUsingLLMStubAgent
 from chemworld.data.logging import load_jsonl
+from chemworld.data.records import trajectory_value
 from chemworld.eval.runner import run_agent
 
 
@@ -35,7 +36,7 @@ def main() -> None:
         records = load_jsonl(output_path)
         print("Logged agent trace entries:", len(records[-1]["agent_trace"]))
         print("Final lab report:")
-        print(records[-1]["agent_view"]["lab_report"]["text"])
+        print(trajectory_value(records[-1], 'agent_view')["lab_report"]["text"])
 
         stub_history = run_agent(
             env_id="ChemWorld",

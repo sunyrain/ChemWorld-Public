@@ -13,10 +13,13 @@ from dataclasses import dataclass, field
 from itertools import permutations, product
 from math import isclose, prod
 
+import numpy as np
+
 from chemworld.data.tdb import TdbDatabase, TdbParameter, TdbPhase
 from chemworld.physchem.caloric_math import FirstDerivative, exponential, logarithm
 from chemworld.physchem.calphad_extrapolation import qkt_weight, validate_qkt
 from chemworld.physchem.gibbs_phase import GibbsPhaseModel, GibbsPhaseProperties, _slope
+from chemworld.physchem.second_order_pair import SecondOrderPair
 from chemworld.physchem.tdb_expressions import TDB_GAS_CONSTANT_J_MOL_K as R
 from chemworld.physchem.tdb_expressions import scalar_value
 
@@ -27,9 +30,21 @@ _GIBBS_PARAMETERS = frozenset({
 })
 
 
+def _zero_jet(value):
+    """Require every scalar coefficient to be zero, including nested directions."""
+    if isinstance(value, FirstDerivative):
+        return _zero_jet(value.value) and _zero_jet(value.slope)
+    if isinstance(value, SecondOrderPair):
+        return all(_zero_jet(getattr(value, name))
+                   for name in ("value", "dx", "dy", "dxx", "dxy", "dyy"))
+    if isinstance(value, np.ndarray):
+        return all(_zero_jet(coefficient) for coefficient in value.flat)
+    return bool(value == 0)
+
+
 def _xlogx(value):
     if scalar_value(value) == 0:
-        if isinstance(value, FirstDerivative) and scalar_value(value.slope) != 0:
+        if not _zero_jet(value):
             raise ValueError("CEF site derivative diverges at zero site fraction")
         return 0.0
     return value * logarithm(value)

@@ -71,6 +71,18 @@ def check_operation_preconditions(
         and "solid" in state.phases.phases
         and sum(state.phases.phases["solid"].species_amounts_mol.values()) > constitution.tolerance
     )
+    if state.equipment is not None and any(
+        record.equipment_type == "database_aqueous_solid_liquid_filter"
+        and record.attached_vessel_id == state.vessel_id
+        and record.status != "parked"
+        for record in state.equipment.equipment.values()
+    ):
+        crystallized = state.phases is not None and any(
+            phase.phase_type == "solid"
+            and phase.metadata.get("pure_mineral") is True
+            and any(amount > 0 for amount in phase.species_amounts_mol.values())
+            for phase in state.phases.phases.values()
+        )
     distillate_ready = (
         state.phases is not None
         and "distillate" in state.phases.phases

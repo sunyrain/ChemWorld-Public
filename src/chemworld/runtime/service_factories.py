@@ -80,6 +80,12 @@ def bulk_process(context):
 
 
 def surface_processes(context):
+    from chemworld.physchem.catalysis_network import (
+        CATALYTIC_STATE_TYPE,
+        CatalyticMechanismSpec,
+        catalytic_process,
+        validate_catalytic_thermodynamics,
+    )
     from chemworld.physchem.surface_rates import surface_process
     from chemworld.physchem.surface_specs import (
         DEFAULT_SURFACE_MECHANISM,
@@ -96,6 +102,18 @@ def surface_processes(context):
         DEFAULT_SURFACE_MECHANISM if model_id is None
         else context.physics.models_of("surface")[model_id]
     )
+    if isinstance(spec, CatalyticMechanismSpec):
+        validate_catalytic_thermodynamics(
+            spec, context.physics.models_of("thermal")[context.state.vessel_id].thermodynamics
+        )
+        slots = tuple(
+            slot for slot in context.state.state_slots.slots
+            if slot.spec.state_type == CATALYTIC_STATE_TYPE
+            and slot.spec.mechanism_id == spec.mechanism_id
+        )
+        if not slots:
+            raise ValueError("declared catalytic process requires its owned site inventory")
+        return tuple(catalytic_process(slot, spec) for slot in slots)
     if isinstance(spec, MultisiteSurfaceSpec):
         from chemworld.physchem.coupled_system import ConstantCvThermodynamics
 
@@ -187,6 +205,30 @@ def finite_transport(composition):
     from chemworld.runtime.transport_devices import TransportRuntime
 
     return TransportRuntime(composition)
+
+
+def gas_reactor_network(composition):
+    from chemworld.runtime.gas_reactor_network import GasReactorNetworkRuntime
+
+    return GasReactorNetworkRuntime(composition)
+
+
+def aqueous_reactive_transport(composition):
+    from chemworld.runtime.aqueous_reactive_transport import AqueousReactiveTransportRuntime
+
+    return AqueousReactiveTransportRuntime(composition)
+
+
+def aqueous_gas_transfer(composition):
+    from chemworld.runtime.aqueous_gas_transfer import AqueousGasTransferRuntime
+
+    return AqueousGasTransferRuntime(composition)
+
+
+def molecular_process(composition):
+    from chemworld.runtime.molecular_process_runtime import MolecularProcessRuntime
+
+    return MolecularProcessRuntime(composition)
 
 
 def stochastic(composition):
@@ -293,7 +335,8 @@ def crystallization(context):
     from chemworld.runtime.crystallization_services import ChemWorldCrystallizationServices
 
     return ChemWorldCrystallizationServices(
-        context.world, context.species_view, thermal=context.services["reaction_thermal"]
+        context.world, context.species_view, thermal=context.services["reaction_thermal"],
+        physics=None if context.composition is None else context.composition.physics,
     )
 
 

@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
+from chemworld.data.records import trajectory_value
 from chemworld.data.schema import (
-    LEGACY_TRAJECTORY_SCHEMA_VERSIONS,
     OUTCOME_LAYER_FIELDS,
     SUPPORTED_TRAJECTORY_SCHEMA_VERSIONS,
+    TRAJECTORY_COMPATIBILITY_ALIASES,
     TRAJECTORY_SCHEMA_VERSION,
 )
-from chemworld.schemas.validation import TRAJECTORY_REQUIRED_KEYS
+from chemworld.schemas.validation import TRAJECTORY_REQUIRED_KEYS, TRAJECTORY_V02_REQUIRED_KEYS
 from chemworld.world.operations import PUBLIC_OBSERVATION_KEYS
 
 REQUIRED_RECORD_KEYS = TRAJECTORY_REQUIRED_KEYS
-LEGACY_RECORD_KEYS = REQUIRED_RECORD_KEYS - {"run_id", *OUTCOME_LAYER_FIELDS}
+LEGACY_RECORD_KEYS = TRAJECTORY_V02_REQUIRED_KEYS - {"run_id", *OUTCOME_LAYER_FIELDS}
 
 EVENT_ACTION_KEYS = {"operation"}
 
@@ -39,21 +41,22 @@ def validate_record(record: dict[str, Any]) -> None:
             f"{SUPPORTED_TRAJECTORY_SCHEMA_VERSIONS!r}"
         )
 
-    required_keys = (
-        LEGACY_RECORD_KEYS
-        if schema_version in LEGACY_TRAJECTORY_SCHEMA_VERSIONS
-        else REQUIRED_RECORD_KEYS
-    )
+    required_keys = {
+        "chemworld-trajectory-0.1": LEGACY_RECORD_KEYS,
+        "chemworld-trajectory-0.2": TRAJECTORY_V02_REQUIRED_KEYS,
+        TRAJECTORY_SCHEMA_VERSION: REQUIRED_RECORD_KEYS,
+    }[schema_version]
     missing = required_keys - record.keys()
     if missing:
         raise ValueError(f"Trajectory record is missing keys: {sorted(missing)}")
 
-    if schema_version == TRAJECTORY_SCHEMA_VERSION:
+    if schema_version != "chemworld-trajectory-0.1":
         for field_name in OUTCOME_LAYER_FIELDS:
             if not isinstance(record[field_name], dict):
                 raise ValueError(f"{field_name} must be an object")
         if not isinstance(record["run_id"], str) or not record["run_id"]:
             raise ValueError("run_id must be a non-empty string")
+    if schema_version == "chemworld-trajectory-0.2":
         benchmark_task_id = record.get("benchmark_task_id")
         if benchmark_task_id is not None and record["task_id"] != benchmark_task_id:
             raise ValueError("trajectory v0.2 task_id must identify the stable task contract")
@@ -71,9 +74,38 @@ def validate_record(record: dict[str, Any]) -> None:
                 "evaluation_outcome.leaderboard_score must match the leaderboard_score alias"
             )
 
+    if schema_version == TRAJECTORY_SCHEMA_VERSION:
+        aliases = set(TRAJECTORY_COMPATIBILITY_ALIASES).intersection(record)
+        if aliases:
+            raise ValueError(f"trajectory v0.3 prohibits compatibility aliases: {sorted(aliases)}")
+        if not isinstance(record["task_id"], str) or not record["task_id"]:
+            raise ValueError("task_id must be a non-empty string")
+        required_children = {
+            "environment_outcome": {"observation": dict},
+            "agent_visible_observation": {
+                "observation": dict,
+                "views": dict,
+                "observed_reward": (int, float),
+            },
+            "evaluation_outcome": {
+                "online_transition_reward": (int, float),
+                "leaderboard_score": (int, float, type(None)),
+            },
+        }
+        for layer, children in required_children.items():
+            for key, expected_type in children.items():
+                value = record[layer].get(key)
+                if key not in record[layer] or not isinstance(value, expected_type):
+                    raise ValueError(f"{layer}.{key} is missing or has an invalid type")
+                if isinstance(value, bool) or (
+                    isinstance(value, int | float) and not math.isfinite(value)
+                ):
+                    raise ValueError(f"{layer}.{key} must be finite and non-boolean")
+
+    observation = trajectory_value(record, "observation")
     if not isinstance(record["action"], dict):
         raise ValueError("Trajectory action must be a JSON object")
-    if not isinstance(record["observation"], dict):
+    if not isinstance(observation, dict):
         raise ValueError("Trajectory observation must be a JSON object")
     if not isinstance(record.get("observed_mask", {}), dict):
         raise ValueError("Trajectory observed_mask must be a JSON object")
@@ -81,13 +113,13 @@ def validate_record(record: dict[str, Any]) -> None:
     if action_missing:
         raise ValueError(f"Action is missing keys: {sorted(action_missing)}")
 
-    observation_missing = REQUIRED_OBSERVATION_KEYS - record["observation"].keys()
+    observation_missing = REQUIRED_OBSERVATION_KEYS - observation.keys()
     if observation_missing:
         raise ValueError(f"Observation is missing keys: {sorted(observation_missing)}")
 
     observed_mask = record.get("observed_mask", {})
     for key in REQUIRED_OBSERVATION_KEYS:
-        raw_value = record["observation"][key]
+        raw_value = observation[key]
         if raw_value is None:
             if observed_mask.get(key, False):
                 raise ValueError(f"Observed key {key} cannot be null")

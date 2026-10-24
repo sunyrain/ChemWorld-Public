@@ -825,9 +825,14 @@ class CoupledSystem:
                     trial_extensions[key] = max(trial_extensions.get(key, 0.0), -value)
             return result
 
+        def temperature(vector: np.ndarray) -> float:
+            # Isothermal temperature is a fixed external parameter. A solver
+            # scale round trip must not perturb it in rates, events or output.
+            return state.temperature_K if self.isothermal else float(vector[count])
+
         def view(time: float, vector: np.ndarray, algebraic_values=None) -> CoupledStateView:
             return CoupledStateView(
-                amounts(vector), float(vector[count]), state.volume_L, state.time_s + time,
+                amounts(vector), temperature(vector), state.volume_L, state.time_s + time,
                 coordinates=dict(zip(coordinate_keys, vector[coordinate_offset:], strict=True)),
                 algebraic_values={} if algebraic_values is None else algebraic_values,
             )
@@ -882,7 +887,7 @@ class CoupledSystem:
             offset = count + 5
             return CoupledState(
                 amounts(vector, record=True),
-                float(vector[count]),
+                temperature(vector),
                 state.volume_L,
                 state.time_s + time,
                 state.boundary_heat_J + float(vector[count + 1]),
@@ -935,7 +940,7 @@ class CoupledSystem:
                     raw = scaled * scales
                     trial = CoupledStateView(
                         dict(zip(keys, raw[:count], strict=True)),
-                        float(raw[count]),
+                        temperature(raw),
                         state.volume_L,
                         state.time_s + time,
                         coordinates=dict(zip(

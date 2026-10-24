@@ -17,6 +17,7 @@ from typing import Any
 
 import numpy as np
 
+from chemworld.data.records import trajectory_value
 from chemworld.eval.explanations import score_mechanism_explanation
 from chemworld.world.operations import PUBLIC_OBSERVATION_KEYS
 
@@ -315,7 +316,7 @@ def _final_assay_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         record
         for record in records
-        if record.get("leaderboard_score") is not None
+        if trajectory_value(record, 'leaderboard_score', None) is not None
         and record.get("transaction_status", record.get("info", {}).get("transaction_status"))
         in {None, "committed"}
     ]
@@ -327,8 +328,8 @@ def _terminal_observation_value(records: list[dict[str, Any]], metric_id: str) -
         raise ValueError("trajectory has no committed final assay")
     final = assays[-1]
     if metric_id == "score":
-        return _finite(final["leaderboard_score"], "leaderboard_score")
-    observation = final.get("observation", {})
+        return _finite(trajectory_value(final, 'leaderboard_score'), "leaderboard_score")
+    observation = trajectory_value(final, 'observation', {})
     if not isinstance(observation, dict) or observation.get(metric_id) is None:
         raise ValueError(f"final assay does not expose declared metric: {metric_id}")
     return _finite(observation[metric_id], f"observation.{metric_id}")
@@ -357,10 +358,13 @@ def _trajectory_value(
     if metric_id == "final_assay_score":
         if not assays:
             raise ValueError("trajectory has no committed final assay")
-        value = _finite(assays[-1]["leaderboard_score"], "leaderboard_score")
+        value = _finite(trajectory_value(assays[-1], 'leaderboard_score'), "leaderboard_score")
         return value, {"committed_final_assay_count": len(assays)}
     if metric_id == "sample_efficiency":
-        scores = [_finite(record["leaderboard_score"], "leaderboard_score") for record in assays]
+        scores = [
+            _finite(trajectory_value(record, "leaderboard_score"), "leaderboard_score")
+            for record in assays
+        ]
         hit = next((index + 1 for index, score in enumerate(scores) if score >= threshold), None)
         value = 0.0 if hit is None else 1.0 - (hit - 1) / max(len(scores), 1)
         return value, {

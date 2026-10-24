@@ -289,10 +289,65 @@ class CompositionPhysics:
 
     def available_operations(self, operations, modules, vessel: str) -> tuple[str, ...]:
         """Intersect declared thermal actions with the installed device capability."""
+        from chemworld.runtime.aqueous_filtration import aqueous_filter_record
+        from chemworld.runtime.aqueous_gas_transfer import aqueous_gas_transfer_record
         from chemworld.runtime.aqueous_mineral import aqueous_record
+        from chemworld.runtime.aqueous_mineral_kinetics import database_mineral_record
+        from chemworld.runtime.aqueous_precipitation import precipitation_record
+        from chemworld.runtime.aqueous_reactive_transport import aqueous_transport_members
+        from chemworld.runtime.calphad_thermal import CalphadThermalSpec
+        from chemworld.runtime.electrodialysis import electrodialysis_record
+        from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalSpec
+
+        local_state = self.initial_states[vessel]
+        if precipitation_record(local_state) is not None:
+            allowed_precipitation = {
+                "wait", "route_material", "select_vessel", "terminate",
+            }
+            if aqueous_filter_record(local_state) is not None:
+                allowed_precipitation.add("filter_crystals")
+            operations = tuple(op for op in operations if op in allowed_precipitation)
+        if aqueous_gas_transfer_record(local_state) is not None:
+            operations = tuple(op for op in operations if op in {
+                "wait", "select_vessel", "terminate",
+            })
+        if vessel in aqueous_transport_members(self):
+            operations = tuple(op for op in operations if op in {
+                "wait", "select_vessel", "terminate",
+            })
+        if vessel in self.models_of("stochastic_hybrid"):
+            operations = tuple(op for op in operations if op in {
+                "wait", "measure", "configure_instrument", "select_vessel", "terminate",
+            })
+        if vessel in self.models_of("molecular_process"):
+            operations = tuple(op for op in operations if op in {"wait", "terminate"})
+        if isinstance(self.models_of("calphad_material").get(vessel), CalphadThermalSpec):
+            operations = tuple(op for op in operations if op in {
+                "heat", "wait", "measure", "configure_instrument", "pause_control",
+                "resume_control", "select_vessel", "terminate",
+            })
+        if isinstance(self.models_of("flash").get(vessel), MolecularFlashThermalSpec):
+            operations = tuple(op for op in operations if op in {
+                "heat", "wait", "measure", "configure_instrument", "pause_control",
+                "resume_control", "select_vessel", "terminate",
+            })
+        if electrodialysis_record(local_state) is not None:
+            operations = tuple(op for op in operations if op in {
+                "configure_electrical_control", "wait", "select_vessel", "terminate",
+            })
+        elif not any(
+            record.attached_vessel_id == vessel and "electrical_control" in record.settings
+            for record in local_state.equipment.equipment.values()
+        ):
+            operations = tuple(op for op in operations if op != "configure_electrical_control")
+
+        if database_mineral_record(self.initial_states[vessel]) is not None:
+            operations = tuple(op for op in operations if op in {
+                "wait", "select_vessel", "terminate",
+            })
 
         thermal = self.models_of("thermal").get(vessel)
-        if thermal is not None and thermal.pressure_law == "helmholtz":
+        if thermal is not None and thermal.uses_eos_pressure:
             operations = tuple(op for op in operations if op in {
                 "heat", "wait", "pause_control", "resume_control", "measure",
                 "select_vessel", "configure_instrument", "terminate",
@@ -592,7 +647,7 @@ class CompositionPhysics:
                     for model in self.models_of(model_id).values():
                         declaration.validate_feed(source, model)
         if self.network.stochastic is None and bool(self.network.reactions) != (
-            "reaction" in spec.component_kinds
+            "reaction" in spec.component_kinds or bool(self.models_of("stochastic_hybrid"))
         ):
             raise ValueError("bulk reactions require a reaction component and a nonempty network")
         instance = self.generate(self.scenario_spec(spec.composition_id, spec.world_split), 0)
@@ -626,12 +681,21 @@ class CompositionPhysics:
                 from chemworld.physchem.helmholtz_equilibrium_thermal import (
                     HelmholtzEquilibriumIsochoricThermodynamics,
                 )
+                from chemworld.physchem.humid_air_thermal import HumidAirIsochoricThermodynamics
+                from chemworld.physchem.water_if97_thermal import IF97IsochoricThermodynamics
+                from chemworld.runtime.aqueous_gas_transfer import aqueous_gas_transfer_record
 
                 thermal = self.models_of("thermal").get(name)
-                if thermal is None or not isinstance(
-                    thermal.thermodynamics, HelmholtzEquilibriumIsochoricThermodynamics
-                ):
-                    raise ValueError("aggregate fluid phase requires equilibrium Helmholtz closure")
+                headspace = aqueous_gas_transfer_record(state) is not None and any(
+                    c.kind == "aqueous_gas_transfer" and c.vessel == name
+                    for c in spec.components
+                )
+                if not headspace and (thermal is None or not isinstance(
+                        thermal.thermodynamics,
+                        (HelmholtzEquilibriumIsochoricThermodynamics, IF97IsochoricThermodynamics,
+                         HumidAirIsochoricThermodynamics))):
+                    raise ValueError(
+                        "aggregate fluid phase requires a declared EOS or finite headspace closure")
             elif state.phase not in {"liquid", "gas", "solid", "formal"}:
                 raise ValueError("initial state needs an explicit supported phase")
             report = constitution.check_state(state)

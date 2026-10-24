@@ -125,7 +125,7 @@ class NativeCalibration(MeasurementCalibration):
                 e.actions, e.readouts, e.seed,
             ) for e in experiments
         )
-        if len({p.path for p in parameters}) != len(parameters):
+        if len({self._binding_identity(p) for p in parameters}) != len(parameters):
             raise ValueError("two parameters cannot write the same physical model field")
         groups = {row.group_id for row in table.rows}
         if (
@@ -136,7 +136,7 @@ class NativeCalibration(MeasurementCalibration):
         seen = set()
         for experiment in self.experiments:
             # Check all paths and ordinary model constructors before optimization.
-            parameterized_world(experiment, parameters, self.initial_values)
+            self._candidate(experiment, self.initial_values)
             for readout in experiment.readouts:
                 key = (readout.row_id, readout.quantity_id)
                 row = self.rows.get(readout.row_id)
@@ -159,6 +159,14 @@ class NativeCalibration(MeasurementCalibration):
         if seen != expected:
             raise ValueError("fixed readouts must cover every observation, including invalid data")
 
+    def _binding_identity(self, parameter):
+        """The unique declared model field, specialized by named-control adapters."""
+        return parameter.path
+
+    def _candidate(self, experiment, values):
+        """Prepare a candidate without changing the one public-history executor."""
+        return parameterized_world(experiment, self.parameters, values), experiment.actions
+
     def forward(self, values, split, *, stage="prediction"):
         predictions = {}
         for experiment in self.experiments:
@@ -175,10 +183,10 @@ class NativeCalibration(MeasurementCalibration):
             self.runs.append(record)
             session = None
             try:
-                spec = parameterized_world(experiment, self.parameters, values)
+                spec, actions = self._candidate(experiment, values)
                 session = ChemWorldRuntime(composition=spec, debug_truth=False)
                 session.reset(seed=experiment.seed)
-                for index, action in enumerate(experiment.actions):
+                for index, action in enumerate(actions):
                     result = session.execute(deepcopy(action))
                     info = result.info
                     acquisition = info.get("outcome_diagnostics", {}).get("acquisition", {})
@@ -198,7 +206,7 @@ class NativeCalibration(MeasurementCalibration):
                         )
                     if (
                         (result.truncated or result.terminated)
-                        and index < len(experiment.actions) - 1
+                        and index < len(actions) - 1
                     ):
                         raise ForwardEvaluationError(
                             "native session ended before the fixed history"

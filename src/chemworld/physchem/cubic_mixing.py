@@ -113,6 +113,36 @@ def _mhv_alpha(target: Any, initial: float, s1: float, s2: float) -> Any:
     return alpha
 
 
+def quadratic_cubic_mixing(
+    xs: Sequence[Any], attractions: Sequence[Any], covolumes: Sequence[Any],
+    interactions: Sequence[Sequence[Any]], *,
+    covolume_interactions: Sequence[Sequence[Any]] | None = None,
+) -> tuple[Any, Any]:
+    """Quadratic attraction and explicit linear or pairwise covolume mixing.
+
+    The default preserves the original linear covolume convention. Explicit
+    lij use bij=(bi+bj)/2*(1-lij), including temperature/composition derivatives
+    carried by the supplied arithmetic. Parameter validation belongs to the
+    model declaration; this shared expression checks matching dimensions.
+    """
+    count = len(xs)
+    if (len(attractions) != count or len(covolumes) != count or len(interactions) != count
+            or any(len(row) != count for row in interactions)):
+        raise ValueError("cubic mixing parameter dimensions must match composition")
+    if covolume_interactions is not None and (
+        len(covolume_interactions) != count
+        or any(len(row) != count for row in covolume_interactions)
+    ):
+        raise ValueError("cubic covolume interaction dimensions must match composition")
+    b_mix = (sum(x*b for x, b in zip(xs, covolumes, strict=True))
+             if covolume_interactions is None else
+             sum(xs[i]*xs[j]*(covolumes[i]+covolumes[j])/2*(1-covolume_interactions[i][j])
+                 for i in range(count) for j in range(count)))
+    return (sum(xs[i]*xs[j]*(attractions[i]*attractions[j])**.5*(1-interactions[i][j])
+                for i in range(count) for j in range(count)),
+            b_mix)
+
+
 def cubic_mixing_expression(
     spec: CubicEOSSpec, xs: Sequence[Any], temperature: Any,
 ) -> tuple[Any, Any]:
@@ -130,10 +160,10 @@ def cubic_mixing_expression(
         coefficients=c.alpha_coefficients if c.alpha_model == "twu91" else (p.kappa,))
         for c, p in zip(spec.components, pure, strict=True)]
     bi = [p.b for p in pure]
-    b_mix = sum(x*b for x, b in zip(xs, bi, strict=True))
     if spec.ge_mixing is None:
-        a_mix = 0.0
+        interactions = []
         for i, left in enumerate(spec.component_ids):
+            row = []
             for j, right in enumerate(spec.component_ids):
                 kij = _binary_interaction(spec, left, right)
                 if i == j:
@@ -141,13 +171,36 @@ def cubic_mixing_expression(
                 elif spec.predictive_interaction is not None:
                     kij = ppr78_value(spec.predictive_interaction, left, right, temperature,
                                       ai[i], ai[j], bi[i], bi[j])
-                a_mix += xs[i]*xs[j]*(ai[i]*ai[j])**0.5*(1-kij)
-        return a_mix, b_mix
-    mixing = spec.ge_mixing
+                row.append(kij)
+            interactions.append(row)
+        return quadratic_cubic_mixing(xs, ai, bi, interactions)
+    return gibbs_excess_cubic_mixing(
+        spec.ge_mixing, spec.model, spec.component_ids, xs, temperature, ai, bi)
+
+
+def gibbs_excess_cubic_mixing(
+    mixing: GibbsExcessMixingSpec, model: str, component_ids: Sequence[str],
+    xs: Sequence[Any], temperature: Any, attractions: Sequence[Any],
+    covolumes: Sequence[float], gas_constant: float = R,
+) -> tuple[Any, Any]:
+    """GE mixing of explicit pure parameters, shared by the original cubic and CPA.
+
+    The supplied R is used for a/(bRT); the activity model independently defines
+    dimensionless gE/(RT). No critical-property conversion is needed for CPA.
+    """
+    if (model not in ("peng_robinson", "srk")
+            or tuple(component_ids) != mixing.activity.component_ids
+            or len(xs) != len(component_ids) or len(attractions) != len(xs)
+            or len(covolumes) != len(xs)):
+        raise ValueError("GE cubic shape, component order and parameters must agree")
+    if not isfinite(gas_constant) or gas_constant <= 0:
+        raise ValueError("GE cubic mixing requires positive finite R")
+    ai, bi = attractions, covolumes
+    b_mix = sum(x*b for x, b in zip(xs, bi, strict=True))
     excess = reduced_gibbs(mixing.activity, xs, temperature)
-    alphas = [a/(b*R*temperature) for a, b in zip(ai, bi, strict=True)]
+    alphas = [a/(b*gas_constant*temperature) for a, b in zip(ai, bi, strict=True)]
     mean = sum(x*alpha for x, alpha in zip(xs, alphas, strict=True))
-    s1, s2 = _shape(spec.model)
+    s1, s2 = _shape(model)
     shape_c = -log((1+s1)/(1+s2))/(s1-s2)
     volume_term = sum(x*logarithm(b_mix/b) for x, b in zip(xs, bi, strict=True))
     if mixing.rule == "huron_vidal":
@@ -170,15 +223,15 @@ def cubic_mixing_expression(
     else:
         alpha = mean+excess/shape_c
         q = 0.0
-        for i, left in enumerate(spec.component_ids):
-            for j, right in enumerate(spec.component_ids):
+        for i, left in enumerate(component_ids):
+            for j, right in enumerate(component_ids):
                 kij = 0. if i == j else mixing.binary_interaction["|".join(sorted((left, right)))]
-                q += xs[i]*xs[j]*((bi[i]-ai[i]/(R*temperature))
-                                  +(bi[j]-ai[j]/(R*temperature)))/2*(1-kij)
+                q += xs[i]*xs[j]*((bi[i]-ai[i]/(gas_constant*temperature))
+                                  +(bi[j]-ai[j]/(gas_constant*temperature)))/2*(1-kij)
         if abs(scalar_value(1-alpha)) < 1e-12:
             raise ValueError("Wong-Sandler mixture covolume denominator is singular")
         b_mix = q/(1-alpha)
-    a_mix = alpha*b_mix*R*temperature
+    a_mix = alpha*b_mix*gas_constant*temperature
     if scalar_value(a_mix) < 0 or scalar_value(b_mix) <= 0:
         raise ValueError("GE mixing produced invalid attraction/covolume")
     return a_mix, b_mix
@@ -189,11 +242,28 @@ def cubic_residual_helmholtz(
 ) -> Any:
     """Molar residual A in J/mol relative to ideal gas at the same T,V,x."""
     a, b = cubic_mixing_expression(spec, xs, temperature)
-    s1, s2 = _shape(spec.model)
     if scalar_value(molar_volume-b) <= 0:
         raise ValueError("cubic Helmholtz volume must exceed mixture covolume")
-    return (-R*temperature*logarithm(1-b/molar_volume)
-            -a/(b*(s1-s2))*logarithm((molar_volume+s1*b)/(molar_volume+s2*b)))
+    return cubic_residual_from_parameters(spec.model, a, b, temperature, 1/molar_volume)
+
+
+def cubic_residual_from_parameters(
+    model: str, attraction: Any, covolume: Any, temperature: Any, molar_density: Any,
+    gas_constant: float = R,
+) -> Any:
+    """Shared molar residual A in J/mol, including the analytic vacuum limit.
+
+    Used by the original cubic EOS and CPA with independently fitted a0/b/c1.
+    No pseudo-critical parameters are manufactured from CPA fitting data.
+    """
+    if model not in ("peng_robinson", "srk"):
+        raise ValueError("unknown cubic Helmholtz shape")
+    if scalar_value(covolume) <= 0 or not 0 <= scalar_value(covolume*molar_density) < 1:
+        raise ValueError("cubic Helmholtz density must be below the covolume pole")
+    s1, s2 = _shape(model)
+    br = covolume*molar_density
+    return (-gas_constant*temperature*logarithm(1-br)
+            -attraction/(covolume*(s1-s2))*logarithm((1+s1*br)/(1+s2*br)))
 
 
 def cubic_helmholtz_fugacities(

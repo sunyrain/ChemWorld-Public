@@ -37,6 +37,6 @@ def test_nested_composition_and_explicit_piecewise_branch():
     )
     assert derivative_values(lambda x: positive_part(x - 4) ** 4, 3, order=3) == (0, 0, 0, 0)
     assert derivative_values(lambda x: positive_part(x - 4) ** 4, 5, order=3) == (1, 4, 12, 24)
-    for order in (-1, 4, True, 1.0):
+    for order in (-1, 5, True, 1.0):
         with pytest.raises(ValueError):
             derivative_values(lambda x: x, 2, order=order)

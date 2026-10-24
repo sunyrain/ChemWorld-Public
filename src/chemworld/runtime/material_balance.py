@@ -37,6 +37,11 @@ class ServiceMaterialBoundary:
         operation = str(action["operation"])
         if before.lab_clock is not None and operation == "wait":
             return self.services.lab_schedule.boundary(before, after)
+        if operation == "wait":
+            selected = self.services.reaction_thermal.advancer.strategy(before)
+            boundary = None if selected is None else getattr(selected[1], "material_boundary", None)
+            if boundary is not None:
+                return boundary(before, after, action)
         exchanges: list[MaterialExchange] = []
         stocks: dict[str, float] = {}
         unmodeled: list[str] = list(formal_inventory_exclusions(before))

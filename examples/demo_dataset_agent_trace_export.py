@@ -9,6 +9,7 @@ from typing import Any
 from chemworld.agents.llm import ToolUsingLLMStubAgent
 from chemworld.data.datasets import export_dataset, flatten_record
 from chemworld.data.logging import load_jsonl
+from chemworld.data.records import trajectory_value
 from chemworld.eval.runner import run_agent
 
 
@@ -52,13 +53,13 @@ def build_demo(root: str | Path = Path("runs") / "demo_agent_trace_dataset") -> 
         "jsonl_export": jsonl_result.to_dict(),
         "parquet_export": parquet_status,
         "record_count": len(records),
-        "final_reward": final_record["reward"],
+        "final_reward": trajectory_value(final_record, 'reward'),
         "agent_trace_step_count": flattened["agent_trace_step_count"],
         "agent_trace_selected_action": flattened["agent_trace_selected_action"],
         "agent_trace_validation_result": flattened["agent_trace_validation_result"],
         "agent_trace_observation_summary": flattened["agent_trace_observation_summary"],
         "agent_trace_memory_note": flattened["agent_trace_memory_note"],
-        "lab_report_text": final_record["agent_view"]["lab_report"]["text"],
+        "lab_report_text": trajectory_value(final_record, 'agent_view')["lab_report"]["text"],
     }
 
 

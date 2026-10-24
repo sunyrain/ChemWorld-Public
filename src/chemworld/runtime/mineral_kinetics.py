@@ -1,4 +1,4 @@
-"""Material-owned calcite surface geometry and one shared-clock kinetic owner."""
+"""Material-owned mineral geometry and one physical kinetic owner per vessel."""
 
 from dataclasses import replace
 from math import isclose
@@ -92,10 +92,22 @@ class MineralKineticsRuntime:
     supported_operations = ("wait",)
 
     def __init__(self, composition=None):
+        from chemworld.runtime.aqueous_mineral_kinetics import DatabaseMineralKineticsRuntime
+
         self.composition = composition
+        self.database = DatabaseMineralKineticsRuntime(composition)
 
     def supports(self, state):
-        return kinetic_record(state) is not None
+        legacy, database = kinetic_record(state) is not None, self.database.supports(state)
+        if legacy and database:
+            raise ValueError("one mineral compartment cannot own competing kinetic models")
+        return legacy or database
+
+    def validate_state(self, state):
+        if self.database.supports(state):
+            self.database.validate_state(state)
+        else:
+            mineral_geometry(state)
 
     def validate_world(self):
         if self.composition is None or self.composition.physics is None:
@@ -105,8 +117,11 @@ class MineralKineticsRuntime:
         declared = {c.vessel for c in self.composition.components if c.kind == "mineral_kinetics"}
         if installed != declared:
             raise ValueError("kinetic mineral compartments require their unique declared owner")
+        self.database.validate_world()
         for vessel in installed:
             state = physics.initial_states[vessel]
+            if self.database.supports(state):
+                continue
             if not aqueous_model(state).allow_calcite:
                 raise ValueError("kinetic mineral requires its allowed calcite phase")
             MineralKineticsSpec.from_dict(kinetic_record(state).settings["mineral_kinetics"])
@@ -122,6 +137,8 @@ class MineralKineticsRuntime:
                 failure_reason="mineral_temperature_data_unavailable",
                 diagnostics={},
             )
+        if self.database.supports(state):
+            return self.database.advance(state, action, heat=heat, jacket_program=jacket_program)
         try:
             model = MineralKineticsSpec.from_dict(
                 kinetic_record(state).settings["mineral_kinetics"]

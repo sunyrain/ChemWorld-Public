@@ -13,7 +13,6 @@ import numpy as np
 from chemworld import __version__
 from chemworld.data.schema import (
     TRAJECTORY_ALIAS_WRITE_REMOVAL_VERSION,
-    TRAJECTORY_COMPATIBILITY_ALIASES,
     TRAJECTORY_SCHEMA_VERSION,
 )
 from chemworld.runtime.semantics import RUNTIME_SEMANTICS_ID
@@ -53,7 +52,7 @@ def action_payload(action: dict[str, Any]) -> dict[str, Any]:
 class TrajectoryLogger:
     """Append-only JSONL logger for benchmark trajectories."""
 
-    compatibility_aliases = TRAJECTORY_COMPATIBILITY_ALIASES
+    compatibility_aliases: tuple[str, ...] = ()
     compatibility_alias_write_removal_version = TRAJECTORY_ALIAS_WRITE_REMOVAL_VERSION
 
     def __init__(self, path: str | Path) -> None:
@@ -346,19 +345,6 @@ class TrajectoryLogger:
             "timestamp": datetime.now(UTC).isoformat(),
             "explanation": explanation or {},
         }
-        # The v0.2 writer materializes these five v0.1 aliases only through this
-        # bounded compatibility block. New readers must use the three outcome
-        # layers; alias writes end at TRAJECTORY_ALIAS_WRITE_REMOVAL_VERSION.
-        compatibility_aliases = {
-            "benchmark_task_id": task_info.get("task_id"),
-            "observation": observation_payload,
-            "reward": float(reward),
-            "agent_view": to_builtin(agent_view or {}),
-            "leaderboard_score": to_builtin(info.get("leaderboard_score")),
-        }
-        if tuple(compatibility_aliases) != self.compatibility_aliases:
-            raise RuntimeError("trajectory compatibility alias contract drifted")
-        payload.update(compatibility_aliases)
         self._handle.write(json.dumps(payload, sort_keys=True) + "\n")
         self._handle.flush()
 

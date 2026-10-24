@@ -216,7 +216,7 @@ def test_native_reactor_and_heater_share_current_temperature_and_composition(mon
     try:
         session.reset(seed=12)
         baseline = surface_world_spec(include_surface=False, include_bulk=True)
-        constants = baseline.physics.thermal_models["reactor"].thermodynamics
+        constants = baseline.physics.models_of('thermal')["reactor"].thermodynamics
 
         def energy(state, support=constants.support_heat_capacity_J_K):
             t = state.temperature_K
@@ -251,7 +251,7 @@ def test_native_reactor_and_heater_share_current_temperature_and_composition(mon
         assert len({round(t, 4) for t, _ in calls}) > 5
         assert any(values.get("CO2", 0) > 0 for _, values in calls)
         assert session._state.species_amounts["CO2"] > 0
-        receiver_support = baseline.physics.thermal_models[
+        receiver_support = baseline.physics.models_of('thermal')[
             "receiver"].thermodynamics.support_heat_capacity_J_K
         total_before = energy(session._state) + energy(
             session._state.inactive_vessels["receiver"], receiver_support)
@@ -302,7 +302,7 @@ def test_native_heater_and_equipment_consume_the_same_caloric_state():
     try:
         session.reset(seed=12)
         session.execute({"operation": "add_component", "component": "CO-feed", "amount_mol": 6e-5})
-        model = spec.physics.thermal_models["reactor"]
+        model = spec.physics.models_of('thermal')["reactor"]
         thermo, state = local_thermodynamics(session._state, model)
         device = next(value.settings["thermal_device"]
                       for value in session._state.equipment.equipment.values()

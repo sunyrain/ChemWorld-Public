@@ -97,14 +97,17 @@ def test_standard_gibbs_derivative_matches_caloric_enthalpy():
 
 def test_authored_runtime_cannot_use_a_conflicting_caloric_reference():
     world = surface_world_spec(surface_spec=MultisiteSurfaceSpec())
-    models = dict(world.physics.thermal_models)
+    models = dict(world.physics.models_of('thermal'))
     model = models["reactor"]
     models["reactor"] = replace(
         model, thermodynamics=replace(model.thermodynamics, reference_temperature_K=300)
     )
     with pytest.raises(ValueError, match="same declared table"):
         ChemWorldRuntime(
-            composition=replace(world, physics=replace(world.physics, thermal_models=models))
+            composition=replace(
+                world,
+                physics=replace(world.physics, models={**world.physics.models, "thermal": models}),
+            )
         )
 
 
@@ -195,7 +198,7 @@ def test_actual_session_material_transfer_keeps_both_site_classes_and_total_ener
             thermo.internal_energy_j(packed)
             for name in ("reactor", "receiver")
             for thermo, packed in (
-                local_thermodynamics(locals_[name], world.physics.thermal_models[name]),
+                local_thermodynamics(locals_[name], world.physics.models_of('thermal')[name]),
             )
         )
 

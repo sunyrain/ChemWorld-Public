@@ -30,7 +30,7 @@ class Quantity:
 # canonical table also includes non-SI choices such as litres and grams/mole.
 COHERENT_SI_UNITS = ("dimensionless", "s", "m", "m^3", "mol", "kg", "K", "A", "Pa", "J", "W",
     "V", "C", "Ohm", "F", "Hz", "mol/m^3", "mol/s", "J/mol", "J/(mol*K)", "kg/m^3",
-    "Pa*s", "N/m", "m/s", "m^2/s", "V/K")
+    "Pa*s", "N/m", "m/s", "m^2/s", "V/K", "m^2", "m^2/A", "A/m^2", "S/m")
 
 
 _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
@@ -53,6 +53,8 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "mol/L": ("concentration", "mol/L", 1.0, 0.0),
     "mol/m^3": ("concentration", "mol/L", 0.001, 0.0),
     "m/s": ("velocity", "m/s", 1.0, 0.0),
+    "m^2": ("area", "m^2", 1.0, 0.0),
+    "m^2/A": ("inverse_current_density", "m^2/A", 1.0, 0.0),
     "s/m^(1/3)": ("manning_roughness", "s/m^(1/3)", 1.0, 0.0),
     "m^0.5/s": ("chezy_coefficient", "m^0.5/s", 1.0, 0.0),
     "kg": ("mass", "kg", 1.0, 0.0),
@@ -120,6 +122,10 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "A": ("electrical_current", "A", 1.0, 0.0),
     "mA": ("electrical_current", "A", 0.001, 0.0),
     "uA": ("electrical_current", "A", 1e-6, 0.0),
+    "A/m^2": ("electrical_current_density", "A/m^2", 1.0, 0.0),
+    "mA/cm^2": ("electrical_current_density", "A/m^2", 10.0, 0.0),
+    "S/m": ("electrical_conductivity", "S/m", 1.0, 0.0),
+    "S/cm": ("electrical_conductivity", "S/m", 100.0, 0.0),
     "V": ("electric_potential", "V", 1.0, 0.0),
     "mV": ("electric_potential", "V", 0.001, 0.0),
     "V/K": ("electric_potential_per_temperature", "V/K", 1.0, 0.0),
@@ -135,6 +141,9 @@ _UNIT_TABLE: dict[str, tuple[str, str, float, float]] = {
     "F": ("capacitance", "F", 1.0, 0.0),
     "uF": ("capacitance", "F", 1e-6, 0.0),
     "Hz": ("frequency", "Hz", 1.0, 0.0),
+    # Inverse-time rates share T^-1; input tables may retain rate notation.
+    "1/s": ("frequency", "Hz", 1.0, 0.0),
+    "s^-1": ("frequency", "Hz", 1.0, 0.0),
     "ppm": ("chemical_shift", "ppm", 1.0, 0.0),
     "ppmv": ("gas_volume_fraction", "gas_volume_fraction", 1e-6, 0.0),
     "gas_volume_fraction": ("gas_volume_fraction", "gas_volume_fraction", 1.0, 0.0),

@@ -208,9 +208,17 @@ def test_flash_thermal_stop_commits_actual_heat_and_time():
     from chemworld.world.vle_world import vle_world_spec
 
     spec = vle_world_spec(synthetic_vle_properties())
-    model = replace(spec.physics.flash_models["reactor"], stop_temperature_K=360)
-    spec = replace(spec, physics=replace(spec.physics, flash_models={
-        **spec.physics.flash_models, "reactor": model}))
+    model = replace(spec.physics.models_of('flash')["reactor"], stop_temperature_K=360)
+    spec = replace(
+        spec,
+        physics=replace(
+            spec.physics,
+            models={
+                **spec.physics.models,
+                "flash": {**spec.physics.models_of("flash"), "reactor": model},
+            },
+        ),
+    )
     session = ChemWorldRuntime(composition=spec)
     try:
         session.reset(seed=12)
@@ -259,12 +267,21 @@ def test_complete_transfer_preserves_distinct_apparatus_capacities_and_empty_sou
     from chemworld.world.vle_world import vle_world_spec
 
     spec = vle_world_spec(synthetic_vle_properties())
-    receiver = replace(spec.physics.flash_models["receiver"], support_heat_capacity_J_K=2)
+    receiver = replace(spec.physics.models_of('flash')["receiver"], support_heat_capacity_J_K=2)
     states = dict(spec.physics.initial_states)
     states["receiver"] = install_flash(states["receiver"], receiver,
                                        receiver.at_tp(states["receiver"].species_amounts, 300))
-    spec = replace(spec, physics=replace(spec.physics, initial_states=states,
-        flash_models={**spec.physics.flash_models, "receiver": receiver}))
+    spec = replace(
+        spec,
+        physics=replace(
+            spec.physics,
+            initial_states=states,
+            models={
+                **spec.physics.models,
+                "flash": {**spec.physics.models_of("flash"), "receiver": receiver},
+            },
+        ),
+    )
     session = ChemWorldRuntime(composition=spec)
     try:
         session.reset(seed=12)

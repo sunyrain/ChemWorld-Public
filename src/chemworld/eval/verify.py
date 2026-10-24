@@ -9,6 +9,7 @@ from typing import Any, cast
 import gymnasium as gym
 
 import chemworld  # noqa: F401
+from chemworld.data.records import trajectory_value
 from chemworld.data.validation import validate_records
 from chemworld.envs.chemworld_env import ChemWorldEnv
 from chemworld.runtime.semantics import RUNTIME_SEMANTICS_ID
@@ -184,7 +185,7 @@ def verify_records(
             )
     first = records[0]
     composition_request = first.get("composition_request")
-    benchmark_task_id = first.get("benchmark_task_id")
+    benchmark_task_id = trajectory_value(first, 'benchmark_task_id', None)
     env_kwargs: dict[str, Any]
     if isinstance(composition_request, dict):
         env_kwargs = {
@@ -347,7 +348,7 @@ def verify_records(
                     break
             replay_audit_info = {**info, **replay_provenance}
             replay_observation = _scalar_observation(observation)
-            recorded_observation = record["observation"]
+            recorded_observation = trajectory_value(record, 'observation')
             if (
                 campaign_resource_card
                 and campaign_resource_card.get("hard_limits", {}).get("per_batch")
@@ -395,14 +396,14 @@ def verify_records(
                     ),
                 )
 
-            reward_error = abs(float(record["reward"]) - float(reward))
+            reward_error = abs(float(trajectory_value(record, 'reward')) - float(reward))
             max_abs_error = max(max_abs_error, reward_error)
             if reward_error > tolerance:
                 mismatches.append(
                     {
                         "step": record["step"],
                         "field": "reward",
-                        "recorded": float(record["reward"]),
+                        "recorded": float(trajectory_value(record, 'reward')),
                         "replayed": float(reward),
                         "abs_error": reward_error,
                     }

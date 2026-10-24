@@ -21,6 +21,46 @@ from chemworld.physchem.thermochemistry_cards import thermochemistry_model_cards
 _EXPONENT_LIMIT = 700.0
 
 
+def species_thermo_from_cantera_yaml(
+    *, species_id: str, thermo: Mapping[str, Any],
+    composition: Mapping[str, float] | None = None,
+    reference_pressure_Pa: float = 101_325.0,
+    units: Mapping[str, str] | None = None,
+) -> Any:
+    """Load all selected gas thermo families into the common native state contract."""
+    if thermo.get("model") == "NASA7":
+        return NASA7SpeciesThermo.from_cantera_yaml_thermo(
+            species_id=species_id, thermo=thermo, composition=composition,
+            reference_pressure_Pa=reference_pressure_Pa,
+        )
+    from chemworld.physchem.mechanism_thermochemistry import GasSpeciesThermo
+
+    return GasSpeciesThermo(species_id, dict(thermo), reference_pressure_Pa,
+                           dict(composition or {}), dict(units or {}))
+
+
+def species_thermo_from_dict(payload: Mapping[str, Any]) -> Any:
+    """Restore the shared species thermochemistry formats without a runtime fork."""
+    if "thermo" in payload:
+        from chemworld.physchem.mechanism_thermochemistry import GasSpeciesThermo
+
+        return GasSpeciesThermo.from_dict(payload)
+    if payload.get("model") == "NASA7":
+        return NASA7SpeciesThermo(
+            species_id=str(payload["species_id"]),
+            segments=tuple(NASA7TemperatureSegment(
+                min_temperature_K=float(node["min_temperature_K"]),
+                max_temperature_K=float(node["max_temperature_K"]),
+                coefficients=_coefficient_tuple(node["coefficients"]),
+                label=str(node.get("label", "")),
+            ) for node in payload["segments"]),
+            reference_pressure_Pa=float(payload.get("reference_pressure_Pa", 101325)),
+            composition=dict(payload.get("composition", {})),
+            source_note=str(payload.get("source_note", "")),
+        )
+    return CorrelationSpeciesThermo.from_dict(payload)
+
+
 @dataclass(frozen=True)
 class NASA7TemperatureSegment:
     """Single NASA7 coefficient segment.
@@ -161,6 +201,14 @@ class NASA7SpeciesThermo:
     reference_pressure_Pa: float = 101_325.0
     composition: dict[str, float] = field(default_factory=dict)
     source_note: str = ""
+
+    @property
+    def min_temperature_K(self) -> float:  # noqa: N802 - shared unit-explicit contract
+        return self.segments[0].min_temperature_K
+
+    @property
+    def max_temperature_K(self) -> float:  # noqa: N802 - shared unit-explicit contract
+        return self.segments[-1].max_temperature_K
 
     def __post_init__(self) -> None:
         if not self.species_id.strip():

@@ -8,7 +8,7 @@ external fixed temperature is a formal reference frame, not either body.
 The empirical heat law does not identify chemical species or a total chemical
 energy function. Global thermodynamic energy closure is explicitly undefined;
 charge and the declared two-node heat equation have separate exact balances.
-This kernel does not yet register a world, optional diffusion or all controllers.
+Optional spatial SOC diffusion uses the official PR 5869 voltage/heat correction.
 """
 
 from collections.abc import Mapping
@@ -20,6 +20,14 @@ import numpy as np
 
 from chemworld.data.scientific_inputs import ScientificTable, _keys, _sequence, _text
 from chemworld.foundation.units import convert_value
+from chemworld.physchem.battery_thevenin_control import (
+    CONTROLLER_CURRENT,
+    DYNAMIC_MODES,
+    TheveninControlSpec,
+    isolate_control_current,
+    thevenin_control_program,
+)
+from chemworld.physchem.battery_thevenin_diffusion import TheveninDiffusionSpec
 from chemworld.physchem.coupled_system import (
     CoupledAlgebraic,
     CoupledCoordinate,
@@ -93,6 +101,8 @@ class TheveninSpec:
     rc_elements: tuple[tuple[TabulatedScalar, TabulatedScalar], ...]
     entropic_change: TabulatedScalar
     ambient_program: ScalarControlProgram
+    diffusion: TheveninDiffusionSpec | None = None
+    control: TheveninControlSpec | None = None
     _native: Mapping[str, float] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
@@ -136,10 +146,17 @@ class TheveninSpec:
                 or any(value <= 0 for _, value in self.ambient_program.setpoints)):
             raise ValueError(
                 "Thevenin ambient boundary requires an explicit positive kelvin program")
+        if self.control is not None and not isinstance(self.control, TheveninControlSpec):
+            raise ValueError("Thevenin controller must have an explicit sourced specification")
         domains = {"soc": (values["minimum_soc"], values["maximum_soc"]),
                    "temperature_K": (lo, hi),
                    "current_A": (-values["maximum_current_A"], values["maximum_current_A"])}
         _check_law(self.ocv, "V", {"soc": "dimensionless"}, domains)
+        if self.diffusion is not None:
+            if not isinstance(self.diffusion, TheveninDiffusionSpec):
+                raise ValueError("Thevenin diffusion must have an explicit sourced specification")
+            if self.ocv.axes and np.any(np.diff(self.ocv._values) < 0):
+                raise ValueError("passive SOC diffusion requires nondecreasing OCV with SOC")
         _check_law(self.series_resistance, "Ohm", R_INPUTS, domains)
         if self.series_resistance.value_range[0] < 0:
             raise ValueError("Thevenin series resistance cannot be negative")
@@ -176,6 +193,8 @@ class TheveninSpec:
                               p["maximum_soc"]+soc_guard),
             *(CoupledCoordinate(rc_key(i), "V", p["maximum_voltage_V"])
               for i in range(len(self.rc_elements))),
+            *(self.diffusion.coordinate_declarations if self.diffusion is not None else ()),
+            *(self.control.coordinate_declarations if self.control is not None else ()),
             *(CoupledCoordinate(key, "K", p["reference_frame_temperature_K"],
                                 p["minimum_temperature_K"]-temperature_guard,
                                 p["maximum_temperature_K"]+temperature_guard)
@@ -195,23 +214,30 @@ class TheveninSpec:
                             JIG_T: p["initial_jig_temperature_K"]})
         coordinates.update({rc_key(i): p[f"initial_rc_{i}_V"]
                             for i in range(len(self.rc_elements))})
+        if self.control is not None:
+            coordinates[CONTROLLER_CURRENT] = self.control.native_parameters["initial_current_A"]
         return CoupledState({}, p["reference_frame_temperature_K"], p["housing_volume_L"],
                             coordinates=coordinates)
 
     def to_dict(self):
-        return {"model_family": THEVENIN_ID, "parameters": self.parameters.to_dict(),
+        payload = {"model_family": THEVENIN_ID, "parameters": self.parameters.to_dict(),
                 "parameter_row_id": self.parameter_row_id, "ocv": self.ocv.to_dict(),
                 "series_resistance": self.series_resistance.to_dict(),
                 "rc_elements": [{"resistance": r.to_dict(), "capacitance": c.to_dict()}
                                 for r, c in self.rc_elements],
                 "entropic_change": self.entropic_change.to_dict(),
                 "ambient_program": self.ambient_program.to_dict()}
+        if self.diffusion is not None:
+            payload["diffusion"] = self.diffusion.to_dict()
+        if self.control is not None:
+            payload["control"] = self.control.to_dict()
+        return payload
 
     @classmethod
     def from_dict(cls, payload):
         _keys(payload, (
             "model_family", "parameters", "parameter_row_id", "ocv", "series_resistance",
-            "rc_elements", "entropic_change", "ambient_program"))
+            "rc_elements", "entropic_change", "ambient_program"), optional=("diffusion", "control"))
         if payload["model_family"] != THEVENIN_ID:
             raise ValueError("unknown Thevenin model identity")
         pairs = []
@@ -224,7 +250,11 @@ class TheveninSpec:
                    TabulatedScalar.from_dict(payload["ocv"]),
                    TabulatedScalar.from_dict(payload["series_resistance"]), tuple(pairs),
                    TabulatedScalar.from_dict(payload["entropic_change"]),
-                   ScalarControlProgram(**payload["ambient_program"]))
+                   ScalarControlProgram(**payload["ambient_program"]),
+                   TheveninDiffusionSpec.from_dict(payload["diffusion"])
+                   if "diffusion" in payload else None,
+                   TheveninControlSpec.from_dict(payload["control"])
+                   if "control" in payload else None)
 
 
 def _fields(spec, state, current):
@@ -238,13 +268,22 @@ def _fields(spec, state, current):
     if r0 < 0 or any(value <= 0 for value in (*resistance, *capacitance)):
         raise ResidualDomainError("numerical trial leaves the positive R/C continuation")
     polarization = tuple(x[rc_key(i)] for i in range(len(spec.rc_elements)))
-    voltage = ocv-current*r0-sum(polarization)
-    empirical_heat = (current**2*r0+current*sum(polarization)
+    profile = (x[SOC],) if spec.diffusion is None else spec.diffusion.profile(x[SOC], x)
+    surface = x[SOC] if spec.diffusion is None else spec.diffusion.surface_soc(x[SOC], x)
+    # Official PyBaMM PR 5869: eta_D = U(surface)-U(mean), Q_D = -I*eta_D.
+    # After current reversal Q_D may be negative as a stored gradient relaxes.
+    diffusion_overpotential = _law(spec.ocv, {"soc": surface})-ocv
+    diffusion_heat = -current*diffusion_overpotential
+    voltage = ocv+diffusion_overpotential-current*r0-sum(polarization)
+    empirical_heat = (current**2*r0+current*sum(polarization)+diffusion_heat
                       - current*x[CELL_T]*_law(spec.entropic_change, values))
     ambient = spec.ambient_program.value_at(state.time_s)
     return {"current_A": current, "voltage_V": voltage, "ocv_V": ocv, "r0_ohm": r0,
             "resistance_ohm": resistance, "capacitance_F": capacitance,
             "polarization_V": polarization, "soc": x[SOC],
+            "distributed_soc": tuple(float(v) for v in profile), "surface_soc": surface,
+            "diffusion_overpotential_V": diffusion_overpotential,
+            "diffusion_heat_W": diffusion_heat,
             "cell_temperature_K": x[CELL_T], "jig_temperature_K": x[JIG_T],
             "ambient_temperature_K": ambient, "empirical_heat_W": empirical_heat,
             "cell_to_jig_W": p["cell_jig_conductance_W_K"]*(x[CELL_T]-x[JIG_T]),
@@ -252,42 +291,83 @@ def _fields(spec, state, current):
 
 
 def thevenin_system(spec, program, *, control_events=()):
-    """Build actual CC/finite-CV equations, never call a private integrator."""
+    """Build named actual port/controller equations on the common residual."""
+    program = thevenin_control_program(program)
+    mode = program.control_mode
     p = spec._native
     limit, voltage_scale = p["maximum_current_A"], p["maximum_voltage_V"]
-    if program.unit not in {"A", "V"} or any(
-        abs(value) > limit if program.unit == "A"
-        else not p["minimum_voltage_V"] <= value <= p["maximum_voltage_V"]
-        for _, value in program.setpoints
-    ):
-        raise ValueError("Thevenin core currently requires CC or finite-source CV in device bounds")
-    if program.unit == "V" and not spec.series_resistance.positive_coordinate_product_derivative(
+    if any((program.unit == "A" and abs(value) > limit)
+           or (program.unit == "V" and not
+               p["minimum_voltage_V"] <= value <= p["maximum_voltage_V"])
+           for _, value in program.setpoints):
+        raise ValueError("Thevenin target exceeds the physical device bounds")
+    if program.current_limit is not None and any(abs(value) > limit
+                                               for _, value in program.current_limit.setpoints):
+        raise ValueError("CCCV current limit exceeds the physical source capability")
+    if program.current_branch_A is not None and not (
+            -limit <= program.current_branch_A[0] < program.current_branch_A[1] <= limit):
+        raise ValueError("declared current branch exceeds the physical source capability")
+    if mode in DYNAMIC_MODES and spec.control is None:
+        raise ValueError("dynamic mode requires an installed persistent controller state")
+    if mode == "voltage" and not spec.series_resistance.positive_coordinate_product_derivative(
         "current_A"
     ):
         raise ValueError("CV requires a certified nonsingular monotone instantaneous I*R0 law")
 
+    def saturated_current(state, target):
+        # The certified positive derivative of I*R0 makes V(I) strictly
+        # decreasing at a fixed physical state, including current-dependent R.
+        # Endpoint voltages therefore identify the active source constraint
+        # without solving another equation or changing the finite-source law.
+        if _fields(spec, state, limit)["voltage_V"] >= target:
+            return limit
+        if _fields(spec, state, -limit)["voltage_V"] <= target:
+            return -limit
+        return None
+
+    cached_key, cached_current = None, None
+
+    def requested_current(state):
+        nonlocal cached_key, cached_current
+        target = program.value_at(state.time_s)
+        if mode == "current":
+            return target
+        if mode in DYNAMIC_MODES:
+            q = state.coordinates[CONTROLLER_CURRENT]
+            return max(q, program.current_limit.value_at(state.time_s)) if mode == "cccv" else q
+        if mode == "voltage":
+            return saturated_current(state, target)
+        # Algebraic power/load roots use the shared certified isolator. This
+        # cache only reuses the same fixed physical state while consistency
+        # perturbs I/V; it is not a second persistent state or a time solver.
+        key = (state.time_s, tuple(state.coordinates.items()))
+        if key != cached_key:
+            inputs = {"soc": state.coordinates[SOC], "temperature_K": state.coordinates[CELL_T]}
+            branch = program.current_branch_A if mode == "power" else (-limit, limit)
+            cached_current = isolate_control_current(spec.series_resistance, inputs,
+                _fields(spec, state, 0.)["voltage_V"], target, branch, mode, limit)
+            cached_key = key
+        return cached_current
+
     def guess(state):
-        current = program.value_at(state.time_s) if program.unit == "A" else 0.
-        if program.unit == "V":
-            target = program.value_at(state.time_s)
-            if _fields(spec, state, limit)["voltage_V"] > target:
-                current = limit
-            elif _fields(spec, state, -limit)["voltage_V"] < target:
-                current = -limit
+        requested = requested_current(state)
+        current = 0. if requested is None else requested
         return {CURRENT: current, VOLTAGE: _fields(spec, state, current)["voltage_V"]}
 
     def residual(state):
         current, voltage = (state.algebraic_values[key] for key in (CURRENT, VOLTAGE))
         actual = _fields(spec, state, current)
         target = program.value_at(state.time_s)
-        requested = current+limit/voltage_scale*(voltage-target)
-        control = ((current-target)/limit if program.unit == "A"
-                   else (current-np.clip(requested, -limit, limit))/limit)
+        requested = requested_current(state)
+        control = ((voltage-target)/voltage_scale if requested is None
+                   else (current-requested)/limit)
         return [control, voltage-actual["voltage_V"]]
 
     algebraic = CoupledAlgebraic(
-        # The projection is the real finite-source law. A second numerical box
-        # on Newton's current trials would obstruct consistent limit roots.
+        # Resolve the exact active CC/CV branch with the common Newton solver.
+        # Differencing a clipped projection across a source-switching corner
+        # gives a spurious I derivative and can stall consistency. Branches
+        # agree at their shared physical root; no current/state is clipped.
         (ResidualVariable(CURRENT, "A", limit, "algebraic"),
          ResidualVariable(VOLTAGE, "V", voltage_scale, "algebraic")),
         (ResidualEquation("thevenin:control", "1"),
@@ -295,6 +375,14 @@ def thevenin_system(spec, program, *, control_events=()):
 
     def evaluate(state):
         current, voltage = (state.algebraic_values[key] for key in (CURRENT, VOLTAGE))
+        if mode in DYNAMIC_MODES:
+            # The controller already declares I=q or I=max(q,Icc). Substitute
+            # that exact algebraic relation into its differential equations.
+            # Otherwise a stale consistency guess can evaluate V/I near zero
+            # even though the actual controller state lies safely in its domain.
+            # The shared terminal/control residual still enforces identical I/V.
+            current = requested_current(state)
+            voltage = _fields(spec, state, current)["voltage_V"]
         f = _fields(spec, state, current)
         rates = {
             SOC: -current/p["capacity_C"], CHARGE: current, WORK: current*voltage,
@@ -306,12 +394,32 @@ def thevenin_system(spec, program, *, control_events=()):
         rates.update({rc_key(i): current/c-state.coordinates[rc_key(i)]/(r*c)
                       for i, (r, c) in enumerate(zip(f["resistance_ohm"], f["capacitance_F"],
                                                    strict=True))})
+        if spec.diffusion is not None:
+            rates.update(spec.diffusion.deviation_rates(
+                state.coordinates, current, p["capacity_C"]))
+        if spec.control is not None:
+            rates[CONTROLLER_CURRENT] = spec.control.rate(
+                mode, state.coordinates[CONTROLLER_CURRENT], current, voltage,
+                program.value_at(state.time_s))
         return ProcessContribution(coordinate_rates=rates)
 
     def validate(state):
         if (state.temperature_K != p["reference_frame_temperature_K"]
                 or state.volume_L != p["housing_volume_L"]):
             raise ValueError("Thevenin formal reference frame/housing is not a thermal cell state")
+        if spec.diffusion is not None:
+            spec.diffusion.validate_profile(state.coordinates[SOC], state.coordinates,
+                                            p["minimum_soc"], p["maximum_soc"])
+        if mode in DYNAMIC_MODES:
+            guard = 32*np.spacing(max(1., limit))
+            if abs(requested_current(state)) > limit+guard:
+                raise ValueError("dynamic controller actual current exceeds the source domain")
+        if mode == "differential_resistance":
+            low, high = program.current_branch_A
+            guard = 32*np.spacing(max(1., abs(low), abs(high)))
+            if not low-guard <= state.coordinates[CONTROLLER_CURRENT] <= high+guard:
+                raise ValueError(
+                    "differential-resistance state is outside its declared current branch")
 
     events = [CoupledEvent("thevenin:minimum-soc", lambda s: s.coordinates[SOC]-p["minimum_soc"]),
               CoupledEvent("thevenin:maximum-soc", lambda s: p["maximum_soc"]-s.coordinates[SOC]),
@@ -319,6 +427,33 @@ def thevenin_system(spec, program, *, control_events=()):
                            lambda s: s.algebraic_values[VOLTAGE]-p["minimum_voltage_V"]),
               CoupledEvent("thevenin:maximum-voltage",
                            lambda s: p["maximum_voltage_V"]-s.algebraic_values[VOLTAGE])]
+    if mode in DYNAMIC_MODES:
+        events.extend((
+            CoupledEvent("thevenin:minimum-source-current",
+                         lambda s: s.algebraic_values[CURRENT]+limit),
+            CoupledEvent("thevenin:maximum-source-current",
+                         lambda s: limit-s.algebraic_values[CURRENT]),
+        ))
+    if mode == "differential_resistance":
+        low, high = program.current_branch_A
+        events.extend((
+            CoupledEvent("thevenin:minimum-control-branch",
+                         lambda s: s.coordinates[CONTROLLER_CURRENT]-low),
+            CoupledEvent("thevenin:maximum-control-branch",
+                         lambda s: high-s.coordinates[CONTROLLER_CURRENT]),
+        ))
+    if spec.diffusion is not None:
+        diffusion = spec.diffusion
+        events.extend((
+            CoupledEvent("thevenin:minimum-surface-soc", lambda s:
+                diffusion.surface_soc(s.coordinates[SOC], s.coordinates)-p["minimum_soc"]),
+            CoupledEvent("thevenin:maximum-surface-soc", lambda s:
+                p["maximum_soc"]-diffusion.surface_soc(s.coordinates[SOC], s.coordinates)),
+            CoupledEvent("thevenin:minimum-internal-soc", lambda s:
+                min(diffusion.profile(s.coordinates[SOC], s.coordinates))-p["minimum_soc"]),
+            CoupledEvent("thevenin:maximum-internal-soc", lambda s:
+                p["maximum_soc"]-max(diffusion.profile(s.coordinates[SOC], s.coordinates))),
+        ))
     for key in (CELL_T, JIG_T):
         events.extend((
             CoupledEvent(f"{key}:minimum", lambda s, key=key:
@@ -347,4 +482,6 @@ def thevenin_fields(spec, state, program):
                             coordinates=state.coordinates, algebraic_values=algebraic)
     values = _fields(spec, view, algebraic[CURRENT])
     values["voltage_V"] = algebraic[VOLTAGE]
+    if spec.control is not None:
+        values["controller_current_A"] = state.coordinates[CONTROLLER_CURRENT]
     return values

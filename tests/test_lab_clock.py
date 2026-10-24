@@ -147,10 +147,14 @@ def test_solver_failure_rolls_back_both_vessels_sampling_and_rng(monkeypatch):
 def test_earliest_physical_stop_realigns_all_systems():
     spec = shared_lab_world()
     models = {
-        **spec.physics.thermal_models,
-        "reactor": replace(spec.physics.thermal_models["reactor"], stop_temperature_K=299.0),
+        **spec.physics.models_of('thermal'),
+        "reactor": replace(spec.physics.models_of('thermal')["reactor"], stop_temperature_K=299.0),
     }
-    r = make(replace(spec, physics=replace(spec.physics, thermal_models=models)))
+    r = make(
+        replace(
+            spec, physics=replace(spec.physics, models={**spec.physics.models, "thermal": models})
+        )
+    )
     enqueue_both(r)
     result = execute(r, "wait", duration_s=120)
     assert result.info["operation_outcome"] == "stopped"
@@ -215,7 +219,11 @@ def test_unsupported_component_and_direct_measurement_are_not_silent_clock_mixes
     with pytest.raises(WorldCompositionError, match="measure"):
         make(replace(spec, task=replace(spec.task, operations=(*spec.task.operations, "measure"))))
     with pytest.raises(WorldCompositionError, match="shared"):
-        make(replace(spec, physics=replace(spec.physics, thermal_models={})))
+        make(
+            replace(
+                spec, physics=replace(spec.physics, models={**spec.physics.models, "thermal": {}})
+            )
+        )
 
 
 def hybrid_spec():

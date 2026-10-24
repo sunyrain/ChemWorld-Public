@@ -128,6 +128,10 @@ def concentration_equilibrium_constant_unit(delta_order: float) -> str:
 def audit_reaction_rate_contract(reaction: ReactionSpec) -> ReactionRateContractReport:
     """Audit one Arrhenius-family declaration without changing its evaluation."""
 
+    if reaction.rate_law.parameters.get("mechanism_schema") == "cantera-gas-v2":
+        from chemworld.physchem.mechanism_rates import audit_mechanism_rate_contract
+
+        return audit_mechanism_rate_contract(reaction)
     equation_id = reaction.rate_law.equation_id
     params = reaction.rate_law.parameters
     violations: list[str] = []

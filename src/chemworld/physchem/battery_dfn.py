@@ -14,6 +14,7 @@ from math import isfinite
 import numpy as np
 from scipy import sparse
 
+from chemworld.physchem import battery_porous_electrical as porous_electrical
 from chemworld.physchem.battery_electrolyte import ELECTROLYTE_SPECIES, BatteryElectrolyteSpec
 from chemworld.physchem.battery_models import (
     BATTERY_ALGEBRAIC,
@@ -113,14 +114,9 @@ class BatteryDFNSpec(BatterySPMSpec):
     def electrical_maps(self):
         # Unit columns of an exactly linear constitutive map, not differencing
         # nonlinear physics. They depend on declared geometry only, not state.
-        columns, reactions = [], []
-        nn, _, np_ = self.electrolyte.cells
-        for column in np.eye(len(self.algebraic_names)).T:
-            values = dict(zip(self.algebraic_names, column, strict=True))
-            q, _, phi_e, phi_s, _ = _linear_electrical(self, values)
-            columns.append(phi_s - np.r_[phi_e[:nn], phi_e[-np_:]])
-            reactions.append(q)
-        return np.array(reactions).T, np.array(columns).T
+        return porous_electrical.electrical_maps(
+            self.electrolyte, self.reaction_keys, self.series_resistance_ohm,
+            self.algebraic_names)
 
     def initial_state(self):
         amounts = self.electrolyte.initial_amounts()
@@ -133,42 +129,17 @@ class BatteryDFNSpec(BatterySPMSpec):
 
 
 def _reaction_currents(spec, values):
-    current = values[BATTERY_ALGEBRAIC[0]]
-    selected = np.array([values[k] for k in spec.reaction_keys])
-    split = spec.electrolyte.cells[0] - 1
-    negative, positive = selected[:split], selected[split:]
-    return np.r_[negative, current - sum(negative), positive, -current - sum(positive)]
+    return porous_electrical.reaction_currents(spec.electrolyte, spec.reaction_keys, values)
 
 
 def _integral_centres(face_values, widths, coefficients):
     """Integral of a linear face field, from the left boundary to each centre."""
-    full = (face_values[:-1] + face_values[1:]) * widths / (2 * coefficients)
-    half = (3 * face_values[:-1] + face_values[1:]) * widths / (8 * coefficients)
-    return np.r_[0.0, np.cumsum(full)[:-1]] + half, float(sum(full))
+    return porous_electrical.integral_centres(face_values, widths, coefficients)
 
 
 def _linear_electrical(spec, values):
-    e = spec.electrolyte
-    current, voltage = (values[key] for key in BATTERY_ALGEBRAIC)
-    q = _reaction_currents(spec, values)
-    nn, ns, _ = e.cells
-    source = np.r_[q[:nn], np.zeros(ns), q[nn:]]
-    ionic_faces = np.r_[0.0, np.cumsum(source)] / e.area_m2
-    widths = np.diff(e.mesh.faces_m)
-    conductivity = np.repeat(e.conductivity_S_m * np.power(e.porosities, e.bruggeman), e.cells)
-    resistance, _ = _integral_centres(ionic_faces, widths, conductivity)
-    phi_e = values[PHI_E] - resistance
-    solid, solid_faces = [], []
-    for name, region, start in (("negative", 0, 0), ("positive", 2, nn + ns)):
-        size = e.cells[region]
-        faces = current / e.area_m2 - ionic_faces[start:start + size + 1]
-        integral, full = _integral_centres(
-            faces, widths[start:start + size], e.solid_conductivity_S_m[region // 2])
-        solid.append(-integral if name == "negative" else
-                     voltage + current * spec.series_resistance_ohm + full - integral)
-        solid_faces.append(faces)
-    phi_s = np.concatenate(solid)
-    return q, ionic_faces, phi_e, phi_s, solid_faces
+    return porous_electrical.linear_electrical(
+        spec.electrolyte, spec.reaction_keys, spec.series_resistance_ohm, values)
 
 
 def _fields(spec, state, values):

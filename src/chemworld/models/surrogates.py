@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from chemworld.data.records import trajectory_value
+
 
 @dataclass(frozen=True)
 class BeliefState:
@@ -24,9 +26,9 @@ class BeliefState:
         """Build a compact belief summary from public trajectory records."""
 
         scores = [
-            float(record["leaderboard_score"])
+            float(trajectory_value(record, 'leaderboard_score'))
             for record in records
-            if record.get("leaderboard_score") is not None
+            if trajectory_value(record, 'leaderboard_score', None) is not None
         ]
         estimates: dict[str, float] = {}
         uncertainty: dict[str, float] = {}

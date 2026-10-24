@@ -1,4 +1,4 @@
-"""NASA7 caloric adapter for the existing common batch/heat integrator."""
+"""Declared ideal-gas caloric adapter for the common batch/heat integrator."""
 
 from dataclasses import dataclass
 from itertools import pairwise
@@ -10,7 +10,7 @@ from chemworld.physchem.reactor_solvers import reaction_network_process
 
 
 @dataclass(frozen=True)
-class NASA7GasThermodynamics:
+class IdealGasThermodynamics:
     """U=sum(n_i*(h_i(T)-RT)); the common solver alone advances heat/time."""
 
     species: dict
@@ -49,7 +49,7 @@ class NASA7GasThermodynamics:
 
     def chemical_energy_rate_w(self, state, derivatives, contributions):
         if any(item.legacy_reaction_energy_W is not None for item in contributions):
-            raise ValueError("NASA7 internal energy cannot also consume a separate reaction heat")
+            raise ValueError("gas internal energy cannot also consume a separate reaction heat")
         return sum(
             rate * self.species_energy_j_mol(key, state.temperature_K)
             for key, rate in derivatives.items()
@@ -64,17 +64,17 @@ class NASA7GasThermodynamics:
     def validate_temperature_interval(self, lower_K, upper_K):
         for species in self.species.values():
             if (
-                species.segments[0].min_temperature_K > lower_K
-                or species.segments[-1].max_temperature_K < upper_K
+                species.min_temperature_K > lower_K
+                or species.max_temperature_K < upper_K
             ):
-                raise ValueError("thermal domain exceeds NASA7 validity")
-            for left, right in pairwise(species.segments):
+                raise ValueError("thermal domain exceeds gas thermochemistry validity")
+            for left, right in pairwise(getattr(species, "segments", ())):
                 if left.max_temperature_K != right.min_temperature_K:
-                    raise ValueError("NASA7 thermal domain contains a gap")
+                    raise ValueError("gas thermochemistry domain contains a gap")
 
     def to_dict(self):
         return {
-            "model": "nasa7-ideal-gas-v1",
+            "model": "ideal-gas-thermochemistry-v1",
             "species": {key: value.to_dict() for key, value in self.species.items()},
             "support_heat_capacity_J_K": self.support_heat_capacity_J_K,
             "reference_temperature_K": self.reference_temperature_K,
@@ -82,20 +82,18 @@ class NASA7GasThermodynamics:
 
     @classmethod
     def from_dict(cls, payload):
-        from chemworld.physchem.thermochemistry import NASA7SpeciesThermo, NASA7TemperatureSegment
+        from chemworld.physchem.thermochemistry import species_thermo_from_dict
 
         values = dict(payload)
-        if values.pop("model") != "nasa7-ideal-gas-v1":
-            raise ValueError("unsupported NASA7 gas caloric model")
-        species = {}
-        for key, raw in values.pop("species").items():
-            node = dict(raw)
-            node.pop("model")
-            node["segments"] = tuple(
-                NASA7TemperatureSegment(**segment) for segment in node["segments"]
-            )
-            species[key] = NASA7SpeciesThermo(**node)
+        if values.pop("model") not in {"nasa7-ideal-gas-v1", "ideal-gas-thermochemistry-v1"}:
+            raise ValueError("unsupported gas caloric model")
+        species = {key: species_thermo_from_dict(raw)
+                   for key, raw in values.pop("species").items()}
         return cls(species, **values)
+
+
+# Existing imports and historical declarations keep one implementation.
+NASA7GasThermodynamics = IdealGasThermodynamics
 
 
 def gas_batch_system(network: ReactionNetworkSpec, *, heat_flux=None, policy=None) -> CoupledSystem:
@@ -108,10 +106,10 @@ def gas_batch_system(network: ReactionNetworkSpec, *, heat_flux=None, policy=Non
         raise ValueError("gas batch requires gas species")
     thermo = network.imported_gas_thermochemistry
     if set(thermo) != set(network.species_ids):
-        raise ValueError("gas batch requires all declared NASA7 thermochemistry")
+        raise ValueError("gas batch requires all declared thermochemistry")
     elements = {element for species in network.species for element in species.composition}
     return CoupledSystem(
-        NASA7GasThermodynamics(thermo),
+        IdealGasThermodynamics(thermo),
         (reaction_network_process(network, species_thermo=thermo),),
         heat_flux=heat_flux or (lambda state: HeatFlux()),
         conservation_laws={

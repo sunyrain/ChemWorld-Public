@@ -14,11 +14,14 @@ from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 
 
-def install_stochastic_state(state, *, seed):
+def install_stochastic_state(state, *, seed, algorithm="gillespie-direct-v1"):
     mol_to_counts(state.species_amounts)
     return state.replace(
         process=replace(
-            state.process, stochastic_continuation=initial_continuation(seed, state.ledger.time_s)
+            state.process,
+            stochastic_continuation=initial_continuation(
+                seed, state.ledger.time_s, algorithm=algorithm,
+            ),
         )
     )
 
@@ -28,17 +31,23 @@ class StochasticRuntime:
 
     def __init__(self, composition=None):
         self.composition = composition
+        from chemworld.runtime.stochastic_hybrid import HybridStochasticRuntime
+
+        self.hybrid = HybridStochasticRuntime(composition)
 
     def supports(self, state):
-        return state.process.stochastic_continuation is not None
+        return (state.process.stochastic_continuation is not None
+                or state.vessel_id in self.hybrid.models)
 
     def validate_world(self):
         if self.composition is None or self.composition.physics is None:
             return
         physics = self.composition.physics
+        self.hybrid.validate_world()
         declared = {c.vessel for c in self.composition.components if c.kind == "stochastic"}
         installed = {key for key, s in physics.initial_states.items() if self.supports(s)}
-        if declared != installed or bool(installed) != (physics.network.stochastic is not None):
+        discrete = installed - self.hybrid.models.keys()
+        if declared != installed or bool(discrete) != (physics.network.stochastic is not None):
             raise ValueError("SSA network, components and owned process state must agree")
         if installed and installed != set(physics.initial_states) and physics.lab_clock is None:
             raise ValueError(
@@ -46,6 +55,8 @@ class StochasticRuntime:
             )
         for vessel in installed:
             state = physics.initial_states[vessel]
+            if self.hybrid.supports(state):
+                continue
             self.validate(state)
             competing = (
                 physics.models_of("thermal"),
@@ -84,9 +95,12 @@ class StochasticRuntime:
     def reconcile_initialization(self, transition):
         if self.composition is None or self.composition.physics is None:
             return transition
+        transition = self.hybrid.reconcile_initialization(transition)
 
         def reset_local(state):
             template = self.composition.physics.initial_states[state.vessel_id]
+            if self.hybrid.supports(template):
+                return state
             if self.supports(template) and not self.supports(state):
                 continuation = deepcopy(template.process.stochastic_continuation)
                 continuation.update(time_s=state.ledger.time_s, pending=None, signature=None)
@@ -106,6 +120,8 @@ class StochasticRuntime:
         )
 
     def validate(self, state):
+        if self.hybrid.supports(state):
+            return self.hybrid.validate(state)
         network = self.composition.physics.network
         spec = StochasticSpec(**network.stochastic)
         if state.temperature_K != spec.temperature_K or state.volume_L != spec.volume_L:
@@ -125,7 +141,13 @@ class StochasticRuntime:
         advance_stochastic(network, counts, continuation, 0)
         return counts
 
+    def validate_state(self, state):
+        if self.hybrid.supports(state):
+            self.hybrid.validate(state)
+
     def advance(self, state, action, *, heat=False, jacket_program=None):
+        if self.hybrid.supports(state):
+            return self.hybrid.advance(state, action, heat=heat, jacket_program=jacket_program)
         if heat or jacket_program is not None:
             return ModelProviderResult(
                 {},
@@ -173,8 +195,10 @@ class StochasticRuntime:
             state=candidate,
             actual_duration_s=result.actual_duration_s,
             diagnostics={
-                "solver": "gillespie-direct-v1",
-                "events_executed": len(result.events),
+                "solver": self.composition.physics.network.stochastic["algorithm"],
+                "events_executed": (result.continuation["events_committed"]
+                                    - state.process.stochastic_continuation["events_committed"]),
+                "stochastic_work": result.work,
                 "energy_scope": "isothermal kinetics only; heat balance not modelled",
             },
         )

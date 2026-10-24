@@ -352,8 +352,8 @@ class PhysicalConstitution:
         amounts = state.species_amounts.copy()
         inventories = [state.samples.total_amounts_mol(), state.state_slots.species_amounts()]
         inventories.extend(
-            PhysicalConstitution.material_inventory(local)
-            for local in state.inactive_vessels.values()
+            PhysicalConstitution.material_inventory(state.inactive_vessels[name])
+            for name in sorted(state.inactive_vessels)
         )
         for inventory in inventories:
             for species, amount in inventory.items():

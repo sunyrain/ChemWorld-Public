@@ -41,6 +41,7 @@ SUPPORTED_COMPONENT_KINDS = (
 )
 
 _COMPONENT_ORDER = {kind: index for index, kind in enumerate(SUPPORTED_COMPONENT_KINDS)}
+_REACTION_PROCESS_DRIVERS = frozenset({"thermal", "electrochemistry", "gas_reactor_network"})
 _TOP_LEVEL_KEYS = frozenset(
     {
         "schema_version",
@@ -1206,6 +1207,20 @@ def check_world_composition_compatibility(
     )
     diagnostics: list[WorldCompositionDiagnostic] = []
     component_set = frozenset(spec.component_kinds)
+    reactive_transport_vessels: set[str] = set()
+    if spec.physics is not None:
+        from chemworld.runtime.reactive_water_treatment import reactive_treatment_record
+
+        for component in spec.components:
+            state = spec.physics.initial_states.get(component.vessel)
+            if component.kind != "finite_transport" or state is None:
+                continue
+            record = reactive_treatment_record(state)
+            model = None if record is None else record.settings.get("physical_model")
+            if isinstance(model, Mapping) and isinstance(model.get("reactor_vessel_id"), str):
+                # The transport provider below validates the complete declaration,
+                # original network and owned tanks. Other liquid paths gain no driver.
+                reactive_transport_vessels.add(model["reactor_vessel_id"])
     if spec.physics is None and "observation" not in component_set:
         diagnostics.append(
             _diagnostic(
@@ -1214,14 +1229,14 @@ def check_world_composition_compatibility(
                 "every executable v1 composition requires the observation component",
             )
         )
-    if "reaction" in component_set and not component_set.intersection(
-        {"thermal", "electrochemistry"}
-    ):
+    if ("reaction" in component_set
+            and not component_set.intersection(_REACTION_PROCESS_DRIVERS)
+            and not reactive_transport_vessels):
         diagnostics.append(
             _diagnostic(
                 "missing_dependency",
                 "components",
-                "reaction requires a thermal or electrochemical process driver",
+                "reaction requires a declared local or finite-system process driver",
                 "reaction",
             )
         )
@@ -1294,7 +1309,8 @@ def check_world_composition_compatibility(
                         c.id,
                     )
                 )
-        if "reaction" in kinds and not kinds.intersection({"thermal", "electrochemistry"}):
+        if ("reaction" in kinds and not kinds.intersection(_REACTION_PROCESS_DRIVERS)
+                and vessel not in reactive_transport_vessels):
             diagnostics.append(
                 _diagnostic(
                     "missing_dependency",

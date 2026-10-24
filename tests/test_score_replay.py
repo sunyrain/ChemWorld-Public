@@ -45,8 +45,7 @@ def test_result_binds_exact_source_records(
     assert result["score_replay"]["metric_source"] == "exact_trajectory_replay"
 
     changed = copy.deepcopy(records)
-    changed_reward = float(changed[0]["reward"]) + 0.01
-    changed[0]["reward"] = changed_reward
+    changed_reward = float(changed[0]["evaluation_outcome"]["online_transition_reward"]) + 0.01
     changed[0]["evaluation_outcome"]["online_transition_reward"] = changed_reward
     with pytest.raises(ValueError, match="bound trajectory source"):
         build_verified_evaluation_result(changed, trajectory_path=trajectory)

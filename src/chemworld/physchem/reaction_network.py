@@ -377,11 +377,11 @@ class ReactionNetworkSpec:
 
     @cached_property
     def imported_gas_thermochemistry(self) -> dict[str, Any]:
-        """Rebuild declared NASA7 data once, including after native JSON replay."""
-        from chemworld.physchem.thermochemistry import NASA7SpeciesThermo
+        """Rebuild declared gas thermochemistry once, including after JSON replay."""
+        from chemworld.physchem.thermochemistry import species_thermo_from_cantera_yaml
 
         return {
-            key: NASA7SpeciesThermo.from_cantera_yaml_thermo(species_id=key, **node)
+            key: species_thermo_from_cantera_yaml(species_id=key, **node)
             for key, node in self.metadata.get("gas_thermochemistry", {}).items()
         }
 

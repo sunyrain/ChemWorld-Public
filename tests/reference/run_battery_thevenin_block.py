@@ -90,6 +90,8 @@ def main():
     if pybamm.__version__ != "25.4.2":
         raise RuntimeError("fixed reference requires PyBaMM 25.4.2")
     data = {"mode": "development", "denominator": len(CASES), "units": [], "passed": 0,
+        "execution_source": ("development working tree; source_commit is the base, "
+                             "not a frozen execution tree"),
         "protocol": "workstreams/world_foundation/NATIVE_CONV45_THEVENIN_EXPERIMENT.md",
         "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         "pybamm_version": pybamm.__version__, "numpy_version": np.__version__,

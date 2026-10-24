@@ -14,6 +14,7 @@ from typing import Any
 
 from chemworld import __version__
 from chemworld.data.logging import load_jsonl
+from chemworld.data.records import trajectory_value
 from chemworld.data.validation import validate_records
 from chemworld.tasks import get_task
 
@@ -452,7 +453,7 @@ def summarize_submission_bundle(path: str | Path) -> dict[str, Any]:
         evaluations.append(evaluate_records(records).to_dict())
         seeds.update(int(record["seed"]) for record in records)
         first = records[0]
-        task_id = str(first.get("benchmark_task_id") or first["task_id"])
+        task_id = str(trajectory_value(first, 'benchmark_task_id', None) or first["task_id"])
         maturity_payload = {
             "kernel_maturity": first["kernel_maturity"],
             "physics_maturity": first["physics_maturity"],

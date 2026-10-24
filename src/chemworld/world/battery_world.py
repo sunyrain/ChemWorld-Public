@@ -15,17 +15,42 @@ from chemworld.physchem.battery_electrolyte import ELECTROLYTE_SPECIES
 from chemworld.physchem.battery_models import BatterySPMSpec
 from chemworld.physchem.reaction_network import ReactionNetworkSpec, SpeciesSpec
 from chemworld.physchem.reactor_shared import ScalarControlProgram
-from chemworld.runtime.battery import BATTERY_TYPE, initial_battery_slot
+from chemworld.runtime.battery import battery_equipment_type, initial_battery_slot
 from chemworld.world.composition import WorldCompositionSpec
 from chemworld.world.physical_world import CompositionPhysics
 
 
 def battery_world_spec(spec=None, *, budget=80, thermal_device=None):
     spec = spec or BatterySPMSpec()
+    plating = getattr(spec, "plating", None) is not None
+    if plating and thermal_device is not None:
+        raise ValueError("plating thermal coupling is unsupported")
+    split_ocvr = getattr(spec, "model_family", None) == "split-ocvr-isothermal-v1"
+    if split_ocvr and thermal_device is not None:
+        raise ValueError("Split OCV-R thermal coupling is unsupported")
+    lead_acid = getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1"
+    if lead_acid and thermal_device is not None:
+        raise ValueError("lead-acid LOQS thermal coupling is unsupported")
+    newman_tobias = getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1"
+    if newman_tobias and thermal_device is not None:
+        raise ValueError("Newman-Tobias thermal coupling is unsupported")
+    msmr = getattr(spec, "model_family", None) == "msmr-spm-isothermal-v1"
+    if msmr and thermal_device is not None:
+        raise ValueError("MSMR thermal coupling is unsupported")
+    half_cell = getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1"
+    if half_cell and thermal_device is not None:
+        raise ValueError("finite half-cell thermal coupling is unsupported")
+    composite = getattr(spec, "model_family", None) == "composite-spm-isothermal-v1"
+    if composite and thermal_device is not None:
+        raise ValueError("composite thermal coupling is unsupported")
+    spatial = getattr(spec, "model_family", None) == "spm-spatial-thermal-v1"
+    if spatial and thermal_device is not None:
+        raise ValueError("spatial thermal cell requires declared surface contacts; "
+                         "external device unsupported")
     vessel = "reactor"
     record = EquipmentRecord(
         "battery",
-        BATTERY_TYPE,
+        battery_equipment_type(spec),
         vessel,
         batch_reset="preserve",
         settings={
@@ -34,6 +59,7 @@ def battery_world_spec(spec=None, *, budget=80, thermal_device=None):
                 "limits_A": [-spec.maximum_current_A, spec.maximum_current_A],
                 "limits_V": [spec.minimum_voltage_V, spec.maximum_voltage_V],
                 "staged_control": True,
+                **({"supported_units": list(spec.supported_control_units)} if split_ocvr else {}),
                 "program": ScalarControlProgram(((0, 0),), "A").to_dict(),
             },
         },
@@ -78,21 +104,21 @@ def battery_world_spec(spec=None, *, budget=80, thermal_device=None):
                 )
             }
         ),
-        # This phase describes only occupied housing volume. All active lithium
+        # This phase describes only occupied housing volume. All cell inventory
         # is equipment-owned below; material reset cannot clone its initial SOC.
         phases=PhaseLedger({"housing": PhaseRecord("housing", vessel, "solid", spec.volume_l, {})}),
         state_slots=StateSlots((initial_battery_slot(record, spec),)),
     )
     physics = CompositionPhysics(
         ReactionNetworkSpec(
-            "battery-lithium",
+            "battery-lead-acid" if lead_acid else "battery-lithium",
             tuple(
                 SpeciesSpec(name, formula)
-                for name, formula in {
+                for name, formula in (spec.species_formulas if lead_acid else {
                     "Li": "Li",
                     **({} if spec.sei is None else SEI_FORMULAS),
                     **({} if spec.electrolyte is None else {ELECTROLYTE_SPECIES: "LiPF6"}),
-                }.items()
+                }).items()
             ),
             (),
         ),
@@ -101,14 +127,34 @@ def battery_world_spec(spec=None, *, budget=80, thermal_device=None):
     return WorldCompositionSpec.from_dict(
         {
             "schema_version": "chemworld-world-composition-0.1",
-            "composition_id": ("native-battery-mpm"
+            "composition_id": ("native-battery-mpm-plating"
+                               if plating and getattr(spec, "model_family", None)
+                               == "mpm-isothermal-v1"
+                               else "native-battery-spm-plating" if plating
+                               else "native-battery-split-ocvr"
+                               if split_ocvr
+                               else "native-battery-lead-acid"
+                               if lead_acid
+                               else "native-battery-newman-tobias"
+                               if newman_tobias
+                               else "native-battery-msmr"
+                               if msmr
+                               else "native-battery-spatial-thermal"
+                               if spatial
+                               else "native-battery-composite"
+                               if composite
+                               else "native-battery-half-cell"
+                               if half_cell
+                               else "native-battery-mpm"
                                if getattr(spec, "model_family", None) == "mpm-isothermal-v1"
                                else "native-battery-dfn"
                                if getattr(spec, "model_family", None) == "dfn-isothermal-v1"
                                else "native-battery-spm" if spec.electrolyte is None
                                else "native-battery-spme"),
             "components": [
-                {"id": "cell", "kind": "battery_spm", "vessel": vessel, "parameters": {}},
+                {"id": "cell", "kind": "battery_cell"
+                 if lead_acid or split_ocvr else "battery_spm",
+                 "vessel": vessel, "parameters": {}},
                 {
                     "id": "meter",
                     "kind": "observation",

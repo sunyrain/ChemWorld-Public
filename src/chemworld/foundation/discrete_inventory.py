@@ -1,6 +1,6 @@
 """Exact molecular interpretation of the existing mol inventory, not a second ledger."""
 
-from math import isfinite, ulp
+from math import fsum, isfinite, ulp
 
 AVOGADRO = 6.02214076e23
 MAX_COUNT = 2**40
@@ -44,6 +44,7 @@ def integer_element_residual(before, after, balance, substances):
     }
     if discrete != after_discrete:
         raise ValueError("discrete inventory lost its declared process state")
+    hybrid = _check_hybrid_partitions(locals_before, locals_after, balance, substances)
     residual = {}
 
     def accumulate(amounts, sign):
@@ -55,7 +56,7 @@ def integer_element_residual(before, after, balance, substances):
 
     for states, sign in ((locals_before, -1), (locals_after, 1)):
         for state in states:
-            if state.vessel_id not in discrete:
+            if state.vessel_id not in discrete or state.vessel_id in hybrid:
                 continue
             accumulate(state.species_amounts, sign)
             accumulate(state.state_slots.species_amounts(), sign)
@@ -68,3 +69,63 @@ def integer_element_residual(before, after, balance, substances):
         if exchange.inventory_kind == "species":
             accumulate(dict(exchange.amounts), -1 if exchange.direction == "in" else 1)
     return max(map(abs, residual.values()), default=0)
+
+
+def _check_hybrid_partitions(before, after, balance, substances):
+    """Check a fixed mixed partition without weakening old all-integer boundaries.
+
+    The runtime independently verifies this state declaration against its actual
+    physical model and authored closed stock, including at snapshot restore.
+    Here the before/after partition must agree and each subset closes separately.
+    """
+    previous = {state.vessel_id: state for state in before}
+    following = {state.vessel_id: state for state in after}
+    hybrid = set()
+
+    def partition(state):
+        continuation = state.process.stochastic_continuation
+        if continuation is None or continuation.get("algorithm") != "integrated-hazard-pdmp-v1":
+            return None
+        keys = continuation.get("discrete_species")
+        if (not isinstance(keys, list) or not keys or len(set(keys)) != len(keys)
+                or any(not isinstance(k, str) for k in keys)
+                or not set(keys) < state.species_amounts.keys()):
+            raise ValueError("hybrid integer subset is invalid")
+        return tuple(keys)
+
+    hybrid_identities = {state.vessel_id for state in (*before, *after)
+                        if state.process.stochastic_continuation is not None
+                        and state.process.stochastic_continuation.get("algorithm")
+                        == "integrated-hazard-pdmp-v1"}
+    for identity in hybrid_identities:
+        if identity not in previous or identity not in following:
+            raise ValueError("stochastic vessel inventory was added or removed")
+        old, new = previous[identity], following[identity]
+        keys = partition(old)
+        if keys != partition(new):
+            raise ValueError("hybrid fixed integer subset changed during the transition")
+        if keys is None:
+            continue
+        hybrid.add(identity)
+        if set(old.species_amounts) != set(new.species_amounts):
+            raise ValueError("hybrid species inventory declaration changed")
+        if any(exchange.inventory_kind == "species" and
+               f"vessel:{identity}" in {exchange.source, exchange.destination}
+               for exchange in balance.exchanges):
+            raise ValueError("hybrid first slice has no material boundary exchange")
+        integer_before = mol_to_counts({k: old.species_amounts[k] for k in keys})
+        integer_after = mol_to_counts({k: new.species_amounts[k] for k in keys})
+        continuous = set(old.species_amounts) - set(keys)
+        atoms = {atom for key in old.species_amounts for atom in substances[key].formula}
+        for atom in atoms:
+            if any(not float(substances[k].formula.get(atom, 0)).is_integer() for k in keys):
+                raise ValueError("hybrid discrete chemistry requires integer atomic formulas")
+            delta = sum((integer_after[k] - integer_before[k]) *
+                        int(substances[k].formula.get(atom, 0)) for k in keys)
+            if delta != 0:
+                raise ValueError("hybrid integer atom balance does not close")
+            totals = [fsum(state.species_amounts[k] * substances[k].formula.get(atom, 0)
+                           for k in continuous) for state in (old, new)]
+            if abs(totals[0] - totals[1]) > max(1e-30, 1e-9 * max(map(abs, totals))):
+                raise ValueError("hybrid continuous atom balance does not close")
+    return hybrid

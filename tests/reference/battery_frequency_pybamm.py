@@ -27,13 +27,23 @@ def casadi_sparse(value):
 
 
 def reference_frequency(
-    spec, family, frequencies, *, refined=False, spme_radial_mesh="exponential-right",
+    spec,
+    family,
+    frequencies,
+    *,
+    refined=False,
+    spme_radial_mesh="exponential-right",
     ocp_functions=None,
 ):
     if family in {"SPM", "SPMe"}:
         points = 240 if refined else 120
-        simulation = build_spme_reference(spec, cells=points, radial_mesh=spme_radial_mesh,
-                                          family=family, ocp_functions=ocp_functions)
+        simulation = build_spme_reference(
+            spec,
+            cells=points,
+            radial_mesh=spme_radial_mesh,
+            family=family,
+            ocp_functions=ocp_functions,
+        )
         grid = {
             "spatial_cells_per_region": points,
             "radial_cells": points,
@@ -42,8 +52,9 @@ def reference_frequency(
         }
     elif family == "DFN":
         nx, nr = (96, 200) if refined else (64, 100)
-        simulation = build_dfn_reference(spec, spatial_cells=nx, radial_cells=nr,
-                                         ocp_functions=ocp_functions)
+        simulation = build_dfn_reference(
+            spec, spatial_cells=nx, radial_cells=nr, ocp_functions=ocp_functions
+        )
         grid = {
             "spatial_cells_per_region": nx,
             "radial_cells": nr,
@@ -55,11 +66,39 @@ def reference_frequency(
     return frequency_from_simulation(simulation, frequencies, family=family, grid=grid)
 
 
-def frequency_from_simulation(simulation, frequencies, *, family, grid, output_names=OUTPUTS):
+def frequency_from_simulation(
+    simulation, frequencies, *, family, grid, output_names=OUTPUTS, response_names=None
+):
     """Linearize a released model; preserve the original four-output default."""
     import casadi
     import pybamm
 
+    output_names = tuple(output_names)
+    detailed = response_names is not None
+    if not output_names or output_names[0] != "Voltage [V]":
+        raise ValueError("frequency outputs must begin with Voltage [V] for Z=-dV/dI")
+    if response_names is None:
+        if output_names == OUTPUTS:
+            response_names = (
+                "Z_ohm",
+                "negative_mol_m3_A",
+                "separator_mol_m3_A",
+                "positive_mol_m3_A",
+            )
+        elif output_names == ("Voltage [V]",):
+            response_names = ("Z_ohm",)
+        else:
+            raise ValueError(
+                "non-default multiple frequency outputs require explicit response_names"
+            )
+    response_names = tuple(response_names)
+    if (
+        len(response_names) != len(output_names)
+        or len(set(response_names)) != len(response_names)
+        or any(not isinstance(v, str) or not v.strip() for v in response_names)
+        or response_names[0] != "Z_ohm"
+    ):
+        raise ValueError("response_names must be unique scalar output labels beginning with Z_ohm")
     simulation.build()
     model = simulation.built_model
     inputs = {"Current function [A]": 0.0}
@@ -79,9 +118,14 @@ def frequency_from_simulation(simulation, frequencies, *, family, grid, output_n
             casadi.jacobian(rhs, exported["inputs"]),
             casadi.jacobian(outputs, states),
             casadi.jacobian(outputs, exported["inputs"]),
+            outputs,
         ],
     )
-    residual, jacobian, forcing, output_state, output_input = function(0, initial, [0])
+    residual, jacobian, forcing, output_state, output_input, initial_outputs = function(
+        0, initial, [0]
+    )
+    if int(output_state.shape[0]) != len(response_names):
+        raise ValueError("frequency output labels require one scalar per source output")
     residual = np.asarray(residual).ravel()
     n_diff = int(model.concatenated_rhs.size)
     rhs_error = float(np.max(np.abs(residual[:n_diff]), initial=0))
@@ -97,10 +141,16 @@ def frequency_from_simulation(simulation, frequencies, *, family, grid, output_n
         "maximum_stationary_algebraic": alg_error,
         "stationary_tolerance": 1e-6,
         "linear_tolerance": 1e-10,
-        "response_order": (["Z_ohm", "negative_mol_m3_A", "separator_mol_m3_A", "positive_mol_m3_A"]
-                           if output_names == OUTPUTS else ["Z_ohm"]),
+        "response_order": list(response_names),
         "definition": "Z=-delta_V/delta_I; positive discharge; exp(+i*2*pi*f*t)",
     }
+    if detailed:
+        metadata.update(
+            initial_state=initial.tolist(),
+            stationary_residual=residual.tolist(),
+            output_names=list(output_names),
+            initial_outputs=np.asarray(initial_outputs).ravel().tolist(),
+        )
     if not np.all(np.isfinite(residual)) or max(rhs_error, alg_error) > 1e-6:
         return {**metadata, "success": False, "failure": "reference_not_stationary", "points": []}
     mass = sparse.csc_matrix(model.mass_matrix.entries)
@@ -124,6 +174,11 @@ def frequency_from_simulation(simulation, frequencies, *, family, grid, output_n
                 response_real=values.real.tolist() if finite else None,
                 response_imag=values.imag.tolist() if finite else None,
             )
+            if detailed:
+                point.update(
+                    state_response_real=response.real.tolist(),
+                    state_response_imag=response.imag.tolist(),
+                )
         except Exception:
             point["exception"] = traceback.format_exc()
         points.append(point)

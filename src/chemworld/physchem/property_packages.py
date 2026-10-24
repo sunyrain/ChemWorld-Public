@@ -12,7 +12,10 @@ if TYPE_CHECKING:
     from chemworld.physchem.eos import CubicEOSSpec
     from chemworld.physchem.equilibrium import ActivityModelSpec
     from chemworld.physchem.helmholtz_solvers import HelmholtzPhaseModel
+    from chemworld.physchem.incompressible_properties import IncompressibleMaterialModel
+    from chemworld.physchem.molecular_properties import MolecularEOSSpec
     from chemworld.physchem.phase_evaluation import PhasePropertyModel, PhaseTransportSpec
+    from chemworld.physchem.water_if97_properties import IF97WaterModel
 
 from chemworld.foundation.units import convert_value
 from chemworld.physchem.enthalpy import (
@@ -315,11 +318,12 @@ def evaluate_property_state(
     temperature_K: float, pressure_Pa: float, phase: str, quantities: Sequence[str],
     references: Mapping[str, CaloricReference] | None = None, eos=None, activity_model=None,
     validity_policy: ValidityPolicy = "raise", volume_model: PropertyCorrelation | None = None,
+    incompressible_model: IncompressibleMaterialModel | None = None,
 ) -> StatePropertyReport:
     """Evaluate a single-phase state using existing identities/correlations.
 
-    Gas states declare ideal-gas behavior unless an existing cubic EOS is given.
-    Cubic liquid states use the same ideal-gas caloric reference plus their
+    Gas states declare ideal-gas behavior unless an explicit fluid EOS is given.
+    EOS liquid states use the same ideal-gas caloric reference plus their
     governed departure. No phase split or missing transport data is invented.
     An explicit mixture volume_model uses the original liquid correlation at
     actual T/P and binds its fixed composition to the component inventory.
@@ -327,6 +331,18 @@ def evaluate_property_state(
     potentials to declared pure-liquid references, without inventing a volume
     or a constant-volume caloric closure.
     """
+    if incompressible_model is not None:
+        from chemworld.physchem.incompressible_properties import (
+            evaluate_incompressible_property_state,
+        )
+
+        if (phase != "liquid" or validity_policy != "raise" or references
+                or any(model is not None for model in (eos, activity_model, volume_model))):
+            raise ValueError("incompressible liquid uses its own strict caloric/volume model")
+        return evaluate_incompressible_property_state(
+            packages, incompressible_model, component_amounts_mol,
+            temperature_K=temperature_K, pressure_Pa=pressure_Pa, quantities=quantities)
+
     from chemworld.physchem.eos import (
         cubic_state_derivatives,
         evaluate_cubic_eos,
@@ -377,7 +393,7 @@ def evaluate_property_state(
     }):
         raise ValueError("non-gas mixture chemical properties require an explicit activity/EOS")
     if eos is not None and phase == "solid":
-        raise ValueError("a cubic fluid EOS does not describe a solid phase")
+        raise ValueError("a fluid EOS does not describe a solid phase")
     policy = "warn" if validity_policy == "ignore" else validity_policy
     model_details: dict[str, object] = {}
     excess = None
@@ -393,13 +409,22 @@ def evaluate_property_state(
     state = None
     derivatives = {}
     if eos is not None:
-        state = evaluate_cubic_eos(eos, fractions, temperature_K=temperature_K,
-                                   pressure_Pa=pressure_Pa,
-                                   phase="vapor" if phase == "gas" else "liquid")
-        if requested & {"cp", "cv", "dH_dT_P", "dU_dT_V", "dV_dT_P", "dV_dP_T"}:
-            derivatives = cubic_state_derivatives(
-                eos, fractions, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+        from chemworld.physchem.molecular_properties import MolecularEOSSpec
+
+        if isinstance(eos, MolecularEOSSpec):
+            if set(eos.component_ids) != set(by_id):
+                raise ValueError("molecular EOS identities must match property packages")
+            state, derivatives = eos.evaluate(
+                fractions, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
                 phase="vapor" if phase == "gas" else "liquid")
+        else:
+            state = evaluate_cubic_eos(eos, fractions, temperature_K=temperature_K,
+                                       pressure_Pa=pressure_Pa,
+                                       phase="vapor" if phase == "gas" else "liquid")
+            if requested & {"cp", "cv", "dH_dT_P", "dU_dT_V", "dV_dT_P", "dV_dP_T"}:
+                derivatives = cubic_state_derivatives(
+                    eos, fractions, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+                    phase="vapor" if phase == "gas" else "liquid")
     elif phase == "gas":
         state = ideal_gas_state(fractions, temperature_K=temperature_K, pressure_Pa=pressure_Pa)
         derivatives = {"cp_departure_J_mol_K": 0.0, "cp_minus_cv_J_mol_K": R_J_PER_MOL_K,
@@ -710,8 +735,27 @@ class ComponentPropertyPackage:
         quantities: Sequence[str], reference: CaloricReference | None = None,
         validity_policy: ValidityPolicy = "raise", gas_model: str | None = None,
         helmholtz_model: HelmholtzPhaseModel | None = None,
+        water_model: IF97WaterModel | None = None,
+        incompressible_model: IncompressibleMaterialModel | None = None,
     ) -> StatePropertyReport:
         """Evaluate requested intensive properties on a one-mole pure basis."""
+        if incompressible_model is not None:
+            if (reference is not None or gas_model is not None or helmholtz_model is not None
+                    or water_model is not None):
+                raise ValueError("incompressible model uses an exclusive material/caloric binding")
+            return evaluate_property_state(
+                (self,), {self.component.identifier: 1.0}, temperature_K=temperature_K,
+                pressure_Pa=pressure_Pa, phase=phase, quantities=quantities,
+                validity_policy=validity_policy, incompressible_model=incompressible_model)
+        if water_model is not None:
+            from chemworld.physchem.water_if97_properties import evaluate_if97_property_state
+
+            if (reference is not None or gas_model is not None or helmholtz_model is not None
+                    or validity_policy != "raise"):
+                raise ValueError("IF97 uses its own exclusive caloric reference and strict domain")
+            return evaluate_if97_property_state(
+                self, water_model, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
+                phase=phase, quantities=quantities)
         if helmholtz_model is not None:
             from chemworld.physchem.helmholtz_properties import evaluate_helmholtz_property_state
 
@@ -748,10 +792,13 @@ class ComponentPropertyPackage:
 
     def phase_model(
         self, *, phase: str, reference: CaloricReference | None = None,
-        eos: CubicEOSSpec | None = None, activity_model: ActivityModelSpec | None = None,
+        eos: CubicEOSSpec | MolecularEOSSpec | None = None,
+        activity_model: ActivityModelSpec | None = None,
         volume_model: PropertyCorrelation | None = None,
         transport_models: Mapping[str, PropertyCorrelation | PhaseTransportSpec] | None = None,
         helmholtz_model: HelmholtzPhaseModel | None = None,
+        water_model: IF97WaterModel | None = None,
+        incompressible_model: IncompressibleMaterialModel | None = None,
     ) -> PhasePropertyModel:
         """Freeze a pure-phase declaration over this package's existing consumers."""
         from chemworld.physchem.phase_evaluation import PhasePropertyModel
@@ -761,6 +808,7 @@ class ComponentPropertyPackage:
             references=None if reference is None else {self.component.identifier: reference},
             eos=eos, activity_model=activity_model, volume_model=volume_model,
             transport_models=transport_models, helmholtz_model=helmholtz_model,
+            water_model=water_model, incompressible_model=incompressible_model,
         )
 
     def evaluate(

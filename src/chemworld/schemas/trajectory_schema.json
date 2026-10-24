@@ -7,7 +7,6 @@
     "affected_ledgers",
     "agent_metadata",
     "agent_visible_observation",
-    "benchmark_task_id",
     "budget",
     "campaign_id",
     "constitution_checks",
@@ -25,12 +24,10 @@
     "kernel_id",
     "kernel_maturity",
     "kernel_version",
-    "leaderboard_score",
     "measurement_cost",
     "mechanism_hash",
     "mechanism_id",
     "objective",
-    "observation",
     "observation_contract_hash",
     "observed_keys",
     "observed_mask",
@@ -42,7 +39,6 @@
     "processed_estimate",
     "proxy_allowed",
     "raw_signal",
-    "reward",
     "reward_source",
     "rollback_reason",
     "run_id",
@@ -69,37 +65,70 @@
     "world_split"
   ],
   "properties": {
-    "initialization_replay": {
-      "description": "Evaluator-only committed initialization instructions and receipt digests.",
-      "type": ["array", "null"],
-      "items": {
-        "type": "object",
-        "required": ["after_operation_id", "experiment_index", "options", "receipt_sha256"],
-        "properties": {
-          "after_operation_id": {"type": "integer", "minimum": 0},
-          "experiment_index": {"type": "integer", "minimum": 0},
-          "options": {"type": "object"},
-          "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-        },
-        "additionalProperties": false
-      }
-    },
     "schema_version": {
       "type": "string",
-      "const": "chemworld-trajectory-0.2"
+      "const": "chemworld-trajectory-0.3"
     },
     "run_id": {
       "type": "string",
       "minLength": 1
     },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "environment_outcome": {
-      "type": "object"
+      "type": "object",
+      "required": [
+        "observation"
+      ],
+      "properties": {
+        "observation": {
+          "type": "object"
+        }
+      }
     },
     "agent_visible_observation": {
-      "type": "object"
+      "type": "object",
+      "required": [
+        "observation",
+        "views",
+        "observed_reward"
+      ],
+      "properties": {
+        "observation": {
+          "type": "object"
+        },
+        "views": {
+          "type": "object"
+        },
+        "observed_reward": {
+          "type": "number"
+        }
+      }
     },
     "evaluation_outcome": {
-      "type": "object"
-    }
+      "type": "object",
+      "required": [
+        "online_transition_reward",
+        "leaderboard_score"
+      ],
+      "properties": {
+        "online_transition_reward": {
+          "type": "number"
+        },
+        "leaderboard_score": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "benchmark_task_id": false,
+    "observation": false,
+    "reward": false,
+    "agent_view": false,
+    "leaderboard_score": false
   }
 }

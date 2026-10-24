@@ -15,6 +15,7 @@ import chemworld  # noqa: F401
 from chemworld.agents.experiment_documents import ExperimentDocumentWorkspace
 from chemworld.data.datasets import dataset_card, export_dataset
 from chemworld.data.logging import TrajectoryLogger, load_jsonl, observation_to_json
+from chemworld.data.records import trajectory_value
 from chemworld.envs.chemworld_env import ChemWorldEnv
 from chemworld.runtime.semantics import RUNTIME_SEMANTICS_ID
 
@@ -136,8 +137,8 @@ def run_unit(
         "planned_ending": ending,
         "operation_count": len(records),
         "final_assay_count": len(assays),
-        "yield": assays[-1]["observation"].get("yield") if assays else None,
-        "final_score": assays[-1].get("leaderboard_score") if assays else None,
+        "yield": trajectory_value(assays[-1], 'observation').get("yield") if assays else None,
+        "final_score": trajectory_value(assays[-1], 'leaderboard_score', None) if assays else None,
         "failures": failures,
     }
 

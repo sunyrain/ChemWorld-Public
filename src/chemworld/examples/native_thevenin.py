@@ -5,6 +5,7 @@ This authored example is not a measured battery or an independent qualification.
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from chemworld.agents.base import BaseAgent
@@ -61,13 +62,35 @@ def default_spec():
         constant("entropy", 1e-4, "V/K"), ScalarControlProgram(((0., 298.15),), "K"))
 
 
-def workflow(spec=None):
-    return thevenin_world_spec(default_spec() if spec is None else spec), (
+def workflow(spec=None, *, include_impedance_analysis=False, include_named_controls=False):
+    from chemworld.world.thevenin_analysis import THEVENIN_ANALYSIS
+
+    spec = default_spec() if spec is None else spec
+    if include_named_controls and spec.control is None:
+        spec = control_spec(spec)
+    return thevenin_world_spec(spec,
+        include_impedance_analysis=include_impedance_analysis), (
+        *(({"operation": "measure", "instrument": THEVENIN_ANALYSIS},)
+          if include_impedance_analysis else ()),
         {"operation": "configure_electrical_control", "current_A": .2},
         {"operation": "wait", "duration_s": 2.},
         {"operation": "measure", "instrument": "thevenin_meter"},
         {"operation": "configure_electrical_control", "current_A": 0.},
         {"operation": "wait", "duration_s": 1.},
+        *((
+            {"operation": "configure_electrical_control", "control_mode": "power",
+             "power_W": .5, "branch_lower_A": 0., "branch_upper_A": 1.},
+            {"operation": "wait", "duration_s": 1.},
+            {"operation": "configure_electrical_control", "control_mode": "resistance",
+             "resistance_Ohm": 10.},
+            {"operation": "wait", "duration_s": 1.},
+            {"operation": "configure_electrical_control", "control_mode": "differential_power",
+             "power_W": .4},
+            {"operation": "wait", "duration_s": 1.},
+            {"operation": "configure_electrical_control", "control_mode": "cccv",
+             "potential_V": 3.8, "current_limit_A": -.2},
+            {"operation": "wait", "duration_s": 1.},
+        ) if include_named_controls else ()),
         {"operation": "configure_electrical_control", "potential_V": 3.65},
         {"operation": "wait", "duration_s": 1.},
         {"operation": "measure", "instrument": "thevenin_meter"},
@@ -75,11 +98,40 @@ def workflow(spec=None):
     )
 
 
-def run(output, *, noise="keyed", spec=None):
+def diffusion_spec(*, cells=16, time_constant_s=30.):
+    """Authored optional planar SOC diffusion, with explicit corrected physics."""
+    from chemworld.physchem.battery_thevenin_diffusion import TheveninDiffusionSpec
+
+    if type(cells) is not int or not 2 <= cells <= 128:
+        raise ValueError("the example requires 2..128 integer diffusion cells")
+    parameters = _table("synthetic-circuit-diffusion", {"diffusion_time_constant_s": "s"},
+                        [{"diffusion_time_constant_s": time_constant_s}])
+    diffusion = TheveninDiffusionSpec(parameters, "0", tuple(i/cells for i in range(cells+1)))
+    return replace(default_spec(), diffusion=diffusion)
+
+
+def control_spec(spec=None):
+    """Explicit synthetic controller gains and persistent current-memory state."""
+    from chemworld.physchem.battery_thevenin_control import TheveninControlSpec
+
+    values = {"initial_current_A": .1, "current_scale_A": 1., "power_scale_W": 1.,
+        "resistance_scale_Ohm": 1., "voltage_scale_V": 1.,
+        "power_response_time_s": 100., "resistance_response_time_s": 100.,
+        "voltage_response_time_s": 1., "antiwindup_time_s": 100./3600.}
+    units = {key: ("A" if key.endswith("_A") else "W" if key.endswith("_W")
+        else "Ohm" if key.endswith("_Ohm") else "V" if key.endswith("_V") else "s")
+        for key in values}
+    declaration = TheveninControlSpec(_table("synthetic-controller", units, [values]), "0")
+    return replace(default_spec() if spec is None else spec, control=declaration)
+
+
+def run(output, *, noise="keyed", spec=None, include_impedance_analysis=False,
+        include_named_controls=False):
     output = Path(output)
     if output.exists():
         raise FileExistsError("preserve previous trajectories; select a new output path")
-    world, actions = workflow(spec)
+    world, actions = workflow(spec, include_impedance_analysis=include_impedance_analysis,
+                              include_named_controls=include_named_controls)
 
     class FixedSequence(BaseAgent):
         def act(self, history):
@@ -102,8 +154,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--noise", choices=("keyed", "sequential"), default="keyed")
+    parser.add_argument("--analysis", action="store_true",
+        help="Opt-in synthetic stationary model analysis; not a physical EIS acquisition")
+    parser.add_argument("--diffusion", action="store_true",
+        help="Enable the authored 16-cell planar diffusion example with corrected voltage/heat")
+    parser.add_argument("--controls", action="store_true",
+        help="Exercise explicit power/load/dynamic/CCCV controls and persistent controller memory")
     args = parser.parse_args()
-    print(json.dumps(run(args.output, noise=args.noise), indent=2))
+    print(json.dumps(run(args.output, noise=args.noise,
+                         spec=diffusion_spec() if args.diffusion else None,
+                         include_impedance_analysis=args.analysis,
+                         include_named_controls=args.controls), indent=2))
 
 
 if __name__ == "__main__":

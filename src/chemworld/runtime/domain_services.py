@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from math import fsum, isclose
 from typing import Any
 
 from chemworld.foundation import (
@@ -190,8 +191,36 @@ class ChemWorldDomainServices:
                 state.vessel_elapsed_s[state.vessel_id]
                 + next_state.ledger.time_s - state.ledger.time_s
             )
+            thermal_fields = ("energy_jacket_J", "heat_reaction_J", "heat_loss_J")
+            thermal_deltas = result.vessel_thermal_deltas
+            if operation != "select_vessel" and thermal_deltas is not None:
+                previous = {state.vessel_id: state, **state.inactive_vessels}
+                members = {next_state.vessel_id: next_state, **next_state.inactive_vessels}
+                if (
+                    set(thermal_deltas) - (previous.keys() & members.keys())
+                    or any(not isclose(
+                        fsum(values.get(key, 0.0) for values in thermal_deltas.values()),
+                        getattr(next_state.ledger, key) - getattr(state.ledger, key),
+                        abs_tol=1e-7, rel_tol=1e-8,
+                    ) for key in thermal_fields)
+                ):
+                    return ModelProviderResult(
+                        {"preconditions": preconditions}, diagnostics={}, success=False,
+                        outcome="numerical_failure", failure_reason="local_system_heat_mismatch",
+                    )
+                for name, increments in thermal_deltas.items():
+                    local = members[name]
+                    record = local.thermal.vessels[name]
+                    members[name] = local.replace(thermal=replace(
+                        local.thermal, vessels={name: replace(record, **{
+                            key: getattr(previous[name].thermal.vessels[name], key)
+                            + increments.get(key, 0.0) for key in thermal_fields
+                        })},
+                    ))
+                active = members.pop(next_state.vessel_id)
+                next_state = active.replace(inactive_vessels=members)
             thermal = next_state.thermal.vessels[next_state.vessel_id]
-            if operation != "select_vessel":
+            if operation != "select_vessel" and thermal_deltas is None:
                 thermal = replace(
                     thermal,
                     **{
@@ -200,7 +229,7 @@ class ChemWorldDomainServices:
                             + getattr(next_state.ledger, key)
                             - getattr(state.ledger, key)
                         )
-                        for key in ("energy_jacket_J", "heat_reaction_J", "heat_loss_J")
+                        for key in thermal_fields
                     },
                 )
             next_state = next_state.replace(

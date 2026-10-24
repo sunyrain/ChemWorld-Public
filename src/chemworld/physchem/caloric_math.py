@@ -5,8 +5,9 @@ algebraic terms during capacity validation; they own no model or runtime state.
 """
 
 from dataclasses import dataclass
-from math import exp, expm1, inf, isfinite, log, nextafter, tanh
+from math import exp, expm1, fsum, inf, isfinite, log, nextafter, tanh
 
+from chemworld.physchem.precise_scalar import PreciseScalar
 from chemworld.physchem.second_order_pair import SecondOrderPair
 
 
@@ -55,6 +56,29 @@ def _jet(value):
     return value if isinstance(value, FirstDerivative) else FirstDerivative(value)
 
 
+def compensated_sum(values):
+    """Accurately sum a shared jet's scalar coefficients without losing derivatives.
+
+    Dense Helmholtz pressure subtracts large residual terms. Compensating only
+    the primal value leaves its pressure and response derivatives inaccurate.
+    Nested first derivatives and SecondOrderPair use the same summation rule.
+    Other arithmetic types retain their own addition contract.
+    """
+    values = tuple(values)
+    if any(isinstance(value, FirstDerivative) for value in values):
+        jets = tuple(_jet(value) for value in values)
+        return FirstDerivative(compensated_sum(v.value for v in jets),
+                               compensated_sum(v.slope for v in jets))
+    if any(isinstance(value, SecondOrderPair) for value in values):
+        jets = tuple(value if isinstance(value, SecondOrderPair) else SecondOrderPair(value)
+                     for value in values)
+        return SecondOrderPair(*(compensated_sum(getattr(v, field) for v in jets)
+                                 for field in ("value", "dx", "dy", "dxx", "dxy", "dyy")))
+    if all(isinstance(value, (int, float)) for value in values):
+        return fsum(values)
+    return sum(values)
+
+
 def scalar_value(value):
     """The primal number of a possibly nested chain-rule derivative."""
     while isinstance(value, (FirstDerivative, SecondOrderPair)):
@@ -98,14 +122,14 @@ def nonnegative_power(value, exponent):
 
 
 def derivative_values(function, value, *, order=1):
-    """Value through third derivative from nested first-order chain rules.
+    """Value through fourth derivative from nested first-order chain rules.
 
     The small fixed order is sufficient for pressure/Arrhenius derivatives;
     this is neither a symbolic expression interpreter nor a finite difference.
     Existing caloric consumers retain their original first-order arithmetic.
     """
-    if isinstance(order, bool) or not isinstance(order, int) or not 0 <= order <= 3:
-        raise ValueError("analytic derivative order must be an integer from zero through three")
+    if isinstance(order, bool) or not isinstance(order, int) or not 0 <= order <= 4:
+        raise ValueError("analytic derivative order must be an integer from zero through four")
     if not isfinite(value):
         raise ValueError("analytic differentiation requires a finite input")
 
@@ -220,8 +244,10 @@ def _interval(value):
 
 
 def exponential(value):
+    if isinstance(value, PreciseScalar):
+        return value.exponential()
     if isinstance(value, SecondOrderPair):
-        result = exp(value.value)
+        result = exponential(value.value)
         return value.compose(result, result, result)
     if isinstance(value, FirstDerivative):
         result = exponential(value.value)
@@ -233,9 +259,11 @@ def exponential(value):
 
 def exponential_minus_one(value):
     """Accurate near-zero exp(x)-1 on the same nested chain-rule arithmetic."""
+    if isinstance(value, PreciseScalar):
+        return value.exponential_minus_one()
     if isinstance(value, SecondOrderPair):
-        result = exp(value.value)
-        return value.compose(expm1(value.value), result, result)
+        result = exponential(value.value)
+        return value.compose(exponential_minus_one(value.value), result, result)
     if isinstance(value, FirstDerivative):
         return FirstDerivative(exponential_minus_one(value.value),
                                exponential(value.value)*value.slope)
@@ -244,10 +272,32 @@ def exponential_minus_one(value):
     return expm1(value)
 
 
+def hyperbolic_tangent(value):
+    """Stable tanh and analytic chain rule, including saturated derivatives."""
+    if isinstance(value, Interval):
+        return _outward(tanh(value.lower), tanh(value.upper))
+    if isinstance(value, (FirstDerivative, SecondOrderPair)):
+        primal = value.value
+        magnitude = primal if scalar_value(primal) >= 0 else -primal
+        q = exponential(-2*magnitude)
+        first = 4*q/(1+q)**2
+        result = hyperbolic_tangent(primal)
+        if isinstance(value, SecondOrderPair):
+            return value.compose(result, first, -2*result*first)
+        return FirstDerivative(result, first*value.slope)
+    if isinstance(value, PreciseScalar):
+        sign = 1 if scalar_value(value) >= 0 else -1
+        q = exponential(-2*sign*value)
+        return -sign*exponential_minus_one(-2*sign*value)/(1+q)
+    return tanh(value)
+
+
 def logarithm(value):
+    if isinstance(value, PreciseScalar):
+        return value.logarithm()
     if isinstance(value, SecondOrderPair):
         inverse = 1/value.value
-        return value.compose(log(value.value), inverse, -inverse*inverse)
+        return value.compose(logarithm(value.value), inverse, -inverse*inverse)
     if isinstance(value, FirstDerivative):
         return FirstDerivative(logarithm(value.value), value.slope / value.value)
     if isinstance(value, Interval):

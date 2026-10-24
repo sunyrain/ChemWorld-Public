@@ -867,7 +867,7 @@ def sample_valid_action(
     ]
     if not actions:
         raise ValueError("No currently available operation matches the request")
-    for _ in range(max_attempts):
+    for attempt in range(max_attempts):
         schema = actions[int(rng.integers(len(actions)))]["schema"]
         candidate: dict[str, Any] = {"operation": schema["operation"]}
         exclusive = {
@@ -883,8 +883,10 @@ def sample_valid_action(
             name = field["field"]
             if name in exclusive and name not in selected:
                 continue
+            # Try the minimal schema-valid payload first. Independent optional
+            # fields may describe mutually exclusive extensions of a control.
             if (not field.get("required", True) and name not in selected
-                    and not rng.integers(2)):
+                    and (attempt == 0 or not rng.integers(2))):
                 continue
             choices = field.get("choices")
             bounds = field.get("bounds")

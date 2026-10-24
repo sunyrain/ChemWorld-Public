@@ -7,7 +7,7 @@ from chemworld.foundation.state_ledgers import (
     VesselLedger,
     VesselRecord,
 )
-from chemworld.physchem.gas_mechanism_batch import NASA7GasThermodynamics
+from chemworld.physchem.gas_mechanism_batch import IdealGasThermodynamics
 from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec, ThermalSystemSpec
 from chemworld.physchem.reaction_network import R_J_PER_MOL_K
 from chemworld.world.composition import WorldCompositionSpec
@@ -24,7 +24,7 @@ def gas_mechanism_world(
     maximum_temperature_K=1800.0,
 ):
     """Initial inventory is authored explicitly; no upstream state is inferred."""
-    thermo = NASA7GasThermodynamics(network.imported_gas_thermochemistry)
+    thermo = IdealGasThermodynamics(network.imported_gas_thermochemistry)
     amounts = {key: float(amounts_mol.get(key, 0)) for key in network.species_ids}
     if set(amounts_mol) - set(amounts):
         raise ValueError("unknown initial gas species")

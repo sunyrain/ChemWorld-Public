@@ -582,17 +582,33 @@ class LabScheduleServices:
             system = next(system for system in self.systems if system.system_id == key)
             if set(members) != set(system.vessels):
                 return fail("lab_system_candidate_ownership_changed", outcome="numerical_failure")
+            thermal_fields = ("energy_jacket_J", "heat_reaction_J", "heat_loss_J")
+            thermal_deltas = result.vessel_thermal_deltas
+            if thermal_deltas is not None and (
+                set(thermal_deltas) != set(members)
+                or any(not isclose(
+                    fsum(values.get(field, 0.0) for values in thermal_deltas.values()),
+                    getattr(after.ledger, field) - getattr(before.ledger, field),
+                    abs_tol=1e-7, rel_tol=1e-8,
+                ) for field in thermal_fields)
+            ):
+                return fail("lab_system_local_heat_mismatch", outcome="numerical_failure")
+            previous_members = {key: before, **before.inactive_vessels}
             for name in ledger.keys() - {"time_s", "risk"}:
                 ledger[name] += getattr(after.ledger, name) - getattr(before.ledger, name)
             for name in sorted(members):
                 local = members[name]
                 thermal = local.thermal.vessels[name]
+                local_heat = (
+                    {field: getattr(previous_members[name].thermal.vessels[name], field)
+                     + thermal_deltas[name].get(field, 0.0) for field in thermal_fields}
+                    if thermal_deltas is not None else
+                    {field: getattr(local.ledger, field) for field in thermal_fields}
+                )
                 local = local.replace(
                     inactive_vessels={}, vessel_elapsed_s={}, lab_clock=None,
                     thermal=replace(local.thermal, vessels={name: replace(
-                        thermal, **{field: getattr(local.ledger, field) for field in (
-                            "energy_jacket_J", "heat_reaction_J", "heat_loss_J",
-                        )},
+                        thermal, **local_heat,
                     )}),
                 )
                 state = install_local(state, local)

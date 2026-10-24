@@ -20,6 +20,7 @@ from chemworld.physchem.enthalpy import caloric_temperature
 from chemworld.physchem.equilibrium import ActivityModelSpec
 from chemworld.physchem.flow_meters import LiquidOrificeSpec, liquid_orifice_pressure
 from chemworld.physchem.fluids_devices import LiquidControlValveSpec, liquid_valve_pressure_drop
+from chemworld.physchem.incompressible_properties import IncompressibleMaterialModel
 from chemworld.physchem.packed_beds import PackedBedSpec, packed_bed_pressure
 from chemworld.physchem.phase_inventory import PhaseInventoryRates, integrate_phase_inventory
 from chemworld.physchem.property_packages import ComponentPropertyPackage, evaluate_property_state
@@ -51,6 +52,7 @@ class LiquidTransportProperties:
     volume_pressure_parameters: dict[str, float | str] | None = None
     volume_mixing_note: str = ""
     activity_model: ActivityModelSpec | None = None
+    incompressible_model: IncompressibleMaterialModel | None = None
 
     def __post_init__(self):
         if not self.packages or len(set(self.component_ids)) != len(self.packages):
@@ -67,6 +69,24 @@ class LiquidTransportProperties:
             or self.pressure_Pa <= 0
         ):
             raise ValueError("liquid transport requires finite positive T/P bounds")
+        if self.incompressible_model is not None:
+            model = self.incompressible_model
+            if not isinstance(model, IncompressibleMaterialModel):
+                raise TypeError("incompressible transport requires an explicit material model")
+            model.validate_components(tuple(p.component for p in self.packages))
+            if (self.caloric_references or self.activity_model is not None
+                    or self.viscosity_pressure_parameters or self.volume_mixing_method is not None
+                    or self.volume_mixing_parameters or self.volume_pressure_parameters
+                    or self.volume_mixing_note):
+                raise ValueError("incompressible transport uses its own exclusive property model")
+            if not model.fluid.temperature_bounds_K[0] <= lo < hi <= (
+                model.fluid.temperature_bounds_K[1]
+            ):
+                raise ValueError("transport temperature interval exceeds incompressible source")
+            for name in ("caloric_references", "viscosity_pressure_parameters",
+                         "volume_mixing_parameters", "volume_pressure_parameters"):
+                object.__setattr__(self, name, MappingProxyType({}))
+            return
         references = self.caloric_references
         if references is None:
             references = {k: CaloricReference(phase="liquid") for k in self.component_ids}
@@ -163,6 +183,7 @@ class LiquidTransportProperties:
             quantities=(quantity,),
             references=self.references,
             activity_model=self.activity_model,
+            incompressible_model=self.incompressible_model,
         )
         return sum(amounts.values()) * report.properties[quantity].value
 
@@ -176,6 +197,7 @@ class LiquidTransportProperties:
             volume_mixing_parameters=self.volume_mixing_parameters,
             volume_pressure_parameters=self.volume_pressure_parameters,
             activity_model=self.activity_model,
+            incompressible_model=self.incompressible_model,
         )
 
     def to_dict(self):
@@ -195,6 +217,8 @@ class LiquidTransportProperties:
             "volume_mixing_note": self.volume_mixing_note,
             **({"activity_model": self.activity_model.to_dict()}
                if self.activity_model is not None else {}),
+            **({"incompressible_model": self.incompressible_model.to_dict()}
+               if self.incompressible_model is not None else {}),
         }
 
     @classmethod
@@ -215,6 +239,8 @@ class LiquidTransportProperties:
             value.get("volume_mixing_note", ""),
             (ActivityModelSpec(**value["activity_model"])
              if value.get("activity_model") is not None else None),
+            (IncompressibleMaterialModel.from_dict(value["incompressible_model"])
+             if value.get("incompressible_model") is not None else None),
         )
 
 

@@ -57,8 +57,8 @@ def test_native_cold_warm_and_snapshot_continue_one_clock_without_future_allocat
         assert after.phases.phases["solid"].species_amounts_mol["P"] > 0.001
         assert after.to_dict() == replay._state.to_dict()
         model, thermal = (
-            world.physics.crystal_models["reactor"],
-            world.physics.thermal_models["reactor"],
+            world.physics.models_of('crystal')["reactor"],
+            world.physics.models_of('thermal')["reactor"],
         )
         assert crystal_inventory_energy(after, model, thermal) - crystal_inventory_energy(
             before, model, thermal
@@ -94,7 +94,7 @@ def test_native_filter_resuspend_preserves_historical_filtrate_and_reconciles_en
             stirring_speed_rpm=600,
         )
         assert session._state.samples.to_dict() == sample
-        population_from_state(session._state, world.physics.crystal_models["reactor"])
+        population_from_state(session._state, world.physics.models_of('crystal')["reactor"])
     finally:
         session.close()
 
@@ -121,7 +121,7 @@ def test_actual_container_port_carries_count_size_and_molecular_constituents():
             stored["population_constituents"], before["population_constituents"], strict=True
         ):
             assert actual == pytest.approx([n * 0.4 for n in original])
-        population_from_state(session._state, world.physics.crystal_models["reactor"])
+        population_from_state(session._state, world.physics.models_of('crystal')["reactor"])
     finally:
         session.close()
 
@@ -180,9 +180,11 @@ def test_material_reset_mixes_retained_body_heat_with_fresh_crystal_inventory(sc
         assert state.ledger == before.ledger
         assert state.phases.phases["solid"].species_amounts_mol["P"] == 0.001
         assert crystal_inventory_energy(
-            state, world.physics.crystal_models["reactor"], world.physics.thermal_models["reactor"]
+            state,
+            world.physics.models_of("crystal")["reactor"],
+            world.physics.models_of("thermal")["reactor"],
         ) == pytest.approx(expected, abs=1e-6)
-        population_from_state(state, world.physics.crystal_models["reactor"])
+        population_from_state(state, world.physics.models_of('crystal')["reactor"])
         settings = equipment_settings(state.equipment, "crystallizer")
         assert settings["population_constituents"] == [[.0003, .0001, .001]]
         assert settings["seed_target_mol"] == .0003

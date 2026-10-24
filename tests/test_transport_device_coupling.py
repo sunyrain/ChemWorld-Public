@@ -232,6 +232,22 @@ def test_invalid_utility_and_numerical_failure_keep_real_inventory(monkeypatch):
     assert runtime._state.ledger.time_s == before.ledger.time_s
 
 
+def test_legacy_transport_rejects_heat_without_candidate_or_elapsed_time():
+    from chemworld.runtime.transport_devices import TransportRuntime
+
+    runtime = session()
+    before = runtime._state
+    result = TransportRuntime().advance(
+        before, {"duration_s": 10, "target_temperature_K": 310}, heat=True,
+    )
+    assert not result.success
+    assert result.outcome == "rejected"
+    assert result.failure_reason == "use_flow_utility_control"
+    assert result.actual_duration_s == 0
+    assert result.state is None
+    assert runtime._state == before
+
+
 @pytest.mark.parametrize("noise", ["sequential", "keyed"])
 def test_agent_transport_history_replays_actual_sources(tmp_path, noise):
     from chemworld.agents.base import BaseAgent

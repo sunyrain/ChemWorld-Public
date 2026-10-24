@@ -205,7 +205,7 @@ def test_numerical_failure_rolls_back_acquisition_and_does_not_use_instrument(mo
 
 def test_physical_stop_commits_actual_endpoint_without_inventing_complete_readout():
     spec = surface_world_spec(include_surface=False)
-    models = dict(spec.physics.thermal_models)
+    models = dict(spec.physics.models_of('thermal'))
     models["reactor"] = replace(models["reactor"], minimum_temperature_K=349.99)
     components = tuple(
         replace(component, parameters={**component.parameters,
@@ -213,8 +213,13 @@ def test_physical_stop_commits_actual_endpoint_without_inventing_complete_readou
         if component.kind == "thermal" and component.vessel == "reactor" else component
         for component in spec.components
     )
-    env = env_for(replace(spec, components=components,
-                          physics=replace(spec.physics, thermal_models=models)))
+    env = env_for(
+        replace(
+            spec,
+            components=components,
+            physics=replace(spec.physics, models={**spec.physics.models, "thermal": models}),
+        )
+    )
     perform(env, operation="pause_control")
     info = perform(env, operation="measure", instrument="gas_composition")[4]
     assert info["operation_outcome"] == "stopped"
@@ -265,7 +270,11 @@ def test_timed_instrument_requires_physical_clock_at_world_binding():
     # A timed instrument cannot bind when its physical system has no solver;
     # the shared owner check now diagnoses this before task capability checks.
     with pytest.raises(WorldCompositionError, match="no declared physical advance strategy"):
-        compile_world_composition(replace(spec, physics=replace(spec.physics, thermal_models={})))
+        compile_world_composition(
+            replace(
+                spec, physics=replace(spec.physics, models={**spec.physics.models, "thermal": {}})
+            )
+        )
 
 
 @pytest.mark.parametrize("noise_mode", ["sequential", "keyed"])

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
 from math import isfinite, log10
 from random import Random
 
+from chemworld._serialization import canonical_json_sha256
 from chemworld.physchem.electrochem_double_layer import DoubleLayerRCSpec
 from chemworld.physchem.electrochem_transport import DiffusionLayerSpec
 from chemworld.physchem.electrochemistry import (
@@ -450,13 +450,7 @@ def _default_hidden_ranges() -> dict[str, HiddenParameterRange]:
 
 
 def _sha256(payload: object) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_json_sha256(payload, ensure_ascii=True)
 
 
 def _positive(value: float, field_name: str) -> None:

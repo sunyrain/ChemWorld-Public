@@ -85,6 +85,24 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
         )
         return np.r_[rates, -constraint]
 
+    def physical_jacobian(t, y, p):
+        jacobian = system.residual_rhs_jacobian(
+            view(t, y[:count], values(y)), (*identities, *names)
+        )
+        if not system.isothermal:
+            return jacobian
+        # The fixed-temperature view ignores the numerical T coordinate. Apply
+        # its chain rule to every RHS/constraint row, without mutating a domain
+        # provider's matrix or changing the independent temperature mass row.
+        temperature = len(material)
+        if sparse.issparse(jacobian):
+            projection = np.ones(len(variables))
+            projection[temperature] = 0
+            return jacobian.multiply(projection)
+        projected = np.array(jacobian, copy=True)
+        projected[:, temperature] = 0
+        return projected
+
     residual = mass_matrix_system(
         "coupled-inventory-energy",
         variables,
@@ -92,9 +110,7 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
         sparse.diags(np.r_[np.ones(count), np.zeros(len(names))]),
         physical_rhs,
         derivatives="hybrid",
-        rhs_jacobian=None if system.residual_rhs_jacobian is None else lambda t, y, p: (
-            system.residual_rhs_jacobian(view(t, y[:count], values(y)), (*identities, *names))
-        ),
+        rhs_jacobian=None if system.residual_rhs_jacobian is None else physical_jacobian,
     )
     events = tuple(
         ResidualEvent(

@@ -73,6 +73,10 @@ def public_path(name: str) -> bool:
     if name.startswith("src/chemworld/"):
         return (
             path.suffix == ".py"
+            or name in {
+                "src/chemworld/data/parameters/incompressible.json",
+                "src/chemworld/data/parameters/CoolProp-MIT.txt",
+            }
             or (name.startswith("src/chemworld/physchem/atomic_data/")
                 and path.suffix in {".csv", ".json"})
             or (name.startswith("src/chemworld/schemas/") and path.suffix == ".json")

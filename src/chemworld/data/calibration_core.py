@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from math import exp, isfinite, log
 
 import numpy as np
@@ -160,13 +161,48 @@ class MeasurementCalibration:
             "measurements": details,
         }
 
-    def fit(self, *, max_nfev=30, diff_step=1e-3, rank_rtol=1e-5, rank_atol=1e-8):
+    def fit(
+        self,
+        *,
+        max_nfev=30,
+        diff_step=1e-3,
+        rank_rtol=1e-5,
+        rank_atol=1e-8,
+        fixed_parameters=None,
+        evaluate_validation=True,
+    ):
         if self._fit_started or self.runs:
             raise ValueError("use a fresh calibration object for each fixed fitting block")
         if isinstance(max_nfev, bool) or not isinstance(max_nfev, int) or max_nfev <= 0:
             raise ValueError("optimizer limit must be a positive integer")
         if not all(isfinite(v) and v > 0 for v in (diff_step, rank_rtol, rank_atol)):
             raise ValueError("derivative and rank tolerances must be positive and finite")
+        if not isinstance(evaluate_validation, bool):
+            raise ValueError("evaluate_validation must be a boolean")
+        if fixed_parameters is not None and not isinstance(fixed_parameters, Mapping):
+            raise ValueError("fixed_parameters must be a named mapping")
+        fixed = dict(fixed_parameters or {})
+        known = {p.parameter_id: p for p in self.parameters}
+        if set(fixed) - set(known):
+            raise ValueError("fixed parameters must belong to the declared parameter whitelist")
+        for name, value in fixed.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("fixed parameters must be finite numeric values")
+            known[name].encode(value)
+        free = [i for i, p in enumerate(self.parameters) if p.parameter_id not in fixed]
+        initial = np.asarray(
+            [p.encode(fixed.get(p.parameter_id, p.initial)) for p in self.parameters]
+        )
+
+        def full_coordinates(x):
+            coordinates = initial.copy()
+            coordinates[free] = x
+            return coordinates
+
+        def candidate_values(x):
+            # Exact declared physical fixed values survive log coordinate round trips.
+            return {**self.values(full_coordinates(x)), **fixed}
+
         self._fit_started = True
         report = {
             "schema_version": self.schema_version,
@@ -190,17 +226,62 @@ class MeasurementCalibration:
             "status": "not_started",
             "failures": [],
         }
+        if fixed_parameters is not None:
+            report.update(
+                fixed_parameters=fixed,
+                free_parameters=[self.parameters[i].parameter_id for i in free],
+            )
+        if not evaluate_validation:
+            report["validation_evaluation"] = "not_requested"
         try:
 
             def training_residual(x):
-                return self.residuals(self.forward(self.values(x), "train", stage="fit"), "train")
+                return self.residuals(
+                    self.forward(candidate_values(x), "train", stage="fit"), "train"
+                )
+
+            if not free:
+                report["estimate"] = candidate_values([])
+                report["training"] = self.metrics(
+                    self.forward(report["estimate"], "train", stage="fixed_evaluation"),
+                    "train",
+                )
+                report["objective"] = report["training"]["sum_squared_weighted_residuals"]
+                report["optimizer"].update(
+                    method="fixed evaluation; no optimizer", success=True, nfev=0, njev=0
+                )
+                report["active_bounds"] = {}
+                report["identifiability"] = {
+                    "rank": 0,
+                    "parameter_count": 0,
+                    "status": "no_free_parameters",
+                    "singular_values": [],
+                    "weighted_jacobian": [],
+                    "boundary": "fixed evaluation does not establish parameter identifiability",
+                }
+                if evaluate_validation:
+                    report["validation"] = self.metrics(
+                        self.forward(report["estimate"], "validation", stage="heldout"),
+                        "validation",
+                    )
+                report["status"] = "fitted"
+                report["resources"] = self._resource_report()
+                json.dumps(report, allow_nan=False)
+                return report
+
+            original_jacobian = self._optimizer_jacobian()
+            jacobian = original_jacobian
+            if callable(original_jacobian) and fixed:
+
+                def jacobian(x):
+                    return original_jacobian(full_coordinates(x))[:, free]
 
             result = least_squares(
                 training_residual,
-                [p.encode(p.initial) for p in self.parameters],
+                initial[free],
                 bounds=(0.0, 1.0),
                 method="trf",
-                jac=self._optimizer_jacobian(),
+                jac=jacobian,
                 diff_step=diff_step,
                 max_nfev=max_nfev,
                 ftol=1e-8,
@@ -214,20 +295,23 @@ class MeasurementCalibration:
                 njev=result.njev,
                 optimality=float(result.optimality),
             )
-            report["estimate"] = self.values(result.x)
+            report["estimate"] = candidate_values(result.x)
+            # This is the objective of the actual returned candidate, even when
+            # max_nfev terminates the optimizer. Never substitute a favorable fit.
+            report["objective"] = float(result.fun @ result.fun)
             report["active_bounds"] = {
-                p.parameter_id: int(active)
-                for p, active in zip(self.parameters, result.active_mask, strict=True)
+                self.parameters[i].parameter_id: int(active)
+                for i, active in zip(free, result.active_mask, strict=True)
             }
             singular_values = np.linalg.svd(result.jac, compute_uv=False)
             threshold = max(rank_atol, rank_rtol * float(singular_values[0]))
             rank = int(np.count_nonzero(singular_values > threshold))
             report["identifiability"] = {
                 "rank": rank,
-                "parameter_count": len(self.parameters),
+                "parameter_count": len(free),
                 "singular_values": singular_values.tolist(),
                 "rank_threshold": threshold,
-                "status": "full_rank_local" if rank == len(self.parameters) else "rank_deficient",
+                "status": "full_rank_local" if rank == len(free) else "rank_deficient",
                 "weighted_jacobian": result.jac.tolist(),
                 "coordinate": "dimensionless bounded linear/log parameters",
                 "boundary": "local sensitivity; no global uniqueness or material qualification",
@@ -240,10 +324,11 @@ class MeasurementCalibration:
                     self.forward(report["estimate"], "train", stage="training_final"),
                     "train",
                 )
-                report["validation"] = self.metrics(
-                    self.forward(report["estimate"], "validation", stage="heldout"),
-                    "validation",
-                )
+                if evaluate_validation:
+                    report["validation"] = self.metrics(
+                        self.forward(report["estimate"], "validation", stage="heldout"),
+                        "validation",
+                    )
                 report["status"] = "fitted"
         except ForwardEvaluationError as exc:
             report.update(status="forward_failed")

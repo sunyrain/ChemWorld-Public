@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from chemworld.data.logging import load_jsonl
+from chemworld.data.records import trajectory_value
 from chemworld.data.validation import validate_records
 from chemworld.eval.layered_evaluation import TaskEvaluationContract, evaluate_layered_records
 from chemworld.eval.metrics import EVALUATION_METRICS_VERSION, evaluate_records
@@ -175,7 +176,7 @@ def _score_replay_payload(
     risk_limit_override: float | None = None,
 ) -> dict[str, Any]:
     first = records[0]
-    task_id = str(first.get("benchmark_task_id") or "")
+    task_id = str(trajectory_value(first, 'benchmark_task_id', None) or "")
     payload: dict[str, Any] = {
         "schema_version": SCORE_REPLAY_BINDING_VERSION,
         "evaluation_metrics_version": EVALUATION_METRICS_VERSION,

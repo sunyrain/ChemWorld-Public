@@ -41,7 +41,7 @@ def stochastic_world(network, counts, *, seed=0, budget=40):
         ),
         units={"amount": "mol", "volume": "L", "temperature": "K", "pressure": "Pa", "time": "s"},
     )
-    state = install_stochastic_state(state, seed=seed)
+    state = install_stochastic_state(state, seed=seed, algorithm=spec.algorithm)
     return WorldCompositionSpec.from_dict(
         {
             "schema_version": "chemworld-world-composition-0.1",

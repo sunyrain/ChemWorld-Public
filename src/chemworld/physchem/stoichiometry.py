@@ -19,6 +19,52 @@ def _fraction(value):
     return value if isinstance(value, Fraction) else Fraction(str(value))
 
 
+class RationalEliminationLimitError(ValueError):
+    """Exact arithmetic stopped at an explicitly declared size budget."""
+
+
+def _check_rational_bits(values, max_integer_bits):
+    if max_integer_bits is not None and any(
+        max(abs(v.numerator).bit_length(), v.denominator.bit_length()) > max_integer_bits
+        for v in values
+    ):
+        raise RationalEliminationLimitError("exact rational arithmetic size budget exhausted")
+
+
+def _rref(rows, *, width, max_integer_bits=None):
+    """Shared exact elimination; only the first width columns may be pivots.
+
+    An optional arithmetic budget belongs to bounded analysis consumers. Ordinary
+    chemical balancing preserves its existing unconstrained exact behavior.
+    """
+    reduced = [list(row) for row in rows]
+
+    def check(values):
+        _check_rational_bits(values, max_integer_bits)
+
+    for row in reduced:
+        check(row)
+    pivot_row, columns = 0, []
+    for column in range(width):
+        found = next((i for i in range(pivot_row, len(reduced)) if reduced[i][column]), None)
+        if found is None:
+            continue
+        reduced[pivot_row], reduced[found] = reduced[found], reduced[pivot_row]
+        divisor = reduced[pivot_row][column]
+        reduced[pivot_row] = [v / divisor for v in reduced[pivot_row]]
+        check(reduced[pivot_row])
+        for index, row in enumerate(reduced):
+            if index != pivot_row and row[column]:
+                multiplier = row[column]
+                reduced[index] = [
+                    a - multiplier * b for a, b in zip(row, reduced[pivot_row], strict=True)
+                ]
+                check(reduced[index])
+        columns.append(column)
+        pivot_row += 1
+    return reduced, columns
+
+
 def stoichiometric_matrix(atomss, reactants, *, charges=None):
     """Rows are conserved atoms/isotopes (and explicit charge); columns are species.
 
@@ -83,22 +129,7 @@ def balance_stoichiometry(matrix, *, allow_fractional=False, fixed_coefficients=
         if value <= 0:
             raise ValueError("fixed coefficients must be positive")
         augmented.append([Fraction(int(i == index)) for i in range(width)] + [value])
-    pivot_row, columns = 0, []
-    for column in range(width):
-        found = next((i for i in range(pivot_row, len(augmented)) if augmented[i][column]), None)
-        if found is None:
-            continue
-        augmented[pivot_row], augmented[found] = augmented[found], augmented[pivot_row]
-        divisor = augmented[pivot_row][column]
-        augmented[pivot_row] = [v / divisor for v in augmented[pivot_row]]
-        for index, row in enumerate(augmented):
-            if index != pivot_row and row[column]:
-                multiplier = row[column]
-                augmented[index] = [
-                    a - multiplier * b for a, b in zip(row, augmented[pivot_row], strict=True)
-                ]
-        columns.append(column)
-        pivot_row += 1
+    augmented, columns = _rref(augmented, width=width)
     if any(not any(row[:-1]) and row[-1] for row in augmented):
         raise ValueError("reaction and fixed stoichiometric coefficients are inconsistent")
     if len(columns) < width:

@@ -60,7 +60,7 @@ class ElectrodeOCV:
         if (
             not models
             or len(set(models)) != len(models)
-            or not set(models) <= {"SPM", "SPMe", "DFN", "MPM"}
+            or not set(models) <= {"SPM", "SPMe", "DFN", "MPM", "NewmanTobias", "SplitOCVR"}
         ):
             raise ValueError("OCV requires explicit supported battery models")
         object.__setattr__(self, "supported_models", models)

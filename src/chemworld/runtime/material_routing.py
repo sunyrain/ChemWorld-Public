@@ -459,11 +459,15 @@ class ChemWorldMaterialRoutingServices:
 
     def uses_native_packets(self, state):
         from chemworld.runtime.aqueous_mineral import aqueous_record
+        from chemworld.runtime.aqueous_precipitation import precipitation_record
         from chemworld.runtime.condensed_material_routing import background_model
+        from chemworld.runtime.humid_air_material import humid_air_model
 
         return self.physics is not None and (
             state.phase == "gas"
+            or humid_air_model(state, self.physics) is not None
             or aqueous_record(state) is not None
+            or precipitation_record(state) is not None
             or state.vessel_id in self.physics.models_of("flash")
             or state.vessel_id in self.physics.models_of("liquid")
             or background_model(state, self.physics) is not None
@@ -506,10 +510,16 @@ class ChemWorldMaterialRoutingServices:
         )
 
     def route_material(self, state, action):
+        from chemworld.runtime.aqueous_precipitation import (
+            precipitation_record,
+            route_precipitation_packet,
+        )
         from chemworld.runtime.component_network import route_material
         from chemworld.runtime.kernel_contracts import ModelProviderResult
         from chemworld.runtime.thermal_material_routing import route_gas_packet
 
+        if precipitation_record(state) is not None:
+            return route_precipitation_packet(state, self.physics, action)
         if self.uses_native_packets(state):
             candidate = route_gas_packet(state, self.physics, action)
             return ModelProviderResult(

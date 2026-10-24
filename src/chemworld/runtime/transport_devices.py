@@ -1,4 +1,4 @@
-"""Finite transport strategy; source and receiver retain their original ledgers."""
+"""Finite liquid-process dispatch; each tank retains its original ledger."""
 
 from dataclasses import replace
 from math import isclose, isfinite
@@ -145,12 +145,58 @@ class TransportRuntime:
     supported_operations = ("set_flow_rate", "run_flow", "wait")
 
     def __init__(self, composition=None):
+        from chemworld.runtime.aqueous_adsorption import AqueousAdsorptionAdapter
+        from chemworld.runtime.cation_exchange import CationExchangeAdapter
+        from chemworld.runtime.finite_heat_recovery import FiniteHeatRecoveryAdapter
+        from chemworld.runtime.molecular_cascade import MolecularCascadeAdapter
+        from chemworld.runtime.molecular_flash_separator import MolecularFlashSeparatorAdapter
+        from chemworld.runtime.reactive_water_treatment import ReactiveWaterTreatmentAdapter
+        from chemworld.runtime.suspension_treatment import SuspensionTreatmentAdapter
+        from chemworld.runtime.zero_order_treatment import ZeroOrderTreatmentAdapter
+
         self.composition = composition
+        self.treatment = ZeroOrderTreatmentAdapter(composition)
+        self.heat_recovery = FiniteHeatRecoveryAdapter(composition)
+        self.molecular_cascade = MolecularCascadeAdapter(composition)
+        self.molecular_flash_separator = MolecularFlashSeparatorAdapter(composition)
+        self.reactive_treatment = ReactiveWaterTreatmentAdapter(composition)
+        self.aqueous_adsorption = AqueousAdsorptionAdapter(composition)
+        self.cation_exchange = CationExchangeAdapter(composition)
+        self.suspension_treatment = SuspensionTreatmentAdapter(composition)
+        self.adapters = (
+            self.treatment, self.heat_recovery, self.molecular_cascade,
+            self.molecular_flash_separator,
+            self.reactive_treatment,
+            self.aqueous_adsorption,
+            self.cation_exchange,
+            self.suspension_treatment,
+        )
 
     def supports(self, state):
-        return transport_record(state) is not None
+        legacy = transport_record(state) is not None
+        matches = sum(adapter.supports(state) for adapter in self.adapters) + int(legacy)
+        if matches > 1:
+            raise ValueError("one transport anchor cannot own competing physical models")
+        return matches == 1
+
+    def validate_state(self, state):
+        if self.molecular_cascade.supports(state):
+            self.molecular_cascade.validate_state(state)
+        if self.molecular_flash_separator.supports(state):
+            self.molecular_flash_separator.validate_state(state)
+        if self.reactive_treatment.supports(state):
+            self.reactive_treatment.validate_state(state)
+        if self.aqueous_adsorption.supports(state):
+            self.aqueous_adsorption.validate_state(state)
+        if self.cation_exchange.supports(state):
+            self.cation_exchange.validate_state(state)
+        if self.suspension_treatment.supports(state):
+            self.suspension_treatment.validate_state(state)
 
     def shared_system(self, state, strategy_id):
+        for adapter in self.adapters:
+            if adapter.supports(state):
+                return adapter.shared_system(state, strategy_id)
         from chemworld.foundation.lab_clock import SharedAdvanceSystem
         from chemworld.runtime.shared_systems import connection_ids
 
@@ -164,20 +210,26 @@ class TransportRuntime:
     def preserved_source_vessels(self):
         if self.composition is None or self.composition.physics is None:
             return set()
-        return {
+        return set().union(*(a.preserved_source_vessels for a in self.adapters)) | {
             FiniteTransportSpec.from_dict(
                 transport_record(s).settings["physical_model"]
             ).source_vessel_id
             for s in self.composition.physics.initial_states.values()
-            if self.supports(s)
+            if transport_record(s) is not None
         }
 
+    @property
+    def protected_lifecycle_vessels(self):
+        return set().union(*(a.protected_lifecycle_vessels for a in self.adapters))
+
     def reconcile_initialization(self, transition):
+        for adapter in self.adapters:
+            transition = adapter.reconcile_initialization(transition)
         active = transition.state
         locals_ = {active.vessel_id: active.replace(inactive_vessels={}), **active.inactive_vessels}
         changed = {}
         for receiver, state in tuple(locals_.items()):
-            if not self.supports(state):
+            if transport_record(state) is None:
                 continue
             spec = FiniteTransportSpec.from_dict(transport_record(state).settings["physical_model"])
             for index, name in enumerate((spec.source_vessel_id, receiver)):
@@ -207,6 +259,15 @@ class TransportRuntime:
         installed = {v for v, s in states.items() if self.supports(s)}
         if declared != installed:
             raise ValueError("finite transport components must match installed devices")
+        members = set()
+        for vessel in installed:
+            system = self.shared_system(states[vessel], "finite-pump-transport")
+            if members.intersection(system.vessels):
+                raise ValueError("finite transport systems cannot share physical tank inventory")
+            members.update(system.vessels)
+        for adapter in self.adapters:
+            adapter.validate_world()
+        installed = {v for v in installed if transport_record(states[v]) is not None}
         sources = set()
         for vessel in installed:
             state = states[vessel].replace(
@@ -229,13 +290,20 @@ class TransportRuntime:
                 raise ValueError("transport capacity exceeds receiver hardware")
 
     def configure_flow(self, state, action):
+        for adapter in self.adapters:
+            if adapter.supports(state):
+                return adapter.configure_flow(state, action)
         record, _, _ = unpack_transport(state)
         return configure_liquid_flow(state, action, record)
 
     def advance(self, state, action, *, heat=False, jacket_program=None):
+        for adapter in self.adapters:
+            if adapter.supports(state):
+                return adapter.advance(state, action, heat=heat, jacket_program=jacket_program)
         if heat or jacket_program is not None:
             return ModelProviderResult(
-                {}, success=False, outcome="rejected", failure_reason="use_flow_utility_control"
+                {}, diagnostics={}, success=False, outcome="rejected",
+                failure_reason="use_flow_utility_control",
             )
         try:
             record, spec, inventory = unpack_transport(state)

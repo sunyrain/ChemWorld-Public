@@ -23,6 +23,9 @@ _ENERGY_FIELDS = frozenset(
         "gas_bath_heat_J",
         "flow_pump_work_J",
         "flow_electrical_work_J",
+        "flow_heat_J",
+        "flow_shaft_work_J",
+        "boundary_work_J",
     }
 )
 
@@ -98,11 +101,19 @@ class PhysicalAdvanceCoordinator:
 
     def validate_snapshot_state(self, state):
         """Check installed state owners before accepting saved continuation data."""
-        for local in (state, *state.inactive_vessels.values()):
+        locals_ = {
+            s.vessel_id: s.replace(inactive_vessels={})
+            for s in (state, *state.inactive_vessels.values())
+        }
+        for identity, local in locals_.items():
             selected = select_advance_strategy(self.strategies, local, bindings=self.bindings)
             validator = None if selected is None else getattr(selected[1], "validate_state", None)
             if validator is not None:
-                validator(local)
+                # A multi-vessel owner must validate this saved system, including
+                # current members when its anchor is not the active vessel.
+                validator(local.replace(inactive_vessels={
+                    name: member for name, member in locals_.items() if name != identity
+                }))
 
     @property
     def preserved_source_vessels(self):

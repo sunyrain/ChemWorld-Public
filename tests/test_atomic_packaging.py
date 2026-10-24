@@ -756,6 +756,220 @@ assert packed_circuit.execute({'operation':'wait','duration_s':.1}).info[
     'transaction_status'] == 'committed'
 assert packed_circuit._state.ledger.time_s == 1.1
 assert run_circuit(sys.argv[1]+'.thevenin.jsonl')['replay_steps'] == 9
+assert run_circuit(sys.argv[1]+'.thevenin-analysis.jsonl',
+    include_impedance_analysis=True)['replay_steps'] == 10
+from chemworld.physchem import TheveninDiffusionSpec, DIFFUSION_CONVENTION
+from chemworld.examples.native_thevenin import diffusion_spec
+packed_diffusive_spec = diffusion_spec(cells=4)
+assert isinstance(packed_diffusive_spec.diffusion, TheveninDiffusionSpec)
+assert packed_diffusive_spec.diffusion.convention == DIFFUSION_CONVENTION
+packed_diffusive_spec = TheveninSpec.from_dict(json.loads(json.dumps(
+    packed_diffusive_spec.to_dict(), sort_keys=True, allow_nan=False)))
+packed_diffusive = ChemWorldRuntime(composition=thevenin_world_spec(packed_diffusive_spec))
+packed_diffusive.reset(seed=9)
+assert packed_diffusive.execute({'operation':'configure_electrical_control',
+    'current_A':.2}).info['transaction_status'] == 'committed'
+assert packed_diffusive.execute({'operation':'wait','duration_s':1.}).info[
+    'transaction_status'] == 'committed'
+packed_spatial_state = unpack_thevenin(packed_diffusive._state)[3]
+assert packed_diffusive_spec.diffusion.surface_soc(packed_spatial_state.coordinates[circuit_soc],
+    packed_spatial_state.coordinates) < packed_spatial_state.coordinates[circuit_soc]
+packed_diffusive = ChemWorldRuntime.from_snapshot(json.loads(json.dumps(
+    packed_diffusive.snapshot().to_dict(), sort_keys=True, allow_nan=False)))
+assert unpack_thevenin(packed_diffusive._state)[3] == packed_spatial_state
+assert run_circuit(sys.argv[1]+'.thevenin-diffusion.jsonl', spec=packed_diffusive_spec,
+    include_impedance_analysis=True)['replay_steps'] == 10
+from chemworld.physchem import TheveninControlSpec, TheveninControlProgram, thevenin_control_program
+from chemworld.examples.native_thevenin import control_spec
+packed_control_spec = control_spec(packed_diffusive_spec)
+assert isinstance(packed_control_spec.control, TheveninControlSpec)
+packed_named = TheveninControlProgram('power', ScalarControlProgram(((0.,.5),),'W'),
+    current_branch_A=(0.,1.))
+assert thevenin_control_program(packed_named.to_dict()) == packed_named
+assert run_circuit(sys.argv[1]+'.thevenin-named-control.jsonl', spec=packed_control_spec,
+    include_named_controls=True, include_impedance_analysis=True)['replay_steps'] == 18
+from chemworld.physchem import ElectrodeOCPSpec
+from chemworld.examples.battery_hysteresis import (
+    default_spec as hysteresis_spec, run as run_hysteresis)
+for packed_many_particle in (False, True):
+    packed_hysteresis = hysteresis_spec(many_particle=packed_many_particle, cells=4)
+    assert isinstance(packed_hysteresis.negative_ocp, ElectrodeOCPSpec)
+    assert len(packed_hysteresis.hysteresis_keys) == 2
+    assert run_hysteresis(sys.argv[1]+f'.hysteresis-{packed_many_particle}.jsonl',
+        spec=packed_hysteresis)['replay_steps'] == 11
+from chemworld.physchem import BatteryHalfCellSPMSpec, LithiumMetalCounterElectrodeSpec
+from chemworld.examples.battery_half_cell import (
+    default_spec as half_cell_spec, run as run_half_cell)
+packed_half_cell = half_cell_spec(cells=4)
+assert isinstance(packed_half_cell, BatteryHalfCellSPMSpec)
+assert isinstance(packed_half_cell.metal, LithiumMetalCounterElectrodeSpec)
+assert not hasattr(packed_half_cell, 'negative')
+assert run_half_cell(sys.argv[1]+'.half-cell.jsonl',
+    spec=packed_half_cell)['replay_steps'] == 11
+from chemworld.examples.battery_half_cell_impedance import run as run_half_cell_eis
+packed_half_eis = run_half_cell_eis(sys.argv[1]+'.half-cell-eis.json',
+    spec=battery_spec_from_dict(packed_half_cell.to_dict()))
+assert packed_half_eis['spectrum']['success'] and packed_half_eis['state_unchanged']
+for packed_inventory in packed_half_eis['inventory_responses']:
+    packed_values = {k: complex(v['real'], v['imag'])
+                     for k,v in packed_inventory['responses'].items()}
+    assert abs(packed_values['metal_Li_mol_per_A']
+               +packed_values['working_Li_mol_per_A']) < 1e-10
+assert len(packed_half_eis['full_response']['variables']) == len(packed_half_cell.inventory_keys)+4
+from chemworld.physchem import ActiveMaterialPhaseSpec, BatteryCompositeSPMSpec
+from chemworld.examples.battery_composite import (
+    default_spec as composite_spec, run as run_composite)
+packed_composite = composite_spec(cells=4)
+assert isinstance(packed_composite, BatteryCompositeSPMSpec)
+assert len(packed_composite.negative_phases) == 2
+assert all(isinstance(phase, ActiveMaterialPhaseSpec) for phase in packed_composite.negative_phases)
+assert not hasattr(packed_composite, 'negative')
+assert run_composite(sys.argv[1]+'.composite.jsonl',
+    spec=packed_composite)['replay_steps'] == 11
+from chemworld.physchem.battery_impedance import BatteryImpedance, battery_impedance_system
+from chemworld.examples.battery_composite_impedance import (
+    default_spec as composite_eis_spec, run as run_composite_eis)
+packed_composite_eis = battery_spec_from_dict(composite_eis_spec(cells=4).to_dict())
+packed_eis_state = packed_composite_eis.initial_state()
+packed_eis_system, _ = battery_impedance_system(packed_composite_eis, packed_eis_state)
+packed_eis = battery_impedance(packed_composite_eis, [.001,.01], state=packed_eis_state)
+assert isinstance(packed_eis, BatteryImpedance) and packed_eis.success
+assert len(packed_eis_system.variables) == len(packed_eis.response.variables)
+assert packed_eis_state == packed_composite_eis.initial_state()
+packed_eis_report = run_composite_eis(sys.argv[1]+'.composite-eis.json', spec=packed_composite_eis)
+assert packed_eis_report['spectrum']['success'] and packed_eis_report['state_unchanged']
+for packed_phase in packed_eis_report['phase_responses']:
+    packed_q = {k: complex(v['real'],v['imag'])
+                for k,v in packed_phase['phase_current_response_A_per_A'].items()}
+    assert abs(packed_q['negative:phase:alpha']+packed_q['negative:phase:beta']-1) < 1e-10
+    assert abs(packed_q['positive:phase:positive']+1) < 1e-10
+assert json.loads(json.dumps(packed_eis.response.to_dict(),allow_nan=False))['success']
+from chemworld.physchem import BatterySpatialThermalSPMSpec, BatteryHeatStackSpec
+from chemworld.examples.battery_spatial_thermal import (
+    default_spec as spatial_thermal_spec, run as run_spatial_thermal)
+packed_spatial_thermal = spatial_thermal_spec(cells=4, thermal_cells=2)
+assert isinstance(packed_spatial_thermal, BatterySpatialThermalSPMSpec)
+assert isinstance(packed_spatial_thermal.heat_stack, BatteryHeatStackSpec)
+assert len(packed_spatial_thermal.thermal_coordinate_keys) == 7
+assert run_spatial_thermal(sys.argv[1]+'.spatial-thermal.jsonl',
+    spec=packed_spatial_thermal)['replay_steps'] == 11
+from chemworld.physchem import BatteryMSMRSPMSpec, MSMRMaterialSpec
+from chemworld.examples.battery_msmr import default_spec as msmr_spec, run as run_msmr
+packed_msmr = msmr_spec(cells=4)
+assert isinstance(packed_msmr, BatteryMSMRSPMSpec)
+assert isinstance(packed_msmr.negative_material, MSMRMaterialSpec)
+assert len(packed_msmr.inventory_keys) == 8
+assert run_msmr(sys.argv[1]+'.msmr.jsonl', spec=packed_msmr)['replay_steps'] == 11
+from chemworld.examples.battery_msmr_impedance import run as run_msmr_eis
+packed_msmr_eis = run_msmr_eis(sys.argv[1]+'.msmr-eis.json',
+    spec=battery_spec_from_dict(packed_msmr.to_dict()))
+assert packed_msmr_eis['spectrum']['success'] and packed_msmr_eis['state_unchanged']
+assert packed_msmr_eis['reaction_rows']['negative'] == list(
+    packed_msmr.negative_material.reaction_row_ids)
+for packed_inventory in packed_msmr_eis['inventory_responses']:
+    packed_values = {k: complex(v['real'], v['imag'])
+                     for k,v in packed_inventory['responses'].items()}
+    assert abs(packed_values['negative_Li_mol_per_A']
+               +packed_values['positive_Li_mol_per_A']) < 1e-10
+from chemworld.physchem import (AveragedElectrodeSpec, BatteryNewmanTobiasSpec,
+    PorousElectrodeGeometrySpec)
+from chemworld.examples.battery_newman_tobias import (
+    default_spec as newman_tobias_spec, run as run_newman_tobias)
+packed_nt = newman_tobias_spec(cells=(3,2,3))
+assert isinstance(packed_nt, BatteryNewmanTobiasSpec)
+assert isinstance(packed_nt.negative, AveragedElectrodeSpec)
+assert isinstance(packed_nt.geometry, PorousElectrodeGeometrySpec)
+assert set(packed_nt.inventory_keys) == {'negative:Li','positive:Li'}
+assert not hasattr(packed_nt.negative, 'diffusivity_m2_s')
+assert run_newman_tobias(sys.argv[1]+'.newman-tobias.jsonl',
+    spec=packed_nt)['replay_steps'] == 11
+from chemworld.examples.battery_newman_tobias_impedance import run as run_nt_eis
+packed_nt_eis = run_nt_eis(sys.argv[1]+'.newman-tobias-eis.json', spec=packed_nt)
+assert packed_nt_eis['spectrum']['success'] and packed_nt_eis['state_unchanged']
+assert packed_nt_eis['reaction_current_variables'] == list(packed_nt.reaction_keys)
+assert json.loads(json.dumps(packed_nt_eis['full_response'],allow_nan=False))['success']
+for packed_inventory in packed_nt_eis['inventory_responses']:
+    packed_values = {k: complex(v['real'], v['imag'])
+                     for k,v in packed_inventory['responses'].items()}
+    assert abs(packed_values['negative_Li_mol_per_A']
+               +packed_values['positive_Li_mol_per_A']) < 1e-10
+for packed_spatial in packed_nt_eis['cell_current_responses']:
+    packed_currents = {k: complex(v['real'], v['imag'])
+                       for k,v in packed_spatial['cell_current_A_per_A'].items()}
+    assert len(packed_currents) == 6
+    for packed_electrode, packed_expected in (('negative',1.),('positive',-1.)):
+        assert abs(sum(v for k,v in packed_currents.items()
+                       if k.startswith(packed_electrode+':'))-packed_expected) < 1e-10
+from chemworld.physchem import (BatteryLeadAcidSpec, LeadAcidGeometrySpec,
+    LeadAcidMaterialSpec, LeadAcidReadout, lead_acid_readout)
+from chemworld.examples.battery_lead_acid import (
+    default_spec as lead_acid_spec, run as run_lead_acid,
+)
+packed_lead_acid = lead_acid_spec()
+assert isinstance(packed_lead_acid, BatteryLeadAcidSpec)
+assert isinstance(packed_lead_acid.geometry, LeadAcidGeometrySpec)
+assert isinstance(packed_lead_acid.material, LeadAcidMaterialSpec)
+assert len(packed_lead_acid.inventory_keys) == 6
+assert 'Li' not in packed_lead_acid.inventory_species.values()
+assert isinstance(lead_acid_readout(packed_lead_acid,
+    packed_lead_acid.initial_state(), 0), LeadAcidReadout)
+assert run_lead_acid(sys.argv[1]+'.lead-acid.jsonl',
+    spec=packed_lead_acid)['replay_steps'] == 11
+from chemworld.physchem import BatterySplitOCVRSpec, SplitOCVRReadout, split_ocvr_readout
+from chemworld.examples.battery_split_ocvr import (
+    default_spec as split_ocvr_spec, run as run_split_ocvr,
+)
+packed_split_ocvr = split_ocvr_spec()
+assert isinstance(packed_split_ocvr, BatterySplitOCVRSpec)
+assert not hasattr(packed_split_ocvr, 'negative')
+assert isinstance(split_ocvr_readout(packed_split_ocvr,
+    packed_split_ocvr.initial_state(), 0.), SplitOCVRReadout)
+assert run_split_ocvr(sys.argv[1]+'.split-ocvr.jsonl',
+    spec=packed_split_ocvr)['replay_steps'] == 11
+from chemworld.physchem import LithiumPlatingSpec, PlatingReadout, plating_readout
+from chemworld.examples.battery_plating import (
+    default_spec as plating_spec, run as run_plating,
+)
+packed_plating = plating_spec()
+assert isinstance(packed_plating.plating, LithiumPlatingSpec)
+assert {'plating:Li','dead:Li'} <= set(packed_plating.inventory_keys)
+assert isinstance(plating_readout(packed_plating,
+    packed_plating.initial_state(), 0.), PlatingReadout)
+assert BatterySPMSpec(**json.loads(json.dumps(packed_plating.to_dict()))) == packed_plating
+assert run_plating(sys.argv[1]+'.plating.jsonl',
+    spec=packed_plating)['replay_steps'] == 11
+from chemworld.examples.battery_mpm_plating import (
+    default_spec as mpm_plating_spec, run as run_mpm_plating,
+)
+from chemworld.physchem.battery_models import battery_spec_from_dict
+packed_mpm_plating = mpm_plating_spec()
+assert isinstance(packed_mpm_plating, BatteryMPMSpec)
+assert packed_mpm_plating.counts == (3,2)
+assert battery_spec_from_dict(json.loads(json.dumps(
+    packed_mpm_plating.to_dict()))) == packed_mpm_plating
+assert run_mpm_plating(sys.argv[1]+'.mpm-plating.jsonl',
+    spec=packed_mpm_plating)['replay_steps'] == 11
+from chemworld.examples.battery_partial_plating import (
+    default_spec as partial_plating_spec, run as run_partial_plating,
+)
+packed_partial_plating = partial_plating_spec()
+assert packed_partial_plating.plating.mode == 'partially reversible'
+assert packed_partial_plating.plating.decay_rate_s_inv == .02
+assert battery_spec_from_dict(json.loads(json.dumps(
+    packed_partial_plating.to_dict()))) == packed_partial_plating
+assert run_partial_plating(sys.argv[1]+'.partial-plating.jsonl',
+    spec=packed_partial_plating)['replay_steps'] == 11
+from chemworld.examples.battery_axen_plating import (
+    default_spec as axen_plating_spec, run as run_axen_plating,
+)
+packed_axen_plating = axen_plating_spec()
+assert packed_axen_plating.plating.mode == 'reversible'
+assert len(packed_axen_plating.hysteresis_keys) == 2
+assert battery_spec_from_dict(json.loads(json.dumps(
+    packed_axen_plating.to_dict()))) == packed_axen_plating
+assert run_axen_plating(sys.argv[1]+'.axen-plating.jsonl',
+    spec=packed_axen_plating)['replay_steps'] == 11
+
 packed_ocv = ElectrodeOCV('packaged-electrode', sbml_source, (.2,-.1),
     tanh_terms=((-0.02,5.,.4),))
 assert ElectrodeOCV.from_dict(packed_ocv.to_dict()) == packed_ocv
@@ -1079,6 +1293,58 @@ packed_result = packed_process.advance(packed_initial, 1)
 assert abs(packed_thermal.internal_energy_j(packed_result.final_state)
     -packed_thermal.internal_energy_j(packed_initial)-10) < 1e-4
 assert abs(packed_result.energy_balance_residual_J) < 1e-4
+# Explicit multifluid import consumes installed pure terms, common caloric
+# codecs and the existing finite-inventory energy advance; no upstream backend.
+from copy import deepcopy
+from chemworld.data import load_multifluid_model
+from chemworld.physchem import (
+    MultifluidModel, MolecularCaloricModel, MolecularIsochoricThermodynamics,
+)
+packed_mf_pure = [deepcopy(packed_heos_source) for _ in range(2)]
+for i, node in enumerate(packed_mf_pure):
+    node['INFO'].update(NAME='packed-mf-'+str(i), CAS=str(i+1))
+packed_mf = load_multifluid_model({
+    'fluids': packed_mf_pure,
+    'binary_pairs': [{'Name1':'packed-mf-0','Name2':'packed-mf-1','CAS1':'1','CAS2':'2',
+        'betaT':1.,'gammaT':1.,'betaV':1.,'gammaV':1.,'F':0.}],
+    'departure_functions': [],
+    'gas_constant_J_mol_K': packed_mf_pure[0]['EOS'][0]['gas_constant'],
+    'gas_constant_convention': 'source_equal',
+}, source='self-authored installed multifluid fixture')
+assert MultifluidModel.from_dict(json.loads(json.dumps(packed_mf.to_dict()))) == packed_mf
+# Revisioned local catalogue chooses the same physical model; no network or
+# upstream package is required by an installed source-to-inventory consumer.
+from chemworld.data import MultifluidSourceCatalog, load_multifluid_catalog, read_multifluid_catalog
+packed_mf_catalog = MultifluidSourceCatalog(
+    catalog_id='installed-synthetic-mixture', revision='1', source='self-authored fixture',
+    fluids=packed_mf_pure,
+    binary_pairs=[{'Name1':'packed-mf-0','Name2':'packed-mf-1','CAS1':'1','CAS2':'2',
+        'betaT':1.,'gammaT':1.,'betaV':1.,'gammaV':1.,'F':0.}], departure_functions=[])
+packed_mf_catalog_path = Path(sys.argv[1]+'.multifluid-catalog.json')
+packed_mf_catalog_path.write_text(json.dumps(packed_mf_catalog.to_dict()))
+assert read_multifluid_catalog(packed_mf_catalog_path) == packed_mf_catalog
+assert load_multifluid_catalog(packed_mf_catalog.to_dict()) == packed_mf_catalog
+packed_mf_selected = packed_mf_catalog.select(('1','2'),
+    gas_constant_J_mol_K=packed_mf_pure[0]['EOS'][0]['gas_constant'],
+    gas_constant_convention='source_equal')
+assert packed_mf_selected.component_ids == packed_mf.component_ids
+assert packed_mf_selected.state(400.,20.,(.3,.7)).pressure_Pa == (
+    packed_mf.state(400.,20.,(.3,.7)).pressure_Pa)
+packed_mf_caloric = MolecularCaloricModel.from_dict(
+    json.loads(json.dumps(packed_mf.caloric_model().to_dict())))
+assert packed_mf_caloric.residual_model == packed_mf
+packed_mf_state = packed_mf_caloric.state(400., 20., (.3, .7))
+assert isclose(packed_mf_state.enthalpy_J_mol, packed_mf_state.internal_energy_J_mol
+    + packed_mf_state.pressure_Pa/20., rel_tol=1e-12)
+packed_mf_thermal = MolecularIsochoricThermodynamics(packed_mf_caloric, 100.)
+packed_mf_initial = CoupledState({'packed-mf-0':.6,'packed-mf-1':1.4}, 400., 100.)
+packed_mf_process = CoupledSystem(packed_mf_thermal, heat_flux=lambda _: HeatFlux(5.),
+    policy=ODESolverPolicy('installed-multifluid', method='BDF', rtol=1e-10, atol=1e-12))
+packed_mf_result = packed_mf_process.advance(packed_mf_initial, .5)
+assert packed_mf_result.final_state.amounts_mol == packed_mf_initial.amounts_mol
+assert abs(packed_mf_thermal.internal_energy_j(packed_mf_result.final_state)
+    - packed_mf_thermal.internal_energy_j(packed_mf_initial)-2.5) < 1e-5
+assert abs(packed_mf_result.energy_balance_residual_J) < 1e-5
 assert all(name not in sys.modules for name in ('CoolProp','thermo','fluids'))
 print('packaged atomic resources OK')
 """

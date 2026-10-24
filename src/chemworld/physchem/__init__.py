@@ -12,6 +12,252 @@ from importlib import import_module
 from typing import Any
 
 _MODULE_EXPORTS: dict[str, list[str]] = {
+    "suspension_treatment_specs": (
+        'SuspensionParticleSpec JarTestEndpointSpec CoagFlocMixingSpec ClarifierSplitSpec '
+        'SuspensionMaterialSpec SuspensionTankInventory SuspensionTreatmentSpec'
+    ).split(),
+    "suspension_treatment": (
+        'SuspensionTreatmentAdvance suspension_treatment_inventory '
+        'suspension_treatment_profile advance_suspension_treatment'
+    ).split(),
+    "sbml_finite_time": ['sbml_finite_time_stability'],
+    "calphad_ternary_diagram": (
+        'CalphadTernaryPath CalphadTernarySpec CalphadTernaryResult '
+        'scan_calphad_ternary_diagram'
+    ).split(),
+    "energy_grain_reduction": ['energy_grain_qsd', 'energy_grain_qsd_table'],
+    "gac_design": (
+        'GACEmpiricalParameters GACBedSpec GACTransportSpec GACFeedConditions '
+        'GACDesignSpec evaluate_gac_design'
+    ).split(),
+    "gas_thermal_wall": ['GasWallContact', 'GasThermalWallSpec'],
+    "cation_exchange": (
+        'CationExchangeSpec CationExchangeInventory CationExchangeAdvance '
+        'cation_exchange_inventory cation_exchange_profile advance_cation_exchange'
+    ).split(),
+    "rrkm_density_states": ['RRKMEnergyGrid', 'RRKMHarmonicState', 'harmonic_state_counts'],
+    "rrkm_grain_binding": (
+        'RRKMProductChannel RRKMGrainSpec rrkm_microcanonical_report compile_rrkm_grains '
+        'rrkm_grain_network rrkm_grain_world rrkm_canonical_report'
+    ).split(),
+    "aqueous_adsorption": (
+        'AqueousAdsorptionSpec AqueousAdsorptionInventory AqueousAdsorptionAdvance '
+        'aqueous_adsorption_inventory aqueous_adsorption_profile advance_aqueous_adsorption'
+    ).split(),
+    "gas_network_pressure": ['GasPressureControlSpec'],
+    "aqueous_headspace_minerals": (
+        'AqueousHeadspaceMineralSpec advance_aqueous_headspace_minerals '
+        'prepare_aqueous_headspace_mineral_state headspace_mineral_properties'
+    ).split(),
+    "reactive_water_treatment": (
+        'ReactiveWaterTreatmentSpec ReactiveWaterTreatmentAdvance '
+        'reactive_water_treatment_inventory reactive_water_treatment_profile '
+        'advance_reactive_water_treatment'
+    ).split(),
+    "pressure_recovery": [
+        'IsothermalLiquidPressureRecoverySpec', 'evaluate_isothermal_liquid_pressure_recovery',
+    ],
+    "gas_network_sensitivity": [
+        'GasSensitivityParameter', 'GasSensitivityPolicy', 'gas_network_trajectory_sensitivities',
+    ],
+    "pcsaft": ['SAFTSegment', 'PCSAFTModel'],
+    "cpa": ['CPAComponent', 'CPAModel'],
+    "saftvrmie": ['MieSegment', 'SAFTVRMieModel', 'mie_effective_diameter'],
+    "dufal_association": ['DufalAssociation', 'dufal_integral'],
+    "molecular_potentials": ['PurePotentialModel', 'SoftSAFTModel', 'POTENTIAL_FAMILIES'],
+    "molecular_potential_extensions": ['TwoCenterLJModel', 'PohlMieModel', 'ChaparroMieModel'],
+    "molecular_consumers": [
+        'MolecularHelmholtzFluid', 'molecular_model_to_dict', 'molecular_model_from_dict',
+    ],
+    "molecular_mixture": [
+        'MolecularCaloricState', 'MolecularCaloricModel',
+        'MolecularIsochoricThermodynamics', 'MolecularStream',
+    ],
+    "molecular_properties": ['MolecularEOSSpec'],
+    "molecular_cascade": ['MolecularCascadeSpec', 'solve_molecular_cascade'],
+    "molecular_flash_separator": [
+        'MolecularFlashSeparatorSpec', 'evaluate_molecular_flash_separator',
+    ],
+    "molecular_flash_separator_inventory": [
+        'MolecularFlashSeparatorInventorySpec', 'advance_molecular_flash_separator',
+    ],
+    "molecular_cascade_inventory": [
+        'MolecularCascadeInventorySpec', 'advance_molecular_cascade',
+    ],
+    "molecular_processes": (
+        'MolecularProcessDomain MolecularProcessStateResult MolecularProcessResult '
+        'MolecularPressureStage MolecularHeatDuty molecular_process_state '
+        'molecular_mix_streams molecular_split_stream molecular_heat_duty'
+    ).split(),
+    "catalysis_descriptors": ['DescriptorAxis', 'LinearEnergyScaling', 'FreeEnergyBEP'],
+    "catalysis_analysis": (
+        'CatalyticAnalysisConditions with_catalytic_descriptors solve_catalytic_steady_state '
+        'catalytic_steady_states map_catalytic_descriptors catalytic_rate_control '
+        'catalytic_product_selectivity map_catalytic_conditions'
+    ).split(),
+    "catalysis_steady_chart": ['CatalyticSteadyChart', 'build_catalytic_steady_chart'],
+    "mechanism_growth_specs": (
+        'reaction_library_key ReactionLibraryEntry MechanismGrowthLibrary GrowthCondition '
+        'CoreEdgeGrowthPolicy GrowthResourceLimits MechanismGrowthCheckpoint MechanismGrowthResult'
+    ).split(),
+    "mechanism_growth": ['grow_mechanism'],
+    "energy_grain_specs": (
+        'InternalModeBaseline EnergyGrainState EnergyGrainBathGas EnergyTransferBath '
+        'EnergyGrainWellSpec MicrocanonicalGrainChannel EnergyGrainMasterEquationSpec'
+    ).split(),
+    "energy_grain_master_equation": (
+        'collision_transition_probabilities boltzmann_grain_fractions '
+        'well_collision_generator energy_grain_generator grain_population_report'
+    ).split(),
+    "energy_grain_binding": ['compile_energy_grain_network', 'energy_grain_world'],
+    "gas_network_energy_specs": ['GasNodeEnergySpec', 'GasThermalLinkSpec'],
+    "water_dielectric": [
+        'WaterDielectricResponse', 'water_relative_permittivity', 'water_dielectric_response',
+    ],
+    "aqueous_hkf": [
+        'AqueousReferenceBasis', 'AqueousGibbsState', 'RevisedHKFSpeciesThermo',
+        'IF97AqueousWaterThermo',
+    ],
+    "aqueous_hkf_sources": [
+        'hkf_reference_basis', 'hkf_source_species', 'hkf_source_water', 'hkf_aqueous_database',
+        'hkf_source_records', 'hkf_species_from_record',
+    ],
+    "surface_import_rates": ['ImportedSurfaceReaction'],
+    "surface_mechanism_import": (
+        'ImportedSurfaceMechanism convert_surface_mechanism import_surface_mechanism '
+        'surface_import_capabilities'
+    ).split(),
+    "hindered_adsorbate": ['HinderedAdsorbateThermo'],
+    "catalysis_thermochemistry": [
+        'HarmonicAdsorbateThermo', 'CatalyticSpeciesThermo', 'CatalyticThermodynamics',
+    ],
+    "catalysis_network": (
+        'CATALYTIC_STATE_TYPE CatalyticReactionSpec CatalyticMechanismSpec CatalyticRates '
+        'make_catalytic_slot validate_catalytic_slot validate_catalytic_thermodynamics '
+        'catalytic_inventory_key evaluate_catalytic_rates catalytic_process catalytic_system '
+        'pack_catalytic_state'
+    ).split(),
+    "molecular_flash": (
+        'MolecularDensityBasin MolecularTPDResult MolecularFlashPhase MolecularTPFlashResult '
+        'molecular_tp_stability molecular_tp_flash'
+    ).split(),
+    "molecular_caloric_flash": (
+        'MolecularCaloricFlashSpec MolecularCaloricFlashSeed MolecularCaloricFlashResult '
+        'solve_molecular_caloric_flash'
+    ).split(),
+    "molecular_interface": (
+        'SquareGradientInfluence MolecularInterfaceBulk MolecularInterfaceResult '
+        'molecular_interface_bulk pure_square_gradient_interface molecular_planar_interface'
+    ).split(),
+    "molecular_graph": (
+        'GraphAtom GraphBond MolecularGraph AtomPattern BondPattern MolecularPattern '
+        'molecular_isomorphic molecular_isomorphisms find_pattern_matches ResonanceResult '
+        'enumerate_allylic_resonance allylic_resonance_equivalent molecular_graph_from_adjacency'
+    ).split(),
+    "reaction_family": (
+        'RecipeAction ReactionFamily RecipeProducts apply_reaction_recipe '
+        'elementary_reaction_families extended_radical_reaction_families'
+    ).split(),
+    "reaction_family_topology": ['ReactionPathConstraint'],
+    "reaction_generation": (
+        'GenerationPolicy GeneratedReaction GenerationReport generate_reactions '
+        'SpeciesDataBinding KineticsBinding bind_generated_network'
+    ).split(),
+    "thermo_group_additivity": (
+        'GroupThermoData RootedGroupNode MolecularThermoContext GroupAdditivityLibrary '
+        'GroupThermoEstimate estimate_group_thermochemistry'
+    ).split(),
+    "kinetics_rate_rules": (
+        'DeclaredArrhenius KineticRoleTree KineticRuleEntry KineticTrainingEntry '
+        'KineticEstimationLibrary KineticEstimate estimate_reaction_kinetics'
+    ).split(),
+    "mechanism_parameter_estimation": [
+        'ParameterPreparationResult', 'prepare_parameterized_mechanism',
+    ],
+    "stochastic_tau_leap": ['TauLeapPolicy'],
+    "stochastic_kinetics": ['StochasticLeap'],
+    "stochastic_hybrid": [
+        'StochasticHybridSpec', 'initial_hybrid_continuation', 'advance_stochastic_hybrid',
+    ],
+    "aqueous_electrodiffusion": ['AqueousDiffusionCoefficient'],
+    "aqueous_reactive_transport": (
+        'AqueousSlowConversion AqueousReactiveTransportSpec AqueousReactiveTransportResult '
+        'prepare_aqueous_transport_state aqueous_transport_faces advance_aqueous_reactive_transport'
+    ).split(),
+    "aqueous_transport_flow": ['AqueousColumnFlowSpec'],
+    "aqueous_gas_transfer": (
+        'AqueousGasTransfer AqueousHeadspaceSpec AqueousHeadspaceResult '
+        'prepare_aqueous_headspace_state headspace_pressure headspace_properties '
+        'headspace_transfer_rates advance_aqueous_headspace'
+    ).split(),
+    "aqueous_database": (
+        'AqueousDataSource AqueousStandardStateResult AqueousStandardState '
+        'AqueousSpecies AqueousReaction AqueousChemicalPotentialReport AqueousDatabase'
+    ).split(),
+    "aqueous_reaction_equilibrium": (
+        'AqueousEquilibriumSpec AqueousEquilibriumResult '
+        'aqueous_chemical_potential_jacobian build_aqueous_equilibrium_system '
+        'solve_aqueous_reaction_equilibrium'
+    ).split(),
+    "aqueous_phase_properties": ['AqueousPhaseProperties', 'aqueous_phase_properties'],
+    "multiion_membrane_properties": ['MultiIonMembraneProperties'],
+    "ion_exchange_pore": [
+        'IonExchangePoreSpec', 'ion_exchange_partition', 'ion_exchange_pore_point',
+    ],
+    "electrodialysis": (
+        'ElectrodialysisSpec electrodialysis_point electrodialysis_inventory '
+        'advance_electrodialysis'
+    ).split(),
+    "nanofiltration": (
+        'PoreIon NanofiltrationSpec pore_hindrance pore_partition_factors donnan_partition '
+        'nanofiltration_point nanofiltration_profile nanofiltration_inventory '
+        'advance_nanofiltration'
+    ).split(),
+    "finite_heat_recovery_specs": ['FiniteHeatRecoverySpec'],
+    "finite_heat_recovery": (
+        'heat_recovery_inventory heat_recovery_profile advance_finite_heat_recovery'
+    ).split(),
+    "aqueous_mineral_equilibrium": (
+        'AqueousMineralEquilibriumSpec AqueousMineralEquilibriumResult '
+        'aqueous_mineral_properties solve_aqueous_mineral_equilibrium'
+    ).split(),
+    "aqueous_mineral_kinetics": (
+        'MineralRateLaw AqueousMineralKineticsSpec AqueousMineralKineticPoint '
+        'AqueousMineralKineticResult prepare_aqueous_mineral_state advance_aqueous_minerals'
+    ).split(),
+    "electrolyte_activity": (
+        'ElectrolyteParameter ElectrolyteInteraction ElectrolyteActivityResult '
+        'ElectrolyteActivityModel pitzer_binary_from_cphi pitzer_mixing_J '
+        'electrolyte_activity_catalog'
+    ).split(),
+    "multifluid": ['MultifluidDepartureTerm', 'MultifluidBinaryPair', 'MultifluidModel'],
+    "quantum_molecular": ['QuantumMieSegment', 'QuantumMiePair', 'SAFTVRQMieModel'],
+    "mie_reference_options": ['MieReferenceOptions'],
+    "generic_saft": ['GenericSAFTModel', 'CanonicalSAFTAssociation', 'MaskedSAFTAssociation'],
+    "generic_saft_import": ['GenericSAFTImportResult', 'generic_saft_from_teqp'],
+    "fundamental_measure": [
+        'FundamentalMeasureFunctional', 'FundamentalMeasureBulkModel', 'fmt_contact_value',
+    ],
+    "quantum_molecular_cubic": ['QuantumCubicComponent', 'QuantumCubicModel'],
+    "lj_spline": ['LJSplineBHModel', 'LJSplineWCAModel', 'LJSplineUVModel', 'lj_spline_potential'],
+    "corresponding_states": [
+        'CorrespondingStatesComponent', 'CubicShapeComponent', 'LeeKeslerPlockerModel',
+        'HuberElyModel', 'ExtendedCorrespondingStatesModel', 'MBWRReference', 'lee_kesler_basis',
+    ],
+    "saft_association": ['AssociationSite', 'GeometricAssociationPair', 'SAFTAssociation',
+                         'association_site_fractions',
+                         'association_helmholtz'],
+    "saft_polar": ['SAFTMultipole', 'SAFTPolar'],
+    "saft_polar_extensions": ['CorrelationMultipole', 'CorrelationPolar'],
+    "molecular_eos": (
+        'ResidualHelmholtzModel MolecularEOSState molecular_eos_state '
+        'molecular_residual_chemical_potentials '
+        'molecular_scaled_derivative molecular_density_from_pressure'
+    ).split(),
+    "incompressible": (
+        'IncompressibleCorrelation IncompressibleReference IncompressibleFluid IncompressibleState'
+    ).split(),
+    "incompressible_properties": ['IncompressibleMaterialModel'],
     "tank_heads": ['HEAD_KINDS', 'TankHead'],
     "tank_geometry": (
         'TankGeometry TankCalibrationTable TankChebyshev cylindrical_wetted_area'
@@ -229,7 +475,49 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ).split(),
     "tabulated_functions": 'TabulatedScalar'.split(),
     "battery_thevenin": 'TheveninSpec thevenin_system thevenin_fields'.split(),
+    "battery_thevenin_diffusion": ['TheveninDiffusionSpec', 'DIFFUSION_CONVENTION'],
+    "battery_thevenin_control": ['TheveninControlSpec', 'TheveninControlProgram',
+                                  'thevenin_control_program'],
+    "thevenin_frequency": (
+        'TheveninImpedance thevenin_impedance thevenin_impedance_system'
+    ).split(),
     "battery_mpm": 'BatteryMPMSpec mpm_fields'.split(),
+    "battery_ocp": ['ElectrodeOCPSpec'],
+    "battery_half_cell": (
+        'BatteryHalfCellSPMSpec LithiumMetalCounterElectrodeSpec HalfCellReadout '
+        'half_cell_readout half_cell_system advance_half_cell'
+    ).split(),
+    "battery_composite": (
+        'ActiveMaterialPhaseSpec BatteryCompositeSPMSpec PhaseReadout CompositeReadout '
+        'composite_readout composite_fields composite_system advance_composite'
+    ).split(),
+    "battery_plating": (
+        'LithiumPlatingSpec PlatingReadout plating_readout '
+        'plating_fields plating_system advance_plating'
+    ).split(),
+    "battery_split_ocvr": (
+        'BatterySplitOCVRSpec SplitOCVRReadout split_ocvr_readout '
+        'split_ocvr_fields split_ocvr_system advance_split_ocvr'
+    ).split(),
+    "battery_lead_acid": (
+        'BatteryLeadAcidSpec LeadAcidGeometrySpec LeadAcidMaterialSpec LeadAcidReadout '
+        'lead_acid_readout lead_acid_fields lead_acid_system advance_lead_acid'
+    ).split(),
+    "battery_newman_tobias": (
+        'AveragedElectrodeSpec BatteryNewmanTobiasSpec newman_tobias_readout '
+        'newman_tobias_fields newman_tobias_system advance_newman_tobias'
+    ).split(),
+    "battery_porous_electrical": ['PorousElectrodeGeometrySpec'],
+    "battery_msmr_materials": ['MSMRMaterialSpec'],
+    "battery_msmr": (
+        'BatteryMSMRSPMSpec MSMRReadout msmr_readout msmr_fields msmr_system advance_msmr'
+    ).split(),
+    "battery_heat_stack": 'HeatStackLayer HeatStackCollector BatteryHeatStackSpec'.split(),
+    "battery_spatial_thermal": (
+        'BatterySpatialThermalSPMSpec spatial_thermal_readout spatial_thermal_fields '
+        'spatial_thermal_system advance_spatial_thermal spatial_thermal_internal_energy_j '
+        'spatial_thermal_chemical_energy_j spatial_thermal_chemical_potentials'
+    ).split(),
     "battery_particles": 'ParticleSizeDistribution lognormal_size_distribution'.split(),
     "battery_soh": (
         'ElectrodeSOHSpec HalfCellSOHSpec SOHResult solve_electrode_soh soh_spec_from_dict '
@@ -335,6 +623,52 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'viscosity_yaws_parameter_jacobian'
     ).split(),
     "calphad_material": ['CefMaterialSpec', 'CefMaterialState'],
+    "calphad_caloric_equilibrium": [
+        'CalphadCaloricSpec', 'CalphadCaloricResult', 'solve_calphad_ph',
+    ],
+    "calphad_phase_diagram": (
+        'CalphadTracePolicy CriticalPointRequest PhaseCrossingRequest CalphadDiagramSpec '
+        'CalphadDiagramResult scan_calphad_phase_diagram'
+    ).split(),
+    "biochemical_analysis_specs": ['BiochemicalAnalysisPolicy', 'BiochemicalAnalysisResult'],
+    "biochemical_analysis": ['analyze_biochemical_steady_state'],
+    "sbml_sensitivity": ['sbml_trajectory_sensitivities'],
+    "elementary_flux_modes": [
+        'FluxModePolicy', 'enumerate_elementary_flux_modes', 'sbml_elementary_flux_modes',
+    ],
+    "bounded_design": (
+        'DesignVariable DesignConstraint BoundedDesignPolicy DesignPoint '
+        'DesignEvaluationError BoundedDesignResult solve_bounded_design'
+    ).split(),
+    "molecular_recycle": ['MolecularRecyclePath', 'MolecularRecyclePolicy'],
+    "fixed_bed": [
+        'FixedBedSpec', 'fixed_bed_slots', 'fixed_bed_face_velocity',
+        'build_fixed_bed_system', 'FIXED_BED_POLICY',
+    ],
+    "zero_order_treatment_specs": ['ZeroOrderTreatmentStage', 'ZeroOrderTreatmentSpec'],
+    "zero_order_treatment": [
+        'treatment_inventory', 'treatment_profile', 'advance_zero_order_treatment',
+    ],
+    "water_treatment_economics": [
+        'WaterTreatmentEconomicsSpec', 'evaluate_water_treatment_economics',
+    ],
+    "aqueous_transport": ['AqueousTransportLaw', 'BinaryAqueousProperties'],
+    "distributed_ro": (
+        'DistributedROSpec local_ro_flux distributed_ro_profile '
+        'distributed_ro_inventory advance_distributed_ro'
+    ).split(),
+    "osmotic_membrane": [
+        'OsmoticMembraneSpec', 'osmotic_membrane_point',
+        'osmotic_membrane_inventory', 'advance_osmotic_membrane',
+    ],
+    "membrane_distillation": [
+        'MembraneDistillationSpec', 'membrane_distillation_point',
+        'membrane_distillation_inventory', 'advance_membrane_distillation',
+    ],
+    "calphad_equilibrium": (
+        'CalphadEquilibriumPolicy CalphadEquilibriumSpec CalphadEquilibriumPhase '
+        'CalphadEquilibriumResult calphad_tp_equilibrium'
+    ).split(),
     "mqmqa": ['MQMQAPhaseModel'],
     "lennard_jones": (
         'LennardJonesSpec COLLISION_PAIRS EPSILON_METHODS DIAMETER_METHODS '
@@ -361,6 +695,39 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     "water_saturation": (
         'water_saturation_pressure water_saturation_temperature'
     ).split(),
+    "water_if97": (
+        'IF97State water_if97_b23_pressure water_if97_region '
+        'water_if97_gibbs_state water_if97_region3_state'
+    ).split(),
+    "water_if97_solvers": (
+        'IF97Equilibrium water_if97_tp water_if97_saturation water_if97_at_pressure'
+    ).split(),
+    "water_if97_properties": ['IF97WaterModel'],
+    "water_if97_volume": (
+        'water_if97_trho water_if97_internal_energy_derivatives'
+    ).split(),
+    "water_if97_thermal": ['IF97IsochoricThermodynamics'],
+    "water_ice": ('IceIhState ice_ih_state ice_ih_gibbs_derivatives').split(),
+    "water_ice_boundaries": (
+        'ice_sublimation_pressure ice_sublimation_temperature '
+        'water_melting_pressure water_melting_temperature'
+    ).split(),
+    "humid_air_parameters": ['iapws95_water', 'iapws_dry_air'],
+    "humid_air": (
+        'HumidAirState humid_air_cross_virials humid_air_cross_energy '
+        'humid_air_helmholtz humid_air_derivatives humid_air_state humid_air_tp '
+        'humid_air_from_water_fraction'
+    ).split(),
+    "humid_air_equilibrium": (
+        'CondensedWaterState HumidAirSaturation condensed_water_state humid_air_saturation '
+        'humid_air_from_relative_humidity humid_air_relative_humidity humid_air_condensation_point'
+    ).split(),
+    "humid_air_psychrometrics": (
+        'HumidAirSaturationResponse HumidAirWetBulb humid_air_ph '
+        'humid_air_saturation_response humid_air_wet_bulb'
+    ).split(),
+    "humid_air_inventory": ['HumidAirVolumeState', 'humid_air_volume'],
+    "humid_air_thermal": ['HumidAirIsochoricThermodynamics'],
     "stoichiometry": (
         'stoichiometric_matrix balance_stoichiometry standard_formation_reaction '
         'stoichiometry_molar_to_mass stoichiometry_mass_to_molar stoichiometry_mass_error'
@@ -396,6 +763,20 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'load_library_mechanism mechanism_library_root mechanism_scenario_library_path '
         'repository_root validate_mechanism_library'
     ).split(),
+    "mechanism_import": ['mechanism_import_capabilities'],
+    "mechanism_rates": ['mechanism_forward_rate_constant'],
+    "mechanism_thermochemistry": ['GasSpeciesThermo'],
+    "gas_mechanism_batch": ['IdealGasThermodynamics', 'NASA7GasThermodynamics', 'gas_batch_system'],
+    "gas_reactor_network": (
+        'GasReactorNodeSpec GasFlowConnectionSpec GasReactorNetworkSpec '
+        'gas_reactor_network_system pack_gas_reactor_network_state advance_gas_reactor_network'
+    ).split(),
+    "gas_network_surface": ['GasSurfaceAttachment'],
+    "gas_transport": (
+        'GasTransportSpec GasTransportResponse gas_transport_from_network gas_transport_response'
+    ).split(),
+    "gas_transport_fluxes": ['GasTransportFluxResult', 'gas_transport_fluxes'],
+    "gas_spatial_transport": ['GasSpatialTransportSpec'],
     "reaction_network": (
         'R_J_PER_MOL_K BatchIntegrationResult RateLawSpec ReactionNetworkSpec '
         'ReactionODEReferenceCase ReactionODEReferenceResult ReactionSensitivityEntry '
@@ -622,6 +1003,7 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ).split(),
     "thermochemistry": (
         'NASA7SpeciesThermo NASA7TemperatureSegment ReactionThermoResult SpeciesThermoState '
+        'species_thermo_from_cantera_yaml species_thermo_from_dict '
         'equilibrium_constant_from_delta_g reaction_thermochemistry '
         'CorrelationSpeciesThermo formation_entropy formation_gibbs_energy '
         'formation_enthalpy_basis formation_reference_phase_change'
