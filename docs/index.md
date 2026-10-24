@@ -1,6 +1,6 @@
 > **[Open the new capability website →](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en)** · [中文版](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh)
 
-> Current main: [23 October foundation update](current-foundation.md) — native Helmholtz, activity thermodynamics, property derivatives and engineering calculations. Existing figures and numerical evidence below describe the frozen August runtime.
+> Current main: [24 October foundation update](current-foundation.md) — working fluids, molecular thermodynamics, reacting networks, water treatment, battery and biochemical analysis. Existing figures and numerical evidence below describe the frozen August runtime.
 
 <section class="cw-studio-hero" data-cw-autoplay data-source="assets/data/representative-behavior-and-forks.json" data-locale="en">
   <div class="cw-studio-glow cw-studio-glow-a"></div>

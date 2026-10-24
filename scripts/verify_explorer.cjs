@@ -20,7 +20,7 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
   await go('home');
   await check('Home exposes the real hierarchy and defers guide payloads',async()=>{
    assert.equal(await page.locator('.site-nav [data-nav]').count(),4);assert.equal(await page.locator('[data-nav="research"]').count(),0);assert.equal(await page.locator('.site-explorer-toolbar').count(),0);
-   assert.match(await page.locator('.home-scale').innerText(),/17/);assert.match(await page.locator('.home-scale').innerText(),/71/);
+   assert.match(await page.locator('.home-scale').innerText(),/17/);assert.match(await page.locator('.home-scale').innerText(),/72/);
    assert.equal(await page.locator('.architecture-visual').count(),0);await page.locator('.home-hero-art img').evaluate(img=>img.decode());
    assert.match(await page.locator('.home-hero-art img').getAttribute('src'),/assets\/home\/hero-/);assert.equal(await page.locator('.home-domain-card').count(),4);
    assert.ok(!requests.some(u=>/chemworld-guide-(content|localized)\.js|chemworld-api-reference\.js/.test(u)));await screenshot('site-home');
@@ -32,13 +32,13 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
   });
   await check('Milestones remain readable in both languages and link to current scope',async()=>{
    for(const lang of ['zh','en']){
-    await go('home',lang);assert.equal(await page.locator('.home-milestone').count(),7);
-    assert.deepEqual(await page.locator('.home-milestone-date time:first-child').evaluateAll(items=>items.map(item=>item.dateTime)),['2026-10-23','2026-10-21','2026-10-20','2026-10-09','2026-09-16','2026-09-06','2026-08-13']);
+    await go('home',lang);assert.equal(await page.locator('.home-milestone').count(),8);
+    assert.deepEqual(await page.locator('.home-milestone-date time:first-child').evaluateAll(items=>items.map(item=>item.dateTime)),['2026-10-24','2026-10-23','2026-10-21','2026-10-20','2026-10-09','2026-09-16','2026-09-06','2026-08-13']);
     assert.match(await page.locator('.home-milestones').innerText(),/Thevenin/);
     assert.match(await page.locator('.home-milestones').innerText(),lang==='en'?/Milestones/:/迭代里程碑/);
     await page.locator('.home-milestones .site-link').click();await page.locator('#guide-reader h1').waitFor();
     assert.ok(page.url().endsWith('#guides/chemworld/current-foundation'));
-    assert.match(await page.locator('#guide-body').innerText(),/963d23f1/);
+    assert.match(await page.locator('#guide-body').innerText(),/a6d88a582/);
    }
    await go('home');
   });
@@ -127,7 +127,7 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
     }
     return data.coverage;
    });
-   assert.equal(coverage.implemented_capabilities,61);assert.equal(coverage.planned_capabilities,10);assert.equal(coverage.examples,70);
+   assert.equal(coverage.implemented_capabilities,71);assert.equal(coverage.planned_capabilities,1);assert.equal(coverage.examples,81);
    const code=await page.locator('[data-api-block="python"] code').first().textContent();
    await page.locator('[data-api-block="python"] [data-api-copy]').first().click();assert.equal((await page.evaluate(()=>navigator.clipboard.readText())).replace(/\r\n/g,'\n'),code);
    const expected=await page.evaluate(()=>window.CHEMWORLD_API_REFERENCE.recipes.combustion.output);
@@ -168,7 +168,7 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
     } finally {delete data.nodes.__table_qa;}
     return {blocks,values,tiny,nulls,booleans};
    });
-   assert.equal(checked.blocks,140);assert.ok(checked.values>1000);assert.ok(checked.tiny>0);assert.ok(checked.nulls>0);assert.ok(checked.booleans>0);
+   assert.equal(checked.blocks,162);assert.ok(checked.values>1000);assert.ok(checked.tiny>0);assert.ok(checked.nulls>0);assert.ok(checked.booleans>0);
   });
   await check('Table/JSON switching, copy and nested groups work independently with the keyboard',async()=>{
    const input=page.locator('[data-api-block="input"]').first(),output=page.locator('[data-api-block="output"]').first();
@@ -204,28 +204,31 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
    await hash('index/surface');await page.locator('[data-tab="io"]').click();assert.ok(await page.locator('.api-action').count()>0);
    await page.locator('.api-action summary').first().click();assert.match(await page.locator('.api-action[open]').innerText(),/mol/);
    await hash('index/spme-dfn');await page.locator('[data-tab="examples"]').click();await page.locator('.api-example-more>summary').click();assert.equal(await page.locator('.api-example-more[open] [data-api-block="python"]').count(),1);
-   await hash('index/general-fluid-eos');assert.equal(await page.locator('.api-planned').count(),1);assert.equal(await page.locator('[data-api-copy]').count(),0);
+   await hash('index/bridge');assert.equal(await page.locator('.api-planned').count(),1);assert.equal(await page.locator('[data-api-copy]').count(),0);
    await go('index/combustion','en');assert.match(await page.locator('.api-reference').innerText(),/Complete Python example/);await screenshot('site-api-en');
   });
   await check('New foundation APIs render executed outputs in both languages',async()=>{
-   for(const lang of ['zh','en'])for(const [id,key] of [['advanced-thermo','helmholtz-state'],['activity-thermo','activity-properties'],['fluid-engineering','flow-meter-inverse']]){
+   for(const lang of ['zh','en'])for(const [id,key] of [['advanced-thermo','helmholtz-state'],['activity-thermo','activity-properties'],['fluid-engineering','flow-meter-inverse'],['working-fluids','water-if97'],['general-fluid-eos','molecular-pcsaft'],['descriptor-catalysis','surface-control'],['kinetic-expansion','mechanism-growth'],['flame-catalysis','gas-flow-column'],['flowsheet','process-path'],['phase-diagram','ternary-equilibrium'],['water-expansion','aqueous-filtration'],['bio-analysis','sbml-finite-time'],['battery-aging','battery-plating'],['impedance','msmr-impedance']]){
     await go('index/'+id,lang);
     assert.equal(await page.locator('.api-planned').count(),0);
     const output=page.locator('[data-api-block="output"]').first();
     await output.waitFor();assert.equal(await output.locator('[data-api-panel="pretty"]').isVisible(),true);
     const expected=await page.evaluate(k=>window.CHEMWORLD_API_REFERENCE.recipes[k].output,key);
     await output.locator('[data-api-view="json"]').click();
-    assert.deepEqual(JSON.parse(await output.locator('pre > code').textContent()),expected);
+    // JSON.stringify serializes IEEE negative zero as 0; compare the JSON view
+    // against that exact representation without rounding any nonzero value.
+    assert.deepEqual(JSON.parse(await output.locator('pre > code').textContent()),JSON.parse(JSON.stringify(expected)));
     await output.locator('[data-api-view="pretty"]').click();
     const units=await output.locator('[data-api-path]').evaluateAll(rows=>Object.fromEntries(rows.map(row=>[JSON.parse(row.dataset.apiPath).at(-1),row.querySelector('.api-data-unit').textContent])));
     if(id==='advanced-thermo'){assert.equal(units.cp_J_mol_K,'J/(mol·K)');assert.equal(units.cv_J_mol_K,'J/(mol·K)');assert.equal(units.enthalpy_J_mol,'J/mol');}
     if(id==='fluid-engineering'){assert.equal(units.recovered_mass_flow_kg_s,'kg/s');assert.equal(units.differential_pressure_Pa,'Pa');}
+    if(id==='working-fluids'){assert.equal(units.cp_J_kg_K,'J/(kg·K)');assert.equal(units.enthalpy_J_kg,'J/kg');await screenshot('site-water-'+lang);}
     if(id==='advanced-thermo')await screenshot('site-helmholtz-'+lang);
    }
   });
   for(const width of [1440,1024,736,390,320])await check(`Chinese and English routes fit at ${width}px`,async()=>{
    await page.setViewportSize({width,height:1000});
-   for(const lang of ['zh','en'])for(const route of ['home','experiments','experiment/reaction-to-purification/6','atlas/materials','index/combustion','index/advanced-thermo','index/fluid-engineering','guides/thermal-reaction/native_mechanisms','start']){
+   for(const lang of ['zh','en'])for(const route of ['home','experiments','experiment/reaction-to-purification/6','atlas/materials','index/combustion','index/advanced-thermo','index/fluid-engineering','index/working-fluids','index/general-fluid-eos','guides/thermal-reaction/native_mechanisms','start']){
     await go(route,lang);const overflow=await page.evaluate(()=>({page:document.documentElement.scrollWidth,viewport:innerWidth}));assert.ok(overflow.page<=overflow.viewport+1,`${width}/${lang}/${route}: ${JSON.stringify(overflow)}`);
     const clippedNav=await page.locator('.site-nav a').evaluateAll(links=>links.filter(link=>{const box=link.getBoundingClientRect();return box.left<0||box.right>innerWidth;}).map(link=>link.textContent));assert.deepEqual(clippedNav,[],`${width}/${lang}: clipped navigation`);
     if(width===390&&lang==='en'&&['home','experiments','experiment/reaction-to-purification/6','guides/thermal-reaction/native_mechanisms','index/combustion'].includes(route))await screenshot('site-mobile-'+route.split('/')[0]);

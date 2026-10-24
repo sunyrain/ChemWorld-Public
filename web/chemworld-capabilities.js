@@ -1,11 +1,11 @@
 // Editorial navigation over the existing capability snapshot; not a runtime registry.
 window.CHEMWORLD_CAPABILITIES = {
-  "snapshot": "2026-10-23",
+  "snapshot": "2026-10-24",
   "registry": {
-    "modules": 27,
-    "components": 32,
+    "modules": 31,
+    "components": 38,
     "operations": 51,
-    "measurements": 26
+    "measurements": 27
   },
   "tree": [
     {
@@ -322,12 +322,22 @@ window.CHEMWORLD_CAPABILITIES = {
                 {
                   "id": "general-fluid-eos",
                   "name": "缔合与多流体状态方程",
-                  "state": "planned",
-                  "ability": "未来扩展通用缔合／多流体模型与无约束相包络。",
-                  "boundary": "不在当前纯流体及选定立方／活度模型范围内。",
+                  "state": "partial",
+                  "ability": "PC-SAFT、SAFT、缔合和多流体均相响应；选定局部稳定性、TP/量热闪蒸与过程消费。",
+                  "boundary": "模型与参数来源需显式声明；局部分支求解不保证任意混合物的全局相平衡。",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "科学模型"
+                },
+                {
+                  "id": "working-fluids",
+                  "name": "水、冰、湿空气与不可压缩工质",
+                  "kind": "capability",
+                  "state": "finite",
+                  "type": "工质物性",
+                  "ability": "IF97 水/蒸汽、冰、湿空气与来源化不可压缩工质的独立性质和状态求解。",
+                  "boundary": "各工质显式限制区域、相态与参数范围；不宣称所有真实流体均已覆盖。",
+                  "source": "docs/native_foundation.md"
                 }
               ]
             }
@@ -480,14 +490,13 @@ window.CHEMWORLD_CAPABILITIES = {
                 },
                 {
                   "id": "descriptor-catalysis",
-                  "name": "描述符催化图与控制度",
-                  "state": "planned",
-                  "ability": "描述符／标度、稳态催化图与控制度。",
-                  "boundary": "后续输运、机制与催化工作流交付。",
+                  "name": "描述符、表面稳态与速率控制",
+                  "state": "finite",
+                  "ability": "显式表面热化学、描述符关系、有限条件稳态图与速率控制分析。",
+                  "boundary": "以声明的位点、网络、参数和稳态分支为边界；不代表真实催化剂校准。",
                   "source": "docs/native_mechanisms.md",
                   "kind": "capability",
-                  "type": "催化模型",
-                  "derivedFrom": "flame-catalysis"
+                  "type": "催化模型"
                 }
               ]
             },
@@ -499,20 +508,20 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "kinetic-expansion",
-                  "name": "机制生成与反应器网络",
-                  "state": "planned",
-                  "ability": "完整热化学／机制、开放反应器网络、灵敏度与压力依赖生成。",
-                  "boundary": "Cantera／RMG 类完整工作流待深化。",
+                  "name": "机理生成与有限反应器网络",
+                  "state": "partial",
+                  "ability": "导入气相/表面机理、分子图与规则、core–edge 扩展、RRKM/能粒/QSD；有限气体网络及灵敏度。",
+                  "boundary": "采用有限规则与参数库；未覆盖完整 Cantera/RMG 工作流或全部数据库。",
                   "source": "docs/native_mechanisms.md",
                   "kind": "capability",
                   "type": "反应系统"
                 },
                 {
                   "id": "flame-catalysis",
-                  "name": "一维火焰与多组分反应流",
-                  "state": "planned",
-                  "ability": "多组分反应流和一维火焰。",
-                  "boundary": "后续输运、机制与催化工作流交付。",
+                  "name": "一维多组分反应输运",
+                  "state": "finite",
+                  "ability": "有限体积反应、组分扩散、Stefan–Maxwell 通量与有限进料/收集器。",
+                  "boundary": "限定低马赫数和已声明的输运/边界模型；通用自由传播火焰仍未交付。",
                   "source": "docs/native_mechanisms.md",
                   "kind": "capability",
                   "type": "反应流模型"
@@ -643,10 +652,10 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "flowsheet",
-                  "name": "通用流程与严格单元",
-                  "state": "planned",
-                  "ability": "可压缩／两相流、通用控制体、严格分离、回路与流程优化。",
-                  "boundary": "fluids／IDAES 类完整工作流尚待交付。",
+                  "name": "串联单元、单回路与过程设计",
+                  "state": "finite",
+                  "ability": "分子热力学驱动压缩/膨胀、热交换与闪蒸；串联路径、单回路和有限接收器及有界设计。",
+                  "boundary": "显式进料、可行域和局部分支；尚非任意拓扑的全流程求解器。",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "流程模型"
@@ -787,14 +796,13 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "battery-aging",
-                  "name": "复杂老化与长循环",
-                  "state": "planned",
-                  "ability": "电池耦合老化与长循环。",
-                  "boundary": "沿电池模型、热耦合及老化依赖分别扩展。",
+                  "name": "有限析锂、SEI 与失活",
+                  "state": "partial",
+                  "ability": "有限活性锂/金属锂库存、可逆/不可逆析锂及选定电池族的副反应耦合。",
+                  "boundary": "部分独立资格块尚有失败；不提供通用寿命预测或完整长期循环验证。",
                   "source": "docs/native_domains.md",
                   "kind": "capability",
-                  "type": "老化模型",
-                  "derivedFrom": "phase-diagram"
+                  "type": "老化模型"
                 }
               ]
             },
@@ -841,10 +849,10 @@ window.CHEMWORLD_CAPABILITIES = {
                 },
                 {
                   "id": "phase-diagram",
-                  "name": "多组分全局多相平衡与相图",
-                  "state": "planned",
-                  "ability": "多组分全局多相平衡与相图。",
-                  "boundary": "依赖全局相选择与多相热力学交付。",
+                  "name": "多相 CEF 与二元/三元相图",
+                  "state": "finite",
+                  "ability": "显式多相 CEF 的 TP/PH 平衡、潜热、二元追踪与三元等温节点、连结线/三相区域。",
+                  "boundary": "有限相集与搜索；保留失败节点，不保证全局唯一解或无限分辨率连续相界。",
                   "source": "docs/native_domains.md",
                   "kind": "capability",
                   "type": "固相热力学模型"
@@ -908,10 +916,10 @@ window.CHEMWORLD_CAPABILITIES = {
                 },
                 {
                   "id": "water-expansion",
-                  "name": "完整电解质与水处理流程",
-                  "state": "planned",
-                  "ability": "数据库水相、反应输运、分布式 RO、NF／电渗析及流程经济性。",
-                  "boundary": "Reaktoro／WaterTAP 类完整工作流待交付。",
+                  "name": "数据库水相与有限水处理",
+                  "state": "partial",
+                  "ability": "来源化水相/矿物、非理想活度、反应输运与顶空；RO/NF/MD/ED、吸附/树脂/GAC、澄清和滤饼洗涤。",
+                  "boundary": "各模型保留盐度、温压、相态及进料限制；不等同于完整 Reaktoro/WaterTAP。",
                   "source": "docs/native_foundation.md",
                   "kind": "capability",
                   "type": "水处理模型"
@@ -936,8 +944,8 @@ window.CHEMWORLD_CAPABILITIES = {
                   "id": "ssa",
                   "name": "整数 Gillespie SSA",
                   "state": "finite",
-                  "ability": "质量作用 propensity、整数计量、持久事件与独立 RNG。",
-                  "boundary": "恒定体积／温度；无自动 ODE/SSA 混合切换。",
+                  "ability": "Gillespie 直接法、Gibson–Bruck next-reaction、显式分区混合 ODE/跳跃过程与有限 tau-leap。",
+                  "boundary": "算法各有独立合同；tau-leap 为近似法，不是任意自动分区或空间 kMC。",
                   "example": "低拷贝 A⇌B 或酶结合／催化。",
                   "source": "docs/native_biochemical.md",
                   "kind": "capability",
@@ -981,10 +989,10 @@ window.CHEMWORLD_CAPABILITIES = {
                 },
                 {
                   "id": "bio-analysis",
-                  "name": "完整生化动力学与系统分析",
-                  "state": "planned",
-                  "ability": "确定性／随机／混合历程、稳态、控制分析、噪声与估参。",
-                  "boundary": "COPASI 类完整工作流尚待交付。",
+                  "name": "生化稳态、拟合与有限时域分析",
+                  "state": "finite",
+                  "ability": "SBML 稳态/控制分析、参数拟合与剖面、基本通量模式和守恒子空间内的有限时域扰动。",
+                  "boundary": "限定受支持的反应 ODE/规则；有限时域增长不作为渐近混沌证据。",
                   "source": "docs/native_biochemical.md",
                   "kind": "capability",
                   "type": "系统分析"

@@ -1,5 +1,97 @@
 # Native physical sessions
 
+## Working fluids and molecular processes {#working-fluids-and-molecular-processes}
+
+The 24 October update adds native water/steam, ice, humid-air and incompressible-fluid calculations, molecular EOS and bounded process paths. The examples below use the installed package. The [capability index](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#index/working-fluids) also provides signatures, input tables and JSON/readable output views for reaction growth, surface control, filtration, ternary equilibrium, plating and SBML analysis.
+
+### IF97: liquid water
+
+IF97 liquid-water TP solution, with mass-specific enthalpy and heat capacities. Ice, humid air and incompressible fluids have separate range contracts.
+
+```python
+import json
+from chemworld.physchem.water_if97_solvers import water_if97_tp
+
+inputs = {'temperature_K': 300, 'pressure_Pa': 3000000, 'phase': 'liquid'}
+
+state = water_if97_tp(inputs["temperature_K"], inputs["pressure_Pa"], phase=inputs["phase"])
+output = state.to_dict()
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "region": 1,
+  "temperature_K": 300,
+  "pressure_Pa": 3000000,
+  "mass_density_kg_m3": 997.8529400984821,
+  "enthalpy_J_kg": 115331.27302143883,
+  "internal_energy_J_kg": 112324.81798237875,
+  "entropy_J_kg_K": 392.2947924026257,
+  "cp_J_kg_K": 4173.012184067787,
+  "cv_J_kg_K": 4121.201603587441,
+  "speed_of_sound_m_s": 1507.73920966903,
+  "gibbs_energy_J_kg": -2357.164699348876,
+  "isothermal_compressibility_Pa_inv": 4.4638212280219395e-10,
+  "thermal_expansion_K_inv": 0.0002773545334266113,
+  "stability_scope": "IF97_stable_region",
+  "specific_volume_m3_kg": 0.001002151679686694
+}
+```
+
+### PC-SAFT: local mixture response
+
+Local homogeneous response of a synthetic binary PC-SAFT model. Mechanical stability is not global phase stability; parameters do not describe a real material.
+
+```python
+import json
+from chemworld.physchem.pcsaft import PCSAFTModel, SAFTSegment
+from chemworld.physchem.molecular_eos import molecular_eos_state
+
+inputs = {'temperature_K': 400,
+ 'molar_density_mol_m3': 20,
+ 'mole_fractions': [0.3, 0.7]}
+
+model = PCSAFTModel(
+    (SAFTSegment("light", 1, 3.4e-10, 120, "synthetic"),
+     SAFTSegment("heavy", 2, 3.8e-10, 180, "synthetic")),
+    ((0, 0.02), (0.02, 0)), (100, 1000), "synthetic")
+state = molecular_eos_state(model, inputs["temperature_K"],
+    inputs["molar_density_mol_m3"], tuple(inputs["mole_fractions"]))
+output = state.to_dict()
+
+print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
+```
+
+```json
+{
+  "temperature_K": 400,
+  "molar_density_mol_m3": 20,
+  "mole_fractions": [
+    0.3,
+    0.7
+  ],
+  "pressure_Pa": 66375.50309041252,
+  "compressibility_factor": 0.9978922592287066,
+  "residual_helmholtz_J_mol": -7.017506251226959,
+  "residual_internal_energy_J_mol": -17.109782171114848,
+  "residual_enthalpy_J_mol": -24.119674911785385,
+  "residual_entropy_J_mol_K": -0.025230689799719725,
+  "residual_cv_J_mol_K": 0.017203159119927498,
+  "residual_cp_J_mol_K": 0.10310302534629337,
+  "dP_dT_rho_Pa_K": 166.79375449322313,
+  "dP_drho_T_Pa_m3_mol": 3311.7804844346783,
+  "mechanically_stable": true,
+  "log_fugacity_coefficients": [
+    0.0010175146195439816,
+    -0.0034472285464053946
+  ],
+  "stability_scope": "homogeneous_mechanical_only",
+  "energy_reference": "ideal_gas_at_same_T_rho_composition"
+}
+```
+
 ## Thermodynamic and engineering APIs {#thermodynamic-and-engineering-apis}
 
 These examples run with the current Python package. Inputs carry physical units
@@ -11,7 +103,7 @@ six UNIFAC variants with caller-supplied group data, Twu/PPR78 and GE cubic mixi
 and a shared homogeneous-phase evaluator. Pure-fluid Helmholtz adds density roots,
 saturation, TP/PH/PS/T-rho flash and bounded thermal consumers. The example below
 isolates the ideal-gas limit; real-fluid use requires a sourced coefficient set
-and its application range. General associating/multifluid EOS remain future work.
+and its application range. Selected molecular, associating and multifluid models are now available; their local domains and parameter provenance remain explicit.
 
 Engineering methods include friction, fittings, valves, meters, pumps, packed
 beds/towers, two-phase and open-channel flow, particle distributions and equipment

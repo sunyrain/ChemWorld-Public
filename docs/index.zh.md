@@ -1,6 +1,6 @@
 > **[打开新版能力网站 →](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh)** · [English](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en)
 
-> 当前基座见[10 月 23 日更新](current-foundation.md)：原生 Helmholtz、活度热力学、物性导数与工程计算。下文已有图示与数值证据对应8月冻结运行时。
+> 当前基座见[10 月 24 日更新](current-foundation.md)：工质与分子热力学、反应网络、水处理、电池与生化分析。下文已有图示与数值证据对应8月冻结运行时。
 
 <section class="cw-studio-hero" data-cw-autoplay data-source="../assets/data/representative-behavior-and-forks.json" data-locale="zh">
   <div class="cw-studio-glow cw-studio-glow-a"></div>

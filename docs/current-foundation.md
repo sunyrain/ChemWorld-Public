@@ -2,6 +2,52 @@
 
 ## Source synchronization {#source-synchronization}
 
+The **24 October 2026** public update advances committed source from `963d23f1`
+to `a6d88a582`. Across that development interval, 359 commits closed **75 CONV
+task/subtask rows**; these are delivery slices, not 75 independent physical models.
+The 56 parent tasks stand at **28 complete, 4 claimed and 24 pending** at this snapshot.
+The installed registry expands from 27 to **31 modules**, 32 to **38 component types**,
+and 26 to **27 instruments**; it retains **51 operations**.
+
+| Area | New public scope |
+| --- | --- |
+| Working fluids and molecular thermodynamics | IF97 water/steam, ice, humid air and incompressible fluids; selected molecular/association/multifluid responses, local stability and TP/caloric flash |
+| Processes and reaction networks | Serial units, single recycle and finite receivers; imported gas/surface mechanisms, graph/rule generation, core–edge growth, RRKM/energy-grain/QSD, finite reactor networks and 1D reacting transport |
+| Aqueous chemistry and treatment | Sourced activities, minerals, reactive transport and headspace; RO/NF/MD/ED, pressure recovery, adsorption, resin/GAC, clarification, precipitation, filtration and cake washing |
+| Solid phases and systems analysis | Multiphase CEF TP/PH and binary/ternary diagrams; next-reaction, hybrid ODE/jump and tau-leap; SBML steady/control analysis, fitting, profiles, flux modes and finite-time perturbations |
+| Batteries | Additional electrode/material families, control and thermal variants, plating, composite and MSMR impedance; qualification remains model-specific |
+| Runtime and maintenance | Canonical trajectory v0.3 fields with historical reads, common helpers, corrected isothermal Jacobians and hybrid lifecycle handling |
+
+The [capability index](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#index/working-fluids)
+provides executable inputs and actual outputs, with JSON and readable-table views.
+Its 72 editorial capability entries group many implementations: **71 have executable
+examples**, including finite and in-development models; the hardware bridge remains planned.
+This count is not a scientific qualification pass rate.
+
+**Qualification boundaries.** Composite and MSMR impedance have completed their fixed
+blocks; Newman–Tobias impedance retains a **3/8** result. Half-cell, plating, Axen,
+lead-acid and spatial variants retain recorded gaps. The molecular parent programme
+also remains active. No full upstream-library replacement, unrestricted flowsheet,
+general flame solver, universal material validation or SOTA claim follows from this update.
+
+**CPU work.** CPU-01 delivered a Python coverage/contract/cost baseline: its 26-unit
+benchmark retained 24 passes, one timeout and one failure. C++ execution, SIMD and
+a new default backend have not been delivered. This is a development source update,
+not a new package release or new formal scientific qualification.
+
+Windows / Python 3.11 focused integration passed **367/367** checks after fixing
+one action-sampling regression introduced by the expanded optional electrical controls.
+The same fix is retained in the main repository (`bd5302485`). The first failed attempt
+is retained in the integration record. The actual sdist-to-wheel install passed, with
+one optional empirical reference check skipped. **8,335 tests collect without errors**;
+this is not a full-suite pass. All **81 executable documentation examples**, three
+public-boundary checks and Ruff pass. The strict bilingual documentation build and **26 browser checks** pass, including all 14 featured API pages in both languages and layouts from 320 to 1440 pixels.
+
+Repository-wide typing and broader independent qualification remain unfinished; the
+historical mypy counts below describe the previous snapshot, not a new typing run.
+
+### Previous public synchronization: 23 October
+
 The **23 October 2026** update advances the public foundation from `8a17e23b`
 to committed source `963d23f1`. The Python backend now includes:
 

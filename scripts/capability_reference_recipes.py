@@ -83,6 +83,198 @@ finally:
 
 
 add(
+    "water-if97", "working-fluids",
+    "from chemworld.physchem.water_if97_solvers import water_if97_tp",
+    {"temperature_K": 300, "pressure_Pa": 3000000, "phase": "liquid"},
+    """
+state = water_if97_tp(inputs["temperature_K"], inputs["pressure_Pa"], phase=inputs["phase"])
+output = state.to_dict()
+""",
+    ["chemworld.physchem.water_if97_solvers:water_if97_tp"],
+    "IF97 液态水 TP 求解；焓和热容按质量计。冰、湿空气和不可压缩工质各有独立的范围合同。",
+    "IF97 liquid-water TP solution, with mass-specific enthalpy and heat capacities. Ice, humid air and incompressible fluids have separate range contracts.",
+)
+
+add(
+    "molecular-pcsaft", "general-fluid-eos",
+    """
+from chemworld.physchem.pcsaft import PCSAFTModel, SAFTSegment
+from chemworld.physchem.molecular_eos import molecular_eos_state
+""",
+    {"temperature_K": 400, "molar_density_mol_m3": 20, "mole_fractions": [0.3, 0.7]},
+    """
+model = PCSAFTModel(
+    (SAFTSegment("light", 1, 3.4e-10, 120, "synthetic"),
+     SAFTSegment("heavy", 2, 3.8e-10, 180, "synthetic")),
+    ((0, 0.02), (0.02, 0)), (100, 1000), "synthetic")
+state = molecular_eos_state(model, inputs["temperature_K"],
+    inputs["molar_density_mol_m3"], tuple(inputs["mole_fractions"]))
+output = state.to_dict()
+""",
+    ["chemworld.physchem.pcsaft:PCSAFTModel", "chemworld.physchem.molecular_eos:molecular_eos_state"],
+    "合成二元 PC-SAFT 局部均相响应；机械稳定性不等于全局相稳定性，参数不代表真实物质。",
+    "Local homogeneous response of a synthetic binary PC-SAFT model. Mechanical stability is not global phase stability; parameters do not describe a real material.",
+)
+
+add(
+    "surface-control", "descriptor-catalysis",
+    """
+from chemworld.examples.native_surface_steady import branching_mechanism, branching_seeds
+from chemworld.physchem.catalysis_analysis import CatalyticAnalysisConditions, map_catalytic_conditions
+""",
+    {"temperature_K": 500, "partial_pressures_Pa": {"A": 20000, "B": 0, "C": 0}},
+    """
+point = CatalyticAnalysisConditions(inputs["temperature_K"], inputs["partial_pressures_Pa"], {"surface": 1e-6})
+output = map_catalytic_conditions(branching_mechanism(disconnected=True), [point],
+    branching_seeds(disconnected=True), target_species="B", product_species=("B", "C"), element_basis="H")
+""",
+    ["chemworld.physchem.catalysis_analysis:map_catalytic_conditions"],
+    "显式合成表面网络的稳态与速率控制分析；保留求解状态，不能外推到任意催化剂。",
+    "Steady-state and rate-control analysis of an authored synthetic surface network. Solver status is retained; this is not transferable calibration for arbitrary catalysts.",
+)
+
+add(
+    "mechanism-growth", "kinetic-expansion",
+    """
+from chemworld.examples.native_mechanism_growth import example_growth_inputs
+from chemworld.physchem.mechanism_growth import grow_mechanism
+""",
+    {"initial_core": ["ethyl"]},
+    """
+library, families, conditions = example_growth_inputs()
+result = grow_mechanism(library, families, tuple(inputs["initial_core"]), conditions)
+output = result.to_dict()
+assert result.complete
+""",
+    ["chemworld.physchem.mechanism_growth:grow_mechanism"],
+    "有限自带图规则与参数库的 core–edge 扩展，包含停止状态；不捆绑完整 RMG 数据库。",
+    "Core–edge growth over the finite packaged graph rules and parameter library, including stopping status. The complete RMG database is not bundled.",
+)
+
+runtime(
+    "gas-flow-column", "flame-catalysis",
+    "from chemworld.examples.gas_flow_column import example_world",
+    'example_world(cells=4, flux_model="stefan-maxwell")',
+    [{"operation": "wait", "duration_s": 0.02}],
+    ["chemworld.examples.gas_flow_column:example_world"],
+    "四单元低马赫数反应流，显式有限进料和产品库存；不是通用火焰求解器。",
+    "Four-cell low-Mach reacting transport with explicit finite feed and product stocks; this is not a general flame solver.",
+)
+
+add(
+    "process-path", "flowsheet",
+    "from chemworld.examples.molecular_process_design import two_stage_design",
+    {"temperature_K": 320, "final_pressure_Pa": 900000},
+    """
+design = two_stage_design(**inputs)
+result = design.path.evaluate()
+output = result.to_dict()
+assert result.success
+""",
+    ["chemworld.examples.molecular_process_design:two_stage_design", "chemworld.runtime.molecular_process_path:MolecularProcessPath.evaluate"],
+    "合成恒热容气体的两级压缩路径；显式给定外部进料。本例求值已声明的路径，不执行全局流程优化。",
+    "Two-stage compression of a synthetic constant-heat-capacity gas with an explicitly prescribed external feed. Evaluates the declared path without global flowsheet optimization.",
+)
+
+add(
+    "ternary-equilibrium", "phase-diagram",
+    """
+from chemworld.examples.calphad_ternary import ternary_equilibrium_spec
+from chemworld.physchem.calphad_equilibrium import calphad_tp_equilibrium
+""",
+    {"temperature_K": 600, "pressure_Pa": 101325, "amounts_mol": {"FE": 0.3, "NI": 0.3, "CR": 0.4}},
+    """
+result = calphad_tp_equilibrium(ternary_equilibrium_spec("preferred"),
+    inputs["temperature_K"], inputs["pressure_Pa"], inputs["amounts_mol"])
+output = result.to_dict()
+assert result.success
+""",
+    ["chemworld.physchem.calphad_equilibrium:calphad_tp_equilibrium"],
+    "自带合成 Fe/Ni/Cr CEF 多相声明的有限 TP 平衡；不是经过材料校准的合金相图。",
+    "Finite TP equilibrium of the packaged synthetic Fe/Ni/Cr multiphase CEF declaration; not an empirically calibrated alloy diagram.",
+)
+
+add(
+    "aqueous-filtration", "water-expansion",
+    """
+from chemworld.examples.aqueous_filtration import synthetic_filtration_world, filter_vessel
+from chemworld.examples.aqueous_precipitation import route
+from chemworld.runtime import ChemWorldRuntime
+""",
+    {"feed_amount_mol": 0.5, "wash_amount_mol": 0.025},
+    """
+_, composition = synthetic_filtration_world()
+session = ChemWorldRuntime(composition=composition)
+session.reset(seed=41)
+try:
+    route(session, "feed-a", "feed-a-reactor", inputs["feed_amount_mol"])
+    route(session, "feed-b", "feed-b-reactor", inputs["feed_amount_mol"])
+    first = filter_vessel(session, "reactor")
+    route(session, "diluent", "wash-cake", inputs["wash_amount_mol"])
+    second = filter_vessel(session, "cake")
+    output = {"filter_status": first.info["transaction_status"],
+              "wash_filter_status": second.info["transaction_status"],
+              "snapshot_schema": session.snapshot().to_dict()["schema_version"]}
+finally:
+    session.close()
+""",
+    ["chemworld.examples.aqueous_filtration:synthetic_filtration_world", "chemworld.examples.aqueous_filtration:filter_vessel"],
+    "合成盐体系的沉淀、过滤和洗饼流程；输出实际事务状态。此演示不建立真实盐溶解度数据库。",
+    "Precipitation, filtration and cake washing for a synthetic salt system, reporting actual transaction status. This demonstration does not establish an empirical salt-solubility database.",
+)
+
+add(
+    "sbml-finite-time", "bio-analysis",
+    """
+from chemworld.examples.sbml_calibration import pool_model
+from chemworld.world.sbml_world import sbml_world
+from chemworld.runtime import ChemWorldRuntime
+from chemworld.runtime.sbml_finite_time import analyze_sbml_finite_time_world
+""",
+    {"sample_offsets_s": [0.2, 0.5], "amount_scales_mol": {"A": 0.8, "B": 0.2}},
+    """
+composition = sbml_world(pool_model(kind="reversible", initial_b=0.2))
+session = ChemWorldRuntime(composition=composition)
+session.reset(seed=52)
+try:
+    output = analyze_sbml_finite_time_world(session._state, composition, **inputs)
+finally:
+    session.close()
+""",
+    ["chemworld.runtime.sbml_finite_time:analyze_sbml_finite_time_world"],
+    "只读有限时域扰动分析，按声明的物料尺度归一化；不将有限时域增长解释为渐近混沌。",
+    "Read-only finite-time perturbation analysis normalized by declared amount scales; finite-time growth is not interpreted as asymptotic chaos.",
+)
+
+runtime(
+    "battery-plating", "battery-aging",
+    "from chemworld.examples.battery_plating import default_spec\nfrom chemworld.world.battery_world import battery_world_spec",
+    'battery_world_spec(default_spec(mode="reversible"))',
+    [{"operation": "configure_electrical_control", "current_A": -0.5},
+     {"operation": "wait", "duration_s": 4},
+     {"operation": "measure", "instrument": "battery_meter"}],
+    ["chemworld.examples.battery_plating:default_spec"],
+    "合成等温 SPM 的有限析锂工作流；独立资格验证尚有缺口，不提供长期寿命预测。",
+    "Finite plating workflow for a synthetic isothermal SPM. Independent qualification remains incomplete; no long-term lifetime prediction is provided.",
+)
+
+add(
+    "msmr-impedance", "impedance",
+    "from chemworld.examples.battery_msmr import default_spec\nfrom chemworld.physchem.battery_impedance import battery_impedance",
+    {"frequencies_Hz": [0.0001, 0.001, 0.01]},
+    """
+spec = default_spec(cells=8)
+result = battery_impedance(spec, inputs["frequencies_Hz"], state=spec.initial_state())
+output = result.to_dict()
+assert result.success
+""",
+    ["chemworld.physchem.battery_impedance:battery_impedance"],
+    "合成 MSMR 电池的局部线性阻抗，保留频点状态与模型约束；不替代所有电池族的独立验证。",
+    "Local linear impedance of a synthetic MSMR cell, retaining frequency status and model constraints; does not substitute for independent qualification of every battery family.",
+)
+
+
+add(
     "helmholtz-state", "advanced-thermo",
     """
 from chemworld.physchem.helmholtz import HelmholtzFluid
