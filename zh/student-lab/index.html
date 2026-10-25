@@ -13,10 +13,6 @@
         <link rel="canonical" href="https://sunyrain.github.io/ChemWorld-Public/zh/student-lab/">
       
       
-        <link rel="prev" href="../agents/">
-      
-      
-        <link rel="next" href="../one-experiment/">
       
       
         
@@ -31,7 +27,7 @@
     
     
       
-        <title>Student Lab - ChemWorld</title>
+        <title>界面发布状态 - ChemWorld</title>
       
     
     
@@ -97,7 +93,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#student-lab" class="md-skip">
+        <a href="#_1" class="md-skip">
           跳转至
         </a>
       
@@ -133,7 +129,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Student Lab
+              界面发布状态
             
           </span>
         </div>
@@ -385,44 +381,17 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Student Lab
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../environment-authoring/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Student Lab
+    设计实验环境
   
 
     
@@ -431,48 +400,60 @@
   
 
       </a>
-      
-        
+    </li>
+  
 
-<nav class="md-nav md-nav--secondary" aria-label="目录">
+    
+      
+      
   
   
   
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
     
   
+    使用环境
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        动画表达什么
-      
-    </span>
-  </a>
+
+    
+  </span>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        建议的第一次体验
-      
-    </span>
-  </a>
   
-</li>
-      
-    </ul>
+
+      </a>
+    </li>
   
-</nav>
+
+    
       
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    可选CPU构建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -713,36 +694,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        动画表达什么
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        建议的第一次体验
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -761,28 +712,11 @@
   
 
 
-<h1 id="student-lab">Student Lab<a class="headerlink" href="#student-lab" title="Permanent link">&para;</a></h1>
-<p>Student Lab 是一个在本机运行的动画实验台，用于体验 ChemWorld 的公开动作合同。它不会调用
-Agent 或模型。安装包后运行：</p>
-<div class="highlight"><pre><span></span><code>chemworld<span class="w"> </span>lab
-</code></pre></div>
-<p>命令会打开 <code>http://127.0.0.1:8876/</code>。远程机器可使用 <code>--no-browser</code>，也可用 <code>--port</code>
-更换本机端口。服务没有身份验证，因此会拒绝非 loopback 的监听地址，只允许本机访问。</p>
-<h2 id="_1">动画表达什么<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<p>容器动画响应已经提交的公开操作，例如投料、加热、取样、分相和结晶。标签与增量来自正常的
-事务回执。动画<strong>不会</strong>展示或估计隐藏组成、动力学参数或评测器状态。</p>
-<p>操作编排器根据当前步骤的 <code>available_actions()</code> 和公开 action schema 动态生成。每个 JSON
-请求先通过 <code>validate_action()</code>，再交给 <code>step()</code>。被拒绝的动作不会改变物理状态或操作预算。</p>
-<h2 id="_2">建议的第一次体验<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<ol>
-<li>选择 <strong>投料到最终检测</strong>，创建 seed 0。</li>
-<li>依次加入溶剂、试剂和催化剂。</li>
-<li>加热反应并进行一次中间测量。</li>
-<li>淬灭或终止后，在合法时请求 <code>final_assay</code>。</li>
-<li>下载 JSON 记录，对比动作效果、成本、安全风险与终点分数。</li>
-</ol>
-<p>Lab 只在内存中保存 session，不向外部服务发送数据。进程关闭后 session 即销毁；如需保留，
-请先下载记录。</p>
+<h1 id="_1">界面发布状态<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>当前公共入口是<a href="../environment/">Python环境与CLI</a>。旧Student Lab命令已退役；
+Research Workbench和Blender Lab仍是开发原型，不随公共包发布。</p>
+<p>通过<a href="../environment-authoring/">环境作者指南</a>选择设备、设置操作与资源边界，并接入自己的Agent。
+网站上的冻结轨迹播放器继续作为历史示例展示，不是实时仿真器。</p>
 
 
 

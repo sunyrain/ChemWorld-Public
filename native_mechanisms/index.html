@@ -384,14 +384,68 @@
   
   
     <li class="md-nav__item">
-      <a href="../student-lab/" class="md-nav__link">
+      <a href="../environment-authoring/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Student Lab
+    Design an environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use the environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Optional CPU build
   
 
     
@@ -669,6 +723,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#named-sections-and-local-source-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Named sections and local source files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#validation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -726,25 +791,27 @@ is exposed: the existing CO/O2/CO2 assay is <strong>not</strong> relabelled as a
 or arbitrary-species analyzer. Inventory is private state, not a fabricated assay.</p>
 <h2 id="supported-finite-contract">Supported finite contract<a class="headerlink" href="#supported-finite-contract" title="Permanent link">&para;</a></h2>
 <ul>
-<li>One explicitly selected ideal-gas phase, 1–64 local species and 1–256 reactions.
-  Every selected species/reaction is retained, or the entire import fails.</li>
-<li>NASA7 standard-state thermo, elementary Arrhenius, third-body, Lindemann/Troe,
-  P-log and Chebyshev. Explicit collision partners on both equation sides retain
+<li>One explicitly selected ideal-gas phase; no artificial species/reaction count
+  ceiling. Every selected species/reaction is retained, or the import fails.
+  An explicitly nonreacting gas (<code>reactions: none</code>) retains its thermochemistry.</li>
+<li>NASA7, NASA9, Shomate, constant-Cp and piecewise-Gibbs standard-state thermo;
+  Arrhenius, third-body, Lindemann/Troe/SRI/Tsang, chemically activated falloff,
+  P-log, Chebyshev and the declared Blowers–Masel branch. Collision partners retain
   their kinetic orders, even when they cancel from net stoichiometry. Duplicate
   channels remain separate reactions.</li>
 <li>P-log sums all terms at the same pressure <strong>before</strong> log interpolation.
   Chebyshev uses inverse-temperature and log-pressure scaled coordinates.
-  Both reject T/P outside the declared domain. At most eight machine ULPs at an
-  endpoint are normalized for inventory-to-pressure floating-point roundoff;
-  no physical extrapolation or nearest-pressure clamping is provided.</li>
+  The imported source semantics clamp P-log at pressure endpoints and evaluate
+  Chebyshev's polynomial outside its fitted pressure interval. These source
+  rules do not extend species thermochemistry beyond its declared temperature
+  interval or establish physical accuracy outside the fitted rate domain.</li>
 <li>The native concentration/rate basis is mol/L and mol/(L·s). Input length
   m/cm/mm, amount mol/kmol, time s/min and supported activation-energy units are
   converted once. A finite extension <code>units: {volume: L, quantity: mol}</code> can be
   used <strong>instead of</strong> a length declaration; L is never treated as a length.
-  P-log requires an explicit <code>temperature-range</code> (an additional finite-domain
-  contract not required by Cantera's unrestricted P-log format).</li>
+  Source file, list and entry unit scopes are retained during section resolution.</li>
 <li>Pressure is computed from the current ideal-gas inventory and temperature.
-  Reversible gas rates use NASA7 and <code>C° = P°/(1000 RT)</code> in mol/L, rather than
+  Reversible gas rates use the selected thermo and <code>C° = P°/(1000 RT)</code> in mol/L, rather than
   silently reusing the historical liquid standard concentration. Internal
   energy is <code>Σ n_i (h_i(T)−RT)</code> and heat capacity its derivative; reaction heat
   is counted once by the shared energy balance.</li>
@@ -753,23 +820,79 @@ or arbitrary-species analyzer. Inventory is private state, not a fabricated assa
   heat/wait duration are unchanged. The mathematical batch integrator also
   supports subsecond stiff trajectories.</li>
 </ul>
-<p>Executable Python, external species includes, custom reaction orders,
-negative-A fits, unsupported thermo/kinetics and unbalanced mechanisms fail
-closed. Transport and non-selected phases remain labelled source metadata, not
-implemented models. Source <code>h2o2.yaml</code> and its BSD license are preserved under
+<p>Custom/negative/nonreactant orders and signed pre-exponential coefficients require
+their explicit source permissions. Executable rate code, unsupported
+thermo/kinetics and unbalanced mechanisms reject. Transport and non-selected
+phases remain source metadata. Source <code>h2o2.yaml</code> and its BSD license remain under
 <code>tests/fixtures/mechanisms/cantera-3.1.0/</code>.</p>
+<h2 id="named-sections-and-local-source-files">Named sections and local source files<a class="headerlink" href="#named-sections-and-local-source-files" title="Permanent link">&para;</a></h2>
+<p>The Python entry accepts explicit library directories. The current file's
+directory has priority; no Cantera installation path or network download is
+implicitly consulted:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem</span><span class="w"> </span><span class="kn">import</span> <span class="n">import_mechanism</span>
+
+<span class="n">network</span> <span class="o">=</span> <span class="n">import_mechanism</span><span class="p">(</span>
+    <span class="s2">&quot;my-mechanism/main.yaml&quot;</span><span class="p">,</span> <span class="n">phase_name</span><span class="o">=</span><span class="s2">&quot;gas&quot;</span><span class="p">,</span> <span class="n">search_paths</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;my-library&quot;</span><span class="p">]</span>
+<span class="p">)</span>
+</code></pre></div>
+<p>The YAML/JSON CLI accepts repeated <code>--search-path</code> arguments in lookup order,
+after the input file's own directory:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>chemworld.physchem.mechanism_import<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>my-mechanism/main.yaml<span class="w"> </span>--phase<span class="w"> </span>gas<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--search-path<span class="w"> </span>my-library<span class="w"> </span>--search-path<span class="w"> </span>shared-library<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output<span class="w"> </span>native-gas.json
+</code></pre></div>
+<p>A phase can select species and reactions from local named sections or files:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">phases</span><span class="p">:</span>
+<span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gas</span>
+<span class="w">  </span><span class="nt">thermo</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ideal-gas</span>
+<span class="w">  </span><span class="nt">kinetics</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gas</span>
+<span class="w">  </span><span class="nt">species</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">thermo.yaml/species</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">H2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">H</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">O</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">O2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">OH</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">H2O</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">HO2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">H2O2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">AR</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">N2</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">reactions</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">reactions.yaml/hydrogen</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">all</span>
+</code></pre></div>
+<p>For an in-memory document, <code>convert_mechanism(..., source_documents={...})</code>
+accepts an explicit mapping from referenced filenames to document dictionaries.
+Named sections preserve source order and each source's unit system. Duplicate
+species selections, ambiguous file keys, missing files or sections, and
+unsupported selected reactions produce errors.</p>
+<p><code>declared-species</code>, <code>skip-undeclared-elements</code> and
+<code>skip-undeclared-third-bodies</code> apply only when explicitly requested by the source.
+The returned network's <code>metadata["source_resolution"]</code> records selected entries,
+omissions, source phase selection and document digests. It survives JSON replay;
+the resulting network uses the original inventory, heat and runtime consumers.
+External element/adjacent-phase sections and other phase families remain outside
+this gas importer.</p>
+<p>A separate experimental <code>import_chemkin(mechanism_path, thermo_path)</code> entry
+implements a bounded gas subset for NASA7 and elementary/third-body/Lindemann/
+Troe declarations. It rejects unsupported directives such as REV, PLOG, CHEB,
+FORD/RORD and MOLECULES rather than silently dropping them. It is not selected
+by this YAML/JSON CLI. Standard CHEMKIN interoperability remains unresolved:
+an actual Cantera 3.2 export exposes rejected <code>ELEM</code> shorthand and an incorrect
+NASA7 temperature-field ordering in the current reader. The source-selection
+<a href="https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/34-source/README.md#chemkin-interoperability-handoff">handoff report</a>
+retains the reproducible input and failures. The YAML/JSON comparison below does
+not qualify that separate importer.</p>
 <h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>pytest<span class="w"> </span>tests/test_pressure_dependent_mechanisms.py<span class="w"> </span>-q
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>pytest<span class="w"> </span>tests/test_pressure_dependent_mechanisms.py<span class="w"> </span>tests/test_reaction_rate_contracts.py<span class="w"> </span>-q
 uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>--with<span class="w"> </span><span class="s1">&#39;cantera==3.1.0&#39;</span><span class="w"> </span>python<span class="w"> </span>scripts/validate_native_mechanisms.py<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--output<span class="w"> </span>/tmp/mechanism-comparison.json
 </code></pre></div>
 <p>The optional reference command runs 45 rate-grid cases, nine heated trajectories
 and three equilibrium limits. The development note fixes denominators and
 tolerances before execution. Final evidence and the first failed endpoint run
-are retained beside <code>NATIVE_MECHANISM_ACCEPTANCE.md</code> in the authoring repository.
-The optional command generates a fresh comparison without those archived outputs.
-This does not certify other
+are retained beside <code>NATIVE_MECHANISM_ACCEPTANCE.md</code>. This does not certify other
 mechanisms, platforms, wet-lab outcomes or a release build.</p>
+<p>The current source-selection qualification uses actual Cantera 3.2: complete
+h2o2 and GRI30 in three file layouts, an explicitly selected hydrogen subset,
+mixed source units and a nonreacting gas. All nine units and 12,552 checks pass;
+the original 3,520-check gas-thermo/rate block also passes unchanged. These static
+comparisons remain distinct from reactor trajectory qualification. The new
+file-imported gas is also exercised in a real heat/wait world with exact snapshot
+continuation. See the source-selection report under
+<code>workstreams/world_foundation/reports/convergence/34-source/</code> for retained failures
+and the installed-package result.</p>
 
 
 

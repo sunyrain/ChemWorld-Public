@@ -16,7 +16,7 @@
         <link rel="prev" href="../quickstart/">
       
       
-        <link rel="next" href="../student-lab/">
+        <link rel="next" href="../environment-authoring/">
       
       
         
@@ -501,14 +501,68 @@
   
   
     <li class="md-nav__item">
-      <a href="../student-lab/" class="md-nav__link">
+      <a href="../environment-authoring/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Student Lab
+    设计实验环境
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    使用环境
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    可选CPU构建
   
 
     
@@ -850,6 +904,7 @@
 
 
 <h1 id="agent">接入 Agent<a class="headerlink" href="#agent" title="Permanent link">&para;</a></h1>
+<p>新应用从<a href="../environment/">环境API</a>和<a href="../environment-authoring/">环境作者指南</a>开始。可使用自己的规划器与奖励，也可完全不评分。下文按任务评分的runner与预设适配器属于保留的历史应用；其命令入口为<code>python -m chemworld.legacy.cli</code>。</p>
 <p>ChemWorld Agent 每一步都从公开任务状态中选择一个有类型的操作。隐藏世界状态由评测器持有；环境
 负责校验请求、记录资源并生成可精确回放的轨迹。建议先跑离线 Agent，再接入外部模型。</p>
 <h2 id="_1">能力矩阵<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
@@ -950,16 +1005,16 @@ workspace 的 Agent，应在 Python 中显式创建并传给 <code>run_agent</co
 生命周期状态，但不会泄露隐藏真值。</p>
 <h2 id="agent_2">离线 Agent<a class="headerlink" href="#agent_2" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>chemworld<span class="w"> </span>tasks<span class="w"> </span>list
-chemworld<span class="w"> </span>run<span class="w"> </span>--task<span class="w"> </span>reaction-to-assay<span class="w"> </span>--agent<span class="w"> </span>scripted_chemistry<span class="w"> </span>--seed<span class="w"> </span><span class="m">0</span>
+python<span class="w"> </span>-m<span class="w"> </span>chemworld.legacy.cli<span class="w"> </span>run<span class="w"> </span>--task<span class="w"> </span>reaction-to-assay<span class="w"> </span>--agent<span class="w"> </span>scripted_chemistry<span class="w"> </span>--seed<span class="w"> </span><span class="m">0</span>
 </code></pre></div>
 <p>其他无需参数的名称包括 <code>random</code>、<code>lhs</code>、<code>greedy</code>、<code>gp_bo</code>、<code>rf_ei</code>、
 <code>safe_gp_bo</code>、<code>tool_using_llm_stub</code> 和 <code>llm_replay</code>。Python 中可使用
-<code>chemworld.eval.runner.make_agent(name)</code>。</p>
+<code>chemworld.legacy.agent_registry.make_agent(name)</code>。</p>
 <h2 id="deepseek">DeepSeek 在线适配器<a class="headerlink" href="#deepseek" title="Permanent link">&para;</a></h2>
 <p>不要把 key 写入源码：</p>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">DEEPSEEK_API_KEY</span><span class="o">=</span><span class="s2">&quot;...&quot;</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.agents.live_llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">LiveLLMAgent</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.legacy.agents.live_llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">LiveLLMAgent</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.eval.runner</span><span class="w"> </span><span class="kn">import</span> <span class="n">run_agent</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.providers.deepseek</span><span class="w"> </span><span class="kn">import</span> <span class="n">DeepSeekClient</span>
 

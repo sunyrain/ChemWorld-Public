@@ -384,14 +384,68 @@
   
   
     <li class="md-nav__item">
-      <a href="../student-lab/" class="md-nav__link">
+      <a href="../environment-authoring/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Student Lab
+    Design an environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use the environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Optional CPU build
   
 
     
@@ -687,7 +741,7 @@
 <tr>
 <td><code>battery_spm</code></td>
 <td>battery_spm, battery_cell, single-particle-battery</td>
-<td>Synthetic SPM with calorics/SEI, or explicit isothermal SPMe-v1 with conservative electrolyte transport; shared native cycling. Explicit isothermal DFN has coupled spatial reactions and a fixed synthetic qualification at 24 through-plane cells per region / 64 radial cells. Explicit isothermal Newman-Tobias uses two average lithium inventories and spatial porous electrical fields, without radial diffusion or dynamic salt; its fixed CV grid-inventory qualification remains open. Development MPM adds shared-potential size populations with independent inventories; independent MPM scientific qualification remains pending. Isothermal single-material SPM/MPM may declare current-sigmoid OCP or one persistent Axen hysteresis coordinate per electrode; no hysteresis thermal/SEI coupling or equilibrium-SOH interpretation. Through-thickness thermal SPM uses three finite layers and two collectors, constant net OCV and local BV temperature feedback with ambient cooling; no arbitrary external thermal device or general material thermal claim. Isothermal MSMR-SPM uses one or two explicit reactions per electrode with potential-driven radial diffusion and shared branch kinetics; no MSMR thermal, EIS or automatic equilibrium-SOH claim. Composite SPM supports two independent negative material phases and one positive phase with single-valued monotone OCV, including internal exchange at zero terminal current; no thermal/SEI, EIS, SOH or energy closure. Positive-working half-cell SPM uses finite lithium metal with explicitly fixed geometry; no half-cell thermal/SEI, EIS, SOH or energy closure. Coarser meshes and other parameters need convergence checks; Closed volume-consistent isothermal lead-acid LOQS uses six real chemical inventories and the same runtime; no heat, side reactions, EIS or automatic SOH. Synthetic parameters are not wet-lab validation. Split OCV-R uses two finite mean Li inventories, separate electrode OCV and capacity, and series resistance; no particle diffusion, BV or heat. Its EIS and equilibrium SOH reuse the same declared inventory model. No PyBaMM runtime backend.</td>
+<td>Synthetic SPM with calorics/SEI, or explicit isothermal SPMe-v1 with conservative electrolyte transport; shared native cycling. Explicit isothermal DFN has coupled spatial reactions and a fixed synthetic qualification at 24 through-plane cells per region / 64 radial cells. Explicit isothermal Newman-Tobias uses two average lithium inventories and spatial porous electrical fields, without radial diffusion or dynamic salt; its fixed CV grid-inventory qualification remains open. Development MPM adds shared-potential size populations with independent inventories; independent MPM scientific qualification remains pending. Isothermal single-material SPM/MPM may declare current-sigmoid OCP or one persistent Axen hysteresis coordinate per electrode; no hysteresis thermal/SEI coupling or equilibrium-SOH interpretation. Through-thickness thermal SPM uses three finite layers and two collectors, constant net OCV and local BV temperature feedback with ambient cooling; no arbitrary external thermal device or general material thermal claim. Isothermal MSMR-SPM uses one or two explicit reactions per electrode with potential-driven radial diffusion and shared branch kinetics; no MSMR thermal, EIS or automatic equilibrium-SOH claim. Isothermal composite DFN resolves two negative and one positive material phase at each thickness cell with shared potentials and dynamic salt; no composite-DFN thermal, side-reaction, SOH, EIS or chemical-energy closure. Collector SPM resolves 1+1D finite-conductivity current collectors with position-resolved single particles and explicit tab potentials; no electrolyte, thermal, side-reaction, PSD, hysteresis, SOH, EIS or chemical-energy closure. Composite SPM supports two independent negative material phases and one positive phase with single-valued monotone OCV, including internal exchange at zero terminal current; no thermal/SEI, EIS, SOH or energy closure. Positive-working half-cell SPM uses finite lithium metal with explicitly fixed geometry; no half-cell thermal/SEI, EIS, SOH or energy closure. Coarser meshes and other parameters need convergence checks; Closed volume-consistent isothermal lead-acid LOQS uses six real chemical inventories and the same runtime; no heat, side reactions, EIS or automatic SOH. Synthetic parameters are not wet-lab validation. Split OCV-R uses two finite mean Li inventories, separate electrode OCV and capacity, and series resistance; no particle diffusion, BV or heat. Its EIS and equilibrium SOH reuse the same declared inventory model. No PyBaMM runtime backend.</td>
 </tr>
 <tr>
 <td><code>battery_thevenin</code></td>
@@ -702,7 +756,7 @@
 <tr>
 <td><code>core</code></td>
 <td>material_input, sample_storage, reaction</td>
-<td>See the authored physical spec and runtime contract; no universal validity claim.</td>
+<td>Declared bulk reaction networks use the selected caloric model. An explicit homogeneous Peng-Robinson phase supports elementary Arrhenius activity-concentration kinetics, same-source standard thermochemistry and finite isochoric energy/pressure evolution; local single-phase stability only, no general nonideal mechanism family or multiphase reactive flash claim.</td>
 </tr>
 <tr>
 <td><code>crystallization</code></td>
@@ -732,12 +786,12 @@
 <tr>
 <td><code>finite_transport</code></td>
 <td>finite_transport, finite-pump-transport</td>
-<td>Finite pump, pipe, tanks and authored heat exchange; bounded working point; or four finite tanks and two pumps exchanging countercurrent heat at declared UA with independent circuit flows; or declared isothermal zero-order liquid treatment chains with finite product/concentrate stocks and receipt-based engineering economics; or finite pump-fed neutral reactive holdup with ideal overflow to a finite product tank, volume-compatible chemistry and one shared bath; or finite neutral aqueous mixed-contact adsorption and rinse with persistent competitive loading, five liquid stocks and one shared bath; or finite ideal-dilute Na/Ca resin exchange with counterion release, salt regeneration and rinse across six liquid stocks, weighted fixed resin charge and one shared bath; or finite neutral suspensions with a declared jar-test endpoint, explicit dispersed/floc particle phases, empirical clarification into actual clear-water/wet-sludge tanks, and mixing/pump work; no additive-driven coagulation prediction or settling dynamics; the adsorption-world feed also supports read-only single-solute fresh GAC design and breakthrough queries at fixed influent, using actual pump flow and feed volume above pickup; not remaining-life prediction for existing LDF media. These are declared finite models, not arbitrary multiphase process-network simulation.</td>
+<td>Finite pump, pipe, tanks and authored heat exchange; bounded working point; or four finite tanks and two pumps exchanging countercurrent heat at declared UA with independent circuit flows; or declared isothermal zero-order liquid treatment chains with finite product/concentrate stocks and receipt-based engineering economics; or finite pump-fed neutral reactive holdup with ideal overflow to a finite product tank, volume-compatible chemistry and one shared bath; or the complete empirical ASM1 13-component/eight-process single CSTR or five-reactor recycle train, finite original water/quality stocks, oxygen supply/offgas and sludge; source-bound COD/N/equivalent budgets, not full molecular CHON, charge or biochemical reaction heat; or finite neutral aqueous mixed-contact adsorption and rinse with persistent competitive loading, five liquid stocks and one shared bath; or finite ideal-dilute Na/Ca resin exchange with counterion release, salt regeneration and rinse across six liquid stocks, weighted fixed resin charge and one shared bath; or finite neutral suspensions with a declared jar-test endpoint, explicit dispersed/floc particle phases, empirical clarification into actual clear-water/wet-sludge tanks, and mixing/pump work; no additive-driven coagulation prediction or settling dynamics; the adsorption-world feed also supports read-only single-solute fresh GAC design and breakthrough queries at fixed influent, using actual pump flow and feed volume above pickup; not remaining-life prediction for existing LDF media. These are declared finite models, not arbitrary multiphase process-network simulation.</td>
 </tr>
 <tr>
 <td><code>gas_reactor_network</code></td>
 <td>gas_reactor_network, finite-isothermal-gas-network</td>
-<td>Finite isothermal ideal-gas reactors, storage and collection nodes; declared molar/mass flow and one-way pressure valves; shared time, material transfers and bath heat; or explicit per-node energy with finite vessel heat capacities, source-temperature enthalpy transport, environment/neighbor heat exchange and one queued anchor heater. Complete imported ideal surfaces can share the same gas network, owned site stocks and calorics. Also sealed or finite-feed/collector isothermal low-Mach planar cells with common grid pressure, independent tank pressures, continuity-derived bulk flow and whole-mixture diffusion; prescribed boundary molar flow has no momentum or compressor model. Alternatively one constant-load finite-stroke ideal-gas piston with actual EOS volume and separately booked pressure work, without surfaces or spatial cells. Constant-volume energy networks can instead declare one finite-heat-capacity wall with its own persistent temperature, gas contact conduction and grey radiation/conduction to an environment. No wall/piston, wall/surface or wall/spatial coupling; no piston inertia, spatial flame field or arbitrary member heat queues. Sourced finite harmonic state counting can compile one-well RRKM channels into the original energy-grain populations and bath collisions, with explicit ZPE and quantization; no rotor, tunneling or general pressure-rate reduction. Read-only single-well QSD rates, product branches and spectral gaps use current original grains and actual bath inventory or explicit fixed T/bath-pressure grids; no dynamic reduction, total-pressure PLog or new heat/inventory model.</td>
+<td>Finite isothermal ideal-gas reactors, storage and collection nodes; declared molar/mass flow and one-way pressure valves; shared time, material transfers and bath heat; or explicit per-node energy with finite vessel heat capacities, source-temperature enthalpy transport, environment/neighbor heat exchange and one queued anchor heater. Complete imported ideal surfaces can share the same gas network, owned site stocks and calorics. Also sealed or finite-feed/collector isothermal low-Mach planar cells with common grid pressure, independent tank pressures, continuity-derived bulk flow and whole-mixture diffusion; prescribed boundary molar flow has no momentum or compressor model. Explicit nonisothermal cells jointly close continuity, local energy and common pressure with upwind enthalpy, diffusion enthalpy and Fourier heat; finite tanks, node heat exchange and the anchor heater retain original inventories and one shared clock. No Soret or momentum equation is implied. Alternatively one constant-load finite-stroke ideal-gas piston with actual EOS volume and separately booked pressure work, without surfaces or spatial cells. Constant-volume energy networks can instead declare one finite-heat-capacity wall with its own persistent temperature, gas contact conduction and grey radiation/conduction to an environment. No wall/piston, wall/surface or wall/spatial coupling; alternatively two nonreactive constant-volume energy nodes connected by one zero-holdup compressor or expander, using actual endpoint pressures, same-source PS/efficiency/PH calorics, finite shaft power and separate inlet/outlet enthalpy with signed work; no shaft/piston, shaft/wall, shaft/surface or shaft/spatial coupling; no piston inertia, spatial flame field or arbitrary member heat queues. Sourced finite harmonic state counting can compile one-well RRKM channels into the original energy-grain populations and bath collisions, with explicit ZPE and quantization; no rotor, tunneling or general pressure-rate reduction. Read-only single-well QSD rates, product branches and spectral gaps use current original grains and actual bath inventory or explicit fixed T/bath-pressure grids; no dynamic reduction, total-pressure PLog or new heat/inventory model. Read-only trajectory sensitivities include signed species enthalpy parameters through the original H/G/U and reverse rates; fixed-geometry gas/surface steady queries distinguish a complete finite network from explicitly held nonreacting boundary nodes, retain original residuals and solver work, and never commit the hypothetical result.</td>
 </tr>
 <tr>
 <td><code>lab_schedule</code></td>
@@ -777,12 +831,12 @@
 <tr>
 <td><code>ro_membrane</code></td>
 <td>ro_membrane, finite-dilute-ro</td>
-<td>Finite ideal dilute NaCl RO at 298.15 K with deposited foulant/rinse, or declared binary-electrolyte axial RO with pressure loss, same-source aqueous calorics and three finite tanks; or ideal dilute multi-ion Donnan/steric/Born NF with a resolved pore and a mixed-feed 0D module; or a periodic internal AEM/CEM electrodialysis pair with two finite liquids, signed ion/water transfer and bounded CC/CV control; or two-tank direct-contact Knudsen membrane distillation with finite heat/cooling and signed water/energy transfer; model-specific T/P/salinity bounds and operations, no membrane holdup or full WaterTAP flowsheet.</td>
+<td>Finite ideal dilute NaCl RO at 298.15 K with deposited foulant/rinse, or declared binary/multisolute axial RO with real ion inventories, neutral transport channels, pressure loss and three finite tanks; explicit common-G aqueous thermodynamics supports isothermal pressure-work recovery, while MCAS ideal-volume and empirical Sharqawy/Nayar seawater properties use independent H/V/osmotic laws without reversible Gibbs-work recovery; seawater TDS remains a conserved kg quantity alongside molecular water; or ideal dilute multi-ion Donnan/steric/Born NF with a resolved pore and a mixed-feed 0D module; or a periodic internal AEM/CEM electrodialysis pair with two finite liquids, signed ion/water transfer and bounded CC/CV control; or explicit passive reverse electrodialysis with open/short circuit, finite resistive load, signed electrical output and isothermal bath heat; or two-tank direct-contact Knudsen membrane distillation with finite heat/cooling and signed water/energy transfer; model-specific T/P/salinity bounds and operations, no membrane holdup or full WaterTAP flowsheet.</td>
 </tr>
 <tr>
 <td><code>sbml</code></td>
 <td>sbml_model, formal-sbml-shared</td>
-<td>Formal 3D SBML quantity coordinates and supported transverse events; no declared chemical formula, carrier mass or heat model. Read-only finite-time perturbation growth for smooth autonomous reaction ODEs uses an explicit mol metric and the original stoichiometric subspace; no event/rate-rule tangents or asymptotic chaos claim.</td>
+<td>Formal 3D SBML quantity coordinates and supported transverse events; no declared chemical formula, carrier mass or heat model. Explicit integer direct/next-reaction/tau modes use elementary source laws, fixed source geometry and the original formal state/clock; source rules, events and constraints are not coupled in integer mode. Read-only finite-time perturbation growth for smooth autonomous reaction ODEs uses an explicit mol metric and the original stoichiometric subspace; periodic QR adds finite-duration Lyapunov estimates, while trajectory spectra distinguish decay, growth, oscillation and resolved time scales; no event/rate-rule tangents, ILDM/CSP reduction or asymptotic chaos claim. Declared source controls and readouts support finite-start constrained steady or finite-horizon optimization from the current inventory; candidate states never replace live state and no global optimum is claimed. Read-only single-parameter steady-branch continuation holds the current conservation class, uses declared amount/parameter scales, and retains stable/unstable segments, fold brackets and failed steps; no all-branch, branch-switching or periodic-orbit qualification.</td>
 </tr>
 <tr>
 <td><code>separation</code></td>
@@ -802,17 +856,17 @@
 <tr>
 <td><code>stochastic</code></td>
 <td>stochastic, gillespie-direct</td>
-<td>Integer Gillespie direct or explicit Gibson-Bruck next-reaction; constant volume/temperature mass action, persistent channel clocks and RNG; or declared fixed-partition continuous/stochastic feedback with integrated hazards, no cross-partition net conversion and no consuming sampling; not spatial kMC, tau-leaping or automatic ODE/SSA switching.</td>
+<td>Integer Gillespie direct, Gibson-Bruck next-reaction, or explicitly approximate adaptive Poisson tau-leaping with critical-channel/SSA fallback and persistent step-held pending batches; fixed volume and temperature, declared mass action, one inventory and process RNG. Fixed-partition ODE/SSA uses integrated hazards and explicit DOP853 or RK45 integration; an explicit stoichiometric-jump mode permits real molecular transfer between integer and continuous stocks with resolved molecular quanta and internal atom-transfer receipts. An explicit adaptive hybrid variant uses lossless real mol, hysteretic classification, RK4 or LSODA drift and persistent next-reaction targets with step-frozen propensities. Its fixed-volume world supports instantaneous solute dosing and nonconsuming mol measurement; consuming hybrid sampling and spatial kMC remain unsupported. An explicitly declared continuous reaction SDE uses RI5 with legacy linear or explicit fractional output, or requested-endpoint truncation before bounded feasible-side physical acceptance. Truncated output has no lookahead and wait splits can change its numerical mesh. Declared bounded inputs and representative offline aliquots invalidate lookahead while retaining the process stream; an explicit volume floor permits sampling boundaries between fixed-volume numerical intervals.</td>
 </tr>
 <tr>
 <td><code>surface_kinetics</code></td>
 <td>surface_reaction</td>
-<td>Finite owned sites; declared single/multisite mean-field mechanisms and symmetric interactions; not spatial kMC or a real catalyst fit.</td>
+<td>Finite owned sites; declared single/multisite mean-field mechanisms and symmetric interactions; optionally declared constant-activity aqueous chemostats and fixed potential versus SHE, with actual liquid stocks/ports, electron stoichiometry, original charge/work and bath heat. Source electronic-energy scaling and free-energy BEP table fits can author the same mechanisms with explicit known-sigma parameter uncertainty. No dynamic pH, double layer, full-cell calorimetry or spatial kMC; real-catalyst predictive accuracy requires separate validation.</td>
 </tr>
 <tr>
 <td><code>thermal</code></td>
 <td>thermal, heater_connection, owned-inventory-temperature, static-finite-carrier-stock, legacy-liquid-enthalpy</td>
-<td>Finite-power or explicitly isothermal device; shared energy accounting; manual reconnection requires one disabled heater in local-clock mode.</td>
+<td>Finite-power or explicitly isothermal device; shared energy accounting; manual reconnection requires one disabled heater in local-clock mode. Explicit finite-jacket P/PI/filtered PID uses actual temperature, heater-owned persistent memory and realized-power anti-windup in the original thermal/shared-clock advance; no extra controller clock, automatic tuning or implicit coupling to other model families.</td>
 </tr>
 <tr>
 <td><code>vacuum_concentration</code></td>

@@ -343,24 +343,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    五分钟开始
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -377,69 +359,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="目录">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        安装
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        先检查，再操作
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        运行完整示例
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        检查当前基座
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -479,14 +398,68 @@
   
   
     <li class="md-nav__item">
-      <a href="../student-lab/" class="md-nav__link">
+      <a href="../environment-authoring/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Student Lab
+    设计实验环境
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    使用环境
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    可选CPU构建
   
 
     
@@ -735,58 +708,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        安装
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        先检查，再操作
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        运行完整示例
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        检查当前基座
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -806,35 +727,20 @@
 
 
 <h1 id="_1">五分钟开始<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>这条路径会创建一个环境、读取公开任务合同，并完成一条合法的测量生命周期。整个过程不需要 API key 或外部模型 Provider。</p>
-<h2 id="_2">安装<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>安装环境，执行三次操作并取得仪器读数。示例使用合成模型，不需要模型密钥或可选上游求解器。</p>
 <div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/sunyrain/ChemWorld-Public.git
 <span class="nb">cd</span><span class="w"> </span>ChemWorld-Public
 uv<span class="w"> </span>sync<span class="w"> </span>--locked<span class="w"> </span>--extra<span class="w"> </span>dev
+uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>chemworld<span class="w"> </span>capabilities<span class="w"> </span>--format<span class="w"> </span>json
+uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>chemworld.examples.user_reward
 </code></pre></div>
-<p>ChemWorld 支持 Python 3.11 和 3.12。</p>
-<h2 id="_3">先检查，再操作<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">gymnasium</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gym</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">chemworld</span>
-
-<span class="n">env</span> <span class="o">=</span> <span class="n">gym</span><span class="o">.</span><span class="n">make</span><span class="p">(</span><span class="s2">&quot;ChemWorld&quot;</span><span class="p">,</span> <span class="n">task_id</span><span class="o">=</span><span class="s2">&quot;reaction-to-assay&quot;</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-<span class="n">observation</span><span class="p">,</span> <span class="n">info</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-
-<span class="nb">print</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">task_prompt</span><span class="p">()[</span><span class="s2">&quot;text&quot;</span><span class="p">])</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">action_schema</span><span class="p">(</span><span class="s2">&quot;heat&quot;</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">available_actions</span><span class="p">()[:</span><span class="mi">3</span><span class="p">])</span>
+<p>最后一个命令执行两次投料和一次压力测量。奖励是可选的普通Python函数，更改奖励不改变取得的观测。</p>
+<p>运行包含材料延续、转移和终检的较长实验：</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>chemworld.examples.native_surface_research<span class="w"> </span>--bulk<span class="w"> </span>--mobile<span class="w"> </span>--terminal-assay
 </code></pre></div>
-<p>公开接口会告诉 Agent 可以做什么，但不会泄露评测者拥有的世界规律或隐藏状态。</p>
-<h2 id="_4">运行完整示例<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>examples/demo_manual_event_sequence.py
-</code></pre></div>
-<p>随后打开<a href="../notebooks/">第一个 notebook</a>，逐步查看动作验证、中间 HPLC、终检和资源账本。</p>
-<h2 id="_5">检查当前基座<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>pytest<span class="w"> </span>-q
-uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>scripts/build_readme_visuals.py<span class="w"> </span>--check
-</code></pre></div>
-<p>安装完成后，这两个检查都可以离线运行。</p>
-<p><a href="../current-foundation/">当前运行时与旧版复现</a>。</p>
+<p>然后<a href="../environment-authoring/">设计自己的环境</a>、<a href="../environment/">接入Agent</a>，或查看
+<a href="../native_domains/">原生工作流</a>。文档安装目标为Python 3.11与3.12；当前交付为开发源码版本。</p>
+<p>历史教学Notebook保留固定版本及原始输出，运行方法见<a href="../notebooks/">Notebook指南</a>。</p>
 
 
 

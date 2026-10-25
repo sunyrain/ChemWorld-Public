@@ -24,10 +24,10 @@ window.createChemWorldGuideReader = function({nodes,lineage,onNavigate,onCapabil
     instruments:[entry('native_foundation'),entry('native_foundation','programmed-chromatography-and-persistent-instrument-state','程序色谱与持久状态')],
     lifecycle:[entry('native_shared_lab'),entry('native_foundation','readings-time-and-reuse','时间与设备复用')],
     records:[entry('native_foundation'),entry('native_shared_lab')],
-    access:[entry('agents'),entry('student-lab'),entry('limitations')],
+    access:[entry('environment'),entry('environment-authoring'),entry('agents'),entry('legacy'),entry('native_cpu')],
     'research-tasks':[entry('quickstart'),entry('native_domains')],
     protocol:[entry('agents'),entry('agents')],
-    'learning-resources':[entry('student-lab'),entry('agents')]
+    'learning-resources':[entry('quickstart'),entry('environment-authoring')]
   };
   const specific={
     'thermal-reaction':entry('native_mechanisms'),surface:entry('native_foundation','two-site-surface-interactions'),
@@ -39,7 +39,7 @@ window.createChemWorldGuideReader = function({nodes,lineage,onNavigate,onCapabil
     calphad:entry('native_foundation','selected-native-tdbcef-material'),aqueous:entry('native_foundation','finite-carbonate-water-chemistry'),
     mineral:entry('native_foundation','finite-calcite-kinetics-and-material-surface-ownership'),membrane:entry('native_foundation','finite-dilute-reverse-osmosis'),
     ssa:entry('native_stochastic'),programmed:entry('native_foundation','programmed-chromatography-and-persistent-instrument-state'),
-    bridge:entry('limitations'),observatory:entry('student-lab')
+    bridge:entry('limitations'),observatory:entry('environment-authoring')
   };
   const sourceToId=new Map(Object.values(sourcePages).map(p=>[p.source,p.id.replace(/\.en$/,'')]));
   const flatten=tokens=>tokens.flatMap(t=>[t,...flatten(t.children||[])]);

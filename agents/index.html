@@ -16,7 +16,7 @@
         <link rel="prev" href="../quickstart/">
       
       
-        <link rel="next" href="../student-lab/">
+        <link rel="next" href="../environment-authoring/">
       
       
         
@@ -501,14 +501,68 @@
   
   
     <li class="md-nav__item">
-      <a href="../student-lab/" class="md-nav__link">
+      <a href="../environment-authoring/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Student Lab
+    Design an environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use the environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Optional CPU build
   
 
     
@@ -850,6 +904,7 @@
 
 
 <h1 id="connect-an-agent">Connect an agent<a class="headerlink" href="#connect-an-agent" title="Permanent link">&para;</a></h1>
+<p>Start with the <a href="../environment/">environment API</a> and <a href="../environment-authoring/">authoring guide</a>. You can supply any planner and choose your own reward, or use no reward. The task-scored runner and preset adapters below are retained historical applications; their CLI is <code>python -m chemworld.legacy.cli</code>.</p>
 <p>ChemWorld agents choose one typed operation at a time from public task state. The environment keeps
 hidden world state evaluator-owned, validates every request, records resource use and writes an exact
 replay trajectory. Start offline before introducing an external model.</p>
@@ -955,16 +1010,16 @@ exposing hidden truth.</p>
 <h2 id="built-in-offline-agents">Built-in offline agents<a class="headerlink" href="#built-in-offline-agents" title="Permanent link">&para;</a></h2>
 <p>List tasks and run a deterministic connectivity check:</p>
 <div class="highlight"><pre><span></span><code>chemworld<span class="w"> </span>tasks<span class="w"> </span>list
-chemworld<span class="w"> </span>run<span class="w"> </span>--task<span class="w"> </span>reaction-to-assay<span class="w"> </span>--agent<span class="w"> </span>scripted_chemistry<span class="w"> </span>--seed<span class="w"> </span><span class="m">0</span>
+python<span class="w"> </span>-m<span class="w"> </span>chemworld.legacy.cli<span class="w"> </span>run<span class="w"> </span>--task<span class="w"> </span>reaction-to-assay<span class="w"> </span>--agent<span class="w"> </span>scripted_chemistry<span class="w"> </span>--seed<span class="w"> </span><span class="m">0</span>
 </code></pre></div>
 <p>Other constructor-free names include <code>random</code>, <code>lhs</code>, <code>greedy</code>, <code>gp_bo</code>, <code>rf_ei</code>,
 <code>safe_gp_bo</code>, <code>tool_using_llm_stub</code> and <code>llm_replay</code>. Use <code>make_agent(name)</code> from
-<code>chemworld.eval.runner</code> when composing runs in Python.</p>
+<code>chemworld.legacy.agent_registry</code> when composing runs in Python.</p>
 <h2 id="live-deepseek-adapter">Live DeepSeek adapter<a class="headerlink" href="#live-deepseek-adapter" title="Permanent link">&para;</a></h2>
 <p>Keep the key out of source files and shell history:</p>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">DEEPSEEK_API_KEY</span><span class="o">=</span><span class="s2">&quot;...&quot;</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.agents.live_llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">LiveLLMAgent</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.legacy.agents.live_llm</span><span class="w"> </span><span class="kn">import</span> <span class="n">LiveLLMAgent</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.eval.runner</span><span class="w"> </span><span class="kn">import</span> <span class="n">run_agent</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.providers.deepseek</span><span class="w"> </span><span class="kn">import</span> <span class="n">DeepSeekClient</span>
 

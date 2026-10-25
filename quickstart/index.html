@@ -343,24 +343,6 @@
         
       
       
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    5-minute quickstart
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -377,69 +359,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#install" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Install
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#inspect-before-acting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Inspect before acting
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-a-complete-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run a complete example
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#check-current-main" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Check current main
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
       
     </li>
   
@@ -479,14 +398,68 @@
   
   
     <li class="md-nav__item">
-      <a href="../student-lab/" class="md-nav__link">
+      <a href="../environment-authoring/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Student Lab
+    Design an environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use the environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Optional CPU build
   
 
     
@@ -735,58 +708,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#install" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Install
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#inspect-before-acting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Inspect before acting
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#run-a-complete-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Run a complete example
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#check-current-main" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Check current main
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -806,35 +727,24 @@
 
 
 <h1 id="5-minute-quickstart">5-minute quickstart<a class="headerlink" href="#5-minute-quickstart" title="Permanent link">&para;</a></h1>
-<p>This path creates one environment, inspects the public contract and commits a valid measurement lifecycle. It uses no API key or external model provider.</p>
-<h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
+<p>Install the environment, run three operations and receive an instrument reading.
+These examples use synthetic models and need no model key or optional upstream solver.</p>
 <div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/sunyrain/ChemWorld-Public.git
 <span class="nb">cd</span><span class="w"> </span>ChemWorld-Public
 uv<span class="w"> </span>sync<span class="w"> </span>--locked<span class="w"> </span>--extra<span class="w"> </span>dev
+uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>chemworld<span class="w"> </span>capabilities<span class="w"> </span>--format<span class="w"> </span>json
+uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>chemworld.examples.user_reward
 </code></pre></div>
-<p>ChemWorld supports Python 3.11 and 3.12.</p>
-<h2 id="inspect-before-acting">Inspect before acting<a class="headerlink" href="#inspect-before-acting" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">gymnasium</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gym</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">chemworld</span>
-
-<span class="n">env</span> <span class="o">=</span> <span class="n">gym</span><span class="o">.</span><span class="n">make</span><span class="p">(</span><span class="s2">&quot;ChemWorld&quot;</span><span class="p">,</span> <span class="n">task_id</span><span class="o">=</span><span class="s2">&quot;reaction-to-assay&quot;</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-<span class="n">observation</span><span class="p">,</span> <span class="n">info</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-
-<span class="nb">print</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">task_prompt</span><span class="p">()[</span><span class="s2">&quot;text&quot;</span><span class="p">])</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">action_schema</span><span class="p">(</span><span class="s2">&quot;heat&quot;</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">env</span><span class="o">.</span><span class="n">unwrapped</span><span class="o">.</span><span class="n">available_actions</span><span class="p">()[:</span><span class="mi">3</span><span class="p">])</span>
+<p>The last command adds two feeds and measures pressure. Its optional reward
+is an ordinary user function; changing it does not change the acquired observation.</p>
+<p>For a longer experiment with retained material, transfer and a terminal assay:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>chemworld.examples.native_surface_research<span class="w"> </span>--bulk<span class="w"> </span>--mobile<span class="w"> </span>--terminal-assay
 </code></pre></div>
-<p>The public surface tells the agent what it may do. It does not expose evaluator-owned laws or hidden state.</p>
-<h2 id="run-a-complete-example">Run a complete example<a class="headerlink" href="#run-a-complete-example" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>examples/demo_manual_event_sequence.py
-</code></pre></div>
-<p>Then open <a href="../notebooks/">the first notebook</a> to see validation, intermediate HPLC feedback, final assay and resource accounting step by step.</p>
-<h2 id="check-current-main">Check current main<a class="headerlink" href="#check-current-main" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>pytest<span class="w"> </span>-q
-uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>scripts/build_readme_visuals.py<span class="w"> </span>--check
-</code></pre></div>
-<p>Both checks work offline after installation.</p>
-<p><a href="../current-foundation/">Current runtime and historical reproduction</a>.</p>
+<p>Next, <a href="../environment-authoring/">design an environment</a>, <a href="../environment/">connect your own agent</a>,
+or browse the <a href="../native_domains/">native workflows</a>. Python 3.11 and 3.12 are the
+documented installation targets. The package is a development source distribution.</p>
+<p>Historical tutorial notebooks retain their pinned runtime and recorded outputs;
+use the <a href="../notebooks/">notebook guide</a> for those examples.</p>
 
 
 

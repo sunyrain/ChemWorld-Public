@@ -1,6 +1,6 @@
 // Editorial navigation over the existing capability snapshot; not a runtime registry.
 window.CHEMWORLD_CAPABILITIES = {
-  "snapshot": "2026-10-24",
+  "snapshot": "2026-10-25",
   "registry": {
     "modules": 31,
     "components": 38,
@@ -1356,13 +1356,13 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "observatory",
-                  "name": "Student Lab 与 Agent Observatory",
+                  "name": "自定义环境与公开观测",
                   "state": "done",
-                  "ability": "本地交互实验；只读轨迹浏览、资源检查与回放。",
-                  "boundary": "界面运行与模型、任务的支持域一致。",
-                  "source": "docs/student-lab.md",
+                  "ability": "声明设备与操作边界，用自己的Agent获取带单位的观测。",
+                  "boundary": "通过Python／CLI使用；内部界面原型暂缓发布。",
+                  "source": "docs/environment-authoring.md",
                   "kind": "capability",
-                  "type": "工作台"
+                  "type": "环境接口"
                 }
               ]
             },
@@ -1378,7 +1378,7 @@ window.CHEMWORLD_CAPABILITIES = {
                   "state": "planned",
                   "ability": "独立模型、真实数据、狭窄物理系统的迁移与验证。",
                   "boundary": "整体桥接路线；不把已有接口当成真实实验室接管。",
-                  "source": "docs/student-lab.md",
+                  "source": "docs/limitations.md",
                   "kind": "capability",
                   "type": "外部接入"
                 }
@@ -1549,7 +1549,7 @@ window.CHEMWORLD_CAPABILITIES = {
                   "state": "done",
                   "ability": "候选干预、三组反馈、完整轨迹与配对隐藏世界。",
                   "boundary": "教学配对与正式 benchmark 结果分别表达。",
-                  "source": "docs/student-lab.md",
+                  "source": "docs/notebooks.md",
                   "kind": "capability",
                   "type": "教学资源"
                 }

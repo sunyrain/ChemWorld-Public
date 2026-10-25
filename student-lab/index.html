@@ -13,10 +13,6 @@
         <link rel="canonical" href="https://sunyrain.github.io/ChemWorld-Public/student-lab/">
       
       
-        <link rel="prev" href="../agents/">
-      
-      
-        <link rel="next" href="../one-experiment/">
       
       
         
@@ -31,7 +27,7 @@
     
     
       
-        <title>Student Lab - ChemWorld</title>
+        <title>Interface availability - ChemWorld</title>
       
     
     
@@ -97,7 +93,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#student-lab" class="md-skip">
+        <a href="#interface-availability" class="md-skip">
           Skip to content
         </a>
       
@@ -133,7 +129,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Student Lab
+              Interface availability
             
           </span>
         </div>
@@ -385,44 +381,17 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Student Lab
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../environment-authoring/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Student Lab
+    Design an environment
   
 
     
@@ -431,48 +400,60 @@
   
 
       </a>
-      
-        
+    </li>
+  
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+    
+      
+      
   
   
   
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
     
   
+    Use the environment
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#what-the-animation-means" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What the animation means
-      
-    </span>
-  </a>
+
+    
+  </span>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#suggested-first-exercise" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Suggested first exercise
-      
-    </span>
-  </a>
   
-</li>
-      
-    </ul>
+
+      </a>
+    </li>
   
-</nav>
+
+    
       
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Optional CPU build
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -713,36 +694,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#what-the-animation-means" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What the animation means
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#suggested-first-exercise" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Suggested first exercise
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -761,31 +712,13 @@
   
 
 
-<h1 id="student-lab">Student Lab<a class="headerlink" href="#student-lab" title="Permanent link">&para;</a></h1>
-<p>Student Lab is a local, animated workbench for learning the public ChemWorld action contract. It
-does not invoke an agent or a model. Install the package and run:</p>
-<div class="highlight"><pre><span></span><code>chemworld<span class="w"> </span>lab
-</code></pre></div>
-<p>The command opens <code>http://127.0.0.1:8876/</code>. Use <code>--no-browser</code> on a remote machine, or select a
-different loopback port with <code>--port</code>. The server rejects non-loopback bind addresses because it
-has no authentication and is intended for local use only.</p>
-<h2 id="what-the-animation-means">What the animation means<a class="headerlink" href="#what-the-animation-means" title="Permanent link">&para;</a></h2>
-<p>The vessel responds to committed public operations such as charging, heating, sampling, phase
-handling and crystallization. The labels and deltas come from the normal transaction receipt. The
-animation does <strong>not</strong> reveal or estimate hidden composition, kinetics or evaluator state.</p>
-<p>The operation composer is generated from <code>available_actions()</code> and the public action schema at the
-current step. Every submitted JSON object passes through <code>validate_action()</code> before <code>step()</code>. A
-rejected action leaves physical state and operation budget unchanged.</p>
-<h2 id="suggested-first-exercise">Suggested first exercise<a class="headerlink" href="#suggested-first-exercise" title="Permanent link">&para;</a></h2>
-<ol>
-<li>Select <strong>Reaction to Assay</strong> and create seed 0.</li>
-<li>Charge a solvent, reagent and catalyst.</li>
-<li>Heat the reaction and make one intermediate measurement.</li>
-<li>Quench or terminate, then request <code>final_assay</code> when it becomes legal.</li>
-<li>Download the JSON notebook and compare action effects, cost, safety risk and endpoint score.</li>
-</ol>
-<p>The Lab keeps sessions in memory and sends no data to an external service. Closing the process
-destroys the sessions. Download the record before closing if you want to retain it.</p>
+<h1 id="interface-availability">Interface availability<a class="headerlink" href="#interface-availability" title="Permanent link">&para;</a></h1>
+<p>Current public access uses the <a href="../environment/">Python environment and CLI</a>.
+The former Student Lab command has been retired. Research Workbench and Blender
+Lab remain development prototypes and are not included in the public package.</p>
+<p>Use the <a href="../environment-authoring/">environment authoring guide</a> to choose apparatus,
+set action/resource limits and connect your own agent. The static website's frozen
+trace viewer remains available as an illustration, not a live simulator.</p>
 
 
 
