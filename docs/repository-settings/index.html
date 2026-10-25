@@ -938,10 +938,11 @@ git<span class="w"> </span>fetch<span class="w"> </span>origin<span class="w"> <
 uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>ghp-import<span class="w"> </span>--no-jekyll<span class="w"> </span>--branch<span class="w"> </span>gh-pages<span class="w"> </span>site
 git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>gh-pages
 </code></pre></div>
-<p>The project website is served at <code>/?lang=en</code> and <code>/?lang=zh</code>; complete documentation
-is under <code>/docs/</code> and <code>/docs/zh/</code>. The former <code>/explore/</code> and root documentation
-URLs redirect while preserving query strings and section fragments. Capability maps
-link to canonical documentation pages rather than a second full-text reader.
+<p>The integrated website is served at <code>/?lang=en</code> and <code>/?lang=zh</code>. Its original guide
+reader uses <code>#guides/&lt;capability&gt;/&lt;document&gt;/&lt;section&gt;</code> routes, rendered from <code>docs/</code>
+Markdown. The former <code>/explore/</code>, <code>/docs/</code> and published guide URLs redirect into
+that interface, retaining language and section. Static MkDocs output remains a
+fallback for technical pages outside the domain-guide collection.
 The recordings are historical test snapshots, not a live backend.</p>
 <p>The release workflow creates a GitHub Release and attaches source and Python package artifacts. PyPI
 publication is deliberately not enabled until package ownership and trusted publishing are configured.</p>
