@@ -1,6 +1,6 @@
 # 有限原生气相反应机制
 
-> 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#guides/chemworld/native_mechanisms)。
+> 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/docs/native_mechanisms/)。
 
 这是开发中的功能，并非通用的 Cantera/RMG 解释器，也不代表化学行为已通过真实实验验证。它使用 ChemWorld 现有的反应网络、共享物料库存与能量积分器、热设备、事务和回放机制。原生执行过程不导入 Cantera。
 

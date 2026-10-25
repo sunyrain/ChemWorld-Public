@@ -1,6 +1,6 @@
 # 运行集成后的原生示例
 
-> 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#guides/chemworld/native_domains)。
+> 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/docs/native_domains/)。
 
 这些是固定的合成开发工作流程，而不是自主的模型运行或与真实实验室数据的拟合。它们使用与原生领域相同的 `ChemWorldRuntime`、Gym、CLI、交易系统和回放功能。不需要任何模型密钥或可选的化学后端。预装的入口点位于 wheel 和 sdist 中，不需要导入任何测试辅助工具或仅限于仓库的配置。
 

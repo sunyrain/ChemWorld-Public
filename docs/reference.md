@@ -1,6 +1,6 @@
 # API reference
 
-The [capability index](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#index/combustion)
+The [capability index](https://sunyrain.github.io/ChemWorld-Public/?lang=en#index/combustion)
 is the interactive API reference for the current public foundation. Each implemented
 capability has an inline Python interface, parameter/default table, complete example,
 explicit input and output captured by executing that example. You can copy and run

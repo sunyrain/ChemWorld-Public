@@ -1,6 +1,7 @@
-site_name: ChemWorld
+site_name: ChemWorld Docs
 site_description: Programmable chemical worlds for controlled, replayable agent experimentation.
-site_url: https://sunyrain.github.io/ChemWorld-Public/
+site_url: https://sunyrain.github.io/ChemWorld-Public/docs/
+site_dir: site/docs
 repo_url: https://github.com/sunyrain/ChemWorld-Public
 repo_name: sunyrain/ChemWorld-Public
 edit_uri: edit/main/docs/
@@ -67,7 +68,7 @@ plugins:
           site_description: 用于受控、可回放 Agent 实验的可编程化学世界。
           copyright: ChemWorld · 软件模型实验环境，不用于指导真实化学实验
           nav_translations:
-            Home: 首页
+            Documentation: 文档首页
             Design an environment: 设计实验环境
             Use the environment: 使用环境
             Optional CPU build: 可选CPU构建
@@ -75,6 +76,12 @@ plugins:
             Connect an agent: 接入 Agent
             One experiment: 一次完整实验
             World foundations: 世界基座
+            Domain guides: 领域指南
+            Native models: 原生模型
+            Reaction mechanisms: 反应机制
+            Biochemical networks: 生化网络
+            Stochastic reactions: 随机反应
+            Shared laboratory: 共享实验室
             Current foundation: 当前基座
             Extension roadmap: 扩展待办
             Evidence: 证据
@@ -89,7 +96,7 @@ extra_javascript:
   - assets/javascripts/experiment-explorer.js
 
 nav:
-  - Home: index.md
+  - Documentation: index.md
   - 5-minute quickstart: quickstart.md
   - Connect an agent: agents.md
   - Design an environment: environment-authoring.md
@@ -97,6 +104,12 @@ nav:
   - Optional CPU build: native_cpu.md
   - One experiment: one-experiment.md
   - World foundations: world-foundations.md
+  - Domain guides:
+      - Native models: native_foundation.md
+      - Reaction mechanisms: native_mechanisms.md
+      - Biochemical networks: native_biochemical.md
+      - Stochastic reactions: native_stochastic.md
+      - Shared laboratory: native_shared_lab.md
   - Current foundation: current-foundation.md
   - Extension roadmap: extension-roadmap.md
   - Evidence: evidence.md

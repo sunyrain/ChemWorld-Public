@@ -1,6 +1,6 @@
 # API 参考
 
-[能力索引](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh#index/combustion)
+[能力索引](https://sunyrain.github.io/ChemWorld-Public/?lang=zh#index/combustion)
 是当前公开基座的交互式 API 文档。每项已实现能力都提供页内 Python 接口、参数与默认值、
 完整示例、明确输入以及由该代码实际运行产生的输出。无需打开实现源码即可复制使用。
 

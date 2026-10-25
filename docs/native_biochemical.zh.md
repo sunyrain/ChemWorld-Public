@@ -1,6 +1,6 @@
 # 有限的低复制世界
 
-> 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#guides/chemworld/native_biochemical)。
+> 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/docs/native_biochemical/)。
 
 两个合成世界运行在原生会话和任务-36的直接策略 SSA 上： `biochemical_world("reversible")` (A与B的关系) 以及 `biochemical_world("enzyme")` (E+S→ES, ES→E+S, ES→E+P)。这些是数值示例，而不是经过生物学验证的系统。 合成 E 是 N2，而 ES 是 CH2N2O，因此结合保持了原子的存在。 这种反应不涉及迈克尔-门腾还原，也没有隐式的 ODE/SSA 切换。
 

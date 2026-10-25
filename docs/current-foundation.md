@@ -1,6 +1,6 @@
 # Current foundation
 
-## 25 October 2026 update
+## 25 October 2026 update {#source-synchronization}
 
 The public Python foundation now follows committed development source
 [`823b6b01f`](https://github.com/sunyrain/ChemWorld/commit/823b6b01f).

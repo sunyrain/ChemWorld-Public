@@ -12,4 +12,4 @@ tau-leap 是近似法，不等同于精确 SSA；没有任意自动分区或空�
 调用 `chemworld.examples.stochastic_tau_leap.tau_world(seed=51, copies=10000)`，
 再交给 `ChemWorldRuntime`，可使用自带近似模型。
 
-整数库存、温度/体积范围、采样限制及回滚规则见[英文完整说明](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#guides/chemworld/native_stochastic)。
+整数库存、温度/体积范围、采样限制及回滚规则见[英文完整说明](https://sunyrain.github.io/ChemWorld-Public/docs/native_stochastic/)。

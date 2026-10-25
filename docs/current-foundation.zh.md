@@ -1,6 +1,6 @@
 # 当前基座
 
-## 2026年10月25日更新
+## 2026年10月25日更新 {#source-synchronization}
 
 公共Python基座同步至已提交的开发版本
 [`823b6b01f`](https://github.com/sunyrain/ChemWorld/commit/823b6b01f)。

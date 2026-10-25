@@ -20,7 +20,7 @@
   <a href="docs/native_domains.md">完整示例</a> ·
   <a href="docs/native_foundation.md">原生 API</a> ·
   <a href="docs/agents.zh.md">接入智能体</a> ·
-  <a href="https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh">中文交互网站</a>
+  <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=zh">中文交互网站</a>
 </p>
 
 ## 构建一个世界，让智能体探索它
@@ -33,7 +33,7 @@ ChemWorld 为自主智能体提供一个可以采取行动的化学世界：加�
 
 ## 迭代里程碑
 
-沿 **ChemWorld 主仓库**的开发历程归并主要升级，日期表示开发交付阶段，不对应公开仓库的集中同步日期。[当前基座](docs/current-foundation.zh.md)记录公开版本的支持范围，也可以在[交互首页](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh#home)浏览时间线。
+沿 **ChemWorld 主仓库**的开发历程归并主要升级，日期表示开发交付阶段，不对应公开仓库的集中同步日期。[当前基座](docs/current-foundation.zh.md)记录公开版本的支持范围，也可以在[交互首页](https://sunyrain.github.io/ChemWorld-Public/?lang=zh#home)浏览时间线。
 
 | 日期 | 能力升级 |
 | --- | --- |
@@ -161,7 +161,7 @@ uv run --no-sync python -m chemworld.examples.user_reward
 
 ## 文档与网站
 
-**[浏览中文版网站](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh)** · **[English website](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en)**
+**[浏览中文版网站](https://sunyrain.github.io/ChemWorld-Public/?lang=zh)** · **[English website](https://sunyrain.github.io/ChemWorld-Public/?lang=en)**
 
 总览图谱、能力索引和领域指南共享同一条导航。实验案例播放已保存的公开测试观测；静态网站不会启动实时实验室或执行新的物理计算。
 

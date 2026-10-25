@@ -22,7 +22,7 @@
   <a href="docs/native_domains.md">Examples</a> ·
   <a href="docs/native_foundation.md">Native API</a> ·
   <a href="docs/agents.md">Connect an agent</a> ·
-  <a href="https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en">Interactive website</a> ·
+  <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=en">Interactive website</a> ·
   <a href="README.zh-CN.md">中文 README</a>
 </p>
 
@@ -46,7 +46,7 @@ budget while keeping the experimental process inspectable.
 Major updates from development in the main **ChemWorld** repository, grouped into
 delivery stages. Dates follow development history rather than public-repository
 synchronization. See [current foundation](docs/current-foundation.md) for public
-distribution scope, or explore the [interactive timeline](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en#home).
+distribution scope, or explore the [interactive timeline](https://sunyrain.github.io/ChemWorld-Public/?lang=en#home).
 
 | Date | Capability update |
 | --- | --- |
@@ -232,8 +232,8 @@ remain internal prototypes and are not part of the public package.
 
 ## Documentation
 
-**[Explore the website in English](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en)** ·
-**[浏览中文版网站](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh)**
+**[Explore the website in English](https://sunyrain.github.io/ChemWorld-Public/?lang=en)** ·
+**[浏览中文版网站](https://sunyrain.github.io/ChemWorld-Public/?lang=zh)**
 
 The capability atlas, index and domain guides share one navigation. Recorded examples
 play saved public test observations; they do not start a live laboratory or run new physics.

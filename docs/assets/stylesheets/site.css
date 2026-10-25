@@ -563,3 +563,9 @@
     transition: none;
   }
 }
+:root { --cw-site-nav-height: 2.6rem; }
+.cw-global-nav { background: var(--md-default-bg-color); border-bottom: 1px solid var(--md-default-fg-color--lightest); }
+.cw-global-nav .md-grid { display: flex; gap: 1.4rem; align-items: center; min-height: var(--cw-site-nav-height); padding: .45rem .8rem; font-size: .7rem; flex-wrap: wrap; }
+.cw-global-nav a { color: var(--md-default-fg-color--light); }
+.cw-global-nav a:hover { color: var(--md-accent-fg-color); }
+.cw-global-nav [aria-current] { color: var(--md-primary-fg-color); font-weight: 700; }

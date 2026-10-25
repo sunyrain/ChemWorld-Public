@@ -37,11 +37,8 @@ jobs:
       - name: Verify generated public visuals
         run: uv run --no-sync python scripts/build_readme_visuals.py --check
 
-      - name: Build documentation
-        run: uv run --no-sync mkdocs build --strict
-
-      - name: Build bilingual capability explorer
-        run: uv run --no-sync python scripts/build_explorer_site.py --output site/explore
+      - name: Build website and documentation
+        run: uv run --no-sync python scripts/build_site.py --output site
 
       - name: Publish static files on the Pages branch
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

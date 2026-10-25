@@ -2,7 +2,7 @@
 
 ## 工质与分子过程 {#working-fluids-and-molecular-processes}
 
-10 月 24 日更新加入原生水/蒸汽、冰、湿空气、不可压缩工质、分子状态方程和有限过程路径。以下代码使用已安装的公开包。[能力索引](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh#index/working-fluids)还提供机理生成、表面控制、过滤、三元平衡、析锂和 SBML 分析的函数签名、输入表与 JSON/键值表输出。
+10 月 24 日更新加入原生水/蒸汽、冰、湿空气、不可压缩工质、分子状态方程和有限过程路径。以下代码使用已安装的公开包。[能力索引](https://sunyrain.github.io/ChemWorld-Public/?lang=zh#index/working-fluids)还提供机理生成、表面控制、过滤、三元平衡、析锂和 SBML 分析的函数签名、输入表与 JSON/键值表输出。
 
 ### IF97：液态水
 
