@@ -12,9 +12,9 @@ const records=JSON.parse(fs.readFileSync(path.join(process.env.CHEMWORLD_SITE_DI
  page.on('pageerror',e=>errors.push(e.message));page.on('response',r=>{if(r.status()>=400)errors.push(`${r.status()} ${r.url()}`);});
  page.on('request',r=>requests.push(r.url()));page.on('requestfailed',r=>errors.push(r.url()));
  const check=async(name,fn)=>{await fn();checks.push(name);console.log(`PASS ${checks.length}: ${name}`);};
- const ready=async route=>{if(route?.startsWith('guides')){await page.locator('.md-content h1').waitFor();return;}await page.waitForFunction(()=>window.CHEMWORLD_CAPABILITIES&&document.querySelector('#site-page h1,#outline .tree-row,.site-error'));if(route?.startsWith('atlas'))await page.locator('#atlas-view:not([hidden]) [data-map]').first().waitFor();if(route?.startsWith('index'))await page.locator('#index-view:not([hidden]) h1').waitFor();};
+ const ready=async route=>{await page.waitForFunction(()=>window.CHEMWORLD_CAPABILITIES&&document.querySelector('#site-page h1,#outline .tree-row,.site-error'));if(route?.startsWith('atlas'))await page.locator('#atlas-view:not([hidden]) [data-map]').first().waitFor();if(route?.startsWith('index'))await page.locator('#index-view:not([hidden]) h1').waitFor();if(route?.startsWith('guides'))await page.locator('#guide-reader h1').waitFor();};
  const go=async(route,lang='zh')=>{await page.goto(base+'?lang='+lang+'#'+route);await ready(route);};
- const hash=async route=>{if(route.startsWith('guides')){await go(route,new URL(page.url()).searchParams.get('lang')||'zh');return;}await page.evaluate(r=>location.hash=r,route);await page.waitForURL('**#'+route);await ready(route);};
+ const hash=async route=>{await page.evaluate(r=>location.hash=r,route);await page.waitForURL('**#'+route);await ready(route);};
  const screenshot=async name=>{await page.locator('img').evaluateAll(async images=>{for(const img of images)img.loading='eager';await Promise.all(images.map(img=>img.decode()));});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await page.screenshot({path:path.join(out,name+'.png'),fullPage:true});};
  try{
   await go('home');
@@ -36,9 +36,9 @@ const records=JSON.parse(fs.readFileSync(path.join(process.env.CHEMWORLD_SITE_DI
     assert.deepEqual(await page.locator('.home-milestone-date time:first-child').evaluateAll(items=>items.map(item=>item.dateTime)),['2026-10-25','2026-10-24','2026-10-23','2026-10-21','2026-10-20','2026-10-09','2026-09-16','2026-09-06','2026-08-13']);
     assert.match(await page.locator('.home-milestones').innerText(),/Thevenin/);
     assert.match(await page.locator('.home-milestones').innerText(),lang==='en'?/Milestones/:/迭代里程碑/);
-    await page.locator('.home-milestones .site-link').click();await page.locator('.md-content h1').waitFor();
-    assert.ok(page.url().endsWith('/docs/'+(lang==='zh'?'zh/':'')+'current-foundation/'));
-    assert.match(await page.locator('.md-content').innerText(),/823b6b01f/);
+    await page.locator('.home-milestones .site-link').click();await page.locator('#guide-reader h1').waitFor();
+    assert.ok(page.url().endsWith('#guides/chemworld/current-foundation'));
+    assert.match(await page.locator('#guide-body').innerText(),/823b6b01f/);
    }
    await go('home');
   });
@@ -86,21 +86,16 @@ const records=JSON.parse(fs.readFileSync(path.join(process.env.CHEMWORLD_SITE_DI
   await check('Global keyboard search reaches capabilities, guides and records',async()=>{
    await page.locator('.site-brand').focus();await page.keyboard.press('/');assert.equal(await page.locator('#site-search').evaluate(e=>e===document.activeElement),true);
    await page.locator('#site-search').fill('DFN');await page.locator('#site-search').press('ArrowDown');await page.keyboard.press('Enter');await page.locator('#document h1').waitFor();assert.match(page.url(),/#index\//);
-   await page.locator('#site-search').fill('native_mechanisms');await page.locator('#site-search').press('Enter');await page.locator('.md-content h1').waitFor();assert.match(page.url(),/native_mechanisms/);
-   await go('home','en');await page.locator('#site-search').fill('reaction-to-assay');await page.locator('#site-search').press('Enter');await page.locator('#step-counter').waitFor();assert.equal(await page.locator('#step-counter').textContent(),'6 / 11');
+   await page.locator('#site-search').fill('native_mechanisms');await page.locator('#site-search').press('Enter');await page.locator('#guide-reader h1').waitFor();assert.match(page.url(),/native_mechanisms/);
+   await page.locator('#site-search').fill('reaction-to-assay');await page.locator('#site-search').press('Enter');await page.locator('#step-counter').waitFor();assert.equal(await page.locator('#step-counter').textContent(),'6 / 11');
   });
-  await check('Legacy guide URLs reach canonical documents and preserve sections',async()=>{
-   for(const lang of ['en','zh']){
-    await go('guides/thermal-reaction/native_mechanisms/supported-finite-contract',lang);
-    assert.ok((await page.locator('.md-content').innerText()).length>3000);
-    assert.ok(page.url().includes('/docs/'+(lang==='zh'?'zh/':'')+'native_mechanisms/'));
-    assert.ok(page.url().endsWith('#supported-finite-contract'));
-    assert.ok(await page.locator('#supported-finite-contract').count());
-   }
-   await screenshot('site-guide');
+  await check('Guides include full prose, section navigation and source links',async()=>{
+   await hash('guides/thermal-reaction/native_mechanisms');assert.ok((await page.locator('#guide-body').innerText()).length>3000);assert.ok(await page.locator('#guide-toc a').count()>=3);
+   await page.locator('#guide-toc [data-guide-anchor="supported-finite-contract"]').click();assert.ok(page.url().endsWith('/supported-finite-contract'));await page.locator('[data-site-lang="zh"]').click();
+   await page.locator('#supported-finite-contract').waitFor();assert.match(await page.locator('.guide-meta').innerText(),/中文预览译文/);assert.ok(page.url().endsWith('/supported-finite-contract'));await screenshot('site-guide');
   });
   await check('Atlas preserves selection, wheel zoom and clean dragging in the site shell',async()=>{
-   await go('atlas/materials');await page.locator('#focus-branch').click();await page.locator('#map-level').selectOption('5');await page.locator('[data-map="battery-dfn-model"]').waitFor();
+   await hash('atlas/materials');await page.locator('#focus-branch').click();await page.locator('#map-level').selectOption('5');await page.locator('[data-map="battery-dfn-model"]').waitFor();
    const viewport=await page.locator('#map-viewport').boundingBox(),before=await page.locator('#zoom-level').textContent();
    await page.mouse.move(viewport.x+80,viewport.y+100);await page.mouse.wheel(0,-120);await page.waitForFunction(old=>document.querySelector('#zoom-level').textContent!==old,before);
    const camera=()=>page.locator('#map-world').evaluate(e=>({left:e.style.left,top:e.style.top,zoom:e.style.zoom,transform:getComputedStyle(e).transform}));
@@ -242,8 +237,8 @@ const records=JSON.parse(fs.readFileSync(path.join(process.env.CHEMWORLD_SITE_DI
    }
   });
   await check('Mobile guide navigation, capability directory and player stay interactive',async()=>{
-   await page.setViewportSize({width:390,height:844});await go('guides/thermal-reaction/native_mechanisms','en');await page.locator('label[for="__drawer"]').first().click();assert.equal(await page.locator('#__drawer').isChecked(),true);
-   await go('index/combustion');await page.locator('#mobile-directory').click();assert.equal(await page.locator('#outline').isVisible(),true);
+   await page.setViewportSize({width:390,height:844});await go('guides/thermal-reaction/native_mechanisms','en');await page.locator('#guide-mobile-nav').click();assert.equal(await page.locator('#guide-navigation').isVisible(),true);
+   await page.locator('[data-view="index"]').click();await page.locator('#mobile-directory').click();assert.equal(await page.locator('#outline').isVisible(),true);
    await hash('experiment/reaction-to-purification/6');await page.locator('#next-step').click();assert.equal(await page.locator('#step-counter').textContent(),'7 / 21');
   });
   assert.deepEqual(errors,[]);assert.ok(!requests.some(u=>new URL(u).pathname.startsWith('/api/')));

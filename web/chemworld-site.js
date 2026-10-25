@@ -5,18 +5,11 @@
   const lang=new URLSearchParams(location.search).get('lang')==='en'?'en':'zh';
   const en=lang==='en',pick=(zh,eng)=>en?eng:zh;
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const text={explore:pick('探索能力','Explore'),experiments:pick('实验案例','Experiments'),docs:pick('文档','Docs'),start:pick('开始使用','Get started'),atlas:pick('总览图谱','Capability atlas'),index:pick('能力索引','Capability index'),guides:pick('文档','Documentation'),snapshot:pick('能力快照 · 2026.10','Capability snapshot · 2026.10'),footer:pick('用于实验智能的因果世界引擎','A causal world engine for experimental intelligence'),preview:pick('开发版','Development')};
-  function docsUrl(id='',anchor='') {
-    const page=id.replace(/\.en$/,'');
-    const path='docs/'+(en?'':'zh/')+(page?encodeURIComponent(page)+'/':'');
-    return new URL(path,location.href).href+(anchor?'#'+encodeURIComponent(anchor):'');
-  }
-  window.chemworldDocsUrl=docsUrl;
-  for(const link of $$('[data-docs-home]'))link.href=docsUrl();
+  const text={explore:pick('探索能力','Explore'),experiments:pick('实验案例','Experiments'),docs:pick('文档','Docs'),start:pick('开始使用','Get started'),atlas:pick('总览图谱','Capability atlas'),index:pick('能力索引','Capability index'),guides:pick('领域指南','Domain guides'),snapshot:pick('能力快照 · 2026.10','Capability snapshot · 2026.10'),footer:pick('用于实验智能的因果世界引擎','A causal world engine for experimental intelligence'),preview:pick('开发版','Development')};
   window.CHEMWORLD_SITE=true;window.CHEMWORLD_LANGUAGE=lang;
   document.documentElement.lang=en?'en':'zh-CN';
   for(const node of $$('[data-i18n]'))node.textContent=text[node.dataset.i18n];
-  const shortNav={atlas:pick('总览图谱','Atlas'),index:pick('能力索引','Index'),guides:pick('文档','Docs'),experiments:pick('实验案例','Experiments')};
+  const shortNav={atlas:pick('总览图谱','Atlas'),index:pick('能力索引','Index'),guides:pick('领域指南','Guides'),experiments:pick('实验案例','Experiments')};
   for(const link of $$('.site-nav [data-nav]')){
     const label=link.textContent;link.setAttribute('aria-label',label);
     link.innerHTML=`<span class="nav-label-full">${esc(label)}</span><span class="nav-label-short">${esc(shortNav[link.dataset.nav])}</span>`;
@@ -169,15 +162,14 @@
   function togglePlay(){if(playTimer){pause();return;}if(!player)return;if(player.index>=player.record.steps.length-1)setStep(0);const b=$('#play-record');b.innerHTML=icon('pause');b.setAttribute('aria-label',pick('暂停播放','Pause playback'));playTimer=setInterval(()=>{if(!player||player.index>=player.record.steps.length-1){pause();return;}setStep(player.index+1);if(player.index===player.record.steps.length-1)pause();},1250/player.speed);}
   function toast(message){const box=$('#site-toast');box.textContent=message;box.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>box.hidden=true,2600);}
   async function copyText(value){try{await navigator.clipboard.writeText(value);toast(pick('已复制','Copied'));}catch{toast(pick('复制受浏览器限制，请选择文本复制。','Clipboard unavailable. Select and copy the text.'));}}
-  function loadScript(src){return new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src+'?v=20261025-progress';s.onload=resolve;s.onerror=()=>reject(Error('Unable to load '+src));document.head.append(s);});}
-  async function json(src){const r=await fetch(src+'?v=20261025-progress');if(!r.ok)throw Error(src+': '+r.status);return r.json();}
-  async function ensureExplorer(){if(explorerLoad)return explorerLoad;explorerLoad=(async()=>{$('#explorer-pages').innerHTML=content.fragments[lang];const suffix=en?'.en':'';await loadScript('chemworld-guide-index.js');await loadScript('chemworld-guide-links.js');await loadScript('chemworld-api-reference.js');await loadScript('chemworld-api-docs.js');await loadScript(`chemworld-site-explorer${suffix}.js`);})();return explorerLoad;}
+  function loadScript(src){return new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src+'?v=20261025-reader-restored';s.onload=resolve;s.onerror=()=>reject(Error('Unable to load '+src));document.head.append(s);});}
+  async function json(src){const r=await fetch(src+'?v=20261025-reader-restored');if(!r.ok)throw Error(src+': '+r.status);return r.json();}
+  async function ensureExplorer(){if(explorerLoad)return explorerLoad;explorerLoad=(async()=>{$('#explorer-pages').innerHTML=content.fragments[lang];const suffix=en?'.en':'';await loadScript('chemworld-guide-content.js');await loadScript('chemworld-guide-localized.js');await loadScript(`chemworld-guide-reader${suffix}.js`);await loadScript('chemworld-api-reference.js');await loadScript('chemworld-api-docs.js');await loadScript(`chemworld-site-explorer${suffix}.js`);})();return explorerLoad;}
   function updateLanguageLinks(){for(const a of $$('[data-site-lang]')){const url=new URL(location.href);url.searchParams.set('lang',a.dataset.siteLang);a.href=url.href;a.setAttribute('aria-current',String(a.dataset.siteLang===lang));}}
   function rememberPosition(){const state={hash:location.hash};window.dispatchEvent(new CustomEvent('chemworld-language-save',{detail:state}));const reader=$('#guide-reader'),doc=$('#document');state.reader=reader?.scrollTop||0;state.document=doc?.scrollTop||0;try{sessionStorage.setItem('chemworld-site-position',JSON.stringify(state));}catch{}}
   async function route(){
     if(location.hash.split('/')[0]==='#research'){history.replaceState(null,'','#experiments');}
-    const epoch=++routeEpoch,parts=location.hash.slice(1).split('/'),view=parts[0]||'home',isExplorer=['atlas','index'].includes(view);
-    if(view==='guides'){location.replace(docsUrl(parts[2]?decodeURIComponent(parts[2]):'',parts[3]?decodeURIComponent(parts[3]):''));return;}
+    const epoch=++routeEpoch,parts=location.hash.slice(1).split('/'),view=parts[0]||'home',isExplorer=['atlas','index','guides'].includes(view);
     if(view!=='experiment'){pause();player=null;chartObserver?.disconnect();}
     $('#site-search-results').hidden=true;$('#site-search').value='';
     const nav=view==='experiment'?'experiments':view;
@@ -209,7 +201,7 @@
     $('#site-search').addEventListener('input',search);$('#site-search').addEventListener('focus',()=>{if($('#site-search').value)search();});
     $('#site-search').addEventListener('keydown',e=>{const first=$('#site-search-results a');if(first&&e.key==='Enter'){e.preventDefault();first.click();}if(first&&e.key==='ArrowDown'){e.preventDefault();first.focus();}});
     $('#site-search-results').addEventListener('keydown',e=>{const links=$$('#site-search-results a'),i=links.indexOf(document.activeElement);if(e.key==='ArrowDown'){e.preventDefault();links[Math.min(i+1,links.length-1)]?.focus();}if(e.key==='ArrowUp'){e.preventDefault();if(i<=0)$('#site-search').focus();else links[i-1].focus();}});
-    document.addEventListener('click',e=>{const guide=e.target.closest('a[href^="#guides/"]');if(guide){const parts=guide.getAttribute('href').slice(1).split('/');guide.href=docsUrl(parts[2]||'',parts[3]||'');}const language=e.target.closest('[data-site-lang]');if(language){if(language.dataset.siteLang===lang){e.preventDefault();return;}updateLanguageLinks();rememberPosition();}const copy=e.target.closest('[data-copy]');if(copy)copyText(copy.dataset.copy==='install'?install:runLocal);const filter=e.target.closest('[data-filter]');if(filter){for(const b of $$('[data-filter]'))b.setAttribute('aria-pressed',String(b===filter));for(const c of $$('[data-case-kind]'))c.hidden=filter.dataset.filter!=='all'&&c.dataset.caseKind!==filter.dataset.filter;}if(!e.target.closest('.site-search-wrap'))$('#site-search-results').hidden=true;});
+    document.addEventListener('click',e=>{const language=e.target.closest('[data-site-lang]');if(language){if(language.dataset.siteLang===lang){e.preventDefault();return;}updateLanguageLinks();rememberPosition();}const copy=e.target.closest('[data-copy]');if(copy)copyText(copy.dataset.copy==='install'?install:runLocal);const filter=e.target.closest('[data-filter]');if(filter){for(const b of $$('[data-filter]'))b.setAttribute('aria-pressed',String(b===filter));for(const c of $$('[data-case-kind]'))c.hidden=filter.dataset.filter!=='all'&&c.dataset.caseKind!==filter.dataset.filter;}if(!e.target.closest('.site-search-wrap'))$('#site-search-results').hidden=true;});
     document.addEventListener('keydown',e=>{const editable=e.target.closest('input,textarea,select,[contenteditable]');if(e.key==='/'&&!editable){e.preventDefault();$('#site-search').focus();}if(e.key==='Escape'){$('#site-search-results').hidden=true;pause();}if(player&&!editable&&!e.target.closest('button,a,[role=button]')){if(e.key==='ArrowRight'){e.preventDefault();setStep(player.index+1,true);}if(e.key==='ArrowLeft'){e.preventDefault();setStep(player.index-1,true);}if(e.code==='Space'){e.preventDefault();togglePlay();}}});
     document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();});
     await route();

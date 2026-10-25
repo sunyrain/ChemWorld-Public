@@ -46,7 +46,8 @@ Research Workbench 与 Blender Lab 仍是内部原型。
 [公共同步记录](https://github.com/sunyrain/ChemWorld-Public/blob/c21fe86cb739b9bed021069ba98921b868576df4/docs/current-foundation.zh.md)
 保留具体范围和分母。
 
-官网现在统一由 `/` 展示项目，`/docs/` 提供完整文档；旧网站及指南地址保留跳转。
+官网首页、能力图谱与领域指南统一使用原来的界面，由 `/` 进入。
+文档在一体化阅读器中展示，保留领域目录、章节导航和代码复制；旧 `/explore/` 与指南地址仍可使用。
 本轮更新网站内容，不改变运行时、PyPI 版本或论文结果。
 
 冻结 Notebook 与轨迹演示继续对应各自的原运行时版本，见[证据](evidence.md)与

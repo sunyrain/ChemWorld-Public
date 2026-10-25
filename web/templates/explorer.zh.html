@@ -31,3 +31,17 @@
       </div>
       <aside id="inspector" class="inspector" aria-label="图谱节点详情"></aside>
     </section>
+    <section id="guides-view" class="guides-layout" aria-label="领域指南" hidden>
+      <aside class="guide-sidebar" aria-label="领域指南导航">
+        <div class="guide-nav-head">领域指南 <span>按架构浏览</span></div>
+        <button type="button" id="guide-mobile-nav" aria-expanded="false">浏览领域指南 <span aria-hidden="true">⌄</span></button>
+        <nav id="guide-navigation" aria-label="指南目录"></nav>
+        <div class="guide-nav-foot">从能力进入方法，再进入可运行示例。</div>
+      </aside>
+      <article id="guide-reader" class="guide-reader" aria-label="指南正文"></article>
+      <aside class="guide-context" aria-label="本页导航">
+        <div class="guide-context-head">本页目录</div>
+        <nav id="guide-toc" aria-label="章节目录"></nav>
+        <div id="guide-related" class="guide-related"></div>
+      </aside>
+    </section>

@@ -68,12 +68,14 @@
     if(view==='atlas')renderMap(false);
     updateHash(historyMode); announce(`已选 ${nodes.get(id).name}`);
   }
-  function openGuide(id,anchor='') {
-    location.assign(guideReader.route(id,anchor));
+  function openGuide(id,anchor='',nodeId=selected,{historyMode='push'}={}) {
+    select(nodes.has(nodeId)?nodeId:selected,{historyMode:null});
+    guideId=id;guideAnchor=anchor;
+    switchView('guides',{historyMode,contextual:false});
+    announce(`Currently reading ${guideReader.pages[id]?.title||"Domain guides"}`);
   }
   function switchView(next,{historyMode='push',contextual=true}={}) {
-    if(next==='guides'){const guide=guideReader.resolve(nodes.get(selected));openGuide(guideId||guide.id,guideAnchor||guide.anchor);return;}
-    view=['index','atlas'].includes(next)?next:'index';
+    view=['index','atlas','guides'].includes(next)?next:'index';
     if(view==='atlas'&&!mapReady){
       opened.clear();['chemworld','physics','runtime','evaluation'].forEach(id=>opened.add(id));
       renderOutline();
@@ -83,9 +85,10 @@
     if(view==='guides'&&(contextual||!guideId)){
       const guide=guideReader.resolve(nodes.get(selected));guideId=guide.id;guideAnchor=guide.anchor;
     }
-    for(const name of ['index','atlas'])$(`#${name}-view`).hidden=view!==name;
+    for(const name of ['index','atlas','guides'])$(`#${name}-view`).hidden=view!==name;
     $$('[data-view]').forEach(button=>button.tagName==='BUTTON'&&button.setAttribute('aria-pressed',String(button.dataset.view===view)));
     updateHash(historyMode);
+    if(view==='guides')guideReader.render(guideId,guideAnchor,nodes.get(selected));
     if(view==='atlas')requestAnimationFrame(()=>{renderMap(!mapReady);mapReady=true;});
   }
   function renderOutline() {
@@ -364,7 +367,7 @@
     if(lastCompact===null){lastCompact=compact;transformMap();}else if(compact!==lastCompact){lastCompact=compact;renderMap(true);}else transformMap();
     $('#fit-map').textContent=compact?"Fit width":"Fit canvas";
   }).observe(viewport);
-  guideReader=window.createChemWorldGuideLinks({nodes,lineage,onNavigate:openGuide,
+  guideReader=window.createChemWorldGuideReader({nodes,lineage,onNavigate:openGuide,
     onCapability(id){select(id,{historyMode:null});switchView('index');$('#document').scrollTop=0;},
     onAtlas(id){select(id,{historyMode:null});switchView('atlas');requestAnimationFrame(locateSelected);},announce});
   window.addEventListener('chemworld-language-save',event=>{event.detail.atlas={opened:[...opened],camera,focusId,mapReady,activeTab};});

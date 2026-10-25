@@ -23,10 +23,11 @@ uv run --no-sync ghp-import --no-jekyll --branch gh-pages site
 git push origin gh-pages
 ```
 
-The project website is served at `/?lang=en` and `/?lang=zh`; complete documentation
-is under `/docs/` and `/docs/zh/`. The former `/explore/` and root documentation
-URLs redirect while preserving query strings and section fragments. Capability maps
-link to canonical documentation pages rather than a second full-text reader.
+The integrated website is served at `/?lang=en` and `/?lang=zh`. Its original guide
+reader uses `#guides/<capability>/<document>/<section>` routes, rendered from `docs/`
+Markdown. The former `/explore/`, `/docs/` and published guide URLs redirect into
+that interface, retaining language and section. Static MkDocs output remains a
+fallback for technical pages outside the domain-guide collection.
 The recordings are historical test snapshots, not a live backend.
 
 The release workflow creates a GitHub Release and attaches source and Python package artifacts. PyPI

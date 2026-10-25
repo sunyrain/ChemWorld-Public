@@ -51,8 +51,9 @@ to that public runtime; they do not qualify the newer development additions abov
 The [record of the public synchronization](https://github.com/sunyrain/ChemWorld-Public/blob/c21fe86cb739b9bed021069ba98921b868576df4/docs/current-foundation.md)
 retains the exact test scopes and denominators.
 
-The website now has one project homepage at `/` and one documentation entry at
-`/docs/`. Old website and guide addresses redirect to the corresponding pages.
+The homepage, capability atlas and domain guides share the original website interface
+at `/`. Documentation opens in the integrated reader with domain navigation, section
+links and copyable code. Old `/explore/` and guide addresses still work.
 This update changes website content, not the runtime, PyPI release or paper results.
 
 Frozen notebooks and trace demonstrations retain their original runtime versions;
