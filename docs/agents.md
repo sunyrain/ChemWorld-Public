@@ -1,5 +1,7 @@
 # Connect an agent
 
+Start with the [environment API](environment.md) and [authoring guide](environment-authoring.md). You can supply any planner and choose your own reward, or use no reward. The task-scored runner and preset adapters below are retained historical applications; their CLI is `python -m chemworld.legacy.cli`.
+
 ChemWorld agents choose one typed operation at a time from public task state. The environment keeps
 hidden world state evaluator-owned, validates every request, records resource use and writes an exact
 replay trajectory. Start offline before introducing an external model.
@@ -72,12 +74,12 @@ List tasks and run a deterministic connectivity check:
 
 ```bash
 chemworld tasks list
-chemworld run --task reaction-to-assay --agent scripted_chemistry --seed 0
+python -m chemworld.legacy.cli run --task reaction-to-assay --agent scripted_chemistry --seed 0
 ```
 
 Other constructor-free names include `random`, `lhs`, `greedy`, `gp_bo`, `rf_ei`,
 `safe_gp_bo`, `tool_using_llm_stub` and `llm_replay`. Use `make_agent(name)` from
-`chemworld.eval.runner` when composing runs in Python.
+`chemworld.legacy.agent_registry` when composing runs in Python.
 
 ## Live DeepSeek adapter
 
@@ -88,7 +90,7 @@ export DEEPSEEK_API_KEY="..."
 ```
 
 ```python
-from chemworld.agents.live_llm import LiveLLMAgent
+from chemworld.legacy.agents.live_llm import LiveLLMAgent
 from chemworld.eval.runner import run_agent
 from chemworld.providers.deepseek import DeepSeekClient
 

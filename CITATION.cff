@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use ChemWorld, please cite this software release and the associated article."
+message: "If you use ChemWorld, please cite this software."
 title: "ChemWorld: Programmable Chemical Worlds for Controlled and Replayable Agent Experimentation"
 type: software
 version: 0.5.0.dev0
@@ -14,14 +14,3 @@ authors:
   - family-names: Wang
     given-names: Xiaonan
     email: wangxiaonan@tsinghua.edu.cn
-preferred-citation:
-  type: article
-  title: "ChemWorld: Programmable Chemical Worlds for Controlled and Replayable Agent Experimentation"
-  year: 2026
-  authors:
-    - family-names: Qiu
-      given-names: Jiangjie
-    - family-names: Li
-      given-names: Yijun
-    - family-names: Wang
-      given-names: Xiaonan

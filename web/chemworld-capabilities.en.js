@@ -1,7 +1,7 @@
 // Generated English preview edition.
 // Editorial navigation over the existing capability snapshot; not a runtime registry.
 window.CHEMWORLD_CAPABILITIES = {
-  "snapshot": "2026-10-24",
+  "snapshot": "2026-10-25",
   "registry": {
     "modules": 31,
     "components": 38,
@@ -1357,13 +1357,13 @@ window.CHEMWORLD_CAPABILITIES = {
               "children": [
                 {
                   "id": "observatory",
-                  "name": "Student Lab & Agent Observatory",
+                  "name": "Custom environments and public observations",
                   "state": "done",
-                  "ability": "Local interactive experiment; read-only trajectory browsing, resource checking, and replay.",
-                  "boundary": "The interface's operation is consistent with the supported domain of the model and the tasks.",
-                  "source": "docs/student-lab.md",
+                  "ability": "Declare apparatus and action bounds; acquire native-unit observations with your own agent.",
+                  "boundary": "Available through Python/CLI; internal UI prototypes are not distributed.",
+                  "source": "docs/environment-authoring.md",
                   "kind": "capability",
-                  "type": "Work bench"
+                  "type": "Environment API"
                 }
               ]
             },
@@ -1379,7 +1379,7 @@ window.CHEMWORLD_CAPABILITIES = {
                   "state": "planned",
                   "ability": "Transfer and validation of independent models, real-world data, and narrow physical systems.",
                   "boundary": "Overall bridging route; do not treat existing interfaces as real laboratory connections.",
-                  "source": "docs/student-lab.md",
+                  "source": "docs/limitations.md",
                   "kind": "capability",
                   "type": "External access"
                 }
@@ -1550,7 +1550,7 @@ window.CHEMWORLD_CAPABILITIES = {
                   "state": "done",
                   "ability": "Candidate interventions, three sets of feedback, complete trajectories, and paired hidden worlds.",
                   "boundary": "The results of the teaching pairing and the formal benchmark are presented separately.",
-                  "source": "docs/student-lab.md",
+                  "source": "docs/notebooks.md",
                   "kind": "capability",
                   "type": "Teaching resources"
                 }

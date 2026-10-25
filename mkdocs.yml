@@ -68,6 +68,9 @@ plugins:
           copyright: ChemWorld · 软件模型实验环境，不用于指导真实化学实验
           nav_translations:
             Home: 首页
+            Design an environment: 设计实验环境
+            Use the environment: 使用环境
+            Optional CPU build: 可选CPU构建
             5-minute quickstart: 五分钟开始
             Connect an agent: 接入 Agent
             One experiment: 一次完整实验
@@ -89,7 +92,9 @@ nav:
   - Home: index.md
   - 5-minute quickstart: quickstart.md
   - Connect an agent: agents.md
-  - Student Lab: student-lab.md
+  - Design an environment: environment-authoring.md
+  - Use the environment: environment.md
+  - Optional CPU build: native_cpu.md
   - One experiment: one-experiment.md
   - World foundations: world-foundations.md
   - Current foundation: current-foundation.md

@@ -1,12 +1,12 @@
 > **[打开新版能力网站 →](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh)** · [English](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en)
 
-> 当前基座见[10 月 24 日更新](current-foundation.md)：工质与分子热力学、反应网络、水处理、电池与生化分析。下文已有图示与数值证据对应8月冻结运行时。
+> 当前公开版本：[10月25日进展](current-foundation.md) · [设计环境](environment-authoring.md) · [接入自己的Agent与奖励](environment.md)。下方播放器保留8月冻结轨迹，仅作历史示例。
 
 <section class="cw-studio-hero" data-cw-autoplay data-source="../assets/data/representative-behavior-and-forks.json" data-locale="zh">
   <div class="cw-studio-glow cw-studio-glow-a"></div>
   <div class="cw-studio-glow cw-studio-glow-b"></div>
   <div class="cw-studio-copy">
-    <div class="cw-studio-brand"><span class="cw-live-dot"></span> 公开轨迹实时演示</div>
+    <div class="cw-studio-brand"><span class="cw-live-dot"></span> 冻结公开轨迹演示</div>
     <h1>让实验 Agent 拥有一个可以行动的世界。</h1>
     <p>ChemWorld 把物理化学模型变成有类型、可回放的实验室。观看一条冻结公开轨迹，如何从材料与过程操作走向仪器、后处理和 final assay。</p>
     <div class="cw-button-row">

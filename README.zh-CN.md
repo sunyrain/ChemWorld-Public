@@ -37,6 +37,7 @@ ChemWorld 为自主智能体提供一个可以采取行动的化学世界：加�
 
 | 日期 | 能力升级 |
 | --- | --- |
+| **2026-10-25** | **面向用户的环境入口与进一步的模型集成。** 自定义目标、设备与资源边界，普通Python奖励可选；模型与过程扩展覆盖多相／分子热力学、界面、水处理、反应网络、电池和生化事件。新增可选C++ ABI骨架，完整科学模型迁移仍在开发。 |
 | **2026-10-24** | **从物性计算扩展到耦合过程与系统分析.** 新增水/蒸汽、湿空气、分子与多流体热力学；连接机理生成、有限反应流、膜与水处理、多相 CEF 相图。扩展电池族、阻抗、随机混合过程和 SBML 分析，并统一轨迹字段与续算语义；各模型保留验证范围。 |
 | **2026-10-23** | **扩展原生热力学与工程计算.** 纯流体 Helmholtz 物性、饱和与闪蒸连接活度模型、六种 UNIFAC 变体和立方状态方程混合规则；扩展带来源的物性导数与拟合，并补齐流量计、阀门、泵、两相流和设备几何计算。 |
 | **2026-10-21–22** | **科学求解、物性数据与模型互操作。** 共同残差／DAE 基础，有限电池模型与诊断，带来源的维里气体物性与热过程，持久 Thevenin 电路；扩展选定的 CALPHAD／ChemSage 模型和 SBML／SED-ML 子集。 |
@@ -61,7 +62,7 @@ uv run --no-sync python -m chemworld.examples.native_surface_research --bulk --m
 
 示例执行 **12 个操作**：从有限库存加料、加热、测量、等待、转移物料，在接收容器中继续实验，最后完成终检。JSON 输出包含每个动作的结果、实际物理时长，以及带有原生单位的仪器读数。
 
-如果希望通过交互界面入门，可以运行 `uv run --no-sync chemworld lab`，打开本地 [Student Lab](#student-lab交互实验室)。
+从[环境作者指南](docs/environment-authoring.zh.md)设计世界，或运行`uv run --no-sync python -m chemworld.examples.user_reward`使用自己的奖励。
 
 ## 基座提供什么
 
@@ -147,15 +148,16 @@ session.close()
 
 [会话指南](docs/native_foundation.md)说明原生观测、Gym 兼容投影与快照续算。[智能体指南](docs/agents.zh.md)介绍自定义 Python 策略、离线基线、已保存轨迹回放和可选的在线模型适配器。默认示例可以离线执行，外部模型由使用者显式选择。
 
-### Student Lab：交互实验室
+### 设计自己的实验环境
 
-在带有动画的浏览器工作台中探索教程任务：
+通过[环境作者指南](docs/environment-authoring.zh.md)声明设备、操作与资源，接入自己的Agent。
+奖励和评价由用户定义；也可只观察实验过程，不计算分数。
 
 ```bash
-uv run --no-sync chemworld lab
+uv run --no-sync python -m chemworld.examples.user_reward
 ```
 
-Student Lab 在本机 `127.0.0.1` 上运行，使用相同的会话与动作 schema。无需 API 密钥即可选择操作并查看可见效果。教程目录提供入门场景，Python 示例覆盖更广的原生领域。
+旧Student Lab命令已退役。Research Workbench与Blender Lab仍是内部原型，暂不随公共包发布。
 
 ## 文档与网站
 

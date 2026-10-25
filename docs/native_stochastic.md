@@ -1,4 +1,4 @@
-# Native integer stochastic chemistry
+# Native stochastic and mixed chemistry
 
 Declare `ReactionNetworkSpec(..., stochastic={"volume_L": 0.01,
 "temperature_K": 298.15})` and pass integer counts to
@@ -40,12 +40,12 @@ advance back, rather than reporting chemical failure or charging physical time.
 The common runtime still applies its declared request/measurement resource rules.
 `StochasticAdvance.work` and runtime `stochastic_work` expose propensity
 evaluations and random draws. Sparse dependencies can reduce work per event;
-this is not a universal wall-time speedup or an approximate time-leaping method.
+the direct/next-reaction cost comparison does not establish a universal wall-time speedup.
 
 Only constant volume and temperature are supported. There is no claim of a
 caloric/energy model or fitted biochemical accuracy. Fractional destructive
 instruments are rejected at compilation; dedicated integer sampling and the
-two presets are available through [biochemical worlds](native_biochemical.md). No COPASI or other
+two biochemical presets are the separate NATIVE-EXT-37 task. No COPASI or other
 upstream simulator is loaded by the runtime.
 
 Development qualification: `uv run --no-sync pytest -q tests/test_stochastic_kinetics.py`;
@@ -53,11 +53,57 @@ Development qualification: `uv run --no-sync pytest -q tests/test_stochastic_kin
 The latter refuses to overwrite a previous attempt. The fixed 4000-run design,
 all outcomes and statistical criteria are in the world_foundation workstream.
 
-## Additional stochastic algorithms
+The next-reaction development block completed 49,152 trajectories across both
+methods; all 29 units and 353 fixed distribution, continuation, world and work
+comparisons passed. Its fixed design and statistical resolution are recorded in the
+[51A delivery](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51A/README.md).
 
-The snapshot also includes explicit-partition hybrid ODE/jump dynamics and a bounded
-adaptive tau-leap implementation. Each has its own continuation and validity contract;
-the direct/next-reaction description above does not make tau-leaping exact.
-Use `chemworld.examples.stochastic_tau_leap.tau_world(seed=51, copies=10000)`
-with `ChemWorldRuntime` for the packaged approximate model. No automatic arbitrary
-partitioning or spatial kMC is claimed.
+## Approximate adaptive tau-leaping
+
+The same `StochasticSpec` also accepts
+`algorithm="adaptive-explicit-tau-leap-v1"` with an explicit `TauLeapPolicy`.
+It samples integer Poisson firing totals, protects critical channels and falls
+back to direct SSA when leaping is unsuitable. Negative candidates are rejected
+and retried with a smaller step; accepted counts are never clipped. Ordinary
+rejection is not claimed to give rejection-unbiased paths, and epsilon is a
+local step-selection control rather than a global error bound.
+
+Pending batches retain their absolute interval, firing counts and process RNG
+in the original continuation. Observations are step-held until a batch endpoint;
+`output_hold_s` exposes that lag. Snapshot restoration preserves this approximate
+numerical path exactly. A batch records aggregate firings, without inventing
+the individual event times of an SSA trajectory.
+
+`chemworld.examples.stochastic_tau_leap.run_example()` exercises original world
+waits and restored continuation. The [51C delivery](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51C/README.md)
+records 30 units, 192 comparisons and 49,152 distribution trajectories in each
+of two retained attempts, including non-grid observation error and fallback
+costs. These results do not qualify implicit tau methods, SDE or automatic
+partition selection.
+
+## Fixed-partition continuous and discrete chemistry
+
+`StochasticHybridSpec` declares the integer species and stochastic reaction
+channels of one reaction network. The remaining material uses continuous mol
+coordinates in the same phase ledger. Integrated Poisson hazards respond to the
+continuous trajectory; pending hazards and RNG survive ordinary snapshots.
+The original profile allows rate feedback between the partitions while each
+partition's net elemental stock remains closed. Its actual world and shared-clock
+qualification is recorded in the [51B delivery](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51B/README.md).
+
+`CrossPartitionHybridSpec` explicitly selects real material transfer: one jump
+can change integer molecules and continuous mol by the corresponding molecular
+quantum. The original `stochastic_hybrid_world` and native wait entry remain the
+consumer. The original process continuation records cumulative cross-partition
+firings; the material ledger remains the only inventory. A continuous reactant
+must contain enough material for the whole jump, and the numerical domain must
+resolve a single molecule. Transfer receipts and both partitions' atomic changes
+are checked together before committing a time slice.
+
+This profile retains fixed volume, temperature and partition assignments.
+It does not supply a heat model, consuming hybrid sampling or automatic
+repartitioning. Same-prefix snapshot continuation and numerical agreement under
+different adaptive integration splits are distinct guarantees. The
+[51D delivery](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51D/REPORT.md)
+records 36/36 development units and 338/338 checks, with a separate complete
+shared-world/runtime snapshot consumer and all retained failures.

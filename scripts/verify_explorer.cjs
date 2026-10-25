@@ -32,13 +32,13 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
   });
   await check('Milestones remain readable in both languages and link to current scope',async()=>{
    for(const lang of ['zh','en']){
-    await go('home',lang);assert.equal(await page.locator('.home-milestone').count(),8);
-    assert.deepEqual(await page.locator('.home-milestone-date time:first-child').evaluateAll(items=>items.map(item=>item.dateTime)),['2026-10-24','2026-10-23','2026-10-21','2026-10-20','2026-10-09','2026-09-16','2026-09-06','2026-08-13']);
+    await go('home',lang);assert.equal(await page.locator('.home-milestone').count(),9);
+    assert.deepEqual(await page.locator('.home-milestone-date time:first-child').evaluateAll(items=>items.map(item=>item.dateTime)),['2026-10-25','2026-10-24','2026-10-23','2026-10-21','2026-10-20','2026-10-09','2026-09-16','2026-09-06','2026-08-13']);
     assert.match(await page.locator('.home-milestones').innerText(),/Thevenin/);
     assert.match(await page.locator('.home-milestones').innerText(),lang==='en'?/Milestones/:/迭代里程碑/);
     await page.locator('.home-milestones .site-link').click();await page.locator('#guide-reader h1').waitFor();
     assert.ok(page.url().endsWith('#guides/chemworld/current-foundation'));
-    assert.match(await page.locator('#guide-body').innerText(),/a6d88a582/);
+    assert.match(await page.locator('#guide-body').innerText(),/823b6b01f/);
    }
    await go('home');
   });
@@ -127,7 +127,7 @@ const records=JSON.parse(fs.readFileSync(path.join(__dirname,'../site/explore/ch
     }
     return data.coverage;
    });
-   assert.equal(coverage.implemented_capabilities,71);assert.equal(coverage.planned_capabilities,1);assert.equal(coverage.examples,81);
+   assert.equal(coverage.implemented_capabilities,71);assert.equal(coverage.planned_capabilities,1);assert.equal(coverage.examples,82);
    const code=await page.locator('[data-api-block="python"] code').first().textContent();
    await page.locator('[data-api-block="python"] [data-api-copy]').first().click();assert.equal((await page.evaluate(()=>navigator.clipboard.readText())).replace(/\r\n/g,'\n'),code);
    const expected=await page.evaluate(()=>window.CHEMWORLD_API_REFERENCE.recipes.combustion.output);

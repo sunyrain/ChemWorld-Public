@@ -1452,3 +1452,15 @@ finally:
     "显式选择已提供粒径测量的 phase-resolved-process-v5 合同。完成反应、淬灭与结晶后采集粒径；预算覆盖仅用于本教学流程。",
     "Explicitly select phase-resolved-process-v5, which provides particle sizing. React, quench and crystallize before acquisition; the budget override is for this teaching workflow.",
 )
+
+
+add(
+    "user-environment",
+    "observatory entrypoints interface-runtime",
+    "from chemworld.examples.user_reward import run_example",
+    {},
+    "output = run_example(reward_fn=None)",
+    ["chemworld.examples.user_reward:run_example"],
+    "两次投料后测量压力，不设置奖励；实验与评价可以分别定义。",
+    "Measure pressure after two feed operations, with no reward; experimentation and evaluation are configured separately.",
+)

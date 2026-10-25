@@ -50,6 +50,7 @@ distribution scope, or explore the [interactive timeline](https://sunyrain.githu
 
 | Date | Capability update |
 | --- | --- |
+| **2026-10-25** | **User-defined environments and further model integration.** Configure goals, apparatus and resource limits, with optional Python rewards. Expanded multiphase/molecular thermodynamics, interfaces, treatment, reacting networks, batteries and biochemical events retain their individual scopes. An optional C++ ABI skeleton is available; scientific-model migration remains in development. |
 | **2026-10-24** | **From property calculations to coupled processes and systems analysis.** Adds water/steam, humid-air, molecular and multifluid thermodynamics; connects mechanism growth, finite reacting flows, membranes, water treatment and multiphase CEF diagrams. Expands battery families, impedance, stochastic hybrid processes and SBML analysis, with unified trajectory fields and continuation semantics. Each model retains its qualification scope. |
 | **2026-10-23** | **Native thermodynamics and engineering calculations.** Pure-fluid Helmholtz properties, saturation and flash join activity models, six UNIFAC variants and cubic mixing rules. Property derivatives and fitting share explicit source contracts; flow meters, valves, pumps, two-phase flow and equipment geometry broaden engineering calculations. |
 | **2026-10-21–22** | **Scientific solvers, property data and interoperability.** Shared residual/DAE infrastructure; bounded battery models and diagnostics; sourced virial gas properties and thermal processes; persistent Thevenin circuits. Selected CALPHAD/ChemSage models and SBML/SED-ML subsets extend interoperability. |
@@ -79,8 +80,8 @@ transfer material, continue in the receiving vessel and finish with an assay.
 Its JSON output contains each action's outcome, actual physical duration and
 instrument readings with native units.
 
-Prefer an interactive introduction? Start the local [Student Lab](#student-lab)
-with `uv run --no-sync chemworld lab`.
+[Design your own environment](docs/environment-authoring.md), or run
+`uv run --no-sync python -m chemworld.examples.user_reward` with a user-defined reward.
 
 ## What makes the foundation useful
 
@@ -217,17 +218,17 @@ The [agent guide](docs/agents.md) covers custom Python policies, offline baselin
 captured-trace replay and optional live-model adapters. Examples run offline; external
 models are an explicit choice.
 
-### Student Lab
+### Design your own environment
 
-Explore the tutorial tasks in an animated browser workbench:
+Declare apparatus, action bounds and resources with the [authoring guide](docs/environment-authoring.md).
+Connect your own agent and define its reward, or observe experiments without scoring them.
 
 ```bash
-uv run --no-sync chemworld lab
+uv run --no-sync python -m chemworld.examples.user_reward
 ```
 
-Student Lab runs locally on `127.0.0.1` and uses the same session and action schemas.
-Choose operations and inspect their visible effects without an API key. Its tutorial
-catalog is a starting point; the Python examples expose the broader native domains.
+The former Student Lab command is retired. Research Workbench and Blender Lab
+remain internal prototypes and are not part of the public package.
 
 ## Documentation
 

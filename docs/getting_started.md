@@ -113,7 +113,7 @@ python -m apps.task_lab.server --port 8876
 启动后可以打开：
 
 - [Agent Observatory](http://127.0.0.1:8876/agent/)：观看 Agent 的逐步决策、谱图与资源消耗。
-- [Student Lab](http://127.0.0.1:8876/student/)：手动选择操作，观察实验状态变化。
+- [环境API与CLI](environment.md)：执行自己的操作并读取观测；旧Student Lab入口已退役。
 
 经典算法和本地实验不需要在线模型密钥。Provider 凭据和私有评测配置不属于本公开版本。
 

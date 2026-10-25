@@ -1,12 +1,12 @@
 > **[Open the new capability website →](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=en)** · [中文版](https://sunyrain.github.io/ChemWorld-Public/explore/?lang=zh)
 
-> Current main: [24 October foundation update](current-foundation.md) — working fluids, molecular thermodynamics, reacting networks, water treatment, battery and biochemical analysis. Existing figures and numerical evidence below describe the frozen August runtime.
+> Current public version: [25 October progress](current-foundation.md) · [Design an environment](environment-authoring.md) · [Your agent and reward](environment.md). The player below retains an August frozen trace as a historical example.
 
 <section class="cw-studio-hero" data-cw-autoplay data-source="assets/data/representative-behavior-and-forks.json" data-locale="en">
   <div class="cw-studio-glow cw-studio-glow-a"></div>
   <div class="cw-studio-glow cw-studio-glow-b"></div>
   <div class="cw-studio-copy">
-    <div class="cw-studio-brand"><span class="cw-live-dot"></span> LIVE PUBLIC DEMONSTRATION</div>
+    <div class="cw-studio-brand"><span class="cw-live-dot"></span> FROZEN TRACE DEMONSTRATION</div>
     <h1>Give experimental agents a world to act in.</h1>
     <p>ChemWorld turns physical-chemistry models into a typed, replayable laboratory. Watch one frozen public agent trace move from materials and process actions to instruments, workup and final assay.</p>
     <div class="cw-button-row">

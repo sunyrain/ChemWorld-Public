@@ -1,5 +1,7 @@
 # 接入 Agent
 
+新应用从[环境API](environment.md)和[环境作者指南](environment-authoring.md)开始。可使用自己的规划器与奖励，也可完全不评分。下文按任务评分的runner与预设适配器属于保留的历史应用；其命令入口为`python -m chemworld.legacy.cli`。
+
 ChemWorld Agent 每一步都从公开任务状态中选择一个有类型的操作。隐藏世界状态由评测器持有；环境
 负责校验请求、记录资源并生成可精确回放的轨迹。建议先跑离线 Agent，再接入外部模型。
 
@@ -66,12 +68,12 @@ run_agent(
 
 ```bash
 chemworld tasks list
-chemworld run --task reaction-to-assay --agent scripted_chemistry --seed 0
+python -m chemworld.legacy.cli run --task reaction-to-assay --agent scripted_chemistry --seed 0
 ```
 
 其他无需参数的名称包括 `random`、`lhs`、`greedy`、`gp_bo`、`rf_ei`、
 `safe_gp_bo`、`tool_using_llm_stub` 和 `llm_replay`。Python 中可使用
-`chemworld.eval.runner.make_agent(name)`。
+`chemworld.legacy.agent_registry.make_agent(name)`。
 
 ## DeepSeek 在线适配器
 
@@ -82,7 +84,7 @@ export DEEPSEEK_API_KEY="..."
 ```
 
 ```python
-from chemworld.agents.live_llm import LiveLLMAgent
+from chemworld.legacy.agents.live_llm import LiveLLMAgent
 from chemworld.eval.runner import run_agent
 from chemworld.providers.deepseek import DeepSeekClient
 

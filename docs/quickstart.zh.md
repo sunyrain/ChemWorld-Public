@@ -1,48 +1,24 @@
 # 五分钟开始
 
-这条路径会创建一个环境、读取公开任务合同，并完成一条合法的测量生命周期。整个过程不需要 API key 或外部模型 Provider。
-
-## 安装
+安装环境，执行三次操作并取得仪器读数。示例使用合成模型，不需要模型密钥或可选上游求解器。
 
 ```bash
 git clone https://github.com/sunyrain/ChemWorld-Public.git
 cd ChemWorld-Public
 uv sync --locked --extra dev
+uv run --no-sync chemworld capabilities --format json
+uv run --no-sync python -m chemworld.examples.user_reward
 ```
 
-ChemWorld 支持 Python 3.11 和 3.12。
+最后一个命令执行两次投料和一次压力测量。奖励是可选的普通Python函数，更改奖励不改变取得的观测。
 
-## 先检查，再操作
-
-```python
-import gymnasium as gym
-import chemworld
-
-env = gym.make("ChemWorld", task_id="reaction-to-assay", seed=0)
-observation, info = env.reset(seed=0)
-
-print(env.unwrapped.task_prompt()["text"])
-print(env.unwrapped.action_schema("heat"))
-print(env.unwrapped.available_actions()[:3])
-```
-
-公开接口会告诉 Agent 可以做什么，但不会泄露评测者拥有的世界规律或隐藏状态。
-
-## 运行完整示例
+运行包含材料延续、转移和终检的较长实验：
 
 ```bash
-uv run --no-sync python examples/demo_manual_event_sequence.py
+uv run --no-sync python -m chemworld.examples.native_surface_research --bulk --mobile --terminal-assay
 ```
 
-随后打开[第一个 notebook](notebooks.md)，逐步查看动作验证、中间 HPLC、终检和资源账本。
+然后[设计自己的环境](environment-authoring.md)、[接入Agent](environment.md)，或查看
+[原生工作流](native_domains.md)。文档安装目标为Python 3.11与3.12；当前交付为开发源码版本。
 
-## 检查当前基座
-
-```bash
-uv run --no-sync pytest -q
-uv run --no-sync python scripts/build_readme_visuals.py --check
-```
-
-安装完成后，这两个检查都可以离线运行。
-
-[当前运行时与旧版复现](current-foundation.md)。
+历史教学Notebook保留固定版本及原始输出，运行方法见[Notebook指南](notebooks.md)。
