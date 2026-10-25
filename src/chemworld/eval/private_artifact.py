@@ -13,7 +13,7 @@ from typing import Any
 
 from chemworld import __version__
 from chemworld.data.submission import git_commit
-from chemworld.eval.leaderboard import load_results
+from chemworld.legacy.leaderboard import load_results
 
 
 def _canonical_json(payload: Any) -> bytes:

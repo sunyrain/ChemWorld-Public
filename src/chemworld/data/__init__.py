@@ -23,10 +23,14 @@ __all__ = [
     "TRAJECTORY_SCHEMA_VERSION",
     "ActivityCalibration",
     "ActivityFitParameter",
+    "CatalyticEnergyCalibration",
+    "CatalyticEnergyFitParameter",
     "ChemSageDatabase",
     "ChemSageParseError",
     "DiameterDistributionCalibration",
     "MolecularGroupAssignment",
+    "MultifluidCalibration",
+    "MultifluidFitParameter",
     "MultifluidSourceCatalog",
     "SBMLCalibration",
     "SBMLCalibrationParameter",
@@ -37,11 +41,13 @@ __all__ = [
     "TrajectoryLogger",
     "TrajectoryRecordPayload",
     "UNIFACInteractionRecord",
+    "assemble_catalytic_mechanism",
     "bind_incompressible_liquid",
     "incompressible_catalog",
     "incompressible_fluid",
     "iter_ddbst_sqlite",
     "iter_ddbst_text",
+    "known_sigma_parameter_uncertainty",
     "load_helmholtz_fluid",
     "load_helmholtz_phase_model",
     "load_incompressible_fluid",
@@ -64,6 +70,28 @@ __all__ = [
 
 
 def __getattr__(name):
+    if name in {"MultifluidCalibration", "MultifluidFitParameter"}:
+        from chemworld.data import multifluid_calibration
+
+        value = getattr(multifluid_calibration, name)
+        globals()[name] = value
+        return value
+    if name == "known_sigma_parameter_uncertainty":
+        from chemworld.data.calibration_uncertainty import known_sigma_parameter_uncertainty
+
+        globals()[name] = known_sigma_parameter_uncertainty
+        return known_sigma_parameter_uncertainty
+    if name in {"CatalyticEnergyCalibration", "CatalyticEnergyFitParameter"}:
+        from chemworld.data import catalysis_calibration
+
+        value = getattr(catalysis_calibration, name)
+        globals()[name] = value
+        return value
+    if name == "assemble_catalytic_mechanism":
+        from chemworld.data.catalysis_inputs import assemble_catalytic_mechanism
+
+        globals()[name] = assemble_catalytic_mechanism
+        return assemble_catalytic_mechanism
     if name in {"sbml_profile_likelihood", "GAUSSIAN_KNOWN_SIGMA"}:
         from chemworld.data import sbml_profile
 

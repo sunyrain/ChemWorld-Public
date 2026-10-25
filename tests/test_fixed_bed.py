@@ -178,3 +178,40 @@ def test_initial_stage_speed_violation_preserves_original_state(monkeypatch):
     assert reference["error"]["reason"] == "stage_initial_domain_violation"
     assert reference["error"]["event"] == "bed:maximum_face_velocity"
     assert reference["evaluate"](0)["gas"] == pytest.approx(reference["initial_gas"])
+
+
+@pytest.mark.parametrize("difference", [-6111.5, 6111.5])
+def test_inlet_resistance_is_bidirectional_and_independent_of_grid(difference):
+    spec = _fixtures.specification(_fixtures.cases()[0], 2)
+    resistance = 1e6
+    for cells in (4, 8, 16):
+        length, rho = .05 / cells, 1.2
+        velocity, _ = fixed_bed_face_velocity(
+            spec, distance_m=length, density_kg_m3=rho,
+            pressure_difference_Pa=difference, series_resistance_Pa_s_m=resistance,
+        )
+        ergun = length * (150 * 1.8e-5 * .6**2 / (.4**3 * 1e-8) * velocity
+                         + 1.75 * rho * .6 / (.4**3 * 1e-4) * velocity * abs(velocity))
+        assert ergun + resistance * velocity == pytest.approx(difference, abs=1e-6)
+        assert abs(velocity) < abs(difference) / resistance
+
+
+def test_valve_declaration_codec_and_actual_fine_grid_purge():
+    case = {**_fixtures.cases()[4], "inlet_resistance_Pa_s_m": 1e6}
+    spec, state = _fixtures.native_world(case, 16)
+    assert FixedBedSpec.from_dict(json.loads(json.dumps(spec.to_dict()))) == spec
+    old = spec.to_dict()
+    old.pop("inlet_resistance_Pa_s_m")
+    assert FixedBedSpec.from_dict(old).inlet_resistance_Pa_s_m == 0
+    for invalid in (-1, float("inf"), True):
+        with pytest.raises(ValueError):
+            replace(spec, inlet_resistance_Pa_s_m=invalid)
+    original = state.to_dict()
+    result = advance_fixed_bed(
+        state, spec, .1, inlet_phase_id="purge", outlet_phase_id="collector")
+    assert result.success, result.to_dict()
+    assert result.state.ledger.time_s == pytest.approx(.1)
+    assert result.diagnostics["momentum"]["maximum_observed_speed_m_s"] < .5
+    assert result.state.phases.phases["purge"].species_amounts_mol["N2"] < (
+        state.phases.phases["purge"].species_amounts_mol["N2"])
+    assert state.to_dict() == original

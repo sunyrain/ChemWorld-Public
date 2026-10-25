@@ -39,6 +39,10 @@ CAMPAIGN_RESOURCE_CARD_VERSION = "chemworld-campaign-resource-card-0.1"
 CAMPAIGN_RESOURCE_DELTA_VERSION = "chemworld-campaign-resource-delta-0.1"
 CAMPAIGN_RESOURCE_LEDGER_VERSION = "chemworld-campaign-resource-ledger-0.1"
 RESOURCE_FLOAT_ABS_TOL = 1.0e-9
+RESOURCE_HISTORY_ROOT_SEED = canonical_json_sha256(
+    {"schema_version": CAMPAIGN_RESOURCE_LEDGER_VERSION, "history": "genesis"}
+)
+MAX_RECENT_RESOURCE_EVENTS = 64
 PROTECTED_CLOSEOUT_POLICY = "protected_closeout_reserve_enforced"
 DEFAULT_PROTECTED_CLOSEOUT_OPERATIONS = frozenset(
     {"discard_batch", "final_assay", "quench", "terminate", "transfer"}
@@ -607,6 +611,10 @@ class CampaignResourceLedger:
         self.physical_cost = 0.0
         self.accumulated_risk = 0.0
         self.peak_risk = 0.0
+        self._history_root_sha256 = RESOURCE_HISTORY_ROOT_SEED
+        self._ledger_sha256 = ""
+        self._include_history_root = True
+        self._refresh_ledger_sha256()
 
     def preflight(
         self,
@@ -675,7 +683,9 @@ class CampaignResourceLedger:
         }
         if instruments:
             self._events[event_id]["instrument_reservation"] = instruments
+        self._append_history_chunk("preflight", self._events[event_id])
         self.verify_integrity()
+        self._refresh_ledger_sha256()
         return preflight
 
     def preview_rejection_reasons(
@@ -781,11 +791,55 @@ class CampaignResourceLedger:
             "outcome_sha256": outcome_sha256,
             "delta": actual.to_dict(),
         }
+        self._append_history_chunk("outcome", {"event_id": event_id, "outcome": event["outcome"]})
         self.verify_integrity()
+        self._refresh_ledger_sha256()
         return actual
 
     def snapshot(self) -> dict[str, Any]:
         self.verify_integrity()
+        replayed_history_root = self._recompute_history_root()
+        if replayed_history_root != self._history_root_sha256:
+            raise CampaignResourceIntegrityError("campaign resource history root mismatch")
+        payload = self._snapshot_payload()
+        payload["ledger_sha256"] = canonical_json_sha256(payload)
+        self._ledger_sha256 = payload["ledger_sha256"]
+        return payload
+
+    def bounded_state(self) -> dict[str, Any]:
+        """Return the live resource state without scanning event history.
+
+        This is a defensive, agent-facing view.  It deliberately omits the
+        event list and does not call :meth:`verify_integrity`; callers that
+        need a replayable audit must use :meth:`snapshot`.
+        """
+
+        return {
+            "state": _deep_thaw(self._state_payload()),
+            "last_event_id": self._event_order[-1] if self._event_order else None,
+            "event_count": len(self._event_order),
+            "ledger_sha256": self._ledger_sha256,
+            "history_root_sha256": self._history_root_sha256,
+        }
+
+    def recent_events(self, limit: int = 8) -> list[dict[str, Any]]:
+        """Return at most ``limit`` defensive copies of recent receipts.
+
+        The bound is intentional: this method is a bounded observation API,
+        not a substitute for the full evaluator-owned snapshot.
+        """
+
+        limit = _positive_int(limit, name="limit")
+        if limit > MAX_RECENT_RESOURCE_EVENTS:
+            raise ValueError(
+                f"limit must be <= {MAX_RECENT_RESOURCE_EVENTS} for bounded resource queries"
+            )
+        return [
+            _deep_thaw(self._events[event_id])
+            for event_id in self._event_order[-limit:]
+        ]
+
+    def _snapshot_payload(self) -> dict[str, Any]:
         payload = {
             "schema_version": CAMPAIGN_RESOURCE_LEDGER_VERSION,
             "card": self.card.to_dict(),
@@ -794,8 +848,64 @@ class CampaignResourceLedger:
             "events": [_deep_thaw(self._events[event_id]) for event_id in self._event_order],
             "last_event_id": self._event_order[-1] if self._event_order else None,
         }
-        payload["ledger_sha256"] = canonical_json_sha256(payload)
+        if self._include_history_root:
+            payload["history_root_sha256"] = self._history_root_sha256
         return payload
+
+    def _refresh_ledger_sha256(self) -> None:
+        """Refresh the compatibility hash after a controlled write.
+
+        The public bounded view reads this cached value.  Full audit callers
+        still rebuild and verify the canonical payload in :meth:`snapshot`.
+        """
+
+        self._ledger_sha256 = canonical_json_sha256(self._snapshot_payload())
+
+    @staticmethod
+    def _history_chunk_payload(phase: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if phase == "preflight":
+            return {
+                str(key): _deep_thaw(value)
+                for key, value in payload.items()
+                if key != "outcome"
+            }
+        return {str(key): _deep_thaw(value) for key, value in payload.items()}
+
+    def _append_history_chunk(self, phase: str, payload: Mapping[str, Any]) -> None:
+        chunk = {
+            "phase": phase,
+            "payload": self._history_chunk_payload(phase, payload),
+        }
+        self._history_root_sha256 = canonical_json_sha256(
+            {"previous": self._history_root_sha256, "chunk": chunk}
+        )
+
+    def _recompute_history_root(self) -> str:
+        root = RESOURCE_HISTORY_ROOT_SEED
+        for event_id in self._event_order:
+            event = self._events[event_id]
+            preflight = self._history_chunk_payload("preflight", event)
+            root = canonical_json_sha256(
+                {
+                    "previous": root,
+                    "chunk": {"phase": "preflight", "payload": preflight},
+                }
+            )
+            outcome = event.get("outcome")
+            if outcome is not None:
+                root = canonical_json_sha256(
+                    {
+                        "previous": root,
+                        "chunk": {
+                            "phase": "outcome",
+                            "payload": {
+                                "event_id": event_id,
+                                "outcome": _deep_thaw(outcome),
+                            },
+                        },
+                    }
+                )
+        return root
 
     @classmethod
     def from_snapshot(cls, payload: Mapping[str, Any]) -> CampaignResourceLedger:
@@ -853,11 +963,24 @@ class CampaignResourceLedger:
             ledger._event_order[-1] if ledger._event_order else None
         ):
             raise CampaignResourceIntegrityError("campaign resource last_event_id mismatch")
+        ledger._history_root_sha256 = ledger._recompute_history_root()
+        supplied_history_root = payload.get("history_root_sha256")
+        ledger._include_history_root = supplied_history_root is not None
         ledger.verify_integrity()
-        if ledger.snapshot()["ledger_sha256"] != supplied_hash:
+        if (
+            supplied_history_root is not None
+            and supplied_history_root != ledger._history_root_sha256
+        ):
+            raise CampaignResourceIntegrityError("campaign resource history root mismatch")
+        replayed = ledger.snapshot()
+        if "history_root_sha256" not in payload:
+            replayed.pop("history_root_sha256", None)
+        replayed.pop("ledger_sha256", None)
+        if canonical_json_sha256(replayed) != supplied_hash:
             raise CampaignResourceIntegrityError(
                 "campaign resource snapshot is not canonically replayable"
             )
+        ledger._ledger_sha256 = str(supplied_hash)
         return ledger
 
     def verify_integrity(self) -> bool:

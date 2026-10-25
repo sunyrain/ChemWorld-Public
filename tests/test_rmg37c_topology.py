@@ -6,7 +6,7 @@ from math import exp
 
 import pytest
 
-pytest.importorskip("cantera", reason="optional independent reference package")
+pytest.importorskip("cantera", reason="Optional independent reference dependency")
 
 from chemworld.examples.native_intramolecular_reactions import example_graphs, example_world
 from chemworld.examples.native_parameter_estimation import example_parameter_inputs

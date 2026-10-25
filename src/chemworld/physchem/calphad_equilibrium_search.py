@@ -13,7 +13,12 @@ import numpy as np
 from scipy.optimize import minimize
 
 from chemworld.physchem.calphad_response import analytic_response
-from chemworld.physchem.residual_system import ResidualDomainError, ResidualVariable, solve_root
+from chemworld.physchem.residual_system import (
+    ResidualDomainError,
+    ResidualVariable,
+    RootPolicy,
+    solve_root,
+)
 
 
 def _partitions(total: int, size: int) -> Any:
@@ -281,11 +286,52 @@ def search_phase(surface: PhaseSurface, samples: Any, mu: Any, energy_scale: flo
                          "jac": lambda _: surface.constraint_jacobian()},
             options={"maxiter": policy.maximum_iterations, "ftol": 1e-12})
         value, gradient = objective(fit.x)
+        point = fit.x.copy()
+        preparation = None
+        # SLSQP's objective stopping rule loses relative accuracy for dilute
+        # constitutions even when the chemical-potential residual is unresolved.
+        # Refine only that failed acceptance branch, using the original CEF
+        # analytic gradient/Hessian. Already accepted results are unchanged.
+        remaining = policy.maximum_iterations - int(fit.nit)
+        if fit.success and np.max(np.abs(gradient)) > 1e-5 and remaining > 0:
+            before_value, before_gradient = value, gradient.copy()
+
+            def response(q: Any) -> Any:
+                if np.any(surface.constraints(q) < 0):
+                    raise ResidualDomainError("tangent root outside original site simplex")
+                v, j, h = surface.response(q)
+                return ((v[0]-mu@v[1:])/energy_scale,
+                        (j[0]-mu@j[1:])/energy_scale,
+                        (h[0]-np.einsum("i,ijk->jk", mu, h[1:]))/energy_scale)
+
+            root = solve_root(lambda q: response(q)[1], point,
+                jacobian=lambda q: response(q)[2],
+                variables=tuple(ResidualVariable(f"site:{k}", "1", lower=policy.site_floor,
+                    upper=1-policy.site_floor) for k in range(surface.dimension)),
+                residual_scales=np.ones(surface.dimension),
+                policy=RootPolicy(tolerance=1e-7,
+                    maximum_iterations=min(remaining, policy.root.maximum_iterations),
+                    maximum_backtracks=policy.root.maximum_backtracks))
+            preparation = {"original_stationarity_RT": float(np.max(np.abs(before_gradient))),
+                "original_distance_J_mol": before_value*energy_scale,
+                "success": root.success, "failure_reason": root.failure_reason,
+                "accepted": False, **root.diagnostics}
+            if root.success:
+                refined_value, refined_gradient, hessian = response(root.value)
+                curvature = float(np.min(np.linalg.eigvalsh(hessian)))
+                preparation["minimum_curvature_RT"] = curvature
+                # Roundoff allowance is far smaller than the existing tangent
+                # acceptance tolerance; Newton must not select a higher well.
+                if refined_value <= before_value+1e-12 and curvature >= -1e-8:
+                    point, value, gradient = root.value.copy(), refined_value, refined_gradient
+                    preparation["accepted"] = True
         success = bool(fit.success and np.max(np.abs(gradient)) <= 1e-5)
         attempts.append({"sample_index": index, "success": success,
             "iterations": int(fit.nit), "message": str(fit.message),
             "distance_J_mol": value*energy_scale,
             "stationarity_RT": float(np.max(np.abs(gradient)))})
+        if preparation is not None:
+            attempts[-1]["stationary_refinement"] = preparation
         if success:
-            minima.append((fit.x.copy(), value*energy_scale))
+            minima.append((point, value*energy_scale))
     return minima, attempts

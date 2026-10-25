@@ -148,3 +148,54 @@ def test_actual_variable_volume_and_original_inventory_candidate():
     extent = result.ledger.phases["aqueous"].species_amounts_mol["Cl-test"]
     assert result.heat_duty_J == pytest.approx(2000 * extent, abs=2e-5)
     assert result.boundary_work_J == pytest.approx(0, abs=2e-5)
+
+
+def test_explicit_gibbs_entropy_authority_preserves_source_and_discloses_difference():
+    th = hkf_source_species("OH-", reference_authority="gibbs_entropy")
+    data = th.reference_diagnostics()
+    assert th.formation_enthalpy_ref_J_mol == -54977 * 4.184
+    assert th.formation_gibbs_ref_J_mol == -37595 * 4.184
+    assert th.entropy_ref_J_mol_K == -2.56 * 4.184
+    assert data["source_triple_consistent"] is False
+    assert data["source_triple_residual_J_mol"] == pytest.approx(12.484976, abs=1e-8)
+    assert data["enthalpy_adjustment_J_mol"] == pytest.approx(-12.484976, abs=1e-8)
+    state = th.evaluate_tp(298.15, 1e5)
+    shift = th.reference_basis.entropy_shift(th.composition, th.charge)
+    assert state.gibbs_J_mol + 298.15 * shift == pytest.approx(-37595 * 4.184, abs=2e-8)
+    assert state.enthalpy_J_mol == pytest.approx(data["working_enthalpy_J_mol"], abs=2e-8)
+    with pytest.raises(ValueError, match="inconsistent formation"):
+        replace(th, reference_authority="strict")
+    with pytest.raises(ValueError, match="reference authority"):
+        replace(th, reference_authority="typo")
+    with pytest.raises(ValueError, match="requires a source formation Gibbs"):
+        hkf_source_species("Na+", reference_authority="gibbs_entropy")
+
+
+def test_hydroxide_authority_roundtrip_and_actual_pure_water_equilibrium():
+    from chemworld.physchem.aqueous_reaction_equilibrium import (
+        AqueousEquilibriumSpec,
+        solve_aqueous_reaction_equilibrium,
+    )
+
+    assert "reference_authority" not in hkf_source_species("Na+").to_dict()
+    assert not hkf_aqueous_database().reactions
+    with pytest.raises(ValueError, match="reference authority"):
+        hkf_aqueous_database(hydroxide_reference_authority="typo")
+    db = hkf_aqueous_database(hydroxide_reference_authority="gibbs_entropy")
+    payload = json.loads(json.dumps(db.to_dict()))
+    clone = AqueousDatabase.from_dict(payload)
+    assert clone.to_dict() == payload
+    oh = next(s.standard_state.thermo for s in clone.species if s.species_id == "OH-")
+    assert oh.reference_authority == "gibbs_entropy"
+    assert not oh.reference_diagnostics()["source_triple_consistent"]
+    feed = {"H2O": 55.5}
+    result = solve_aqueous_reaction_equilibrium(
+        AqueousEquilibriumSpec(clone, ("water-dissociation",)), feed,
+        temperature_K=298.15, pressure_Pa=1e5)
+    assert result.success, result.to_dict()
+    assert feed == {"H2O": 55.5}
+    assert result.amounts_mol["Na+"] == result.amounts_mol["Cl-"] == 0
+    assert result.amounts_mol["H+"] == pytest.approx(result.amounts_mol["OH-"], rel=1e-8)
+    assert 1e-8 < result.amounts_mol["OH-"] < 1e-6
+    assert result.amounts_mol["H2O"] + result.amounts_mol["OH-"] == pytest.approx(55.5, abs=1e-9)
+    assert abs(result.reaction_residuals["water-dissociation"]) < 2e-8

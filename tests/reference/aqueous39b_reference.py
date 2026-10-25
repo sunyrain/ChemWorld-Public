@@ -109,10 +109,10 @@ def born_ref(charge, w):
     return born(record, TR, PR), mp.diff(lambda t: born(record, t, PR), TR)
 
 
-def hkf_g(record, T, P, elemental):
+def hkf_g(record, T, P, elemental, reference_authority="strict"):
     cal = M("4.184")
     S = M(str(record["S"])) * cal
-    if record["Hf"] is None:
+    if record["Hf"] is None or reference_authority == "gibbs_entropy":
         es = sum(M(str(n)) * M(str(elemental[e])) for e, n in record["composition"].items())
         es += record["charge"] * M(str(elemental["charge"]))
         H = M(str(record["Gf"])) * cal + TR * (S - es)
@@ -135,11 +135,11 @@ def hkf_g(record, T, P, elemental):
     return H - T * S + thermal + mechanical + born(record, T, P) - b - bt * (T - TR)
 
 
-def hkf_state(record, T, P, elemental):
+def hkf_state(record, T, P, elemental, reference_authority="strict"):
     T, P = M(str(T)), M(str(P))
 
     def function(t, p):
-        return hkf_g(record, t, p, elemental)
+        return hkf_g(record, t, p, elemental, reference_authority)
 
     g = function(T, P)
     s = -mp.diff(lambda t: function(t, P), T)

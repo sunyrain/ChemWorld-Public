@@ -377,8 +377,10 @@ class PhysicalConstitution:
         self, before: WorldState, after: WorldState, balance: TransitionBalance
     ) -> CheckResult:
         from chemworld.foundation.discrete_inventory import integer_element_residual
+        from chemworld.foundation.empirical_inventory import check_empirical_transitions
 
         try:
+            check_empirical_transitions(before, after, balance)
             atoms = integer_element_residual(before, after, balance, self.substances)
         except (ValueError, KeyError) as exc:
             return CheckResult("material_conservation", False, str(exc), tolerance=0)

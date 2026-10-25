@@ -19,7 +19,9 @@ from chemworld.runtime.fixed_bed import advance_fixed_bed
 def native_case(case, cells, tight):
     start = monotonic()
     spec, state = native_world(case, cells)
-    policy = replace(FIXED_BED_POLICY, rtol=1e-8 if tight else 1e-6, atol=1e-12 if tight else 1e-10)
+    tolerances = case.get("native_tolerances", ((1e-6, 1e-10), (1e-8, 1e-12)))
+    rtol, atol = tolerances[int(tight)]
+    policy = replace(FIXED_BED_POLICY, rtol=rtol, atol=atol)
     profiles, diagnostics, heat = [], [], 0.0
     success, stop = True, None
     names = [*spec.cell_phase_ids, "source", "collector", "purge"]
@@ -172,7 +174,14 @@ def plain(value):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--completion", action="store_true",
+                        help="prospective finite-inlet-resistance block; defaults unchanged")
     args = parser.parse_args()
+    selected_cases = cases()
+    if args.completion:
+        selected_cases = [{**case, "inlet_resistance_Pa_s_m": 1e6,
+                           "native_tolerances": ((1e-8, 1e-12), (1e-10, 1e-14))}
+                          for case in selected_cases]
     if args.output.exists():
         raise ValueError("retain completed block; choose a new output path")
     started, completed, stage = monotonic(), 0, "initialization"
@@ -187,7 +196,7 @@ def main():
     thread.start()
     rows, references, spatial, temporal = [], [], [], []
     try:
-        for case in cases():
+        for case in selected_cases:
             refs = {}
             for cells in (4, 8, 16):
                 stage = f"reference {case['id']} grid={cells}"
@@ -305,7 +314,7 @@ def main():
         payload = plain(
             {
                 "mode": "development",
-                "fixed_cases": cases(),
+                "fixed_cases": selected_cases,
                 "summary": summary,
                 "references": references,
                 "runs": rows,

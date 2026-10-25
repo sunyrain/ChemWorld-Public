@@ -11,6 +11,7 @@ from math import isfinite
 from typing import Any
 
 from chemworld.physchem.aqueous_transport import BinaryAqueousProperties
+from chemworld.physchem.multisolute_ro_properties import MultisoluteROProperties
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ class IsothermalLiquidPressureRecoverySpec:
 
 def evaluate_isothermal_liquid_pressure_recovery(
     spec: IsothermalLiquidPressureRecoverySpec,
-    properties: BinaryAqueousProperties,
+    properties: BinaryAqueousProperties | MultisoluteROProperties,
     component_rates_mol_s: Mapping[str, float],
     *,
     temperature_K: float,
@@ -52,6 +53,11 @@ def evaluate_isothermal_liquid_pressure_recovery(
     outlet_pressure_Pa: float,
 ) -> dict[str, Any]:
     """A pure rate calculation: original extensive properties evaluated per second."""
+    if (
+        isinstance(properties, MultisoluteROProperties)
+        and properties.property_approximation != "common-g"
+    ):
+        raise ValueError("independent empirical RO properties do not define reversible Gibbs work")
     if any(
         isinstance(v, bool) or not isfinite(v) or v <= 0
         for v in (temperature_K, inlet_pressure_Pa, outlet_pressure_Pa)

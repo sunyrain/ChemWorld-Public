@@ -3,6 +3,8 @@
 from dataclasses import replace
 from typing import Any
 
+from chemworld.foundation.discrete_inventory import CROSS_PARTITION_ALGORITHM
+from chemworld.physchem.stochastic_cross_partition import validate_transfer
 from chemworld.physchem.stochastic_hybrid import (
     HYBRID_ALGORITHM,
     StochasticHybridSpec,
@@ -19,13 +21,17 @@ class HybridStochasticRuntime:
 
     @property
     def models(self) -> dict[str, StochasticHybridSpec]:
-        return ({} if self.composition is None or self.composition.physics is None else
-                self.composition.physics.models_of("stochastic_hybrid"))
+        if self.composition is None or self.composition.physics is None:
+            return {}
+        return {key: value for key, value in
+                self.composition.physics.models_of("stochastic_hybrid").items()
+                if isinstance(value, StochasticHybridSpec)}
 
     def supports(self, state: Any) -> bool:
         continuation = state.process.stochastic_continuation
         return state.vessel_id in self.models or (
-            continuation is not None and continuation.get("algorithm") == HYBRID_ALGORITHM)
+            continuation is not None and continuation.get("algorithm") in {
+                HYBRID_ALGORITHM, CROSS_PARTITION_ALGORITHM})
 
     def validate_world(self) -> None:
         if not self.models:
@@ -73,7 +79,13 @@ class HybridStochasticRuntime:
         advance_stochastic_hybrid(network, spec, state.species_amounts, continuation, 0)
         # The declaration, not editable hidden continuation, owns each closed stock.
         template = self.composition.physics.initial_states[state.vessel_id]
-        validate_hybrid_conservation(network, spec, template.species_amounts, state.species_amounts)
+        if continuation["algorithm"] == CROSS_PARTITION_ALGORITHM:
+            validate_transfer(network, spec, template.species_amounts, state.species_amounts,
+                template.process.stochastic_continuation["partition_transfer"],
+                continuation["partition_transfer"])
+        else:
+            validate_hybrid_conservation(network, spec, template.species_amounts,
+                                        state.species_amounts)
         return spec
 
     def reconcile_initialization(self, transition: Any) -> Any:
@@ -120,6 +132,7 @@ class HybridStochasticRuntime:
                 failure_reason="hybrid_advance_failed", diagnostics={"solver_error": str(exc),
                     "failed_candidate_work": getattr(exc, "work", {})})
         return ModelProviderResult({}, state=candidate, actual_duration_s=result.actual_duration_s,
-            diagnostics={"solver": HYBRID_ALGORITHM, "events_executed": len(result.events),
+            diagnostics={"solver": result.continuation["algorithm"],
+                         "events_executed": len(result.events),
                          "stochastic_work": result.work,
                          "energy_scope": "isothermal kinetics only; heat balance not modelled"})

@@ -532,6 +532,56 @@ def newman_tobias_fields(spec, state, *, current_A=None, program=None):
     return {**f, "closure_diagnostic": answer.root.diagnostics}
 
 
+def newman_tobias_spatial_profile(spec, state, *, current_A=None, program=None):
+    """Return a JSON-safe read-only profile of the NT porous electrical state.
+
+    The two mean lithium stocks remain the only persistent inventories. This
+    projection labels the cell-integrated reaction currents and shared
+    centre/face electrical fields without creating a second state or solver.
+    """
+    if current_A is None and program is None:
+        current_A = 0.0
+    fields = newman_tobias_fields(spec, state, current_A=current_A, program=program)
+    nn, _, np_ = spec.geometry.cells
+    labels = tuple(
+        f"{electrode}:cell:{index}"
+        for electrode, count in (("negative", nn), ("positive", np_))
+        for index in range(count)
+    )
+
+    def vector(values):
+        return [float(value) for value in np.asarray(values)]
+
+    q = np.asarray(fields["reaction_current_A"])
+    return {
+        "model_family": NT_FAMILY,
+        "cell_labels": list(labels),
+        "thickness_cells": list(spec.geometry.cells),
+        "current_A": float(fields["current_A"]),
+        "voltage_V": float(fields["voltage_V"]),
+        "reaction_current_A": {
+            label: float(value) for label, value in zip(labels, q, strict=True)
+        },
+        "interfacial_current_A_m2": vector(fields["interfacial_current_A_m2"]),
+        "surface_fraction": vector(fields["surface_fraction"]),
+        "electrolyte_potential_V": vector(fields["electrolyte_potential_V"]),
+        "solid_potential_V": vector(fields["solid_potential_V"]),
+        "electrolyte_face_current_A_m2": vector(
+            fields["electrolyte_face_current_A_m2"]
+        ),
+        "solid_face_current_A_m2": {
+            "negative": vector(fields["negative_solid_face_current_A_m2"]),
+            "positive": vector(fields["positive_solid_face_current_A_m2"]),
+        },
+        "charge_balance_A": {
+            "negative_reaction_sum_A": float(np.sum(q[:nn])),
+            "positive_reaction_sum_A": float(np.sum(q[nn:])),
+            "negative_expected_A": float(fields["current_A"]),
+            "positive_expected_A": float(-fields["current_A"]),
+        },
+    }
+
+
 def newman_tobias_readout(spec, state, current_A):
     f = newman_tobias_fields(spec, state, current_A=current_A)
     nn = spec.geometry.cells[0]

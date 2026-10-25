@@ -39,8 +39,11 @@ class StochasticHybridSpec:
     rtol: float = 1e-10
     atol: float = 1e-12
     max_step_s: float | None = None
+    ode_method: str = "DOP853"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.ode_method, str) or self.ode_method not in {"DOP853", "RK45"}:
+            raise ValueError("unknown hybrid deterministic integration method")
         for name in ("discrete_species", "stochastic_reactions"):
             values = getattr(self, name)
             if isinstance(values, str):
@@ -60,7 +63,10 @@ class StochasticHybridSpec:
             raise ValueError("hybrid work budget and maximum step must be positive")
 
     def to_dict(self) -> dict[str, Any]:
-        return {"schema": HYBRID_SCHEMA, **asdict(self),
+        values = asdict(self)
+        if self.ode_method == "DOP853":
+            values.pop("ode_method")
+        return {"schema": HYBRID_SCHEMA, **values,
                 "discrete_species": list(self.discrete_species),
                 "stochastic_reactions": list(self.stochastic_reactions)}
 
@@ -69,6 +75,7 @@ class StochasticHybridSpec:
         values = dict(payload)
         if values.pop("schema", None) != HYBRID_SCHEMA:
             raise ValueError("unsupported hybrid physical model schema")
+        values.setdefault("ode_method", "DOP853")
         if set(values) != {f.name for f in fields(cls)}:
             raise ValueError("hybrid physical model requires its exact declared fields")
         return cls(**values)
@@ -83,7 +90,8 @@ class HybridChannel:
     stochastic: bool
 
 
-def compile_hybrid(network: ReactionNetworkSpec, spec: StochasticHybridSpec
+def compile_hybrid(network: ReactionNetworkSpec, spec: StochasticHybridSpec,
+                   *, allow_cross_partition: bool = False
                    ) -> tuple[tuple[HybridChannel, ...], tuple[HybridChannel, ...]]:
     """Validate separate net stocks and explicit zero-net catalytic orders."""
     discrete, jumps = set(spec.discrete_species), set(spec.stochastic_reactions)
@@ -107,7 +115,8 @@ def compile_hybrid(network: ReactionNetworkSpec, spec: StochasticHybridSpec
             raise ValueError("hybrid requires elementary mass action with zero-net catalysts")
         stochastic = reaction.reaction_id in jumps
         changed = set(reaction.stoichiometry)
-        if (stochastic and not changed <= discrete) or (not stochastic and changed & discrete):
+        if (stochastic and not allow_cross_partition and not changed <= discrete) or (
+                not stochastic and changed & discrete):
             raise ValueError("hybrid channel changes inventory outside its fixed partition")
         k = reaction.rate_law.parameters["k"]
         if isinstance(k, bool) or not isfinite(k) or k < 0:
@@ -142,6 +151,10 @@ def _signature(network: ReactionNetworkSpec, spec: StochasticHybridSpec,
 def initial_hybrid_continuation(network: ReactionNetworkSpec, spec: StochasticHybridSpec,
                                 amounts_mol: Mapping[str, float], *, seed: int,
                                 time_s: float = 0.) -> dict[str, Any]:
+    if getattr(spec, "algorithm", HYBRID_ALGORITHM) != HYBRID_ALGORITHM:
+        from chemworld.physchem.stochastic_cross_partition import initial_cross_continuation
+
+        return initial_cross_continuation(network, spec, amounts_mol, seed=seed, time_s=time_s)
     compile_hybrid(network, spec)
     amounts, _ = _amounts(network, spec, amounts_mol)
     if type(seed) is not int or seed < 0 or time_s != 0:
@@ -241,6 +254,10 @@ def advance_stochastic_hybrid(network: ReactionNetworkSpec, spec: StochasticHybr
                               amounts_mol: Mapping[str, float], continuation: Mapping[str, Any],
                               duration_s: float) -> HybridAdvance:
     """Pure candidate: all inventory, RNG and hazard mutations are local until accepted."""
+    if getattr(spec, "algorithm", HYBRID_ALGORITHM) != HYBRID_ALGORITHM:
+        from chemworld.physchem.stochastic_cross_partition import advance_cross_partition
+
+        return advance_cross_partition(network, spec, amounts_mol, continuation, duration_s)
     continuous_channels, jump_channels = compile_hybrid(network, spec)
     amounts, counts = _amounts(network, spec, amounts_mol)
     memory, rng = _continuation(network, spec, amounts, continuation)
@@ -311,7 +328,7 @@ def advance_stochastic_hybrid(network: ReactionNetworkSpec, spec: StochasticHybr
     while time < end:
         roots = tuple(_HazardRoot(index, len(keys), targets)
                       for index in range(len(jump_channels)))
-        policy = ODESolverPolicy(HYBRID_ALGORITHM, method="DOP853", rtol=spec.rtol,
+        policy = ODESolverPolicy(HYBRID_ALGORITHM, method=spec.ode_method, rtol=spec.rtol,
             atol=spec.atol, max_step_s=spec.max_step_s,
             event_names=tuple(c.reaction_id for c in jump_channels))
         vector = np.asarray([*(amounts[k] / scale for k in keys), *hazards])

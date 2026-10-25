@@ -12,6 +12,22 @@ from importlib import import_module
 from typing import Any
 
 _MODULE_EXPORTS: dict[str, list[str]] = {
+    "activated_sludge_kinetics": (
+        'ASM1Parameters asm1_rates asm1_stoichiometry asm1_quality'
+    ).split(),
+    "activated_sludge_specs": ['ActivatedSludgeSpec'],
+    "activated_sludge": (
+        'ActivatedSludgeInventory ActivatedSludgeAdvance activated_sludge_inventory '
+        'advance_activated_sludge inventory_quality'
+    ).split(),
+    "thermal_feedback": ['ThermalFeedbackSpec', 'thermal_feedback_point'],
+    "catalysis_reservoirs": [
+        'AqueousStandardThermo', 'ChemostatSolute', 'CatalyticReservoirBoundary',
+    ],
+    "chemostatted_catalysis": (
+        'ChemostattedElectricalReadout chemostatted_readout '
+        'chemostatted_catalytic_system pack_chemostatted_state'
+    ).split(),
     "suspension_treatment_specs": (
         'SuspensionParticleSpec JarTestEndpointSpec CoagFlocMixingSpec ClarifierSplitSpec '
         'SuspensionMaterialSpec SuspensionTankInventory SuspensionTreatmentSpec'
@@ -21,6 +37,12 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'suspension_treatment_profile advance_suspension_treatment'
     ).split(),
     "sbml_finite_time": ['sbml_finite_time_stability'],
+    "sbml_continuation": ['sbml_steady_branch'],
+    "sbml_lyapunov": ['sbml_lyapunov_spectrum'],
+    "sbml_timescales": ['sbml_trajectory_timescales'],
+    "sbml_design": (
+        'SBMLDesignControl SBMLDesignMetric SBMLDesignSpec optimize_sbml_design'
+    ).split(),
     "calphad_ternary_diagram": (
         'CalphadTernaryPath CalphadTernarySpec CalphadTernaryResult '
         'scan_calphad_ternary_diagram'
@@ -60,6 +82,10 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     "gas_network_sensitivity": [
         'GasSensitivityParameter', 'GasSensitivityPolicy', 'gas_network_trajectory_sensitivities',
     ],
+    "gas_thermochemistry_parameters": [
+        'GasThermochemistryParameter', 'species_enthalpy_parameter', 'with_species_enthalpy',
+    ],
+    "gas_network_steady": ['gas_network_steady_state'],
     "pcsaft": ['SAFTSegment', 'PCSAFTModel'],
     "cpa": ['CPAComponent', 'CPAModel'],
     "saftvrmie": ['MieSegment', 'SAFTVRMieModel', 'mie_effective_diameter'],
@@ -74,6 +100,10 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'MolecularIsochoricThermodynamics', 'MolecularStream',
     ],
     "molecular_properties": ['MolecularEOSSpec'],
+    "mechanism_ideal_reference": ['MechanismIdealReference'],
+    "molecular_reaction": [
+        'mechanism_caloric_model', 'molecular_reaction_rates', 'molecular_reaction_process',
+    ],
     "molecular_cascade": ['MolecularCascadeSpec', 'solve_molecular_cascade'],
     "molecular_flash_separator": [
         'MolecularFlashSeparatorSpec', 'evaluate_molecular_flash_separator',
@@ -91,9 +121,12 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ).split(),
     "catalysis_descriptors": ['DescriptorAxis', 'LinearEnergyScaling', 'FreeEnergyBEP'],
     "catalysis_analysis": (
-        'CatalyticAnalysisConditions with_catalytic_descriptors solve_catalytic_steady_state '
+        'CatalyticAnalysisConditions ChemostattedAnalysisConditions '
+        'with_catalytic_descriptors solve_catalytic_steady_state '
         'catalytic_steady_states map_catalytic_descriptors catalytic_rate_control '
-        'catalytic_product_selectivity map_catalytic_conditions'
+        'catalytic_product_selectivity map_catalytic_conditions '
+        'solve_chemostatted_catalytic_steady_state map_chemostatted_catalytic_conditions '
+        'chemostatted_rate_control'
     ).split(),
     "catalysis_steady_chart": ['CatalyticSteadyChart', 'build_catalytic_steady_chart'],
     "mechanism_growth_specs": (
@@ -145,15 +178,36 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'MolecularCaloricFlashSpec MolecularCaloricFlashSeed MolecularCaloricFlashResult '
         'solve_molecular_caloric_flash'
     ).split(),
+    "molecular_multiphase": (
+        'MolecularMultiphaseSpec MolecularMultiphaseSeed MolecularMultiphaseResult '
+        'solve_molecular_multiphase'
+    ).split(),
+    "molecular_phase_boundary": (
+        'MolecularPhaseBoundarySpec MolecularBoundarySeed MolecularBoundaryResult '
+        'MolecularEnvelopeResult solve_molecular_phase_boundary solve_molecular_azeotrope '
+        'trace_molecular_phase_envelope'
+    ).split(),
+    "molecular_solid_boundary": (
+        'MolecularElementReferenceShift MolecularSolidBoundarySpec MolecularSolidCandidate '
+        'MolecularSolidBoundaryResult MolecularSolidBoundaryPath evaluate_molecular_solid_boundary '
+        'solve_molecular_solid_boundary_path'
+    ).split(),
     "molecular_interface": (
-        'SquareGradientInfluence MolecularInterfaceBulk MolecularInterfaceResult '
+        'SquareGradientInfluence SingularSquareGradientInfluence PolynomialSquareGradientInfluence '
+        'MolecularInfluence molecular_influence_from_dict '
+        'MolecularInterfaceBulk MolecularInterfaceResult '
         'molecular_interface_bulk pure_square_gradient_interface molecular_planar_interface'
+    ).split(),
+    "molecular_interface_fitting": (
+        'SurfaceTensionObservation InfluenceFitParameter MolecularInterfaceFitCase '
+        'MolecularInfluenceFitResult fit_molecular_influence'
     ).split(),
     "molecular_graph": (
         'GraphAtom GraphBond MolecularGraph AtomPattern BondPattern MolecularPattern '
         'molecular_isomorphic molecular_isomorphisms find_pattern_matches ResonanceResult '
         'enumerate_allylic_resonance allylic_resonance_equivalent molecular_graph_from_adjacency'
     ).split(),
+    "molecular_identity": ['molecular_identity_mapping'],
     "reaction_family": (
         'RecipeAction ReactionFamily RecipeProducts apply_reaction_recipe '
         'elementary_reaction_families extended_radical_reaction_families'
@@ -176,9 +230,29 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ],
     "stochastic_tau_leap": ['TauLeapPolicy'],
     "stochastic_kinetics": ['StochasticLeap'],
+    "stochastic_ri5": ['RI5Draw', 'RI5Step', 'draw_ri5', 'ri5_step'],
+    "mathml_dimensions": ['mathml_dimension'],
+    "stochastic_sde_specs": [
+        'SDEParameter', 'SDEControl', 'ReactionNoise', 'ReactionFlux', 'StochasticSDESpec',
+    ],
+    "stochastic_sde_model": ['ReactionSDE'],
+    "stochastic_sde": [
+        'SDEAdvance', 'initial_sde_continuation', 'advance_sde', 'rebind_sde_continuation',
+    ],
     "stochastic_hybrid": [
         'StochasticHybridSpec', 'initial_hybrid_continuation', 'advance_stochastic_hybrid',
     ],
+    "stochastic_cross_partition": [
+        'CrossPartitionHybridSpec', 'initial_cross_continuation', 'advance_cross_partition',
+    ],
+    "stochastic_adaptive_hybrid": [
+        'AdaptiveHybridSpec', 'AdaptiveHybridModel', 'AdaptivePartition',
+    ],
+    "stochastic_adaptive_advance": [
+        'AdaptiveHybridAdvance', 'AdaptiveHybridRebind', 'initial_adaptive_continuation',
+        'advance_adaptive_hybrid', 'rebind_adaptive_continuation',
+    ],
+    "runge_kutta4": ['RK4Step', 'rk4_step'],
     "aqueous_electrodiffusion": ['AqueousDiffusionCoefficient'],
     "aqueous_reactive_transport": (
         'AqueousSlowConversion AqueousReactiveTransportSpec AqueousReactiveTransportResult '
@@ -194,6 +268,14 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'AqueousDataSource AqueousStandardStateResult AqueousStandardState '
         'AqueousSpecies AqueousReaction AqueousChemicalPotentialReport AqueousDatabase'
     ).split(),
+    "aqueous_database_audit": (
+        'AQUEOUS_DATABASE_AUDIT_SCHEMA_VERSION audit_aqueous_database '
+        'aqueous_database_capabilities'
+    ).split(),
+    "aqueous_database_external": (
+        'EXTERNAL_AQUEOUS_DATABASE_SCHEMA aqueous_database_from_external_json '
+        'aqueous_database_to_external_json'
+    ).split(),
     "aqueous_reaction_equilibrium": (
         'AqueousEquilibriumSpec AqueousEquilibriumResult '
         'aqueous_chemical_potential_jacobian build_aqueous_equilibrium_system '
@@ -207,6 +289,10 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     "electrodialysis": (
         'ElectrodialysisSpec electrodialysis_point electrodialysis_inventory '
         'advance_electrodialysis'
+    ).split(),
+    "reverse_electrodialysis": (
+        'ReverseElectrodialysisSpec reverse_electrodialysis_point '
+        'reverse_electrodialysis_inventory advance_reverse_electrodialysis'
     ).split(),
     "nanofiltration": (
         'PoreIon NanofiltrationSpec pore_hindrance pore_partition_factors donnan_partition '
@@ -231,6 +317,11 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'electrolyte_activity_catalog'
     ).split(),
     "multifluid": ['MultifluidDepartureTerm', 'MultifluidBinaryPair', 'MultifluidModel'],
+    "multifluid_coupling": ['MultifluidAssociationModel', 'MultifluidActivityModel'],
+    "molecular_critical": [
+        'MolecularCriticalResult', 'molecular_composition_response',
+        'solve_molecular_critical', 'trace_molecular_critical',
+    ],
     "quantum_molecular": ['QuantumMieSegment', 'QuantumMiePair', 'SAFTVRQMieModel'],
     "mie_reference_options": ['MieReferenceOptions'],
     "generic_saft": ['GenericSAFTModel', 'CanonicalSAFTAssociation', 'MaskedSAFTAssociation'],
@@ -483,17 +574,37 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ).split(),
     "battery_mpm": 'BatteryMPMSpec mpm_fields'.split(),
     "battery_ocp": ['ElectrodeOCPSpec'],
+    "battery_materials": ['ElectrodeOCV', 'ElectrodeOCVEndpointPolicy'],
+    "battery_parameter_sets": (
+        'BatteryParameterSet BatteryParameterBinding BatteryParameterFunction '
+        'BatteryParameterDerivation BatteryParameterField battery_parameter_set'
+    ).split(),
+    "battery_half_cell_dfn": (
+        'BatteryHalfCellDFNSpec BatteryHalfCellElectrolyteSpec LithiumMetalSaltKineticsSpec '
+        'HalfCellDFNReadout half_cell_dfn_readout half_cell_dfn_fields '
+        'half_cell_dfn_system advance_half_cell_dfn'
+    ).split(),
     "battery_half_cell": (
         'BatteryHalfCellSPMSpec LithiumMetalCounterElectrodeSpec HalfCellReadout '
         'half_cell_readout half_cell_system advance_half_cell'
     ).split(),
+    "battery_dfn_composite": (
+        'BatteryCompositeDFNSpec CompositeDFNReadout composite_dfn_readout '
+        'composite_dfn_fields composite_dfn_system advance_composite_dfn'
+    ).split(),
+    "battery_collector_spm": (
+        'BatteryCollectorSPMSpec CollectorSPMReadout collector_spm_readout '
+        'collector_spm_fields collector_spm_system advance_collector_spm'
+    ).split(),
+    "battery_current_collector": 'CollectorGeometrySpec collector_potentials'.split(),
     "battery_composite": (
         'ActiveMaterialPhaseSpec BatteryCompositeSPMSpec PhaseReadout CompositeReadout '
         'composite_readout composite_fields composite_system advance_composite'
     ).split(),
     "battery_plating": (
-        'LithiumPlatingSpec PlatingReadout plating_readout '
-        'plating_fields plating_system advance_plating'
+        'LithiumPlatingSpec PlatingReadout PlatingCycleResult plating_readout '
+        'plating_fields plating_system advance_plating plating_inventory_ledger '
+        'advance_plating_cycle'
     ).split(),
     "battery_split_ocvr": (
         'BatterySplitOCVRSpec SplitOCVRReadout split_ocvr_readout '
@@ -501,11 +612,13 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     ).split(),
     "battery_lead_acid": (
         'BatteryLeadAcidSpec LeadAcidGeometrySpec LeadAcidMaterialSpec LeadAcidReadout '
-        'lead_acid_readout lead_acid_fields lead_acid_system advance_lead_acid'
+        'lead_acid_readout lead_acid_profile lead_acid_fields lead_acid_system '
+        'advance_lead_acid'
     ).split(),
     "battery_newman_tobias": (
         'AveragedElectrodeSpec BatteryNewmanTobiasSpec newman_tobias_readout '
-        'newman_tobias_fields newman_tobias_system advance_newman_tobias'
+        'newman_tobias_fields newman_tobias_spatial_profile newman_tobias_system '
+        'advance_newman_tobias'
     ).split(),
     "battery_porous_electrical": ['PorousElectrodeGeometrySpec'],
     "battery_msmr_materials": ['MSMRMaterialSpec'],
@@ -657,6 +770,14 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'DistributedROSpec local_ro_flux distributed_ro_profile '
         'distributed_ro_inventory advance_distributed_ro'
     ).split(),
+    "multisolute_ro_properties": (
+        'NeutralROChannel ROFlatSheetChannel MultisoluteROProperties'
+    ).split(),
+    "multisolute_ro": ['local_multisolute_ro_flux', 'multisolute_ro_profile'],
+    "seawater_ro": (
+        'SeawaterROProperties SeawaterROSpec SeawaterROInventory '
+        'seawater_ro_profile seawater_ro_inventory advance_seawater_ro'
+    ).split(),
     "osmotic_membrane": [
         'OsmoticMembraneSpec', 'osmotic_membrane_point',
         'osmotic_membrane_inventory', 'advance_osmotic_membrane',
@@ -757,13 +878,22 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'nernst_potential ohmic_drop reaction_quotient_from_activities '
         'reaction_quotient_log_from_activities run_electrolysis'
     ).split(),
+    "electrochemical_mechanism_import": (
+        'ELECTROCHEMICAL_MECHANISM_SCHEMA_VERSION ImportedElectrochemicalMechanism '
+        'convert_electrochemical_mechanism electrochemical_mechanism_import_capabilities '
+        'import_electrochemical_mechanism'
+    ).split(),
     "mechanism_library": (
         'MECHANISM_SCENARIO_SCHEMA_VERSION MechanismLibraryValidationReport '
         'MechanismScenarioCard get_mechanism_card list_mechanism_cards list_mechanism_paths '
         'load_library_mechanism mechanism_library_root mechanism_scenario_library_path '
         'repository_root validate_mechanism_library'
     ).split(),
-    "mechanism_import": ['mechanism_import_capabilities'],
+    "mechanism_import": ['mechanism_import_capabilities', 'convert_mechanism', 'import_mechanism'],
+    "chemkin_import": (
+        'chemkin_import_capabilities convert_chemkin import_chemkin'
+    ).split(),
+    "mechanism_capabilities": ['cantera_mechanism_capabilities'],
     "mechanism_rates": ['mechanism_forward_rate_constant'],
     "mechanism_thermochemistry": ['GasSpeciesThermo'],
     "gas_mechanism_batch": ['IdealGasThermodynamics', 'NASA7GasThermodynamics', 'gas_batch_system'],
@@ -772,11 +902,15 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'gas_reactor_network_system pack_gas_reactor_network_state advance_gas_reactor_network'
     ).split(),
     "gas_network_surface": ['GasSurfaceAttachment'],
+    "gas_shaft_machine": ['GasShaftMachineSpec', 'gas_shaft_operating_point'],
     "gas_transport": (
         'GasTransportSpec GasTransportResponse gas_transport_from_network gas_transport_response'
     ).split(),
     "gas_transport_fluxes": ['GasTransportFluxResult', 'gas_transport_fluxes'],
     "gas_spatial_transport": ['GasSpatialTransportSpec'],
+    "gas_spatial_energy": (
+        'gas_spatial_energy_system spatial_energy_rates advance_gas_spatial_energy'
+    ).split(),
     "reaction_network": (
         'R_J_PER_MOL_K BatchIntegrationResult RateLawSpec ReactionNetworkSpec '
         'ReactionODEReferenceCase ReactionODEReferenceResult ReactionSensitivityEntry '

@@ -40,9 +40,23 @@ def _decode_sbml(payload):
 
 
 def _decode_stochastic_hybrid(payload):
+    if payload.get("schema") == "native-adaptive-hybrid-v1":
+        from chemworld.physchem.stochastic_adaptive_hybrid import AdaptiveHybridSpec
+
+        return AdaptiveHybridSpec.from_dict(payload)
+    if payload.get("schema") == "cross-partition-stochastic-hybrid-v1":
+        from chemworld.physchem.stochastic_cross_partition import CrossPartitionHybridSpec
+
+        return CrossPartitionHybridSpec.from_dict(payload)
     from chemworld.physchem.stochastic_hybrid import StochasticHybridSpec
 
     return StochasticHybridSpec.from_dict(payload)
+
+
+def _decode_stochastic_sde(payload):
+    from chemworld.physchem.stochastic_sde_specs import StochasticSDESpec
+
+    return StochasticSDESpec.from_dict(payload)
 
 
 def _decode_molecular_process(payload):
@@ -52,6 +66,10 @@ def _decode_molecular_process(payload):
 
 
 def _decode_flash(payload):
+    if payload.get("model_type") == "molecular_multiphase_thermal_v1":
+        from chemworld.runtime.molecular_multiphase_thermal import MolecularMultiphaseThermalSpec
+
+        return MolecularMultiphaseThermalSpec.from_dict(payload)
     if payload.get("model_type") == "molecular_flash_thermal_v1":
         from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalSpec
 
@@ -77,6 +95,7 @@ def _without_processes(spec, vessels, label):
 
 
 def _thermal(physics, spec):
+    from chemworld.runtime.chemostatted_catalysis import ChemostattedCatalysisRuntime
     from chemworld.runtime.condensed_material_routing import validate_background_sources
     from chemworld.runtime.coupled_thermal import assemble_local_system
 
@@ -87,10 +106,18 @@ def _thermal(physics, spec):
         required = set(model.thermodynamics.inventory_keys) & bulk_species
         if not required <= state.species_amounts.keys():
             raise ValueError("initial state omits a declared local thermal inventory")
-        if model.uses_eos_pressure:
+        if model.pressure_law == "molecular":
+            if any(c.vessel == name and set(spec.modules.components()[c.kind].processes)
+                   - {"bulk_reaction"} for c in spec.components):
+                raise ValueError("molecular thermal world supports declared bulk chemistry only")
+        elif model.uses_eos_pressure:
             _without_processes(spec, (name,), "declared EOS thermal")
         if name not in physics.models_of("crystal"):
-            assemble_local_system(state, physics, spec.modules, spec.components)
+            chemostatted = ChemostattedCatalysisRuntime(spec, spec.modules)
+            if chemostatted.supports(state):
+                chemostatted.validate_state(state)
+            else:
+                assemble_local_system(state, physics, spec.modules, spec.components)
 
 
 def _thermal_feed(source, model):
@@ -116,9 +143,10 @@ def _flash(physics, spec):
 def _flash_feed(source, model):
     from chemworld.runtime.flash_thermal import inventory_enthalpy_j
     from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalSpec
+    from chemworld.runtime.molecular_multiphase_thermal import MolecularMultiphaseThermalSpec
 
-    if isinstance(model, MolecularFlashThermalSpec):
-        raise ValueError("molecular two-phase caloric branch does not declare material feeds")
+    if isinstance(model, (MolecularFlashThermalSpec, MolecularMultiphaseThermalSpec)):
+        raise ValueError("molecular thermal closure does not declare material feeds")
     if set(source.species_amounts) != set(model.properties.component_ids):
         raise ValueError("finite flash source must share its component identities")
     inventory_enthalpy_j(source, model)
@@ -315,5 +343,9 @@ SBML = PhysicsModelSpec("sbml", "1", _decode_sbml, _encode,
                        component_kind="sbml_model", exclusive_group="thermal_evolution")
 STOCHASTIC_HYBRID = PhysicsModelSpec(
     "stochastic_hybrid", "1", _decode_stochastic_hybrid, _encode,
+    exclusive_group="thermal_evolution",
+)
+STOCHASTIC_SDE = PhysicsModelSpec(
+    "stochastic_sde", "1", _decode_stochastic_sde, _encode,
     exclusive_group="thermal_evolution",
 )

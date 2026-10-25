@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from chemworld.agents.event import ScriptedChemistryAgent
 from chemworld.data.logging import load_jsonl
 from chemworld.eval.resource_accounting import (
     METHOD_RESOURCE_USAGE_VERSION,
@@ -15,6 +14,7 @@ from chemworld.eval.resource_accounting import (
     load_resource_protocol,
 )
 from chemworld.eval.runner import run_agent
+from chemworld.legacy.agents.event import ScriptedChemistryAgent
 
 
 def _usage(**overrides: object) -> dict[str, object]:

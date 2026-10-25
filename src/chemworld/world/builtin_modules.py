@@ -22,6 +22,9 @@ from chemworld.world.instruments import (
 def _instruments():
     from chemworld.world.aqueous_instruments import aqueous_instrument_specs
     from chemworld.world.biochemical_instruments import biochemical_instrument_specs
+    from chemworld.world.chemostatted_catalysis_instruments import (
+        chemostatted_coverage_instrument_spec,
+    )
     from chemworld.world.chromatography_instruments import chromatography_instrument_specs
     from chemworld.world.electrode_instruments import electrode_instrument_specs
     from chemworld.world.flash_instruments import flash_instrument_specs
@@ -29,6 +32,10 @@ def _instruments():
     from chemworld.world.membrane_instruments import membrane_instrument_spec
     from chemworld.world.sbml_instruments import formal_instrument_spec
     from chemworld.world.solid_instruments import calphad_instrument_spec, solid_instrument_spec
+    from chemworld.world.stochastic_sde_instruments import (
+        sde_aliquot_instrument_spec,
+        sde_instrument_spec,
+    )
     from chemworld.world.transport_instruments import transport_instrument_spec
 
     contracts = _builtin_instrument_contracts(include_particle_size=True)
@@ -40,8 +47,10 @@ def _instruments():
         + gas_instrument_specs()
         + flash_instrument_specs()
         + electrode_instrument_specs()
+        + (chemostatted_coverage_instrument_spec(),)
         + chromatography_instrument_specs()
         + biochemical_instrument_specs()
+        + (sde_instrument_spec(), sde_aliquot_instrument_spec())
         + (transport_instrument_spec(),)
         + aqueous_instrument_specs()
         + (membrane_instrument_spec(),)
@@ -53,9 +62,10 @@ def _instruments():
 def _named_electrical_fields():
     return (
         ActionFieldSpec("control_mode", choices=("current", "voltage", "power", "resistance",
-            "differential_power", "differential_resistance", "cccv"), required=False),
+            "differential_power", "differential_resistance", "cccv", "open_circuit"),
+            required=False, choice_provider=factories.electrical_control_choices),
         ActionFieldSpec("power_W", "W", (-100., 100.), required=False),
-        ActionFieldSpec("resistance_Ohm", "Ohm", (1e-6, 1e6), required=False),
+        ActionFieldSpec("resistance_Ohm", "Ohm", (0., 1e6), required=False),
         ActionFieldSpec("current_limit_A", "A", (-10., 10.), required=False),
         ActionFieldSpec("branch_lower_A", "A", (-10., 10.), required=False),
         ActionFieldSpec("branch_upper_A", "A", (-10., 10.), required=False),
@@ -158,10 +168,23 @@ BUILTIN_MODULES = (
     DomainModuleSpec(
         module_id="sbml",
         scope_notes=("Formal 3D SBML quantity coordinates and supported transverse events; "
-                     "no declared chemical formula, carrier mass or heat model. Read-only "
+                     "no declared chemical formula, carrier mass or heat model. Explicit "
+                     "integer direct/next-reaction/tau modes use elementary source laws, "
+                     "fixed source geometry and the original formal state/clock; source "
+                     "rules, events and constraints are not coupled in integer mode. Read-only "
                      "finite-time perturbation growth for smooth autonomous reaction ODEs "
                      "uses an explicit mol metric and the original stoichiometric subspace; "
-                     "no event/rate-rule tangents or asymptotic chaos claim.",),
+                     "periodic QR adds finite-duration Lyapunov estimates, while trajectory "
+                     "spectra distinguish decay, growth, oscillation and resolved time scales; "
+                     "no event/rate-rule tangents, ILDM/CSP reduction or asymptotic chaos claim. "
+                     "Declared source controls and readouts support finite-start constrained "
+                     "steady or finite-horizon optimization from the current inventory; "
+                     "candidate states never replace live state and no global optimum is claimed. "
+                     "Read-only "
+                     "single-parameter steady-branch continuation holds the current "
+                     "conservation class, uses declared amount/parameter scales, and "
+                     "retains stable/unstable segments, fold brackets and failed steps; "
+                     "no all-branch, branch-switching or periodic-orbit qualification.",),
         components=(("sbml_model", ComponentCapability(
             operations=("wait", "set_model_parameters"), minimum_operations=1,
             interfaces=("formal_quantities",),
@@ -186,31 +209,65 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="stochastic",
-        scope_notes=("Integer Gillespie direct or explicit Gibson-Bruck next-reaction; "
-                     "constant volume/temperature mass action, persistent channel clocks and RNG; "
-                     "or declared fixed-partition continuous/stochastic feedback with integrated "
-                     "hazards, no cross-partition net conversion and no consuming sampling; "
-                     "not spatial kMC, tau-leaping or automatic ODE/SSA switching.",),
+        scope_notes=("Integer Gillespie direct, Gibson-Bruck next-reaction, or explicitly "
+                     "approximate adaptive Poisson tau-leaping with critical-channel/SSA "
+                     "fallback and persistent step-held pending batches; fixed volume and "
+                     "temperature, declared mass action, one inventory and process RNG. "
+                     "Fixed-partition ODE/SSA uses integrated hazards and explicit DOP853 "
+                     "or RK45 integration; an explicit "
+                     "stoichiometric-jump mode permits real molecular transfer between "
+                     "integer and continuous stocks with resolved molecular quanta and "
+                     "internal atom-transfer receipts. An explicit adaptive hybrid variant "
+                     "uses lossless real mol, hysteretic classification, RK4 or LSODA drift "
+                     "and persistent next-reaction targets with step-frozen propensities. "
+                     "Its fixed-volume world supports instantaneous solute dosing and "
+                     "nonconsuming mol measurement; consuming hybrid sampling and spatial "
+                     "kMC remain unsupported. An explicitly declared continuous reaction "
+                     "SDE uses RI5 with legacy linear or explicit fractional output, or "
+                     "requested-endpoint truncation before bounded feasible-side physical "
+                     "acceptance. Truncated output has no lookahead and wait splits can "
+                     "change its numerical mesh. "
+                     "Declared bounded inputs and representative offline aliquots invalidate "
+                     "lookahead while retaining the process stream; an explicit volume floor "
+                     "permits sampling boundaries between fixed-volume numerical intervals.",),
         components=(("stochastic", ComponentCapability(
-            operations=("wait",), interfaces=("material",), minimum_operations=1,
+            operations=("wait", "set_sde_parameters"), interfaces=("material",),
+            minimum_operations=1,
             state_owners=("phases", "stochastic_continuation"),
         )),),
         advance_strategies=(AdvanceStrategySpec(
             # Stable dispatcher key; the physical declaration selects the algorithm.
             "gillespie-direct", factories.stochastic, shared_clock=True,
         ),),
-        models=(physics_models.STOCHASTIC_HYBRID,),
+        models=(physics_models.STOCHASTIC_HYBRID, physics_models.STOCHASTIC_SDE),
+        operations=(OperationSpec(
+            Operation('set_sde_parameters', 'Set declared SDE inputs', ('values',),
+                      ('not_terminated',)),
+            'stochastic', 'stochastic_controls', 'apply_parameters',
+            fields=(ActionFieldSpec('values', 'per_input_coherent_SI_or_dimensionless',
+                                    value_kind='number_map'),),
+            affected_ledgers=('process',),
+        ),),
+        services=(ServiceFactorySpec('stochastic_controls', 'stochastic_controls',
+            factories.stochastic_controls, 'SDEStochasticRuntime', ('reaction_thermal',)),),
         dependencies=("thermal",),
     ),
     DomainModuleSpec(
         module_id="ro_membrane",
         scope_notes=("Finite ideal dilute NaCl RO at 298.15 K with deposited foulant/rinse, "
-                     "or declared binary-electrolyte axial RO with pressure loss, "
-                     "same-source aqueous calorics and three finite tanks; "
+                     "or declared binary/multisolute axial RO with real ion inventories, "
+                     "neutral transport channels, pressure loss and three finite tanks; "
+                     "explicit common-G aqueous thermodynamics supports isothermal "
+                     "pressure-work recovery, while MCAS ideal-volume and empirical "
+                     "Sharqawy/Nayar seawater properties use independent H/V/osmotic laws "
+                     "without reversible Gibbs-work recovery; seawater TDS remains a "
+                     "conserved kg quantity alongside molecular water; "
                      "or ideal dilute multi-ion Donnan/steric/Born NF with a resolved pore "
                      "and a mixed-feed 0D module; "
                      "or a periodic internal AEM/CEM electrodialysis pair with two finite "
                      "liquids, signed ion/water transfer and bounded CC/CV control; "
+                     "or explicit passive reverse electrodialysis with open/short circuit, "
+                     "finite resistive load, signed electrical output and isothermal bath heat; "
                      "or two-tank direct-contact Knudsen membrane distillation with finite "
                      "heat/cooling and signed water/energy transfer; model-specific "
                      "T/P/salinity bounds and operations, no membrane holdup or full WaterTAP "
@@ -219,7 +276,8 @@ BUILTIN_MODULES = (
             operations=("set_flow_rate", "run_flow", "heat", "wait", "pause_control",
                         "resume_control", "configure_electrical_control"),
             interfaces=("material", "flow_rate", "temperature"),
-            state_owners=("liquid_transport_enthalpy_v1", "membrane_bound_foulant_v1"),
+            state_owners=("liquid_transport_enthalpy_v1", "membrane_bound_foulant_v1",
+                          "seawater_tds_mass_v1"),
         )),),
         advance_strategies=(AdvanceStrategySpec(
             "finite-dilute-ro", factories.ro_membrane, shared_clock=True,
@@ -235,6 +293,10 @@ BUILTIN_MODULES = (
                      "product/concentrate stocks and receipt-based engineering economics; "
                      "or finite pump-fed neutral reactive holdup with ideal overflow to a "
                      "finite product tank, volume-compatible chemistry and one shared bath; "
+                     "or the complete empirical ASM1 13-component/eight-process single "
+                     "CSTR or five-reactor recycle train, finite original water/quality "
+                     "stocks, oxygen supply/offgas and sludge; source-bound COD/N/equivalent "
+                     "budgets, not full molecular CHON, charge or biochemical reaction heat; "
                      "or finite neutral aqueous mixed-contact adsorption and rinse with "
                      "persistent competitive loading, five liquid stocks and one shared bath; "
                      "or finite ideal-dilute Na/Ca resin exchange with counterion release, "
@@ -271,12 +333,22 @@ BUILTIN_MODULES = (
                      "low-Mach planar cells with common grid pressure, independent tank pressures, "
                      "continuity-derived bulk flow and whole-mixture diffusion; prescribed "
                      "boundary molar flow has no momentum or compressor model. "
+                     "Explicit nonisothermal cells jointly close continuity, local energy "
+                     "and common pressure with upwind enthalpy, diffusion enthalpy and "
+                     "Fourier heat; finite tanks, node heat exchange and the anchor heater "
+                     "retain original inventories and one shared clock. No Soret or "
+                     "momentum equation is implied. "
                      "Alternatively one constant-load finite-stroke ideal-gas piston with "
                      "actual EOS volume and separately booked pressure work, without surfaces "
                      "or spatial cells. Constant-volume energy networks can instead declare "
                      "one finite-heat-capacity wall with its own persistent temperature, "
                      "gas contact conduction and grey radiation/conduction to an environment. "
                      "No wall/piston, wall/surface or wall/spatial coupling; "
+                     "alternatively two nonreactive constant-volume energy nodes connected "
+                     "by one zero-holdup compressor or expander, using actual endpoint "
+                     "pressures, same-source PS/efficiency/PH calorics, finite shaft power "
+                     "and separate inlet/outlet enthalpy with signed work; "
+                     "no shaft/piston, shaft/wall, shaft/surface or shaft/spatial coupling; "
                      "no piston inertia, spatial flame field or arbitrary "
                      "member heat queues. Sourced finite harmonic state counting can compile "
                      "one-well RRKM channels into the original energy-grain populations and "
@@ -284,7 +356,12 @@ BUILTIN_MODULES = (
                      "or general pressure-rate reduction. Read-only single-well QSD rates, "
                      "product branches and spectral gaps use current original grains and "
                      "actual bath inventory or explicit fixed T/bath-pressure grids; "
-                     "no dynamic reduction, total-pressure PLog or new heat/inventory model.",),
+                     "no dynamic reduction, total-pressure PLog or new heat/inventory model. "
+                     "Read-only trajectory sensitivities include signed species enthalpy "
+                     "parameters through the original H/G/U and reverse rates; fixed-geometry "
+                     "gas/surface steady queries distinguish a complete finite network from "
+                     "explicitly held nonreacting boundary nodes, retain original residuals "
+                     "and solver work, and never commit the hypothetical result.",),
         components=(("gas_reactor_network", ComponentCapability(
             operations=("wait",), minimum_operations=1,
             interfaces=("material", "temperature"), state_owners=("gas_network_accounting_v1",),
@@ -501,6 +578,14 @@ BUILTIN_MODULES = (
                      "Isothermal MSMR-SPM uses one or two explicit reactions per electrode "
                      "with potential-driven radial diffusion and shared branch kinetics; "
                      "no MSMR thermal, EIS or automatic equilibrium-SOH claim. "
+                     "Isothermal composite DFN resolves two negative and one positive material "
+                     "phase at each thickness cell with shared potentials and dynamic salt; "
+                     "no composite-DFN thermal, side-reaction, SOH, EIS "
+                     "or chemical-energy closure. "
+                     "Collector SPM resolves 1+1D finite-conductivity current collectors "
+                     "with position-resolved single particles and explicit tab potentials; "
+                     "no electrolyte, thermal, side-reaction, PSD, hysteresis, SOH, EIS "
+                     "or chemical-energy closure. "
                      "Composite SPM supports two independent negative material phases and one "
                      "positive phase with single-valued monotone OCV, including internal exchange "
                      "at zero terminal current; no thermal/SEI, EIS, SOH or energy closure. "
@@ -513,6 +598,13 @@ BUILTIN_MODULES = (
                      "Split OCV-R uses two finite mean Li inventories, separate electrode OCV "
                      "and capacity, and series resistance; no particle diffusion, BV or heat. "
                      "Its EIS and equilibrium SOH reuse the same declared inventory model. "
+                     "Versioned Chen2020 inputs retain all94 source fields and expose a checked "
+                     "298.15K/fixed-electrolyte single-material SPM projection; nominal capacity "
+                     "and occupied cell-envelope volume remain distinct from active inventories. "
+                     "Explicit DFN half-cell uses separator/working-electrode dynamic salt, "
+                     "finite fixed-geometry lithium metal and local working particles; "
+                     "no half-cell DFN thermal, side, EIS or automatic-SOH interpretation. "
+                     "New source-parameter and DFN-half-cell independent qualification is pending. "
                      "No PyBaMM runtime backend.",),
         components=(
             (
@@ -643,9 +735,9 @@ BUILTIN_MODULES = (
             ),
         ),
         models=(physics_models.FLASH,),
-        scope_notes=("Finite TP/PH closure with explicit phase/caloric models, including "
-                     "simultaneous two-phase molecular PH on a declared local branch with "
-                     "finite thermal devices and explicit constant-pressure boundary work; "
+        scope_notes=("Finite TP/PH/UV closure with explicit phase/caloric models, including "
+                     "declared multiphase molecular equilibrium, finite thermal devices, "
+                     "constant-pressure boundary work or a fixed-volume energy balance; "
                      "no simultaneous undeclared kinetic process.",),
         components=(
             (
@@ -664,16 +756,23 @@ BUILTIN_MODULES = (
         module_id="surface_kinetics",
         models=(physics_models.SURFACE,),
         scope_notes=("Finite owned sites; declared single/multisite mean-field mechanisms "
-                     "and symmetric interactions; not spatial kMC or a real catalyst fit.",),
+                     "and symmetric interactions; optionally declared constant-activity "
+                     "aqueous chemostats and fixed potential versus SHE, with actual liquid "
+                     "stocks/ports, electron stoichiometry, original charge/work and bath heat. "
+                     "Source electronic-energy scaling and free-energy BEP table fits can "
+                     "author the same mechanisms with explicit known-sigma parameter uncertainty. "
+                     "No dynamic pH, double layer, full-cell calorimetry or spatial kMC; "
+                     "real-catalyst predictive accuracy requires separate validation.",),
         processes=(("surface_kinetics", factories.surface_processes),),
         components=(
             (
                 "surface_reaction",
                 ComponentCapability(
-                    operations=(),
+                    operations=("configure_electrical_control",),
                     processes=("surface_kinetics",),
                     dependencies=("thermal",),
-                    state_owners=("surface_kinetics",),
+                    state_owners=("surface_kinetics", "chemostatted_catalysis_electrical",
+                                  "chemostatted_catalysis_exchange"),
                     interfaces=("material", "temperature", "surface"),
                     parameters=(("surface_id", ParameterRule("string")),),
                 ),
@@ -683,6 +782,12 @@ BUILTIN_MODULES = (
     ),
     DomainModuleSpec(
         module_id="core",
+        scope_notes=("Declared bulk reaction networks use the selected caloric model. "
+                     "An explicit homogeneous Peng-Robinson phase supports elementary "
+                     "Arrhenius activity-concentration kinetics, same-source standard "
+                     "thermochemistry and finite isochoric energy/pressure evolution; "
+                     "local single-phase stability only, no general nonideal mechanism "
+                     "family or multiphase reactive flash claim.",),
         processes=(("bulk_reaction", factories.bulk_process),),
         operations=(
             OperationSpec(
@@ -1000,7 +1105,11 @@ BUILTIN_MODULES = (
         ),
         models=(physics_models.THERMAL,),
         scope_notes=("Finite-power or explicitly isothermal device; shared energy accounting; "
-                     "manual reconnection requires one disabled heater in local-clock mode.",),
+                     "manual reconnection requires one disabled heater in local-clock mode. "
+                     "Explicit finite-jacket P/PI/filtered PID uses actual temperature, "
+                     "heater-owned persistent memory and realized-power anti-windup in the "
+                     "original thermal/shared-clock advance; no extra controller clock, "
+                     "automatic tuning or implicit coupling to other model families.",),
         operations=(
             OperationSpec(
                 Operation("reconnect_heater", "Reconnect one disabled heater", ("vessel",),
@@ -1232,7 +1341,7 @@ BUILTIN_MODULES = (
                         "resume_control",
                     ),
                     interfaces=("temperature", "time", "energy", "safety"),
-                    state_owners=("temperature_control",),
+                    state_owners=("temperature_control", "thermal-feedback-memory-v1"),
                     required_any=("cool_crystallize", "distill", "heat", "run_flow", "wait"),
                     parameters=(
                         (

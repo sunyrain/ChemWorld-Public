@@ -475,6 +475,51 @@ def test_snapshot_hash_roundtrip_and_integrity_checks() -> None:
         CampaignResourceLedger.from_snapshot(falsified_decision)
 
 
+def test_bounded_state_and_recent_events_preserve_audit_boundary(monkeypatch) -> None:
+    ledger = CampaignResourceLedger(_small_card())
+    action = {"operation": "add_solvent", "volume_L": 0.025, "solvent": 1}
+    event_id = campaign_resource_event_id("bounded", 1)
+    ledger.preflight(event_id, action, starts_vessel=True)
+    ledger.record_outcome(event_id, action, _committed(), starts_vessel=True)
+
+    full = ledger.snapshot()
+    bounded = ledger.bounded_state()
+    assert bounded["state"] == full["state"]
+    assert bounded["ledger_sha256"] == full["ledger_sha256"]
+    assert bounded["history_root_sha256"] == full["history_root_sha256"]
+    assert bounded["event_count"] == len(full["events"]) == 1
+    assert ledger.recent_events(1) == full["events"]
+
+    recent = ledger.recent_events(1)
+    recent[0]["action"]["volume_L"] = 99.0
+    assert ledger.recent_events(1)[0]["action"]["volume_L"] == 0.025
+    with pytest.raises(ValueError, match="must be positive"):
+        ledger.recent_events(0)
+    with pytest.raises(ValueError, match="bounded resource queries"):
+        ledger.recent_events(65)
+
+    def no_full_snapshot():
+        raise AssertionError("bounded query called snapshot")
+
+    monkeypatch.setattr(ledger, "snapshot", no_full_snapshot)
+    assert ledger.bounded_state()["state"] == full["state"]
+    assert ledger.recent_events(1)[0]["event_id"] == event_id
+
+
+def test_history_root_rejects_rehashed_event_tampering() -> None:
+    ledger = CampaignResourceLedger(_small_card())
+    action = {"operation": "add_reagent", "amount_mol": 0.01}
+    event_id = campaign_resource_event_id("history-root", 1)
+    ledger.preflight(event_id, action)
+    ledger.record_outcome(event_id, action, _committed())
+    tampered = ledger.snapshot()
+    tampered["history_root_sha256"] = "0" * 64
+    tampered.pop("ledger_sha256")
+    tampered["ledger_sha256"] = canonical_json_sha256(tampered)
+    with pytest.raises(CampaignResourceIntegrityError, match="history root mismatch"):
+        CampaignResourceLedger.from_snapshot(tampered)
+
+
 def test_delta_derivation_is_deterministic_and_rejects_negative_reports() -> None:
     action = {"operation": "add_solvent", "volume_L": 0.025, "solvent": 2}
     proposal = derive_campaign_resource_delta(action, starts_vessel=True)

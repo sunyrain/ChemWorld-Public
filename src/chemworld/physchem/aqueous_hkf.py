@@ -118,7 +118,9 @@ class RevisedHKFSpeciesThermo:
 
     c=(J/mol/K,J*K/mol), omega=J/mol. Source Hf, Gf and S are preserved.
     At least Hf or Gf must be supplied. If both exist they must agree under the
-    explicit gauge within a caller-declared source precision bound.
+    explicit gauge within a caller-declared source precision bound by default.
+    Explicit ``gibbs_entropy`` authority keeps the original triple but derives
+    the working H from G/S; it does not certify the original H as consistent.
     """
 
     species_id: str
@@ -135,6 +137,7 @@ class RevisedHKFSpeciesThermo:
     reference_consistency_tolerance_J_mol: float
     reference_pressure_Pa: float = _PR
     reference_temperature_K: float = _TR
+    reference_authority: str = "strict"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "composition", MappingProxyType(dict(self.composition)))
@@ -154,6 +157,10 @@ class RevisedHKFSpeciesThermo:
         ):
             raise ValueError("HKF requires complete coefficients, source and 298.15 K/1 bar datum")
         h, g = self.formation_enthalpy_ref_J_mol, self.formation_gibbs_ref_J_mol
+        if self.reference_authority not in ("strict", "gibbs_entropy"):
+            raise ValueError("declare strict or gibbs_entropy HKF reference authority")
+        if self.reference_authority == "gibbs_entropy" and g is None:
+            raise ValueError("Gibbs/entropy authority requires a source formation Gibbs value")
         if h is None and g is None:
             raise ValueError("HKF needs formation enthalpy or Gibbs energy")
         if any(
@@ -170,7 +177,8 @@ class RevisedHKFSpeciesThermo:
             raise ValueError("HKF parameters must be finite numbers")
         if h is not None and g is not None:
             residual = h - _TR * (self.entropy_ref_J_mol_K - shift) - g
-            if abs(residual) > self.reference_consistency_tolerance_J_mol:
+            if (self.reference_authority == "strict"
+                    and abs(residual) > self.reference_consistency_tolerance_J_mol):
                 raise ValueError(
                     f"inconsistent formation H/G/standard S: residual={residual:.9g} J/mol"
                 )
@@ -181,12 +189,33 @@ class RevisedHKFSpeciesThermo:
 
     @property
     def enthalpy_ref_J_mol(self) -> float:  # noqa: N802 - property units follow the data contract
-        if self.formation_enthalpy_ref_J_mol is not None:
+        if (self.reference_authority == "strict"
+                and self.formation_enthalpy_ref_J_mol is not None):
             return self.formation_enthalpy_ref_J_mol
         return cast(float, self.formation_gibbs_ref_J_mol) + _TR * (
             self.entropy_ref_J_mol_K
             - self.reference_basis.entropy_shift(self.composition, self.charge)
         )
+
+    def reference_diagnostics(self) -> dict[str, Any]:
+        """Keep printed-source consistency separate from the chosen working datum."""
+        h, g = self.formation_enthalpy_ref_J_mol, self.formation_gibbs_ref_J_mol
+        residual = None if h is None or g is None else h - _TR * (
+            self.entropy_ref_J_mol_K
+            - self.reference_basis.entropy_shift(self.composition, self.charge)
+        ) - g
+        return {
+            "authority": self.reference_authority,
+            "source_formation_enthalpy_J_mol": h,
+            "source_formation_gibbs_J_mol": g,
+            "source_entropy_J_mol_K": self.entropy_ref_J_mol_K,
+            "source_triple_residual_J_mol": residual,
+            "source_printing_bound_J_mol": self.reference_consistency_tolerance_J_mol,
+            "source_triple_consistent": (None if residual is None else
+                abs(residual) <= self.reference_consistency_tolerance_J_mol),
+            "working_enthalpy_J_mol": self.enthalpy_ref_J_mol,
+            "enthalpy_adjustment_J_mol": None if h is None else self.enthalpy_ref_J_mol - h,
+        }
 
     def omega(self, temperature_K: Any, pressure_Pa: Any) -> Any:
         if not self.charge:
@@ -256,6 +285,8 @@ class RevisedHKFSpeciesThermo:
             "reference_consistency_tolerance_J_mol": self.reference_consistency_tolerance_J_mol,
             "reference_pressure_Pa": self.reference_pressure_Pa,
             "reference_temperature_K": self.reference_temperature_K,
+            **({"reference_authority": self.reference_authority}
+               if self.reference_authority != "strict" else {}),
         }
 
 

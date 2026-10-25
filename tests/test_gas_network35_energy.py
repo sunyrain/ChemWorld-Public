@@ -104,7 +104,7 @@ def test_energy_codec_and_original_isothermal_codec_are_distinct(reference):
 
 
 @pytest.mark.parametrize(
-    "defect", ("missing-node", "anchor-temperature", "zero-capacity", "bad-thermo")
+    "defect", ("missing-node", "anchor-temperature", "negative-capacity", "bad-thermo")
 )
 def test_rejects_incomplete_or_inconsistent_energy_authoring(reference, defect):
     spec, network, _ = reference.cases.native(reference.cases.case())
@@ -113,8 +113,8 @@ def test_rejects_incomplete_or_inconsistent_energy_authoring(reference, defect):
             replace(spec, energy_nodes=spec.energy_nodes[:1])
         elif defect == "anchor-temperature":
             replace(spec, temperature_K=500)
-        elif defect == "zero-capacity":
-            GasNodeEnergySpec("reactor", 400, 0)
+        elif defect == "negative-capacity":
+            GasNodeEnergySpec("reactor", 400, -1)
         else:
             gas_reactor_network_system(
                 replace(

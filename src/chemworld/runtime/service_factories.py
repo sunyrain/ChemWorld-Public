@@ -53,6 +53,7 @@ def reaction_thermal(context):
 def bulk_process(context):
     from dataclasses import replace
 
+    from chemworld.physchem.molecular_mixture import MolecularIsochoricThermodynamics
     from chemworld.physchem.reactor_solvers import reaction_network_process
 
     local_ids = {
@@ -76,6 +77,12 @@ def bulk_process(context):
         reactions=tuple(reactions),
         stochastic=None,
     )
+    if isinstance(context.thermodynamics, MolecularIsochoricThermodynamics):
+        from chemworld.physchem.molecular_reaction import molecular_reaction_process
+
+        return (molecular_reaction_process(
+            network, context.thermodynamics, process_id=context.component.id,
+        ),)
     return (reaction_network_process(network, process_id=context.component.id),)
 
 
@@ -136,6 +143,17 @@ def surface_processes(context):
         if slot.spec.state_type in {SURFACE_STATE_TYPE, MULTISITE_STATE_TYPE}
     )
     if not slots:
+        # A material carrier may leave its vessel or be cleared at a declared
+        # batch boundary. Its absence means zero active surface, not a new
+        # inventory. Stationary/vessel-owned sites remain mandatory.
+        initial = context.physics.initial_states.get(context.state.vessel_id)
+        declared = () if initial is None else tuple(
+            slot for slot in initial.state_slots.slots
+            if slot.spec.state_type in {SURFACE_STATE_TYPE, MULTISITE_STATE_TYPE}
+            and slot.spec.mechanism_id == spec.mechanism_id)
+        if declared and all(slot.spec.owner_kind == 'material'
+                            and slot.spec.batch_reset == 'clear' for slot in declared):
+            return ()
         raise ValueError("surface process requires an owned surface inventory")
     return tuple(surface_process(slot, spec) for slot in slots)
 
@@ -169,6 +187,23 @@ def control_program(context):
     from chemworld.runtime.control_program import ControlProgramServices
 
     return ControlProgramServices(context.services["reaction_thermal"])
+
+
+def electrical_control_choices(state, _validator):
+    from chemworld.runtime.control_program import electrical_device
+
+    try:
+        settings = electrical_device(state).settings["electrical_control"]
+    except ValueError:
+        return ()
+    if settings.get("passive_load_modes"):
+        return tuple(settings["passive_load_modes"])
+    if settings.get("named_control_modes"):
+        return tuple(settings["named_control_modes"])
+    # Scalar A/V sources do not require the optional named-mode field. Keep a
+    # nonempty lexical domain so action admission does not reject its absence.
+    return tuple(mode for mode, unit in (("current", "A"), ("voltage", "V"))
+                 if unit in settings.get("supported_units", ("A", "V")))
 
 
 def transient_electrode(composition):
@@ -235,6 +270,10 @@ def stochastic(composition):
     from chemworld.runtime.stochastic import StochasticRuntime
 
     return StochasticRuntime(composition)
+
+
+def stochastic_controls(context):
+    return context.services['reaction_thermal'].advancer.strategies['gillespie-direct'].sde
 
 
 def sbml(composition):

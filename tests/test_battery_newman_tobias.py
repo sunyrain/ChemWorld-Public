@@ -13,6 +13,7 @@ from chemworld.physchem.battery_newman_tobias import (
     advance_newman_tobias,
     newman_tobias_control_mode,
     newman_tobias_fields,
+    newman_tobias_spatial_profile,
     newman_tobias_system,
     validate_newman_tobias_state,
 )
@@ -70,6 +71,25 @@ def test_actual_spatial_bv_and_exact_charge_boundary_conditions(current):
         assert f["voltage_V"] == pytest.approx(3.83, abs=1e-12)
         np.testing.assert_allclose(f["solid_potential_V"][:3], 0, atol=1e-13)
         np.testing.assert_allclose(f["electrolyte_potential_V"], -0.13, atol=1e-13)
+
+
+def test_spatial_profile_is_json_safe_and_keeps_unique_inventory_boundaries():
+    spec = model()
+    state = spec.initial_state()
+    before = state
+    profile = newman_tobias_spatial_profile(spec, state, current_A=0.2)
+    assert profile["model_family"] == "newman-tobias-isothermal-v1"
+    assert profile["thickness_cells"] == [3, 2, 4]
+    assert len(profile["cell_labels"]) == 7
+    assert set(profile["reaction_current_A"]) == set(profile["cell_labels"])
+    assert profile["charge_balance_A"]["negative_reaction_sum_A"] == pytest.approx(0.2)
+    assert profile["charge_balance_A"]["positive_reaction_sum_A"] == pytest.approx(-0.2)
+    assert len(profile["electrolyte_face_current_A_m2"]) == 10
+    assert len(profile["electrolyte_potential_V"]) == 9
+    assert len(profile["solid_face_current_A_m2"]["negative"]) == 4
+    assert len(profile["solid_face_current_A_m2"]["positive"]) == 5
+    json.dumps(profile, allow_nan=False)
+    assert state == before
 
 
 @pytest.mark.parametrize("current", [0.2, -0.2, 0.0])

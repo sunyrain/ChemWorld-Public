@@ -15,7 +15,7 @@ import numpy as np
 from chemworld.foundation.balances import (
     MaterialExchange,
     TransitionBalance,
-    formal_inventory_exclusions,
+    inventory_balance_exclusions,
 )
 from chemworld.foundation.lab_clock import LabClockState
 from chemworld.foundation.solvents import SolventInventory, total_solvents
@@ -31,24 +31,53 @@ ALLOWED = {"queue_lab_heat", "queue_lab_measure", "wait", "select_vessel", "term
            "add_solvent", "route_material", "create_container", "transfer_material"}
 
 
+def _fixed_isothermal_bath(record):
+    return record.settings.get("lab_role") == "fixed_isothermal_bath"
+
+
 def shared_operation_allowed(operation, state, modules, action=None):
     if operation in ALLOWED:
         return True
+    from chemworld.foundation.discrete_inventory import (
+        CONTINUOUS_REACTION_ALGORITHMS,
+        CONTINUOUS_SDE_ALGORITHM,
+    )
+
+    continuation = state.process.stochastic_continuation
+    sde = continuation is not None and continuation.get('algorithm') == CONTINUOUS_SDE_ALGORITHM
+    continuous = (continuation is not None
+                  and continuation.get('algorithm') in CONTINUOUS_REACTION_ALGORITHMS)
+    if operation == 'add_component':
+        # An instantaneous declared solute packet changes only this vessel.
+        # Its actual model and numerical-memory invalidation are checked by
+        # the stochastic delegate and the original material transaction.
+        return continuous
+    if operation == 'set_sde_parameters':
+        return sde
     if operation == "set_model_parameters":
         return state.phase == "formal"
-    if operation != "measure" or state.phase != "formal":
+    if operation != "measure":
         return False
+    from chemworld.runtime.reverse_electrodialysis import reverse_electrodialysis_record
     from chemworld.world.operations import instrument_name
 
+    red = reverse_electrodialysis_record(state) is not None
+    if state.phase != "formal" and not red and not continuous:
+        return False
     specs = modules.instrument_specs()
     selected = (None if action is None
                 else instrument_name(action.get("instrument"), modules=modules))
     return any(
         (selected is None or identity == selected)
-        and spec.contract.input_state_schema.get("required_phase") == "formal"
-        and spec.contract.clock_semantics in {"instantaneous_snapshot", "in_situ_end"}
-        and spec.contract.sample_consumption_L == 0
-        and not spec.contract.destructive
+        and ((state.phase == "formal"
+              and spec.contract.input_state_schema.get("required_phase") == "formal")
+             or (red and identity == "electrical_meter")
+             or (continuous and identity == 'sde_amount_meter')
+             or (sde and identity == 'sde_aliquot_meter'))
+        and ((spec.contract.clock_semantics in {"instantaneous_snapshot", "in_situ_end"}
+              and spec.contract.sample_consumption_L == 0 and not spec.contract.destructive)
+             or (sde and identity == 'sde_aliquot_meter'
+                 and spec.contract.clock_semantics == 'offline_snapshot'))
         and (spec.native_observer is not None or spec.observer_factory is not None)
         for identity, spec in specs.items()
     )
@@ -64,7 +93,8 @@ def lab_device_choices(state, kind, *, allowed_instruments=None):
                for record in local.equipment.equipment.values()]
     if kind == "heat":
         return tuple(sorted(r.equipment_id for r in records
-                            if r.equipment_type == "thermal_device"))
+                            if r.equipment_type == "thermal_device"
+                            and not _fixed_isothermal_bath(r)))
     return tuple(sorted(
         record.equipment_id for record in records
         if record.settings.get("lab_analyzer_instrument") in available
@@ -109,7 +139,24 @@ def validate_lab(composition):
     ):
         raise ValueError("lab initial states must be independent, zero-time physical states")
     equipment = [r for state in states.values() for r in state.equipment.equipment.values()]
-    heaters = [r for r in equipment if r.equipment_type == "thermal_device"]
+    heaters = []
+    for local in states.values():
+        for record in local.equipment.equipment.values():
+            if record.equipment_type != "thermal_device":
+                continue
+            role = record.settings.get("lab_role")
+            if role is None:
+                heaters.append(record)
+                continue
+            if not _fixed_isothermal_bath(record):
+                raise ValueError("unsupported laboratory thermal device role")
+            from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
+
+            device = ThermalDeviceSpec.from_dict(record.settings["thermal_device"])
+            if (device.mode != "isothermal" or not device.enabled
+                    or record.attached_vessel_id != local.vessel_id
+                    or record.status == "parked"):
+                raise ValueError("fixed laboratory bath must be an enabled local isotherm")
     if sorted(r.equipment_id for r in heaters) != list(spec.heater_ids):
         raise ValueError("lab declares exactly its physical heater identities")
     if any(record.settings["thermal_device"].get("enabled", True) for record in heaters):
@@ -250,7 +297,7 @@ def lab_instrument_reservation(state, action, *, modules=None):
 def _acquisition_reservation(state, action, modules):
     from chemworld.world.operations import instrument_name
 
-    if modules is None or state.phase != "formal":
+    if modules is None or not shared_operation_allowed("measure", state, modules, action):
         return {}
     specs = modules.instrument_specs()
     try:
@@ -531,9 +578,15 @@ class LabScheduleServices:
             ) for system in self.systems
         }
 
-        def solve(duration):
+        def solve(duration, previous=None):
             results = {}
             for key, local in groups.items():
+                if previous is not None and previous[key].actual_duration_s == duration:
+                    # The event-limiting system already supplied this exact
+                    # finite prefix. Reintegrating it to its own root can move
+                    # the root and leave material and laboratory clocks apart.
+                    results[key] = previous[key]
+                    continue
                 heat = next(
                     (job for job in running if job["kind"] == "heat" and job["vessel"] == key), None
                 )
@@ -562,7 +615,7 @@ class LabScheduleServices:
         earliest = min(r.actual_duration_s for r in results.values())
         if earliest < dt:
             dt = earliest
-            results = solve(dt)
+            results = solve(dt, results)
             failure = next(
                 (r for r in results.values() if r.outcome in {"rejected", "numerical_failure"}),
                 None,
@@ -700,5 +753,5 @@ class LabScheduleServices:
             tuple(
                 MaterialExchange(**{**record, "amounts": tuple(record["amounts"].items())})
                 for record in current[len(previous) :]
-            ), unmodeled_quantities=formal_inventory_exclusions(before)
+            ), unmodeled_quantities=inventory_balance_exclusions(before)
         )

@@ -12,6 +12,7 @@ from chemworld.physchem.mechanism_growth_specs import (
     reaction_library_key,
 )
 from chemworld.physchem.molecular_graph import molecular_isomorphic
+from chemworld.physchem.molecular_identity import molecular_identity_mapping
 from chemworld.physchem.reaction_family import ReactionFamily
 from chemworld.physchem.reaction_generation import (
     GenerationReport,
@@ -20,6 +21,41 @@ from chemworld.physchem.reaction_generation import (
 )
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.reaction_network_specs import ReactionSpec
+
+
+def validate_growth_library_identity(
+    library: MechanismGrowthLibrary, policy: CoreEdgeGrowthPolicy
+) -> None:
+    """Require one declared parameter owner per fully resolved resonance class.
+
+    Exact-mode library validation is unchanged. No equal or conflicting parameter
+    records are silently selected/averaged, and initial inventories are never merged.
+    """
+    if not policy.generation.allylic_resonance:
+        return
+    for index, binding in enumerate(library.species):
+        # Also resolve the first/only species, even without a candidate to compare.
+        molecular_identity_mapping(
+            binding.graph,
+            binding.graph,
+            allylic_resonance=True,
+            maximum_forms=policy.generation.maximum_resonance_forms,
+        )
+        for previous in library.species[:index]:
+            if (
+                molecular_identity_mapping(
+                    binding.graph,
+                    previous.graph,
+                    allylic_resonance=True,
+                    maximum_forms=policy.generation.maximum_resonance_forms,
+                )
+                is not None
+            ):
+                raise ValueError(
+                    "resonance_identity_conflict: one species/thermochemistry owner required; "
+                    f"{previous.species.species_id} [{previous.source.to_dict()}] conflicts with "
+                    f"{binding.species.species_id} [{binding.source.to_dict()}]"
+                )
 
 
 def enumerate_bound_candidates(
@@ -37,9 +73,25 @@ def enumerate_bound_candidates(
     names: dict[str, str] = {}
     missing: list[dict[str, Any]] = []
     for key, graph in report.species.items():
-        matches = [
-            name for name, binding in pool.items() if molecular_isomorphic(graph, binding.graph)
-        ]
+        try:
+            matches = [
+                name
+                for name, binding in pool.items()
+                if (
+                    molecular_identity_mapping(
+                        graph,
+                        binding.graph,
+                        allylic_resonance=True,
+                        maximum_forms=policy.generation.maximum_resonance_forms,
+                    )
+                    is not None
+                    if policy.generation.allylic_resonance
+                    else molecular_isomorphic(graph, binding.graph)
+                )
+            ]
+        except ValueError as exc:
+            # A generated product may need more forms than any input library graph.
+            return replace(report, complete=False, truncated_reasons=(str(exc),)), {}, []
         if len(matches) != 1:
             missing.append(
                 {

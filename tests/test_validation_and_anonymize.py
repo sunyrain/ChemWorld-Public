@@ -11,7 +11,8 @@ from chemworld.data.schema import (
     TRAJECTORY_COMPATIBILITY_ALIASES,
 )
 from chemworld.data.validation import validate_records
-from chemworld.eval.runner import make_agent, run_agent
+from chemworld.eval.runner import run_agent
+from chemworld.legacy.agent_registry import make_agent
 
 
 def test_validate_records_rejects_missing_schema(tmp_path) -> None:

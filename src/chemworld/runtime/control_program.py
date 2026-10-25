@@ -31,6 +31,11 @@ def configure_electrical_control(state, action):
     """Set one supported source programme; physical advancement remains shared."""
     record = electrical_device(state)
     settings = record.settings["electrical_control"]
+    if settings.get("passive_load_modes"):
+        from chemworld.runtime.reverse_electrodialysis import configured_red_load_program
+
+        mode, program = configured_red_load_program(state, record, action)
+        return _configured_electrical(state, record, {**settings, "load_mode": mode}, program)
     from chemworld.runtime.thevenin_control import NAMED_FIELDS
 
     if settings.get("named_control_modes"):
@@ -57,6 +62,8 @@ def configure_electrical_control(state, action):
     low, high = settings[limit_key]
     if not isfinite(target) or not low <= target <= high or not isfinite(duration) or duration < 0:
         raise ValueError("electrical target or ramp duration is outside device capability")
+    if settings.get("constant_potential_only") and (unit != "V" or duration != 0):
+        raise ValueError("electrical source requires a constant potential without a ramp")
     old = ScalarControlProgram(**settings["program"])
     if old.unit != unit and duration:
         raise ValueError("a ramp cannot interpolate between different control units")

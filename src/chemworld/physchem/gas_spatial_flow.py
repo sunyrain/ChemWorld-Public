@@ -1,4 +1,4 @@
-"""Finite boundary ports for the original isothermal low-Mach gas grid.
+"""Finite boundary ports for the original low-Mach gas grid.
 
 Only the grid shares pressure. The two original reservoir vessels retain their
 own finite inventories and pressures. Prescribed flow is a kinematic control,
@@ -86,17 +86,20 @@ def add_spatial_boundary_faces(
             raise ValueError("finite spatial donor requires positive actual inventory")
         composition = {s: donor[s] / total for s in network.species_ids}
         amounts = {s: rate * x for s, x in composition.items()}
+        temperature = (
+            views[edge.source_vessel_id].temperature_K
+            if spatial.energy_equation
+            else spec.temperature_K
+        )
         enthalpy = fsum(
-            thermo[s].evaluate(spec.temperature_K).enthalpy_J_mol * n for s, n in amounts.items()
+            thermo[s].evaluate(temperature).enthalpy_J_mol * n for s, n in amounts.items()
         )
         area = float(spatial.mesh.face_areas_m2[0 if index == 0 else -1])
-        concentration = packet["pressure_Pa"] / (R * spec.temperature_K)
+        concentration = packet["pressure_Pa"] / (R * temperature)
         velocity = rate / (area * concentration)
-        cp = fsum(
-            x * thermo[s].evaluate(spec.temperature_K).cp_J_mol_K for s, x in composition.items()
-        )
+        cp = fsum(x * thermo[s].evaluate(temperature).cp_J_mol_K for s, x in composition.items())
         mass = fsum(x * masses[s] for s, x in composition.items())
-        sound = sqrt(cp / (cp - R) * R * spec.temperature_K / mass)
+        sound = sqrt(cp / (cp - R) * R * temperature / mass)
         packet["faces"][edge.connection_id] = {
             "source": edge.source_vessel_id,
             "target": edge.target_vessel_id,
@@ -111,9 +114,10 @@ def add_spatial_boundary_faces(
             "mass_velocity_m_s": velocity,
             "mach": abs(velocity) / sound,
             "pressure_Pa": packet["pressure_Pa"],
-            "temperature_K": spec.temperature_K,
+            "temperature_K": temperature,
             "mole_fractions": composition,
             "diffusive_molar_residual_mol_s": 0.0,
+            **({"fourier_heat_W": 0.0} if spatial.energy_equation else {}),
         }
         boundary["left" if index == 0 else "right"] = amounts
     packet["boundary_species_rates_mol_s"] = boundary

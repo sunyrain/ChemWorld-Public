@@ -6,11 +6,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from chemworld.agents.llm import ToolUsingLLMStubAgent
 from chemworld.data.datasets import export_dataset, flatten_record
 from chemworld.data.logging import load_jsonl
 from chemworld.data.records import trajectory_value
 from chemworld.eval.runner import run_agent
+from chemworld.legacy.agents.llm import ToolUsingLLMStubAgent
 
 
 def build_demo(root: str | Path = Path("runs") / "demo_agent_trace_dataset") -> dict[str, Any]:

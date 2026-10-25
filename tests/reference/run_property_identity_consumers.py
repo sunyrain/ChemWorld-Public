@@ -3,21 +3,32 @@
 import argparse
 import json
 import re
+import runpy
 import time
 import traceback
 from collections import Counter
 from pathlib import Path
 
 import chemicals
+import review_crc84_identity as crc84
 from collect_gsrs_identities import public_identity
 from collect_identity_depositors import deposit_fields
 from collect_identity_material_pages import TextPage
 from collect_sander_identity_evidence import IdentityPage
 from collect_srs_identity_sources import FIELDS as SRS_FIELDS
 from convert_racemic_identities import stereochemical_layers
+from review_printed_identity import (
+    ROUTE as DOCUMENT_ROUTE,
+)
+from review_printed_identity import (
+    check_document_identity,
+    document_negative_variants,
+    read_documents,
+)
 from run_electro_optical_block import dielectric_source_unit, native_card, optical_source_unit
 
 from chemworld.data.electro_optical import ElectroOpticalDatabase
+from chemworld.data.identifiers import UnknownIdentifierError
 from chemworld.physchem.elements import parse_formula
 from chemworld.physchem.specs import ComponentSpec
 
@@ -38,10 +49,21 @@ def check_identity(
     remaining_encodings=None,
     institutional=None,
     srs=None,
+    documents=None,
+    crc84_documents=None,
+    source_units=None,
 ):
     scope = component.metadata["identity_scope"]
     external = component.metadata["external_identity"]
     cas = component.cas_number
+    if scope.get("evidence_route") == crc84.ROUTE:
+        crc84.check_identity(component, crc84_documents, pubchem, srs, source_units)
+        check_roundtrip(component)
+        return
+    if scope.get("evidence_route") == DOCUMENT_ROUTE:
+        check_document_identity(component, documents, pubchem)
+        check_roundtrip(component)
+        return
     if scope.get("evidence_route") == "reviewed_srs_former_CAS_gsrs":
         check_srs_identity(component, gsrs, pubchem, srs)
         check_roundtrip(component)
@@ -839,6 +861,12 @@ def main():
     parser.add_argument("--srs-directory", type=Path)
     parser.add_argument("--srs-current-directory", type=Path)
     parser.add_argument("--srs-fenchone-directory", type=Path)
+    parser.add_argument("--primary-documents-directory", type=Path)
+    parser.add_argument("--printed-encoding-directory", type=Path)
+    parser.add_argument("--indexed-identities-directory", type=Path)
+    parser.add_argument("--crc84-directory", type=Path)
+    parser.add_argument("--crc84-encoding-directory", type=Path)
+    parser.add_argument("--crc84-additional-encoding-directory", type=Path)
     parser.add_argument(
         "--components",
         type=Path,
@@ -850,7 +878,15 @@ def main():
     parser.add_argument("--expected-negatives", type=int, default=2)
     parser.add_argument("--expected-identity-negatives", type=int, default=0)
     parser.add_argument("--block", default="reviewed-identity-consumers-1")
+    parser.add_argument("--check-source-gaps", action="store_true")
     args = parser.parse_args()
+    if args.check_source_gaps:
+        example = runpy.run_path(str(
+            Path(__file__).resolve().parents[2] / "examples/crc_electro_optical_inputs.py"
+        ))
+        inspect_source_identity = example["inspect_source_identity"]
+        reviewed_property_input = example["reviewed_property_input"]
+        source_gap_error = example["SourceIdentityGapError"]
 
     def read(path):
         return json.loads(path.read_text(encoding="utf8"))
@@ -899,6 +935,19 @@ def main():
         )
         if args.srs_directory else None
     )
+    documents = (
+        read_documents(args.primary_documents_directory, args.printed_encoding_directory,
+                       args.indexed_identities_directory)
+        if args.primary_documents_directory else None
+    )
+    crc84_documents = (
+        crc84.read_documents(args.crc84_directory, args.crc84_encoding_directory,
+                             args.crc84_additional_encoding_directory)
+        if args.crc84_directory else None
+    )
+    source_units = {}
+    for row in gaps:
+        source_units.setdefault(row["inputs"]["raw"]["CAS"], []).append(row["unit"])
 
     def qualify(component):
         check_identity(
@@ -917,6 +966,9 @@ def main():
             remaining_encodings,
             institutional,
             srs,
+            documents,
+            crc84_documents,
+            source_units,
         )
 
     components = {c["cas_number"]: ComponentSpec.from_dict(c) for c in mapping["components"]}
@@ -936,6 +988,37 @@ def main():
         }
         if cas not in components:
             row.update(status="unresolved", reason="no_reviewed_explicit_component")
+            if args.check_source_gaps:
+                try:
+                    diagnostic = inspect_source_identity(mapping, cas, original["unit"])
+                    assert diagnostic["status"] == "source_gap"
+                    assert original["unit"] in diagnostic["source_units"]
+                    assert diagnostic["category"] and diagnostic["reason"]
+                    assert inspect_source_identity(
+                        json.loads(json.dumps(mapping)), cas, original["unit"]
+                    ) == diagnostic
+                    record = database.record(cas, method=source)
+                    raw_fields = dict(zip(record.field_names, record.raw_fields, strict=True))
+                    assert raw_fields == inputs["raw"]
+                    field = "Permittivity" if source == "CRC_PERMITTIVITY" else "RI"
+                    assert record.value(field).value == float(inputs["raw"][field])
+                    try:
+                        reviewed_property_input(
+                            database, mapping, cas, method=source, source_point=True
+                        )
+                    except source_gap_error as exc:
+                        assert exc.diagnostic == diagnostic
+                    else:
+                        raise AssertionError("unresolved fixture material accepted")
+                    try:
+                        native_card(database, record, source_point=True)
+                    except UnknownIdentifierError:
+                        pass
+                    else:
+                        raise AssertionError("original identifier path silently supplied component")
+                    row.update(identity_diagnostic=diagnostic, gap_check="passed")
+                except Exception:
+                    row.update(gap_check="failed", failure=traceback.format_exc())
         else:
             component = components[cas]
             try:
@@ -949,6 +1032,11 @@ def main():
                 assert record.row_number == inputs["row"] + 1
                 card = native_card(database, record, component=component, source_point=True)
                 assert card.package.component.to_dict() == component.to_dict()
+                if args.check_source_gaps:
+                    reviewed = reviewed_property_input(
+                        database, mapping, cas, method=source, source_point=True
+                    )
+                    assert reviewed.to_dict() == card.to_dict()
                 consumer = (
                     dielectric_source_unit if source == "CRC_PERMITTIVITY" else optical_source_unit
                 )
@@ -998,7 +1086,8 @@ def main():
         if (
             transformation is None
             or component.metadata["identity_scope"].get("evidence_route")
-            in {"reviewed_pubchem_depositor", "reviewed_srs_former_CAS_gsrs"}
+            in {"reviewed_pubchem_depositor", "reviewed_srs_former_CAS_gsrs",
+                DOCUMENT_ROUTE, crc84.ROUTE}
         ):
             continue
         for mode in ("absolute_representative", "relative_single_enantiomer"):
@@ -1332,11 +1421,34 @@ def main():
                 else:
                     check.update(status="failed", reason="wrong_material_identity_accepted")
                 identity_negatives.append(check)
+    for component in components.values():
+        route = component.metadata["identity_scope"].get("evidence_route")
+        if route not in {DOCUMENT_ROUTE, crc84.ROUTE}:
+            continue
+        variants = (crc84.negative_variants(component) if route == crc84.ROUTE
+                    else document_negative_variants(component))
+        for mode, data in variants:
+            check = {"source_CAS": component.cas_number, "wrong_identity": mode}
+            try:
+                qualify(ComponentSpec.from_dict(data))
+            except AssertionError:
+                check["status"] = "passed"
+            else:
+                check.update(status="failed", reason="wrong_material_identity_accepted")
+            identity_negatives.append(check)
     states = dict(Counter(r["status"] for r in rows))
     reviewed_passed = (
         states.get("passed", 0) == args.expected_rows
         and len(identity_negatives) == args.expected_identity_negatives
         and all(c["status"] == "passed" for c in negative_checks + identity_negatives)
+    )
+    gap_checks = dict(Counter(r["gap_check"] for r in rows if "gap_check" in r))
+    gaps_passed = (
+        args.check_source_gaps and gap_checks == {"passed": 285 - args.expected_rows}
+        and len(mapping["source_gaps"]) == len({
+            r["inputs"]["raw"]["CAS"] for r in rows if r["status"] == "unresolved"
+        })
+        and mapping["unresolved_source_rows"] == 285 - args.expected_rows
     )
     result = {
         "task": "NATIVE-CONV-22G1",
@@ -1350,6 +1462,8 @@ def main():
         "new_verified_source_mappings": states.get("passed", 0),
         "reviewed_block_passed": reviewed_passed,
         "complete_and_passed": states.get("passed", 0) == 285,
+        "source_gap_checks": gap_checks,
+        "functional_acceptance_passed": reviewed_passed and gaps_passed,
         "comparison_count": sum(len(r.get("metrics", {}).get("comparisons", [])) for r in rows),
         "negative_checks": negative_checks,
         "identity_negative_checks": identity_negatives,
@@ -1371,6 +1485,8 @@ def main():
         "SRS_fenchone_encoding": (
             str(args.srs_fenchone_directory) if args.srs_fenchone_directory else None
         ),
+        "primary_document_identities": documents,
+        "CRC84_document_identities": crc84_documents,
         "results": rows,
         "source_counts": dict(Counter(r["inputs"]["source"] for r in gaps)),
         "qualified_source_counts": dict(
@@ -1404,12 +1520,14 @@ def main():
                     "supplementary_CAMEO_source",
                     "remaining_original_deposits",
                     "remaining_original_encodings",
+                    "primary_document_identities",
+                    "CRC84_document_identities",
                 }
             },
             indent=2,
         )
     )
-    return not reviewed_passed
+    return not (reviewed_passed and (gaps_passed if args.check_source_gaps else True))
 
 
 if __name__ == "__main__":

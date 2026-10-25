@@ -189,7 +189,7 @@ class ChemWorldDomainServices:
             elapsed = dict(next_state.vessel_elapsed_s)
             elapsed[state.vessel_id] = (
                 state.vessel_elapsed_s[state.vessel_id]
-                + next_state.ledger.time_s - state.ledger.time_s
+                + (next_state.ledger.time_s - state.ledger.time_s)
             )
             thermal_fields = ("energy_jacket_J", "heat_reaction_J", "heat_loss_J")
             thermal_deltas = result.vessel_thermal_deltas

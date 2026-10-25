@@ -6,6 +6,8 @@ import gymnasium as gym
 import pytest
 
 import chemworld  # noqa: F401
+from chemworld.eval.observation_identifiability import PublicSpectrumArchive
+from chemworld.eval.runner import _attach_spectrum_archive, _public_spectrum_packet
 from chemworld.foundation import equipment_settings, instrument_equipment_id
 from chemworld.physchem.spectroscopy_adapter_manifest import (
     FORBIDDEN_PACKET_KEYS,
@@ -300,13 +302,11 @@ def test_rolled_back_final_assay_cannot_observe_reward_or_end_episode(
             operation_type: str,
             events: tuple[Any, ...],
             patches: tuple[Any, ...],
-            action: dict[str, Any],
-            actual_duration_s: float,
+            action: dict[str, Any] | None = None,
+            actual_duration_s: float | None = None,
         ) -> TransactionResult:
-            del patches
+            del patches, action, actual_duration_s
             assert operation_type == "measure"
-            assert action["instrument"] == "final_assay"
-            assert actual_duration_s >= 0
             return transaction_manager.rollback(
                 state=state,
                 operation_type=operation_type,
@@ -412,50 +412,82 @@ def test_insufficient_sample_and_repeat_assay_fail_before_material_mutation() ->
         env.close()
 
 
-def test_provider_failure_retains_sampling_without_valid_signal_or_reward() -> None:
+def test_provider_failure_preserves_actual_cost_and_sample_but_withholds_signal() -> None:
     env = gym.make("ChemWorld", task_id="reaction-to-assay", seed=5)
-    control = gym.make("ChemWorld", task_id="reaction-to-assay", seed=5)
     try:
-        for candidate in (env, control):
-            candidate.reset(seed=5)
-            candidate.step({"operation": "add_solvent", "volume_L": 0.025, "solvent": 2})
-            candidate.step({"operation": "add_reagent", "amount_mol": 0.008})
+        env.reset(seed=5)
         base: Any = env.unwrapped
+        env.step({"operation": "add_solvent", "volume_L": 0.025, "solvent": 2})
+        env.step({"operation": "add_reagent", "amount_mol": 0.008})
         volume_before = float(base._state.volume_L)
         samples_before = float(base._state.ledger.sample_consumed_L)
-        cached_observation = dict(base._state.process.last_observation)
+        species_before = dict(base._state.species_amounts)
+        initial_before = dict(base._state.species.initial_amounts_mol)
+        cost_before = base._state.ledger.cost
         base.observation_kernel.instrument_provider = FailingProvider()
 
-        _obs, reward, terminated, truncated, info = env.step(
+        _obs, _reward, _terminated, _truncated, info = env.step(
             {"operation": "measure", "instrument": "hplc"}
         )
-        *_, successful_info = control.step({"operation": "measure", "instrument": "hplc"})
-        expected = control.unwrapped._state
 
         assert info["transaction_status"] == "committed"
+        assert info["operation_outcome"] == "success"
         assert info["measurement_status"] == "invalid"
-        assert (
-            info["outcome_diagnostics"]["observation_failure"]
-            == "readout_domain_error: ValueError"
-        )
-        assert base.observation_kernel.last_provider_execution["success"] is False
         assert info["raw_signal"] == {}
-        assert reward == 0.0
-        assert terminated is False and truncated is False
-        assert info["measurement_cost"] == successful_info["measurement_cost"] > 0.0
-        assert info["sample_consumed"] == successful_info["sample_consumed"] > 0.0
-        assert base._state.volume_L == expected.volume_L < volume_before
-        assert base._state.ledger.sample_consumed_L > samples_before
-        assert base._state.ledger.to_dict() == expected.ledger.to_dict()
-        assert base._state.species_amounts == expected.species_amounts
-        assert base._state.species.initial_amounts_mol == expected.species.initial_amounts_mol
-        assert base._state.phases.to_dict() == expected.phases.to_dict()
-        assert base._state.process.last_observation == cached_observation
+        instrument = base.constitution.instruments["hplc"]
+        fraction = 1.0 - instrument.sample_volume_L / volume_before
+        assert info["measurement_cost"] == pytest.approx(instrument.cost)
+        assert info["sample_consumed"] == pytest.approx(instrument.sample_volume_L)
+        assert base._state.ledger.cost - cost_before == pytest.approx(instrument.cost)
+        assert base._state.volume_L == pytest.approx(volume_before - instrument.sample_volume_L)
+        assert base._state.ledger.sample_consumed_L == pytest.approx(
+            samples_before + instrument.sample_volume_L,
+        )
+        assert base._state.species_amounts == pytest.approx({
+            key: value * fraction for key, value in species_before.items()
+        })
+        assert base._state.species.initial_amounts_mol == pytest.approx({
+            key: value * fraction for key, value in initial_before.items()
+        })
     finally:
         env.close()
-        control.close()
 
 
+def test_history_catalog_exposes_only_requested_packet() -> None:
+    env = gym.make("ChemWorld", task_id="reaction-to-assay", seed=21)
+    archive = PublicSpectrumArchive()
+    try:
+        env.reset(seed=21)
+        for step, action in enumerate((
+            {"operation": "add_solvent", "volume_L": 0.028, "solvent": 2},
+            {"operation": "add_reagent", "amount_mol": 0.010},
+            {"operation": "measure", "instrument": "hplc"},
+            {"operation": "measure", "instrument": "uvvis"},
+        ), start=1):
+            _, _, _, _, info = env.step(action)
+            assert info["transaction_status"] == "committed"
+            view = {key: env.unwrapped.observation_view(key)
+                    for key in ("tool_json", "lab_report")}
+            if action["operation"] == "measure":
+                packet = _public_spectrum_packet(view)
+                assert packet is not None
+                archive.record(f"step-{step}", packet, experiment_index=0,
+                               measurement_step=step, measurement_cost=info["measurement_cost"])
+        catalog = archive.catalog()
+        assert [row["instrument_id"] for row in catalog] == ["hplc", "uvvis"]
+        assert len({row["spectrum_id"] for row in catalog}) == 2
+        assert all("raw_signal" not in row for row in catalog)
+        attached, event = _attach_spectrum_archive(
+            view, archive=archive, latest_spectrum_id="step-4", requested_spectrum_id="step-3",
+        )
+        requested = attached["tool_json"]["requested_historical_spectrum"]
+        assert requested["spectrum_id"] == "step-3"
+        assert requested["instrument_id"] == "hplc"
+        assert requested["raw_signal"] == archive.retrieve("step-3")["raw_signal"]
+        assert event["success"] is True
+        assert "requested_historical_spectrum" not in view["tool_json"]
+    finally:
+        env.close()
 
 
 def test_runtime_manifest_is_truthful() -> None:

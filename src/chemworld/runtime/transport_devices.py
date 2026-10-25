@@ -145,6 +145,7 @@ class TransportRuntime:
     supported_operations = ("set_flow_rate", "run_flow", "wait")
 
     def __init__(self, composition=None):
+        from chemworld.runtime.activated_sludge import ActivatedSludgeAdapter
         from chemworld.runtime.aqueous_adsorption import AqueousAdsorptionAdapter
         from chemworld.runtime.cation_exchange import CationExchangeAdapter
         from chemworld.runtime.finite_heat_recovery import FiniteHeatRecoveryAdapter
@@ -163,6 +164,7 @@ class TransportRuntime:
         self.aqueous_adsorption = AqueousAdsorptionAdapter(composition)
         self.cation_exchange = CationExchangeAdapter(composition)
         self.suspension_treatment = SuspensionTreatmentAdapter(composition)
+        self.activated_sludge = ActivatedSludgeAdapter(composition)
         self.adapters = (
             self.treatment, self.heat_recovery, self.molecular_cascade,
             self.molecular_flash_separator,
@@ -170,6 +172,7 @@ class TransportRuntime:
             self.aqueous_adsorption,
             self.cation_exchange,
             self.suspension_treatment,
+            self.activated_sludge,
         )
 
     def supports(self, state):
@@ -192,6 +195,8 @@ class TransportRuntime:
             self.cation_exchange.validate_state(state)
         if self.suspension_treatment.supports(state):
             self.suspension_treatment.validate_state(state)
+        if self.activated_sludge.supports(state):
+            self.activated_sludge.validate_state(state)
 
     def shared_system(self, state, strategy_id):
         for adapter in self.adapters:

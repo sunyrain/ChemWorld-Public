@@ -14,8 +14,8 @@ from chemworld.physchem.molecular_graph import (
     MolecularGraph,
     enumerate_allylic_resonance,
     find_pattern_matches,
-    molecular_isomorphisms,
 )
+from chemworld.physchem.molecular_identity import _relabel_graph, molecular_identity_mapping
 from chemworld.physchem.reaction_family import ReactionFamily, apply_reaction_recipe
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.reaction_network_specs import RateLawSpec, ReactionSpec, SpeciesSpec
@@ -89,17 +89,12 @@ class GenerationReport:
 def _match(
     left: MolecularGraph, right: MolecularGraph, policy: GenerationPolicy
 ) -> dict[str, str] | None:
-    variants: tuple[MolecularGraph, ...] = (left,)
-    if policy.allylic_resonance:
-        resonance = enumerate_allylic_resonance(left, maximum_forms=policy.maximum_resonance_forms)
-        if not resonance.complete:
-            raise ValueError("resonance_identity_search_truncated")
-        variants = resonance.forms
-    for variant in variants:
-        mapping = next(molecular_isomorphisms(variant, right), None)
-        if mapping is not None:
-            return mapping
-    return None
+    return molecular_identity_mapping(
+        left,
+        right,
+        allylic_resonance=policy.allylic_resonance,
+        maximum_forms=policy.maximum_resonance_forms,
+    )
 
 
 def _path_key(
@@ -224,11 +219,19 @@ def generate_reactions(
                             }
                         )
                         continue
-                    products, mappings = [], []
+                    products, mappings, product_forms = [], [], []
                     try:
                         for i, graph in enumerate(generated.products):
                             key, mapping = register(graph)
                             products.append(key)
+                            if policy.allylic_resonance:
+                                product_forms.append(
+                                    {
+                                        "species_id": key,
+                                        "occurrence": i,
+                                        "graph": _relabel_graph(graph, mapping).to_dict(),
+                                    }
+                                )
                             for atom in graph.atoms:
                                 occurrence, original_atom = generated.original_atoms[atom.atom_id]
                                 mappings.append(
@@ -268,6 +271,12 @@ def generate_reactions(
                         continue
                     seen_paths.add(path_key)
                     path = {"template_matches": list(matches), "atom_mapping": mappings}
+                    if policy.allylic_resonance:
+                        path["reactant_forms"] = [
+                            {"species_id": key, "occurrence": i, "graph": graph.to_dict()}
+                            for i, (key, graph) in enumerate(zip(assignment, graphs, strict=True))
+                        ]
+                        path["product_forms"] = product_forms
                     if generated.topology_matches:
                         path["topology"] = list(generated.topology_matches)
                     if identity in candidates:
@@ -370,6 +379,58 @@ class KineticsBinding:
             raise ValueError("kinetic data need source version and license")
 
 
+def _bound_resonance_path(
+    path: Mapping[str, Any],
+    names: Mapping[str, str],
+    atom_maps: Mapping[str, Mapping[str, str]],
+) -> dict[str, Any]:
+    """Bind every occurrence to library nuclei without replacing its Lewis form."""
+    reactants = {row["occurrence"]: row["species_id"] for row in path["reactant_forms"]}
+    rows = [
+        {
+            **row,
+            "reactant_species": names[row["reactant_species"]],
+            "reactant_atom": atom_maps[row["reactant_species"]][row["reactant_atom"]],
+            "product_species": names[row["product_species"]],
+            "product_atom": atom_maps[row["product_species"]][row["product_atom"]],
+        }
+        for row in path["atom_mapping"]
+    ]
+    result = {
+        **path,
+        "atom_mapping": rows,
+        "template_matches": [
+            {label: atom_maps[reactants[i]][atom] for label, atom in match.items()}
+            for i, match in enumerate(path["template_matches"])
+        ],
+    }
+    for side in ("reactant_forms", "product_forms"):
+        result[side] = [
+            {
+                **row,
+                "species_id": names[row["species_id"]],
+                "graph": _relabel_graph(
+                    MolecularGraph.from_dict(row["graph"]), atom_maps[row["species_id"]]
+                ).to_dict(),
+            }
+            for row in path[side]
+        ]
+    if "topology" in path:
+        topology = []
+        for record in path["topology"]:
+            mapping = atom_maps[reactants[record["reactant_index"]]]
+            exo = record["exocyclic_double_bond"]
+            topology.append(
+                {
+                    **record,
+                    "atom_path": [mapping[a] for a in record["atom_path"]],
+                    "exocyclic_double_bond": [mapping[a] for a in exo] if exo else None,
+                }
+            )
+        result["topology"] = topology
+    return result
+
+
 def bind_generated_network(
     report: GenerationReport,
     species_data: Sequence[SpeciesDataBinding],
@@ -389,7 +450,7 @@ def bind_generated_network(
         raise ValueError("generated network requires at least one actual net reaction")
     if not isfinite(reference_temperature_K) or reference_temperature_K <= 0:
         raise ValueError("enthalpy reference temperature must be explicit and positive")
-    bound, thermos, nodes = {}, {}, {}
+    bound, thermos, nodes, atom_maps = {}, {}, {}, {}
     for key, graph in report.species.items():
         matches = [b for b in species_data if _match(graph, b.graph, report.policy) is not None]
         if len(matches) != 1:
@@ -397,11 +458,17 @@ def bind_generated_network(
                 f"species {key} requires exactly one graph-matched identity/thermochemistry binding"
             )
         binding = matches[0]
+        if report.policy.allylic_resonance:
+            mapping = _match(graph, binding.graph, report.policy)
+            assert mapping is not None  # The unique binding was matched above.
+            atom_maps[key] = mapping
         bound[key] = replace(
             binding.species,
             metadata={
                 **binding.species.metadata,
-                "generated_graph": graph.to_dict(),
+                "generated_graph": (
+                    binding.graph if report.policy.allylic_resonance else graph
+                ).to_dict(),
                 "parameter_source": binding.source.to_dict(),
             },
         )
@@ -461,6 +528,13 @@ def bind_generated_network(
             }
             for path in generated.paths
         ]
+        if report.policy.allylic_resonance:
+            native_paths = [
+                _bound_resonance_path(
+                    path, {key: value.species_id for key, value in bound.items()}, atom_maps
+                )
+                for path in generated.paths
+            ]
         reaction = ReactionSpec(
             generated.reaction_id,
             side(generated.reactants) + " => " + side(generated.products),

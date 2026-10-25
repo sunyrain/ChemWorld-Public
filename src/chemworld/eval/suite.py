@@ -9,7 +9,8 @@ from typing import Any
 
 from chemworld.data.logging import load_jsonl
 from chemworld.eval.result_artifacts import build_verified_evaluation_result
-from chemworld.eval.runner import EvaluationPolicy, make_agent, run_agent
+from chemworld.eval.runner import EvaluationPolicy, run_agent
+from chemworld.legacy.agent_registry import make_agent
 
 
 def run_suite(

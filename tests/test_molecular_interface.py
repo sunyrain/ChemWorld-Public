@@ -44,6 +44,17 @@ def test_binary_free_profile_has_curved_density_path():
     fractions = (profile-np.array(model.left))/(np.array(model.right)-model.left)
     assert np.max(abs(fractions[:, 0]-fractions[:, 1])) > .04
     assert result.diagnostics["stationarity_residual_RT"] < 1e-5
+    # Reconstruct every unconstrained Euler-Lagrange equation analytically.
+    # A converged translation-pinned initialization alone must not be accepted.
+    dz = np.diff(result.positions_m)
+    weights = (dz[:-1]+dz[1:])/2
+    c = profile[1:-1]
+    lo, hi, a = np.array(model.left), np.array(model.right), np.array(model.amplitudes)
+    bulk_gradient = 2*a*(c-lo)*(hi-c)*(hi+lo-2*c)
+    slopes = np.diff(profile, axis=0)/dz[:, None]
+    force = 1e-18*(slopes[:-1]-slopes[1:])/weights[:, None]
+    assert np.max(abs(bulk_gradient+force))/(300*model.gas_constant_J_mol_K) <= 1e-7
+    assert result.diagnostics["root_iterations_total"] <= 500
 
 
 def test_invalid_coexistence_influence_and_numerical_failure():

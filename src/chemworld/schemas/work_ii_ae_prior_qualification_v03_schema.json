@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "chemworld-work-ii-ae-locus-qualification-contract-0.3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "contract_id", "status", "development_only",
+    "experiment_note", "participant_provider_calls", "participant_outcomes_read",
+    "coverage", "classifier", "thresholds", "selection_rule", "noise",
+    "cohorts", "denominators", "tasks"
+  ],
+  "properties": {
+    "schema_version": {"const": "chemworld-work-ii-ae-locus-qualification-contract-0.3"},
+    "contract_id": {"const": "work-ii-ae-v0.3-locus-development"},
+    "status": {"const": "design_only_not_executed"},
+    "development_only": {"const": true},
+    "experiment_note": {"type": "string", "minLength": 1},
+    "participant_provider_calls": {"const": 0},
+    "participant_outcomes_read": {"const": false},
+    "coverage": {"type": "object"},
+    "classifier": {"type": "object"},
+    "thresholds": {"type": "object"},
+    "selection_rule": {"type": "object"},
+    "noise": {"type": "object"},
+    "cohorts": {
+      "type": "object",
+      "required": ["classifier_fit", "classifier_validation", "prospective_screen", "confirmation", "future_formal_reserved"]
+    },
+    "denominators": {"type": "object"},
+    "tasks": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_id", "campaign_config", "loci"],
+        "properties": {
+          "task_id": {"type": "string"},
+          "campaign_config": {"type": "string"},
+          "loci": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["locus_id", "scientific_priority", "target_field", "measurement_stage_id", "gate_endpoint_id", "classifier_secondary_endpoint_ids", "non_gating_secondary_metric_ids", "descriptor_whitelist"],
+              "properties": {
+                "locus_id": {"type": "string", "pattern": "^ae-locus-"},
+                "scientific_priority": {"type": "integer", "minimum": 1, "maximum": 2},
+                "target_field": {"type": "string"},
+                "measurement_stage_id": {"enum": ["final-assay", "reaction-post-quench-hplc", "partition-post-settle-pre-separation-hplc"]},
+                "gate_endpoint_id": {"type": "string"},
+                "classifier_secondary_endpoint_ids": {"type": "array", "items": {"type": "string"}},
+                "non_gating_secondary_metric_ids": {"type": "array", "items": {"type": "string"}},
+                "descriptor_whitelist": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

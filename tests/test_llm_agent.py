@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from chemworld.agents.llm import LLMCompletionReplayAgent, LLMReplayAgent
 from chemworld.data.logging import load_jsonl
 from chemworld.data.records import trajectory_value
 from chemworld.eval.metrics import evaluate_records
 from chemworld.eval.runner import run_agent
+from chemworld.legacy.agents.llm import LLMCompletionReplayAgent, LLMReplayAgent
 
 PUBLIC_REPLAY_FIXTURE = (
     Path(__file__).resolve().parents[1]

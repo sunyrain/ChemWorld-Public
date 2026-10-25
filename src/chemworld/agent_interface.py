@@ -46,8 +46,8 @@ from chemworld.world.operations import PUBLIC_OBSERVATION_KEYS as OBSERVATION_KE
 
 PUBLIC_ACTION_SCHEMA_VERSION = "chemworld-public-action-affordance-0.2"
 
-# Synchronous public-view builders never execute actions. Reuse the verified
-# resource snapshot and derived affordances only within that read, then discard
+# Synchronous public-view builders never execute actions. Reuse the bounded
+# resource state and derived affordances only within that read, then discard
 # them even on exceptions. Action execution never consumes this view context.
 # ContextVar isolates concurrent callers; nested calls for another env/state
 # receive their own scope. Nothing is cached by state identity across requests.
@@ -90,6 +90,8 @@ def _view_affordances(base):
 
 
 def _campaign_snapshot(base: Any, ledger: Any) -> dict[str, Any]:
+    """Return the bounded live state used by public affordance queries."""
+
     active = _RESOURCE_READ.get()
     if (
         active is None
@@ -97,10 +99,10 @@ def _campaign_snapshot(base: Any, ledger: Any) -> dict[str, Any]:
         or active[1] is not ledger
         or active[2] is not getattr(base, "_state", None)
     ):
-        return ledger.snapshot()
+        return ledger.bounded_state()
     cache = active[3]
     if "snapshot" not in cache:
-        cache["snapshot"] = ledger.snapshot()
+        cache["snapshot"] = ledger.bounded_state()
     return cache["snapshot"]
 
 
@@ -516,6 +518,23 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
             }
         ]
     electrical_fields = None
+    if operation == 'set_sde_parameters' and state is not None:
+        from chemworld.physchem.stochastic_sde import sde_model
+
+        composition = getattr(getattr(base, 'compiled_composition', None), 'spec', None)
+        physics = None if composition is None else composition.physics
+        spec = None if physics is None else physics.models_of('stochastic_sde').get(state.vessel_id)
+        if spec is not None:
+            model = sde_model(physics.network, spec, state.process.stochastic_continuation)
+            for field in fields:
+                if field['field'] == 'values':
+                    field.update(properties={name: {
+                        'type': 'number', 'minimum': metadata['bounds'][0],
+                        'maximum': metadata['bounds'][1], 'unit': metadata['unit'],
+                        'dimension': metadata['dimension'],
+                        'current_value': model.control_values[name],
+                    } for name, metadata in model.control_metadata.items()},
+                    additionalProperties=False, partial_updates=True)
     if operation in {"configure_electrical_control", "queue_electrical_stage"}:
         from chemworld.runtime.control_program import electrical_device
 
@@ -983,7 +1002,7 @@ def _campaign_remaining(base: Any) -> dict[str, Any]:
                     existing = global_values.get(key)
                     global_values[key] = min(existing, value) if existing is not None else value
 
-        intersect(result, local.snapshot()["state"]["remaining"])
+        intersect(result, local.bounded_state()["state"]["remaining"])
     return result
 
 
@@ -1272,6 +1291,29 @@ def _default_task_prompt_profile(info: dict[str, Any], base: Any) -> dict[str, A
 
 
 def _task_prompt_profile(info: dict[str, Any], base: Any) -> dict[str, Any]:
+    if info.get("scoring_contract", {}).get("score_family") == "unscored":
+        return {
+            "task_goal": info.get("objective") or "Explore the declared physical environment.",
+            "success_criteria": [
+                "Pursue the user's research objective with the declared "
+                "operations and instruments.",
+                "The user defines any reward, evaluation and stopping decision within the budget.",
+            ],
+            "constraints": [
+                f"Episode mode: {info.get('episode_mode')}.",
+                "Operations must satisfy the current action schemas and available resources.",
+                "Measurements may consume time, sample or cost; history reads do not acquire data.",
+            ],
+            "measurement_policy": (
+                "Use native observation channels with their units, quality and sample times. "
+                "Missing measurements are not zero; cached observations are not new evidence."
+            ),
+            "recommended_strategy": [
+                "Choose experiments and measurements for the user's question.",
+                "Use acquired observations and remaining resources to decide what to do next.",
+            ],
+            "failure_modes": ["invalid operation", "precondition failure", "resource exhaustion"],
+        }
     task_id = str(info.get("task_id") or "")
     if (
         task_id == "electrochemical-conversion"
@@ -1363,19 +1405,21 @@ def _render_task_prompt_text(
     success_metrics: list[str],
     operation_groups: dict[str, list[str]],
     experiment_lifecycle: dict[str, str],
+    unscored: bool,
+    submission_requirements: list[str],
 ) -> str:
     group_lines = [
         f"  - {group}: {', '.join(operations)}" for group, operations in operation_groups.items()
     ]
     lines = [
-        f"Task: {task_id or 'ad-hoc ChemWorld task'}",
+        f"{'Environment' if unscored else 'Task'}: {task_id or 'ad-hoc ChemWorld task'}",
         f"Goal: {profile['task_goal']}",
         (
             f"Objective: {objective}; budget: {budget} operations; "
             f"episode_mode: {episode_mode}; safety_limit: {safety_limit}."
         ),
         "Hidden information policy: " + HIDDEN_INFORMATION_POLICY,
-        "Success criteria:",
+        "Environment use:" if unscored else "Success criteria:",
         *[f"  - {item}" for item in profile["success_criteria"]],
         "Constraints:",
         *[f"  - {item}" for item in profile["constraints"]],
@@ -1386,12 +1430,18 @@ def _render_task_prompt_text(
         "  - operation groups:",
         *group_lines,
         f"  - all operations: {', '.join(allowed_operations)}",
-        f"Success metrics: {', '.join(success_metrics) if success_metrics else 'task score'}.",
+        (
+            "Reward and evaluation: user-defined. Replay checks do not assess agent performance."
+            if unscored
+            else "Success metrics: "
+            + (", ".join(success_metrics) if success_metrics else "task score") + "."
+        ),
         f"Measurement policy: {profile['measurement_policy']}",
         "Recommended strategy:",
         *[f"  - {item}" for item in profile["recommended_strategy"]],
-        "Submission requirements: " + ", ".join(SUBMISSION_REQUIREMENTS) + ".",
     ]
+    if submission_requirements:
+        lines.append("Submission requirements: " + ", ".join(submission_requirements) + ".")
     return "\n".join(lines)
 
 
@@ -1400,6 +1450,8 @@ def task_prompt(env: Any) -> dict[str, Any]:
 
     base = _base_env(env)
     info = base.task_info()
+    unscored = info.get("scoring_contract", {}).get("score_family") == "unscored"
+    submission_requirements = [] if unscored else list(SUBMISSION_REQUIREMENTS)
     allowed_operations = list(info.get("allowed_operations", []))
     allowed_instruments = list(info.get("allowed_instruments", []))
     success_metrics = list(
@@ -1431,6 +1483,8 @@ def task_prompt(env: Any) -> dict[str, Any]:
         success_metrics=success_metrics,
         operation_groups=operation_groups,
         experiment_lifecycle=experiment_lifecycle,
+        unscored=unscored,
+        submission_requirements=submission_requirements,
     )
     return {
         "text": text + "\nRisk signal: " + info["risk_signal_contract"]["interpretation"],
@@ -1447,7 +1501,9 @@ def task_prompt(env: Any) -> dict[str, Any]:
         "allowed_instruments": info.get("allowed_instruments", []),
         "success_metrics": success_metrics,
         "safety_limit": info.get("safety_limit"),
-        "threshold": _task_spec_value(base, "threshold", info.get("threshold")),
+        "threshold": None if unscored else _task_spec_value(
+            base, "threshold", info.get("threshold")
+        ),
         "termination_policy": _task_spec_value(
             base,
             "termination_policy",
@@ -1479,8 +1535,10 @@ def task_prompt(env: Any) -> dict[str, Any]:
         "recommended_strategy": list(profile["recommended_strategy"]),
         "failure_modes": list(profile["failure_modes"]),
         "hidden_information_policy": HIDDEN_INFORMATION_POLICY,
-        "submission_requirements": list(SUBMISSION_REQUIREMENTS),
-        "prompt_version": "chemworld-agent-task-prompt-0.3",
+        "submission_requirements": submission_requirements,
+        "prompt_version": (
+            "chemworld-environment-prompt-0.1" if unscored else "chemworld-agent-task-prompt-0.3"
+        ),
     }
 
 

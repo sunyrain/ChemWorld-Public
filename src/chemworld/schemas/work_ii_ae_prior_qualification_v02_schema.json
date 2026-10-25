@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "chemworld-work-ii-ae-prior-distinguishability-contract-0.2",
+  "title": "Work II A-E prior distinguishability v0.2 contract",
+  "type": "object",
+  "required": ["schema_version", "contract_id", "status", "experiment_note", "experiment_note_sha256", "policy", "noise", "thresholds", "cohorts", "denominators", "tasks"],
+  "properties": {
+    "schema_version": {"const": "chemworld-work-ii-ae-prior-distinguishability-contract-0.2"},
+    "development_only": {"const": true},
+    "participant_provider_calls": {"const": 0},
+    "participant_outcomes_read": {"const": false},
+    "experiment_note_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "policy": {
+      "type": "object",
+      "required": ["policy_id", "inputs", "forbidden_inputs", "policy_replicates_per_world", "rounds_per_policy_replicate", "planned_unique_recipes_per_policy_replicate", "category_order_by_anchor", "nuisance_design"]
+    },
+    "noise": {
+      "type": "object",
+      "required": ["covariance_between_distinct_recipe_executions", "seed_namespace", "seed_coordinate_fields", "left_right_seed_and_namespace_must_differ", "replicates_per_anchor_category"]
+    },
+    "cohorts": {
+      "type": "object",
+      "required": ["construction", "heldout_qualification"]
+    },
+    "denominators": {
+      "type": "object",
+      "required": ["primary_executions_total", "construction_primary_executions", "heldout_qualification_primary_executions", "tolerance_zero_exact_replay_checks"]
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["task_id", "campaign_config", "campaign_config_sha256", "target_field", "descriptor_permutation", "support_metric_ids", "negative_control_metric_ids"],
+        "properties": {
+          "campaign_config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

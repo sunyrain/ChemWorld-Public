@@ -2,13 +2,15 @@
 
 Equation reference: PyBaMM BasicSPM (BSD-3-Clause), commit
 a4ea370d9ff844e586907cea7109c38f36ce3660. This independent implementation uses
-ChemWorld inventories, diffusion, BV constants and event integration. Parameters
-are synthetic; optional caloric closure derives from the same OCV state function.
+ChemWorld inventories, diffusion, BV constants and event integration. Default
+parameters are synthetic; explicit source projections retain their input binding.
+Optional caloric closure derives from the same OCV state function.
 """
 
 from dataclasses import asdict, dataclass, replace
 from functools import cached_property
 from math import asinh, isfinite, pi, sqrt
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.optimize import brentq
@@ -48,6 +50,9 @@ from chemworld.physchem.residual_system import (
     RootPolicy,
     solve_steady_residual,
 )
+
+if TYPE_CHECKING:
+    from chemworld.physchem.battery_parameter_sets import BatteryParameterBinding
 
 F = FARADAY_C_PER_MOL
 R = R_J_PER_MOL_K
@@ -149,6 +154,9 @@ class BatterySPMSpec:
     negative_ocp: ElectrodeOCPSpec | None = None
     positive_ocp: ElectrodeOCPSpec | None = None
     plating: LithiumPlatingSpec | None = None
+    parameter_binding: "BatteryParameterBinding | None" = None
+    cell_envelope_volume_m3: float | None = None
+    kinetics_stoichiometry_clip: float | None = None
 
     def __post_init__(self):
         if self.numerical_form not in {"ode", "residual"}:
@@ -254,8 +262,40 @@ class BatterySPMSpec:
 
             validate_plating_configuration(self)
 
+        if self.cell_envelope_volume_m3 is not None:
+            volume = self.cell_envelope_volume_m3
+            if (isinstance(volume, bool) or not isfinite(volume)
+                    or volume < self.negative.active_volume_m3 + self.positive.active_volume_m3):
+                raise ValueError("cell envelope volume must contain both active material volumes")
+        if self.kinetics_stoichiometry_clip is not None:
+            clip = self.kinetics_stoichiometry_clip
+            if (isinstance(clip, bool) or not isfinite(clip)
+                    or not 0 < clip < self.surface_margin):
+                raise ValueError("kinetics trial clip must be inside the declared stopping margin")
+        source_options = (self.cell_envelope_volume_m3 is not None
+                          or self.kinetics_stoichiometry_clip is not None
+                          or self.parameter_binding is not None)
+        if source_options and (
+                family != "SPM" or self.thermal is not None or self.sei is not None
+                or self.plating is not None or self.has_directional_ocp
+                or self.numerical_form != "residual"):
+            raise ValueError(
+                "source projection options require single-valued no-side isothermal SPM")
+        if self.parameter_binding is not None:
+            from chemworld.physchem.battery_parameter_sets import BatteryParameterBinding
+
+            binding = self.parameter_binding
+            if isinstance(binding, dict):
+                binding = BatteryParameterBinding.from_dict(binding)
+                object.__setattr__(self, "parameter_binding", binding)
+            if not isinstance(binding, BatteryParameterBinding):
+                raise ValueError("battery parameters require an explicit source binding")
+            binding.validate_projection(self)
+
     @property
     def volume_l(self):
+        if self.cell_envelope_volume_m3 is not None:
+            return self.cell_envelope_volume_m3 * 1000
         if self.plating is not None:
             return (self.plating.native_parameters["negative_electrode_volume_m3"]
                     + self.positive.active_volume_m3) * 1000
@@ -265,6 +305,10 @@ class BatterySPMSpec:
 
     @property
     def model_id(self):
+        if self.parameter_binding is not None:
+            binding = self.parameter_binding
+            return (f"source-SPM:{binding.parameter_set_id}@{binding.source_version}:"
+                    f"{binding.projection_id}")
         if self.plating is not None:
             return "synthetic-SPM-plating-v1"
         return "synthetic-SPM-v1" if self.electrolyte is None else self.electrolyte.model_version
@@ -312,7 +356,16 @@ class BatterySPMSpec:
     def to_dict(self):
         # OCP tables contain immutable mappings; serialize their declared codec,
         # not dataclasses' private implementation caches.
-        result = asdict(replace(self, negative_ocp=None, positive_ocp=None, plating=None))
+        result = asdict(replace(
+            self, negative_ocp=None, positive_ocp=None, plating=None, parameter_binding=None
+        ))
+        for name in ("cell_envelope_volume_m3", "kinetics_stoichiometry_clip"):
+            if getattr(self, name) is None:
+                result.pop(name)
+        if self.parameter_binding is None:
+            result.pop("parameter_binding")
+        else:
+            result["parameter_binding"] = self.parameter_binding.to_dict()
         if self.plating is None:
             result.pop("plating")
         else:
@@ -437,6 +490,12 @@ def battery_side_rate(spec, state):
 
 
 def battery_particle_flux(spec, state, name, current_A):
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        raise ValueError("DFN half-cell uses per-position reaction currents, not one particle flux")
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        raise ValueError(
+            "collector SPM uses per-position reaction currents; legacy particle flux is unsupported"
+        )
     if getattr(spec, "plating", None) is not None:
         from chemworld.physchem.battery_plating import plating_particle_flux
 
@@ -455,6 +514,10 @@ def battery_spec_from_dict(value):
     family = value.get("model_family")
     if family is None:
         return BatterySPMSpec(**value)
+    if family == "half-cell-dfn-isothermal-v1":
+        from chemworld.physchem.battery_half_cell_dfn import BatteryHalfCellDFNSpec
+
+        return BatteryHalfCellDFNSpec.from_dict(value)
     if family == "split-ocvr-isothermal-v1":
         from chemworld.physchem.battery_split_ocvr import BatterySplitOCVRSpec
 
@@ -463,6 +526,14 @@ def battery_spec_from_dict(value):
         from chemworld.physchem.battery_lead_acid import BatteryLeadAcidSpec
 
         return BatteryLeadAcidSpec.from_dict(value)
+    if family == "composite-dfn-isothermal-v1":
+        from chemworld.physchem.battery_dfn_composite import BatteryCompositeDFNSpec
+
+        return BatteryCompositeDFNSpec.from_dict(value)
+    if family == "collector-spm-isothermal-v1":
+        from chemworld.physchem.battery_collector_spm import BatteryCollectorSPMSpec
+
+        return BatteryCollectorSPMSpec.from_dict(value)
     if family == "newman-tobias-isothermal-v1":
         from chemworld.physchem.battery_newman_tobias import BatteryNewmanTobiasSpec
 
@@ -491,6 +562,10 @@ def battery_spec_from_dict(value):
 
 
 def battery_readout(spec, state, current_A):
+    if getattr(spec, "parameter_binding", None) is not None and (
+            abs(state.temperature_K - spec.temperature_K) > 1e-8
+            or abs(state.volume_L - spec.volume_l) > 1e-12):
+        raise ValueError("source SPM readout requires its declared fixed temperature and volume")
     if getattr(spec, "plating", None) is not None:
         from chemworld.physchem.battery_plating import plating_readout
 
@@ -503,6 +578,14 @@ def battery_readout(spec, state, current_A):
         from chemworld.physchem.battery_lead_acid import lead_acid_readout
 
         return lead_acid_readout(spec, state, current_A)
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        from chemworld.physchem.battery_dfn_composite import composite_dfn_readout
+
+        return composite_dfn_readout(spec, state, current_A)
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        from chemworld.physchem.battery_collector_spm import collector_spm_readout
+
+        return collector_spm_readout(spec, state, current_A)
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         from chemworld.physchem.battery_newman_tobias import newman_tobias_readout
 
@@ -519,6 +602,10 @@ def battery_readout(spec, state, current_A):
         from chemworld.physchem.battery_composite import composite_readout
 
         return composite_readout(spec, state, current_A)
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        from chemworld.physchem.battery_half_cell_dfn import half_cell_dfn_readout
+
+        return half_cell_dfn_readout(spec, state, current_A)
     if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
         from chemworld.physchem.battery_half_cell import half_cell_readout
 
@@ -542,7 +629,9 @@ def battery_readout(spec, state, current_A):
         values[name] = theta
         # Smooth finite trial extension beyond the stopping surfaces. Accepted
         # states/events use the actual, unclipped theta; no missing Li is repaired.
-        trial_theta = float(np.clip(theta, spec.surface_margin / 2, 1 - spec.surface_margin / 2))
+        clip = (spec.surface_margin / 2 if spec.kinetics_stoichiometry_clip is None
+                else spec.kinetics_stoichiometry_clip)
+        trial_theta = float(np.clip(theta, clip, 1 - clip))
         j0 = particle.exchange_current_scale_A_m2 * sqrt(trial_theta * (1 - trial_theta))
         if spec.electrolyte is not None:
             j0 *= spec.electrolyte.kinetics_factor(state, name)
@@ -597,6 +686,14 @@ def battery_control_mode(spec, state, program):
         from chemworld.physchem.battery_lead_acid import lead_acid_control_mode
 
         return lead_acid_control_mode(spec, state, program)
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        from chemworld.physchem.battery_dfn_composite import composite_dfn_control_mode
+
+        return composite_dfn_control_mode(spec, state, program)
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        from chemworld.physchem.battery_collector_spm import collector_spm_control_mode
+
+        return collector_spm_control_mode(spec, state, program)
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         from chemworld.physchem.battery_newman_tobias import newman_tobias_control_mode
 
@@ -613,6 +710,10 @@ def battery_control_mode(spec, state, program):
         from chemworld.physchem.battery_composite import composite_control_mode
 
         return composite_control_mode(spec, state, program)
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        from chemworld.physchem.battery_half_cell_dfn import half_cell_dfn_control_mode
+
+        return half_cell_dfn_control_mode(spec, state, program)
     if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
         from chemworld.physchem.battery_half_cell import half_cell_control_mode
 
@@ -663,6 +764,14 @@ def battery_algebraic(spec, program):
         from chemworld.physchem.battery_lead_acid import lead_acid_algebraic
 
         return lead_acid_algebraic(spec, program)
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        from chemworld.physchem.battery_dfn_composite import composite_dfn_algebraic
+
+        return composite_dfn_algebraic(spec, program)
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        from chemworld.physchem.battery_collector_spm import collector_spm_algebraic
+
+        return collector_spm_algebraic(spec, program)
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         from chemworld.physchem.battery_newman_tobias import newman_tobias_algebraic
 
@@ -679,6 +788,10 @@ def battery_algebraic(spec, program):
         from chemworld.physchem.battery_composite import composite_algebraic
 
         return composite_algebraic(spec, program)
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        from chemworld.physchem.battery_half_cell_dfn import half_cell_dfn_algebraic
+
+        return half_cell_dfn_algebraic(spec, program)
     if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
         from chemworld.physchem.battery_half_cell import half_cell_algebraic
 
@@ -727,6 +840,14 @@ def battery_control_current(spec, state, program):
         from chemworld.physchem.battery_lead_acid import lead_acid_control_current
 
         return lead_acid_control_current(spec, state, program)
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        from chemworld.physchem.battery_dfn_composite import composite_dfn_control_current
+
+        return composite_dfn_control_current(spec, state, program)
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        from chemworld.physchem.battery_collector_spm import collector_spm_control_current
+
+        return collector_spm_control_current(spec, state, program)
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         from chemworld.physchem.battery_newman_tobias import newman_tobias_control_current
 
@@ -743,6 +864,10 @@ def battery_control_current(spec, state, program):
         from chemworld.physchem.battery_composite import composite_control_current
 
         return composite_control_current(spec, state, program)
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        from chemworld.physchem.battery_half_cell_dfn import half_cell_dfn_control_current
+
+        return half_cell_dfn_control_current(spec, state, program)
     if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
         from chemworld.physchem.battery_half_cell import half_cell_control_current
 
@@ -800,6 +925,8 @@ def battery_control_current(spec, state, program):
 
 
 def _energy_bins(spec):
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        raise ValueError("DFN half-cell chemical-energy and equilibrium-SOH closure is unsupported")
     if getattr(spec, "plating", None) is not None:
         raise ValueError("plating complete chemical-energy closure is unsupported")
     if getattr(spec, "model_family", None) == "split-ocvr-isothermal-v1":
@@ -807,6 +934,10 @@ def _energy_bins(spec):
     if getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1":
         raise ValueError(
             "lead-acid LOQS chemical-energy and equilibrium-SOH closure is unsupported")
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        raise ValueError("composite DFN chemical-energy and equilibrium-SOH closure is unsupported")
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        raise ValueError("collector SPM chemical-energy and equilibrium-SOH closure is unsupported")
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         raise ValueError("Newman-Tobias chemical-energy and equilibrium-SOH closure is unsupported")
     if getattr(spec, "model_family", None) == "msmr-spm-isothermal-v1":
@@ -823,6 +954,8 @@ def _energy_bins(spec):
 
 
 def battery_chemical_potentials(spec, state):
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        raise ValueError("collector SPM chemical potentials are unsupported")
     if getattr(spec, "model_family", None) == "spm-spatial-thermal-v1":
         from chemworld.physchem.battery_spatial_thermal import spatial_thermal_chemical_potentials
 
@@ -840,6 +973,8 @@ def battery_chemical_potentials(spec, state):
 
 
 def battery_chemical_energy_j(spec, state):
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        raise ValueError("collector SPM chemical-energy closure is unsupported")
     if getattr(spec, "model_family", None) == "spm-spatial-thermal-v1":
         from chemworld.physchem.battery_spatial_thermal import spatial_thermal_chemical_energy_j
 
@@ -863,6 +998,8 @@ def battery_chemical_energy_j(spec, state):
 
 
 def battery_dissipation_w(spec, state, current):
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        raise ValueError("DFN half-cell complete chemical-energy closure is unsupported")
     """Derive four dissipative contributions independently of endpoint residuals."""
     if getattr(spec, "plating", None) is not None:
         raise ValueError("plating complete dissipation closure is unsupported")
@@ -870,6 +1007,10 @@ def battery_dissipation_w(spec, state, current):
         raise ValueError("Split OCV-R chemical-energy dissipation closure is unsupported")
     if getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1":
         raise ValueError("lead-acid LOQS dissipation closure is unsupported")
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        raise ValueError("composite DFN complete dissipation closure is unsupported")
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        raise ValueError("collector SPM dissipation closure is unsupported")
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         raise ValueError("Newman-Tobias dissipation closure is unsupported")
     if getattr(spec, "model_family", None) == "msmr-spm-isothermal-v1":
@@ -919,6 +1060,8 @@ def battery_dissipation_w(spec, state, current):
 
 
 def battery_sei_affinity_j_mol(spec, state, current):
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        raise ValueError("DFN half-cell side-reaction chemical affinity is unsupported")
     """Electrochemical driving force for the declared irreversible side process."""
     if getattr(spec, "plating", None) is not None:
         raise ValueError("plating and SEI affinity coupling is unsupported")
@@ -926,6 +1069,10 @@ def battery_sei_affinity_j_mol(spec, state, current):
         raise ValueError("Split OCV-R SEI chemistry is unsupported")
     if getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1":
         raise ValueError("lead-acid LOQS SEI chemistry is unsupported")
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        raise ValueError("composite DFN SEI affinity is unsupported")
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        raise ValueError("collector SPM SEI affinity is unsupported")
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         raise ValueError("Newman-Tobias SEI affinity is unsupported")
     if getattr(spec, "model_family", None) == "msmr-spm-isothermal-v1":
@@ -986,7 +1133,9 @@ def _ocp_spm_rhs_jacobian(spec, state, program, identities):
             particle.mesh, particle.diffusivity_m2_s).inventory_jacobian_s_inv.toarray()
         jac[index[keys[-1]], index[ik]] = -qsign / F
         theta = particle_surface_fraction(particle, name, state, qsign * current / F)
-        trial = float(np.clip(theta, spec.surface_margin / 2, 1 - spec.surface_margin / 2))
+        clip = (spec.surface_margin / 2 if spec.kinetics_stoichiometry_clip is None
+                else spec.kinetics_stoichiometry_clip)
+        trial = float(np.clip(theta, clip, 1 - clip))
         j0 = particle.exchange_current_scale_A_m2 * sqrt(trial * (1 - trial))
         z = qsign * current / (2 * particle.area_m2 * j0)
         factor = 2 * R * state.temperature_K / F / sqrt(1 + z * z)
@@ -1024,6 +1173,8 @@ def _ocp_spm_rhs_jacobian(spec, state, program, identities):
 
 
 def battery_system(spec, program, *, thermal_device=None, control_events=()):
+    if getattr(spec, "parameter_binding", None) is not None and thermal_device is not None:
+        raise ValueError("source SPM thermal-device coupling is unsupported")
     if getattr(spec, "plating", None) is not None:
         from chemworld.physchem.battery_plating import plating_system
 
@@ -1039,6 +1190,16 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
 
         return lead_acid_system(spec, program, thermal_device=thermal_device,
                                 control_events=control_events)
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        from chemworld.physchem.battery_dfn_composite import composite_dfn_system
+
+        return composite_dfn_system(spec, program, thermal_device=thermal_device,
+                                    control_events=control_events)
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        from chemworld.physchem.battery_collector_spm import collector_spm_system
+
+        return collector_spm_system(spec, program, thermal_device=thermal_device,
+                                    control_events=control_events)
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         from chemworld.physchem.battery_newman_tobias import newman_tobias_system
 
@@ -1059,6 +1220,11 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
 
         return composite_system(spec, program, thermal_device=thermal_device,
                                 control_events=control_events)
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        from chemworld.physchem.battery_half_cell_dfn import half_cell_dfn_system
+
+        return half_cell_dfn_system(
+            spec, program, thermal_device=thermal_device, control_events=control_events)
     if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
         from chemworld.physchem.battery_half_cell import half_cell_system
 
@@ -1336,6 +1502,18 @@ def advance_battery(
         return advance_lead_acid(spec, state, program, duration_s,
                                 evaluation_times_s=evaluation_times_s,
                                 thermal_device=thermal_device, control_events=control_events)
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        from chemworld.physchem.battery_dfn_composite import advance_composite_dfn
+
+        return advance_composite_dfn(spec, state, program, duration_s,
+                                     evaluation_times_s=evaluation_times_s,
+                                     thermal_device=thermal_device, control_events=control_events)
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        from chemworld.physchem.battery_collector_spm import advance_collector_spm
+
+        return advance_collector_spm(spec, state, program, duration_s,
+                                     evaluation_times_s=evaluation_times_s,
+                                     thermal_device=thermal_device, control_events=control_events)
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         from chemworld.physchem.battery_newman_tobias import advance_newman_tobias
 
@@ -1360,6 +1538,12 @@ def advance_battery(
         return advance_composite(spec, state, program, duration_s,
                                  evaluation_times_s=evaluation_times_s,
                                  thermal_device=thermal_device, control_events=control_events)
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        from chemworld.physchem.battery_half_cell_dfn import advance_half_cell_dfn
+
+        return advance_half_cell_dfn(
+            spec, state, program, duration_s, evaluation_times_s=evaluation_times_s,
+            thermal_device=thermal_device, control_events=control_events)
     if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
         from chemworld.physchem.battery_half_cell import advance_half_cell
 

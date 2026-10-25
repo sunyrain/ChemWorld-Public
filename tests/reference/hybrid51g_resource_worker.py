@@ -1,0 +1,123 @@
+"""Isolated native kernel timing; allocation and warm-up are separate trials."""
+
+import argparse
+import json
+import platform
+import sys
+import time
+import traceback
+import tracemalloc
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from hybrid51g_distribution_cases import author
+
+from chemworld.physchem.stochastic_hybrid import (
+    advance_stochastic_hybrid,
+    initial_hybrid_continuation,
+)
+
+AVOGADRO = 6.02214076e23
+SEEDS = (1, 7, 17, 37, 73, 101, 251, 509)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--unit", type=Path, required=True)
+    parser.add_argument("--method", choices=("DOP853", "RK45"), required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    unit = json.loads(args.unit.read_text(encoding="utf-8"))
+    network, spec, amounts = author(unit, args.method)
+    args.output.mkdir(parents=True, exist_ok=True)
+    import numpy
+    import scipy
+
+    (args.output / "environment.json").write_text(
+        json.dumps(
+            {
+                "python": sys.version,
+                "executable": sys.executable,
+                "platform": platform.platform(),
+                "processor": platform.processor(),
+                "numpy": numpy.__version__,
+                "scipy": scipy.__version__,
+                "method": args.method,
+                "spec": spec.to_dict(),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    trials = [(997, "warmup")] + [(s, "timed") for s in SEEDS] + [(17, "allocation")]
+    started = time.monotonic()
+    with (
+        (args.output / "trajectories.jsonl").open("x", encoding="utf-8") as stream,
+        (args.output / "events.jsonl").open("x", encoding="utf-8") as journal,
+    ):
+        for index, (seed, purpose) in enumerate(trials):
+            identity = unit["id"] + "-" + str(index)
+            row = {
+                "id": identity,
+                "seed": seed,
+                "purpose": purpose,
+                "status": "error",
+                "simulation_attempted": False,
+                "simulation_completed": False,
+            }
+            try:
+                memory = initial_hybrid_continuation(network, spec, amounts, seed=seed)
+                journal.write(json.dumps({"id": identity, "event": "time_course_started"}) + "\n")
+                journal.flush()
+                row["simulation_attempted"] = True
+                if purpose == "allocation":
+                    tracemalloc.start()
+                wall, cpu = time.perf_counter(), time.process_time()
+                try:
+                    result = advance_stochastic_hybrid(
+                        network, spec, amounts, memory, unit["duration_s"]
+                    )
+                finally:
+                    row.update(wall_s=time.perf_counter() - wall, cpu_s=time.process_time() - cpu)
+                    if purpose == "allocation":
+                        current, peak = tracemalloc.get_traced_memory()
+                        tracemalloc.stop()
+                        row.update(
+                            python_allocation_current_bytes=current,
+                            python_allocation_peak_bytes=peak,
+                        )
+                row.update(
+                    status="ok",
+                    simulation_completed=True,
+                    time_s=result.continuation["time_s"],
+                    populations={k: v * AVOGADRO for k, v in result.amounts_mol.items()},
+                    events=len(result.events),
+                    event_path=result.events,
+                    work=result.work,
+                    continuation=result.continuation,
+                )
+            except Exception as exc:
+                row.update(error=repr(exc), traceback=traceback.format_exc())
+            stream.write(json.dumps(row, allow_nan=False) + "\n")
+            stream.flush()
+            elapsed = time.monotonic() - started
+            print(
+                json.dumps(
+                    {
+                        "unit": unit["id"],
+                        "method": args.method,
+                        "completed": index + 1,
+                        "total": len(trials),
+                        "trials_per_second": (index + 1) / elapsed if elapsed else None,
+                        "eta_s": (len(trials) - index - 1) * elapsed / (index + 1),
+                        "purpose": purpose,
+                        "status": row["status"],
+                    }
+                ),
+                flush=True,
+            )
+
+
+if __name__ == "__main__":
+    main()

@@ -278,7 +278,12 @@ class MultifluidModel:
 
     def validate_state(self, state: MolecularEOSState) -> None:
         """Source pressure-domain guard called by every common state consumer."""
-        if state.pressure_Pa > min(f.maximum_pressure_Pa for f in self.fluids):
+        self.validate_pressure(state.pressure_Pa)
+
+    def validate_pressure(self, pressure_Pa: float) -> None:
+        """Apply the source ceiling even when a critical response has singular Cp."""
+        _finite(pressure_Pa, "pressure")
+        if pressure_Pa > min(f.maximum_pressure_Pa for f in self.fluids):
             raise ValueError("pressure outside common pure-source validity")
 
     def composition_derivative(

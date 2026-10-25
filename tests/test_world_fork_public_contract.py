@@ -27,6 +27,15 @@ INVENTORY_PATH = (
 FIXTURE_PATH = (
     REPOSITORY_ROOT / "configs" / "benchmark" / "work_i_world_fork_public_contract_v0.1.json"
 )
+REPORT_PATH = (
+    REPOSITORY_ROOT
+    / "workstreams"
+    / "arxiv_v1"
+    / "reports"
+    / "work-i-world-fork-public-contract-v0.1.json"
+)
+
+
 def _inventory() -> WorldComponentInventory:
     return load_world_component_inventory(INVENTORY_PATH)
 
@@ -64,13 +73,7 @@ def test_frozen_certificate_covers_all_public_components_and_matches_report() ->
     assert report["spec_bound_component_count"] == 9
     assert report["identity_leakage_finding_count"] == 0
     assert all(item["passed"] for item in report["component_results"])
-    assert report["claim_boundary"] == {
-        "public_interface_invariance": True,
-        "fork_identity_non_disclosure": True,
-        "physical_divergence_claim": False,
-        "replay_claim": False,
-        "agent_performance_claim": False,
-    }
+    assert json.loads(REPORT_PATH.read_text(encoding="utf-8")) == report
 
 
 def test_bundle_is_canonical_and_bound_to_fork_component_digests() -> None:

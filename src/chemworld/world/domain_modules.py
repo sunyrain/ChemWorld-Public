@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from math import isfinite
-from typing import Any
+from typing import Any, Literal
 
 from chemworld.foundation.ontology import Instrument, Operation
 from chemworld.foundation.state_ownership import StateSlotSpec
@@ -305,6 +305,197 @@ class AdvanceStrategySpec:
             raise ValueError("shared-clock participation must be explicitly boolean")
 
 
+_EXECUTION_FORMS = frozenset({"expression", "native_algorithm", "state_machine"})
+_DERIVATIVE_MODES = frozenset(
+    {"not_declared", "analytic", "automatic", "finite_difference", "not_applicable", "unsupported"}
+)
+_THREAD_SAFETY_MODES = frozenset(
+    {"not_declared", "instance_local", "shared_read_only", "reentrant", "unsupported"}
+)
+_SNAPSHOT_MODES = frozenset({"not_declared", "supported", "not_applicable", "unsupported"})
+_EFFECT_ACCESS = frozenset({"read", "write"})
+_EFFECT_MIXING = frozenset({"sum", "equal", "weighted", "not_applicable"})
+_EFFECT_RESET = frozenset({"clear", "preserve", "initial", "not_applicable"})
+_NATIVE_UNIT_CONTRACTS = (
+    {"dimension": "volume", "source": "L", "target": "m^3", "scale": 0.001},
+    {"dimension": "volume", "source": "m^3", "target": "L", "scale": 1000.0},
+    {
+        "dimension": "concentration",
+        "source": "mol/L",
+        "target": "mol/m^3",
+        "scale": 1000.0,
+    },
+    {
+        "dimension": "concentration",
+        "source": "mol/m^3",
+        "target": "mol/L",
+        "scale": 0.001,
+    },
+    {
+        "dimension": "amount",
+        "source": "mol",
+        "target": "particle_count",
+        "scale": 6.02214076e23,
+        "reference": "exact_avogadro_constant",
+    },
+    {
+        "dimension": "amount",
+        "source": "particle_count",
+        "target": "mol",
+        "scale": 1.0 / 6.02214076e23,
+        "reference": "exact_avogadro_constant",
+    },
+    {"dimension": "energy", "source": "J", "target": "kJ", "scale": 0.001},
+    {"dimension": "energy", "source": "kJ", "target": "J", "scale": 1000.0},
+)
+
+
+@dataclass(frozen=True)
+class NativeExecutionSpec:
+    """Optional CPU execution contract attached to one Python module.
+
+    The default deliberately remains undeclared.  A module must opt in with a
+    lowering form and the three safety contracts before a CPU composition can
+    be selected.  This keeps the Python author API source-compatible while
+    making missing native capabilities visible at composition time.
+    """
+
+    lowering: str = "not_declared"
+    derivatives: str = "not_declared"
+    thread_safety: str = "not_declared"
+    snapshot: str = "not_declared"
+    public_result_type: str = "chemworld.public.Result"
+    private_diagnostic_type: str = "chemworld.private.ExecutionDiagnostics"
+
+    def __post_init__(self) -> None:
+        if self.lowering != "not_declared" and self.lowering not in _EXECUTION_FORMS:
+            raise ValueError(f"unknown native lowering form: {self.lowering!r}")
+        if self.derivatives not in _DERIVATIVE_MODES:
+            raise ValueError(f"unknown derivative capability: {self.derivatives!r}")
+        if self.thread_safety not in _THREAD_SAFETY_MODES:
+            raise ValueError(f"unknown thread-safety capability: {self.thread_safety!r}")
+        if self.snapshot not in _SNAPSHOT_MODES:
+            raise ValueError(f"unknown snapshot capability: {self.snapshot!r}")
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in (self.public_result_type, self.private_diagnostic_type)
+        ):
+            raise ValueError("native result and diagnostic types require stable names")
+
+    @property
+    def cpu_eligible(self) -> bool:
+        return (
+            self.lowering in _EXECUTION_FORMS
+            and self.derivatives not in {"not_declared", "unsupported"}
+            and self.thread_safety not in {"not_declared", "unsupported"}
+            and self.snapshot not in {"not_declared", "unsupported"}
+        )
+
+    def cpu_diagnostics(self, module_id: str) -> tuple[dict[str, str], ...]:
+        checks = (
+            ("lowering", self.lowering, "not_declared"),
+            ("derivatives", self.derivatives, "not_declared"),
+            ("thread_safety", self.thread_safety, "not_declared"),
+            ("snapshot", self.snapshot, "not_declared"),
+        )
+        diagnostics = []
+        for field_name, value, undeclared in checks:
+            if value == undeclared:
+                diagnostics.append(
+                    {
+                        "code": "native_capability_undeclared",
+                        "module": module_id,
+                        "field": field_name,
+                        "message": f"{module_id} does not declare {field_name}",
+                    }
+                )
+            elif value == "unsupported":
+                diagnostics.append(
+                    {
+                        "code": "native_capability_unsupported",
+                        "module": module_id,
+                        "field": field_name,
+                        "message": f"{module_id} explicitly does not support {field_name}",
+                    }
+                )
+        return tuple(diagnostics)
+
+    def to_dict(self) -> dict[str, str | bool]:
+        return {
+            "lowering": self.lowering,
+            "derivatives": self.derivatives,
+            "thread_safety": self.thread_safety,
+            "snapshot": self.snapshot,
+            "public_result_type": self.public_result_type,
+            "private_diagnostic_type": self.private_diagnostic_type,
+            "cpu_eligible": self.cpu_eligible,
+        }
+
+
+# The longer name is useful to authors who think in terms of a capability
+# declaration; keep one canonical implementation and no second registry.
+ExecutionCapabilitySpec = NativeExecutionSpec
+
+
+@dataclass(frozen=True)
+class ExecutionEffectSpec:
+    """One explicit read/write effect consumed by a native lowering."""
+
+    resource: str
+    access: Literal["read", "write"]
+    owner: str
+    unit: str = "dimensionless"
+    operation_id: str | None = None
+    mixing: str = "not_applicable"
+    reset: str = "not_applicable"
+    conserved_quantity: str | None = None
+
+    def __post_init__(self) -> None:
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in (self.resource, self.owner, self.unit)
+        ):
+            raise ValueError("native effects require stable resource, owner and unit names")
+        if self.operation_id is not None and (
+            not isinstance(self.operation_id, str) or not self.operation_id.strip()
+        ):
+            raise ValueError("native effect operation IDs must be non-empty")
+        if self.access not in _EFFECT_ACCESS:
+            raise ValueError(f"unknown native effect access: {self.access!r}")
+        if self.mixing not in _EFFECT_MIXING:
+            raise ValueError(f"unknown native effect mixing rule: {self.mixing!r}")
+        if self.reset not in _EFFECT_RESET:
+            raise ValueError(f"unknown native effect reset rule: {self.reset!r}")
+        if self.conserved_quantity is not None and (
+            not isinstance(self.conserved_quantity, str) or not self.conserved_quantity.strip()
+        ):
+            raise ValueError("conserved quantities require stable names")
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "resource": self.resource,
+            "access": self.access,
+            "owner": self.owner,
+            "unit": self.unit,
+            "operation_id": self.operation_id,
+            "mixing": self.mixing,
+            "reset": self.reset,
+            "conserved_quantity": self.conserved_quantity,
+        }
+
+
+SemanticEffectSpec = ExecutionEffectSpec
+
+
+class NativeCapabilityError(ValueError):
+    """Raised when a caller explicitly requests an ineligible CPU backend."""
+
+    def __init__(self, diagnostics: tuple[dict[str, str], ...]):
+        self.diagnostics = diagnostics
+        message = "; ".join(item["message"] for item in diagnostics)
+        super().__init__(f"CPU execution is not available for the selected modules: {message}")
+
+
 @dataclass(frozen=True)
 class DomainModuleSpec:
     module_id: str
@@ -319,6 +510,8 @@ class DomainModuleSpec:
     advance_strategies: tuple[AdvanceStrategySpec, ...] = ()
     scope_notes: tuple[str, ...] = ()
     models: tuple[PhysicsModelSpec, ...] = ()
+    execution: NativeExecutionSpec = field(default_factory=NativeExecutionSpec)
+    effects: tuple[ExecutionEffectSpec, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.version, str) or not self.version:
@@ -334,6 +527,7 @@ class DomainModuleSpec:
             "advance_strategies",
             "scope_notes",
             "models",
+            "effects",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
         # Earlier local modules supplied (id, factory) pairs. Normalize at the
@@ -342,6 +536,10 @@ class DomainModuleSpec:
             value if isinstance(value, AdvanceStrategySpec) else AdvanceStrategySpec(*value)
             for value in self.advance_strategies
         ))
+        if not isinstance(self.execution, NativeExecutionSpec):
+            raise TypeError("module execution metadata must be a NativeExecutionSpec")
+        if not all(isinstance(effect, ExecutionEffectSpec) for effect in self.effects):
+            raise TypeError("module effects must be ExecutionEffectSpec declarations")
 
 
 @dataclass(frozen=True)
@@ -365,6 +563,17 @@ class DomainModuleRegistry:
         for module in self.modules:
             if not set(module.dependencies) <= ids:
                 raise ValueError(f"Missing module dependencies for {module.module_id}")
+            operation_ids = {spec.operation.id for spec in module.operations}
+            effect_keys = set()
+            for effect in module.effects:
+                if effect.operation_id is not None and effect.operation_id not in operation_ids:
+                    raise ValueError(
+                        f"Missing operation owner for native effect {effect.operation_id}"
+                    )
+                key = (effect.operation_id, effect.resource, effect.access)
+                if key in effect_keys:
+                    raise ValueError(f"Duplicate native effect owner for {key!r}")
+                effect_keys.add(key)
         for label, items in (
             ("operation", [op.operation.id for m in self.modules for op in m.operations]),
             ("service", [s.service_id for m in self.modules for s in m.services]),
@@ -442,6 +651,224 @@ class DomainModuleRegistry:
 
     def components(self) -> dict[str, ComponentCapability]:
         return {key: value for module in self.modules for key, value in module.components}
+
+    def execution_specs(self) -> dict[str, NativeExecutionSpec]:
+        """Return the optional native contract keyed by the existing module ID."""
+        return {module.module_id: module.execution for module in self.modules}
+
+    def _modules_for_composition(self, composition) -> tuple[DomainModuleSpec, ...]:
+        spec = getattr(composition, "spec", composition)
+        if spec is None:
+            return self.modules
+        selected_ids: set[str] = set()
+        component_kinds = {component.kind for component in getattr(spec, "components", ())}
+        task = getattr(spec, "task", None)
+        operations = set(getattr(task, "operations", None) or ())
+        instruments = set(getattr(task, "instruments", None) or ())
+        for module in self.modules:
+            if component_kinds.intersection(name for name, _ in module.components):
+                selected_ids.add(module.module_id)
+            if operations.intersection(operation.operation.id for operation in module.operations):
+                selected_ids.add(module.module_id)
+            if instruments.intersection(item.definition.id for item in module.instruments):
+                selected_ids.add(module.module_id)
+        if not selected_ids:
+            return self.modules
+        module_by_id = {module.module_id: module for module in self.modules}
+        pending = list(selected_ids)
+        while pending:
+            module = module_by_id[pending.pop()]
+            for dependency in module.dependencies:
+                if dependency not in selected_ids:
+                    selected_ids.add(dependency)
+                    pending.append(dependency)
+        return tuple(module for module in self.modules if module.module_id in selected_ids)
+
+    def cpu_diagnostics(self, composition=None) -> tuple[dict[str, str], ...]:
+        """Report why an explicit CPU selection cannot be made.
+
+        Missing metadata is intentionally a deterministic diagnostic rather than
+        an inferred capability.  A composition may therefore select the whole
+        reference backend without changing any existing Python module.
+        """
+        modules = self._modules_for_composition(composition)
+        diagnostics = [
+            diagnostic
+            for module in modules
+            for diagnostic in module.execution.cpu_diagnostics(module.module_id)
+        ]
+        if composition is not None:
+            spec = getattr(composition, "spec", composition)
+            for component in getattr(spec, "components", ()):
+                if component.kind not in self.components():
+                    diagnostics.append(
+                        {
+                            "code": "native_component_undeclared",
+                            "module": component.kind,
+                            "field": "components",
+                            "message": f"component {component.kind} is not installed",
+                        }
+                    )
+        return tuple(diagnostics)
+
+    @staticmethod
+    def _state_layout(module: DomainModuleSpec) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": slot.slot_id,
+                "owner": {"kind": slot.owner_kind, "id": slot.owner_id},
+                "state_type": slot.state_type,
+                "mechanism": slot.mechanism_id,
+                "phase": slot.phase_id,
+                "batch_reset": slot.batch_reset,
+                "time_evolution": slot.time_evolution,
+                "fields": [
+                    {
+                        "id": field.name,
+                        "unit": field.unit,
+                        "mixing": field.mixing,
+                        "weight_field": field.weight_field,
+                        "minimum": field.minimum,
+                        "conserved_quantity": field.conserved_quantity,
+                        "species_id": field.species_id,
+                    }
+                    for field in slot.fields
+                ],
+            }
+            for slot in module.state_slots
+        ]
+
+    @staticmethod
+    def _port_layout(module: DomainModuleSpec) -> list[dict[str, Any]]:
+        ports = []
+        for component_id, component in module.components:
+            ports.append(
+                {
+                    "component": component_id,
+                    "inputs": [
+                        {
+                            "id": f"{component_id}.input.{name}",
+                            "name": name,
+                            "unit": component.port_unit,
+                        }
+                        for name in component.input_ports
+                    ],
+                    "outputs": [
+                        {
+                            "id": f"{component_id}.output.{name}",
+                            "name": name,
+                            "unit": component.port_unit,
+                        }
+                        for name in component.outputs
+                    ],
+                }
+            )
+        return ports
+
+    def lower_execution_ir(self, composition=None, *, backend: str = "auto") -> dict[str, Any]:
+        """Lower declarations into a JSON-safe native execution IR.
+
+        The lowering is generated from the one module registry.  ``auto`` keeps
+        the existing reference path when a module has no CPU contract;
+        ``backend='cpu'`` fails at the boundary with all deterministic
+        diagnostics instead of silently mixing executors.
+        """
+        if backend not in {"auto", "cpu", "reference"}:
+            raise ValueError("backend must be auto, cpu or reference")
+        diagnostics = self.cpu_diagnostics(composition)
+        if backend == "cpu" and diagnostics:
+            raise NativeCapabilityError(diagnostics)
+        selected = (
+            "cpu"
+            if backend == "cpu" or (backend == "auto" and not diagnostics)
+            else "reference"
+        )
+        modules = []
+        for module in self.modules:
+            operation_rows = []
+            for operation in module.operations:
+                operation_rows.append(
+                    {
+                        "id": operation.operation.id,
+                        "kind": operation.kind,
+                        "fields": [field.public_schema() for field in operation.fields],
+                        "read_write_ledgers": list(operation.affected_ledgers),
+                        "effects": [
+                            effect.to_dict()
+                            for effect in module.effects
+                            if effect.operation_id in {None, operation.operation.id}
+                        ],
+                    }
+                )
+            modules.append(
+                {
+                    "id": module.module_id,
+                    "version": module.version,
+                    "dependencies": list(module.dependencies),
+                    "execution": module.execution.to_dict(),
+                    "state": self._state_layout(module),
+                    "ports": self._port_layout(module),
+                    "effects": [effect.to_dict() for effect in module.effects],
+                    "operations": operation_rows,
+                    "conservation": sorted(
+                        {
+                            field.conserved_quantity
+                            for slot in module.state_slots
+                            for field in slot.fields
+                            if field.conserved_quantity is not None
+                        }
+                    ),
+                }
+            )
+        spec = getattr(composition, "spec", composition)
+        composition_row = None
+        if spec is not None:
+            compatibility = getattr(composition, "compatibility", None)
+            composition_row = {
+                "id": getattr(spec, "composition_id", None),
+                "instances": [
+                    {
+                        "id": component.id,
+                        "kind": component.kind,
+                        "vessel": component.vessel,
+                        "role": component.role,
+                    }
+                    for component in getattr(spec, "components", ())
+                ],
+                "state_owners": dict(
+                    sorted(
+                        getattr(compatibility, "state_owners", {})
+                        if compatibility is not None
+                        else {}
+                    )
+                ),
+            }
+        return {
+            "schema": "chemworld-native-execution-ir-v1",
+            "backend": selected,
+            "diagnostics": [dict(item) for item in diagnostics],
+            "types": {
+                "public_result": "chemworld.public.Result",
+                "private_diagnostics": "chemworld.private.ExecutionDiagnostics",
+            },
+            "units": {
+                "canonical": {
+                    "volume": "m^3",
+                    "amount": "mol",
+                    "concentration": "mol/m^3",
+                    "particle_count": "integer_count",
+                    "energy": "J",
+                },
+                "conversions": [dict(item) for item in _NATIVE_UNIT_CONTRACTS],
+                "energy_reference": {
+                    "absolute": "J",
+                    "molar": "J/mol",
+                    "zero": "model_declared",
+                },
+            },
+            "composition": composition_row,
+            "modules": modules,
+        }
 
     def instrument_specs(self, *, include_optional: bool = False) -> dict[str, InstrumentSpec]:
         return {

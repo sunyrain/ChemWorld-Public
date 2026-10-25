@@ -1,13 +1,14 @@
 """Bounded file IPC for one-session, tool-driven Codex experiments.
 
 The authoritative environment and trajectory never live in this workspace.  The
-workspace contains only a reconstructable public cache, a small bridge, and an
+workspace contains a complete public operation stream, a recent cache, a small bridge, and an
 initially empty directory in which the model may create arbitrary notes.
 """
 
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import shutil
@@ -20,13 +21,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from chemworld.agents.public_history import public_history_page
 from chemworld.data.logging import to_builtin
 
 EXPERIMENT_CODEX_IPC_VERSION = "chemworld-experiment-codex-ipc-0.2"
+CAMPAIGN_PROGRESS_VERSION = "chemworld-campaign-progress-0.2"
 DEFAULT_MAX_TOOL_OUTPUT_BYTES = 32_768
 DEFAULT_HISTORY_EVENT_LIMIT = 64
 DEFAULT_HISTORY_BYTE_LIMIT = 131_072
 DEFAULT_MAX_ARTIFACT_BYTES = 8_388_608
+ATOMIC_REPLACE_RETRY_LIMIT = 40
+ATOMIC_REPLACE_RETRY_INTERVAL_S = 0.025
+SESSION_RETIRE_RETRY_LIMIT = 20
+SESSION_RETIRE_RETRY_INTERVAL_S = 0.05
 
 
 class ExperimentCodexIPCError(RuntimeError):
@@ -42,6 +49,7 @@ class IPCRequest:
     expected_step: int
     action: dict[str, Any]
     payload_sha256: str
+    decision_audit: dict[str, Any] | None = None
 
 
 class ExperimentCodexWorkspace:
@@ -84,6 +92,7 @@ class ExperimentCodexWorkspace:
         self.lab_tool_path = self.agent_directory / "lab_tool.py"
         self.current_path = self.public_directory / "current.json"
         self.history_path = self.public_directory / "history.jsonl"
+        self.operation_history_path = self.public_directory / "operation_history.jsonl"
         self.active_session_path = self.ipc_directory / "active_session.json"
         self.max_tool_output_bytes = int(max_tool_output_bytes)
         self.history_event_limit = int(history_event_limit)
@@ -115,6 +124,7 @@ class ExperimentCodexWorkspace:
                 _python_shim_source(),
             )
         _atomic_write_text(self.history_path, "")
+        _atomic_write_text(self.operation_history_path, "")
         self._history_rows = []
         self._session_descriptors = {}
         self._initialized = True
@@ -155,6 +165,44 @@ class ExperimentCodexWorkspace:
         _atomic_write_json(path, normalized)
         return {
             "relative_path": "reference/task_contract.json",
+            **_fingerprint(path),
+        }
+
+    def publish_belief_checkpoint_contract(
+        self,
+        contract: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Write the host-owned Work II checkpoint contract for a campaign cell."""
+
+        self._require_initialized()
+        normalized = _bounded_json_object(
+            contract,
+            max_bytes=self.max_artifact_bytes,
+            label="belief checkpoint contract",
+        )
+        path = self.reference_directory / "belief_checkpoint_contract.json"
+        _atomic_write_json(path, normalized)
+        return {
+            "relative_path": "reference/belief_checkpoint_contract.json",
+            **_fingerprint(path),
+        }
+
+    def publish_terminal_action_readout_contract(
+        self,
+        contract: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Write a terminal-only held-out action packet for a campaign cell."""
+
+        self._require_initialized()
+        normalized = _bounded_json_object(
+            contract,
+            max_bytes=self.max_artifact_bytes,
+            label="terminal action readout contract",
+        )
+        path = self.reference_directory / "terminal_action_readout_contract.json"
+        _atomic_write_json(path, normalized)
+        return {
+            "relative_path": "reference/terminal_action_readout_contract.json",
             **_fingerprint(path),
         }
 
@@ -219,12 +267,67 @@ class ExperimentCodexWorkspace:
         rows = _read_jsonl(path)
         return rows[-max(self.history_event_limit * 8, 64) :]
 
+    def belief_snapshot_audit(self, session_id: str) -> list[dict[str, Any]]:
+        """Return the structured Work II checkpoints committed in one Codex session."""
+
+        root = self.session_root(session_id) / "belief_snapshots"
+        if not root.exists():
+            return []
+        return [_read_json_object(path) for path in sorted(root.glob("*.json"))]
+
+    def belief_snapshot_draft_audit(self, session_id: str) -> dict[str, Any]:
+        """Retain participant-authored staged fragments, including incomplete drafts."""
+
+        root = self.session_root(session_id) / "belief_snapshot_drafts"
+        drafts: list[dict[str, Any]] = []
+        fragment_count = 0
+        if root.exists():
+            for draft_root in sorted(path for path in root.iterdir() if path.is_dir()):
+                manifest_path = draft_root / "manifest.json"
+                fragments_root = draft_root / "fragments"
+                fragments = (
+                    [_read_json_object(path) for path in sorted(fragments_root.glob("*.json"))]
+                    if fragments_root.is_dir()
+                    else []
+                )
+                fragment_count += len(fragments)
+                finalization_path = draft_root / "finalization.json"
+                drafts.append(
+                    {
+                        "draft_id": draft_root.name,
+                        "manifest": (
+                            _read_json_object(manifest_path) if manifest_path.is_file() else None
+                        ),
+                        "fragments": fragments,
+                        "fragment_count": len(fragments),
+                        "finalization": (
+                            _read_json_object(finalization_path)
+                            if finalization_path.is_file()
+                            else None
+                        ),
+                    }
+                )
+        return {
+            "schema_version": "chemworld-work-ii-belief-snapshot-draft-audit-0.1",
+            "drafts": drafts,
+            "draft_count": len(drafts),
+            "fragment_count": fragment_count,
+        }
+
+    def final_recommendation_audit(self, session_id: str) -> dict[str, Any] | None:
+        """Return the host-owned participant recommendation committed in one session."""
+
+        path = self.session_root(session_id) / "final_recommendation.json"
+        return _read_json_object(path) if path.exists() else None
+
     def start_session(
         self,
         *,
         session_id: str,
         expected_step: int = 1,
         response_timeout_s: float,
+        session_scope: str = "experiment",
+        terminal_action_readout_required: bool = False,
     ) -> dict[str, Any]:
         """Create a new session namespace while preserving optional Agent files."""
 
@@ -235,6 +338,10 @@ class ExperimentCodexWorkspace:
             raise ValueError("expected_step must be positive")
         if response_timeout_s <= 0:
             raise ValueError("response_timeout_s must be positive")
+        if session_scope not in {"experiment", "campaign"}:
+            raise ValueError("session_scope must be experiment or campaign")
+        if terminal_action_readout_required and session_scope != "campaign":
+            raise ValueError("terminal action readout requires campaign scope")
         session_root = self.session_root(session_id)
         if session_root.exists():
             raise FileExistsError(f"session already exists: {session_id}")
@@ -250,11 +357,126 @@ class ExperimentCodexWorkspace:
             "expected_step": int(expected_step),
             "max_tool_output_bytes": self.max_tool_output_bytes,
             "response_timeout_s": float(response_timeout_s),
+            "session_scope": session_scope,
+            "terminal_action_readout_required": bool(terminal_action_readout_required),
         }
         _atomic_write_json(session_root / "session.json", descriptor)
+        if session_scope == "campaign":
+            _atomic_write_json(
+                session_root / "campaign_progress.json",
+                {
+                    "schema_version": CAMPAIGN_PROGRESS_VERSION,
+                    "closed_batch_count": 0,
+                    "completed_experiment_count": 0,
+                    "completed_experiment_indices": [],
+                    "completed_batch_ids": [],
+                    "observed_evidence_ids": [],
+                    "campaign_ended": False,
+                },
+            )
         _atomic_write_json(self.active_session_path, descriptor)
         self._session_descriptors[session_id] = deepcopy(descriptor)
         return deepcopy(descriptor)
+
+    def publish_campaign_progress(
+        self,
+        *,
+        session_id: str,
+        closed_batch_count: int,
+        completed_experiment_count: int,
+        completed_experiment_index: int | None,
+        observed_evidence_id: str | None,
+        campaign_ended: bool,
+    ) -> dict[str, Any]:
+        """Advance the small host-owned campaign ledger independently of bounded history."""
+
+        descriptor = self._session_descriptor(session_id)
+        if descriptor.get("session_scope") != "campaign":
+            raise ExperimentCodexIPCError("campaign progress requires a campaign session")
+        for value, label in (
+            (closed_batch_count, "closed batch count"),
+            (completed_experiment_count, "completed experiment count"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ExperimentCodexIPCError(f"{label} must be non-negative")
+        if completed_experiment_count > closed_batch_count:
+            raise ExperimentCodexIPCError(
+                "completed experiment count cannot exceed closed batch count"
+            )
+        path = self.session_root(session_id) / "campaign_progress.json"
+        current = _read_json_object(path)
+        if current.get("schema_version") != CAMPAIGN_PROGRESS_VERSION:
+            raise ExperimentCodexIPCError("campaign progress schema is invalid")
+        prior_closed = current.get("closed_batch_count")
+        prior_count = current.get("completed_experiment_count")
+        prior_indices = current.get("completed_experiment_indices")
+        prior_batch_ids = current.get("completed_batch_ids")
+        prior_evidence = current.get("observed_evidence_ids")
+        prior_ended = current.get("campaign_ended")
+        if (
+            isinstance(prior_closed, bool)
+            or not isinstance(prior_closed, int)
+            or isinstance(prior_count, bool)
+            or not isinstance(prior_count, int)
+            or not isinstance(prior_indices, list)
+            or any(
+                isinstance(item, bool) or not isinstance(item, int) or item < 1
+                for item in prior_indices
+            )
+            or prior_indices != sorted(set(prior_indices))
+            or len(prior_indices) != prior_count
+            or not isinstance(prior_batch_ids, list)
+            or prior_batch_ids != [f"batch-{index:04d}" for index in prior_indices]
+            or not isinstance(prior_evidence, list)
+            or any(not isinstance(item, str) or not item for item in prior_evidence)
+            or len(set(prior_evidence)) != len(prior_evidence)
+            or len(prior_evidence) != prior_count
+            or not isinstance(prior_ended, bool)
+        ):
+            raise ExperimentCodexIPCError("campaign progress state is malformed")
+        if closed_batch_count not in {prior_closed, prior_closed + 1}:
+            raise ExperimentCodexIPCError("campaign closed batch count is not monotonic")
+        if completed_experiment_count not in {prior_count, prior_count + 1}:
+            raise ExperimentCodexIPCError("campaign progress count is not monotonic")
+        if completed_experiment_count == prior_count + 1 and closed_batch_count != prior_closed + 1:
+            raise ExperimentCodexIPCError("a completed experiment must close one new batch")
+        if closed_batch_count == prior_closed and completed_experiment_count != prior_count:
+            raise ExperimentCodexIPCError("completion cannot advance without a new closed batch")
+        indices = list(prior_indices)
+        batch_ids = list(prior_batch_ids)
+        evidence = list(prior_evidence)
+        if completed_experiment_count == prior_count + 1:
+            if (
+                isinstance(completed_experiment_index, bool)
+                or not isinstance(completed_experiment_index, int)
+                or completed_experiment_index != closed_batch_count
+            ):
+                raise ExperimentCodexIPCError(
+                    "completed experiment index must identify the newly closed lifecycle batch"
+                )
+            expected = f"experiment-{completed_experiment_count}-final-assay"
+            if observed_evidence_id != expected:
+                raise ExperimentCodexIPCError("campaign progress evidence ID is invalid")
+            indices.append(completed_experiment_index)
+            batch_ids.append(f"batch-{completed_experiment_index:04d}")
+            evidence.append(expected)
+        elif observed_evidence_id is not None or completed_experiment_index is not None:
+            raise ExperimentCodexIPCError(
+                "campaign progress added completion identity without completion"
+            )
+        if prior_ended and not campaign_ended:
+            raise ExperimentCodexIPCError("campaign terminal state cannot be reversed")
+        state = {
+            "schema_version": CAMPAIGN_PROGRESS_VERSION,
+            "closed_batch_count": closed_batch_count,
+            "completed_experiment_count": completed_experiment_count,
+            "completed_experiment_indices": indices,
+            "completed_batch_ids": batch_ids,
+            "observed_evidence_ids": evidence,
+            "campaign_ended": campaign_ended,
+        }
+        _atomic_write_json(path, state)
+        return deepcopy(state)
 
     def publish_current(self, packet: Mapping[str, Any]) -> dict[str, Any]:
         """Publish a bounded reconstructable view for ``lab_tool status``."""
@@ -269,7 +491,7 @@ class ExperimentCodexWorkspace:
         return _fingerprint(self.current_path)
 
     def append_public_history(self, event: Mapping[str, Any]) -> dict[str, Any]:
-        """Append to a bounded cache; this file is never the authoritative ledger."""
+        """Retain the public outcome durably, then refresh its bounded recent cache."""
 
         self._require_initialized()
         normalized = _bounded_json_object(
@@ -286,6 +508,10 @@ class ExperimentCodexWorkspace:
             raise ExperimentCodexIPCError(
                 "one public history event exceeds the configured cache budget"
             )
+        with self.operation_history_path.open("ab") as handle:
+            handle.write(_encode_jsonl([normalized]))
+            handle.flush()
+            os.fsync(handle.fileno())
         _atomic_write_bytes(self.history_path, _encode_jsonl(rows))
         self._history_rows = rows
         return {
@@ -302,9 +528,11 @@ class ExperimentCodexWorkspace:
         descriptor = deepcopy(self._session_descriptor(session_id))
         descriptor["expected_step"] = int(expected_step)
         _atomic_write_json(self.session_root(session_id) / "session.json", descriptor)
-        active = _read_json_object(self.active_session_path)
-        if active.get("session_id") == session_id:
-            _atomic_write_json(self.active_session_path, descriptor)
+        # ``active_session.json`` is an immutable pointer for the lifetime of one
+        # provider turn.  The MCP process reads it frequently to resolve the
+        # session namespace, so replacing it after every operation creates an
+        # unnecessary Windows reader/writer sharing race.  Mutable CAS state is
+        # owned by the session descriptor and the host-side descriptor cache.
         self._session_descriptors[session_id] = deepcopy(descriptor)
 
     def wait_for_request(
@@ -315,23 +543,24 @@ class ExperimentCodexWorkspace:
         timeout_s: float,
         process_alive: Callable[[], bool],
         handled_request_ids: set[str],
+        progress_callback: Callable[[], None] | None = None,
+        progress_interval_s: float = 30.0,
     ) -> IPCRequest:
         """Wait for one well-formed, unhandled request from the active Codex turn."""
 
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
+        if progress_interval_s <= 0:
+            raise ValueError("progress_interval_s must be positive")
         request_roots = (
             self.session_root(session_id) / "mcp_requests",
             self.transport_session_root(session_id) / "requests",
         )
         deadline = time.monotonic() + timeout_s
+        next_progress = time.monotonic() + progress_interval_s
         while time.monotonic() < deadline:
             request_paths = sorted(
-                (
-                    path
-                    for root in request_roots
-                    for path in root.glob("*.json")
-                ),
+                (path for root in request_roots for path in root.glob("*.json")),
                 key=lambda item: (item.name, item.parent.as_posix()),
             )
             for path in request_paths:
@@ -357,6 +586,9 @@ class ExperimentCodexWorkspace:
                 raise ExperimentCodexIPCError(
                     "Codex process exited before submitting the next operation"
                 )
+            if progress_callback is not None and time.monotonic() >= next_progress:
+                progress_callback()
+                next_progress = time.monotonic() + progress_interval_s
             time.sleep(self.poll_interval_s)
         raise TimeoutError("timed out waiting for a Codex lab operation")
 
@@ -404,8 +636,15 @@ class ExperimentCodexWorkspace:
                 raise ExperimentCodexIPCError(
                     "refusing to retire a session outside its protocol root"
                 ) from error
-            if path.exists():
-                shutil.rmtree(path)
+            for attempt in range(SESSION_RETIRE_RETRY_LIMIT):
+                try:
+                    if path.exists():
+                        shutil.rmtree(path)
+                    break
+                except OSError:
+                    if attempt + 1 == SESSION_RETIRE_RETRY_LIMIT:
+                        raise
+                    time.sleep(SESSION_RETIRE_RETRY_INTERVAL_S)
         active = (
             _read_json_object(self.active_session_path) if self.active_session_path.exists() else {}
         )
@@ -457,9 +696,7 @@ class ExperimentCodexWorkspace:
                 "required_file": True,
                 "required_files": ["lab_tool.py"],
                 "file_count": len(self.snapshot_agent_files()),
-                "file_count_scope": (
-                    "agent_authored_memory_excluding_bridge_and_transport"
-                ),
+                "file_count_scope": ("agent_authored_memory_excluding_bridge_and_transport"),
             },
             "transport": {
                 "relative_path": "agent/.transport",
@@ -474,6 +711,8 @@ class ExperimentCodexWorkspace:
                 "max_tool_output_bytes": self.max_tool_output_bytes,
                 "history_event_limit": self.history_event_limit,
                 "history_byte_limit": self.history_byte_limit,
+                "complete_history": "public/operation_history.jsonl",
+                "history_pagination": "history offset=0 starts at the first public operation",
                 "max_artifact_bytes": self.max_artifact_bytes,
             },
             "material_information": (
@@ -522,11 +761,7 @@ class ExperimentCodexWorkspace:
             valid_regular_file = (
                 self.lab_tool_path.is_file() and not self.lab_tool_path.is_symlink()
             )
-            actual = (
-                str(_fingerprint(self.lab_tool_path)["sha256"])
-                if valid_regular_file
-                else None
-            )
+            actual = str(_fingerprint(self.lab_tool_path)["sha256"]) if valid_regular_file else None
         except OSError:
             actual = None
         if actual != _lab_tool_sha256():
@@ -596,6 +831,10 @@ def _normalize_request(raw: Mapping[str, Any], *, session_id: str) -> IPCRequest
     if not isinstance(action, dict) or not isinstance(action.get("operation"), str):
         raise ExperimentCodexIPCError("IPC request requires action.operation")
     normalized_action = to_builtin(action)
+    raw_decision_audit = raw.get("decision_audit")
+    if raw_decision_audit is not None and not isinstance(raw_decision_audit, dict):
+        raise ExperimentCodexIPCError("IPC request decision_audit must be an object or null")
+    decision_audit = to_builtin(raw_decision_audit) if raw_decision_audit is not None else None
     payload_sha256 = hashlib.sha256(_canonical_json(normalized_action).encode("utf-8")).hexdigest()
     return IPCRequest(
         session_id=session_id,
@@ -603,6 +842,7 @@ def _normalize_request(raw: Mapping[str, Any], *, session_id: str) -> IPCRequest
         expected_step=expected_step,
         action=normalized_action,
         payload_sha256=payload_sha256,
+        decision_audit=decision_audit,
     )
 
 
@@ -720,10 +960,23 @@ def _atomic_write_bytes(path: Path, value: bytes) -> None:
             handle.write(value)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        _replace_with_retry(temporary, path)
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
+
+
+def _replace_with_retry(temporary: Path, path: Path) -> None:
+    """Bound transient Windows sharing violations without hiding hard failures."""
+
+    for retry in range(ATOMIC_REPLACE_RETRY_LIMIT + 1):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if retry >= ATOMIC_REPLACE_RETRY_LIMIT:
+                raise
+            time.sleep(ATOMIC_REPLACE_RETRY_INTERVAL_S)
 
 
 LAB_TOOL_SOURCE = r'''"""Isolated ChemWorld file-IPC client.  Standard library only."""
@@ -739,6 +992,8 @@ import time
 from pathlib import Path
 
 VERSION = "chemworld-experiment-codex-ipc-0.2"
+ATOMIC_REPLACE_RETRY_LIMIT = 40
+ATOMIC_REPLACE_RETRY_INTERVAL_S = 0.025
 TOOL = Path(__file__).resolve(strict=True)
 AGENT = TOOL.parent
 ROOT = AGENT.parent.resolve(strict=True)
@@ -782,10 +1037,21 @@ def atomic_json(path: Path, value: object) -> None:
             handle.write(encode(value) + b"\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp, path)
+        replace_with_retry(temp, path)
     finally:
         if temp.exists():
             temp.unlink()
+
+
+def replace_with_retry(temp: Path, path: Path) -> None:
+    for retry in range(ATOMIC_REPLACE_RETRY_LIMIT + 1):
+        try:
+            os.replace(temp, path)
+            return
+        except PermissionError:
+            if retry >= ATOMIC_REPLACE_RETRY_LIMIT:
+                raise
+            time.sleep(ATOMIC_REPLACE_RETRY_INTERVAL_S)
 
 
 def descriptor() -> dict:
@@ -809,19 +1075,16 @@ def status(_: argparse.Namespace) -> None:
     emit(read_object(PUBLIC / "current.json"), cap=int(active["max_tool_output_bytes"]))
 
 
+# PUBLIC_HISTORY_READER
+
+
 def history(args: argparse.Namespace) -> None:
     active = descriptor()
-    limit = max(1, min(int(args.limit), 10))
-    rows = []
-    history_path = PUBLIC / "history.jsonl"
-    if history_path.exists():
-        for line in history_path.read_text(encoding="utf-8").splitlines():
-            if line:
-                value = json.loads(line)
-                if isinstance(value, dict):
-                    rows.append(value)
     emit(
-        {"schema_version": VERSION, "authoritative": False, "events": rows[-limit:]},
+        {"schema_version": VERSION, **public_history_page(
+            PUBLIC, limit=args.limit, offset=args.offset,
+            max_bytes=int(active["max_tool_output_bytes"]) - 128
+        )},
         cap=int(active["max_tool_output_bytes"]),
     )
 
@@ -995,6 +1258,7 @@ def parser() -> argparse.ArgumentParser:
     status_parser.set_defaults(func=status)
     history_parser = commands.add_parser("history")
     history_parser.add_argument("--limit", type=int, default=5)
+    history_parser.add_argument("--offset", type=int)
     history_parser.set_defaults(func=history)
     inspect_parser = commands.add_parser("inspect")
     inspect_parser.add_argument("--artifact-id", required=True)
@@ -1040,6 +1304,12 @@ def main() -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 '''
+
+
+# Keep the standalone, standard-library bridge and MCP on the same reader.
+LAB_TOOL_SOURCE = LAB_TOOL_SOURCE.replace(
+    "# PUBLIC_HISTORY_READER", inspect.getsource(public_history_page)
+)
 
 
 __all__ = [

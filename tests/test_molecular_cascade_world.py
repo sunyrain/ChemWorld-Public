@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("thermo", reason="optional independent reference package")
+pytest.importorskip("thermo", reason="Optional independent reference dependency")
 
 from chemworld.examples.molecular_cascade import molecular_cascade_example
 from chemworld.runtime import ChemWorldRuntime

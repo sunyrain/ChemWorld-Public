@@ -39,6 +39,9 @@ __all__ = [
     "MolecularFlashSeparatorAdapter",
     "MolecularFlashThermalSpec",
     "MolecularInventoryInterface",
+    "MolecularMultiphaseInventorySpec",
+    "MolecularMultiphaseInventoryState",
+    "MolecularMultiphaseThermalSpec",
     "MolecularPhaseEquilibriumSpec",
     "MolecularPhaseInventoryResult",
     "MolecularPhaseTarget",
@@ -64,9 +67,14 @@ __all__ = [
     "WorldEvent",
     "advance_molecular_process_receiver",
     "analyze_energy_grain_world_state",
+    "analyze_gas_network_steady_world",
     "analyze_gas_network_world_state",
+    "analyze_sbml_design_world",
     "analyze_sbml_finite_time_world",
     "analyze_sbml_flux_modes",
+    "analyze_sbml_lyapunov_world",
+    "analyze_sbml_steady_branch_world",
+    "analyze_sbml_timescales_world",
     "analyze_sbml_world_state",
     "analyze_treatment_world_economics",
     "build_molecular_process_receiver",
@@ -76,13 +84,19 @@ __all__ = [
     "equilibrate_aqueous_mineral_inventory",
     "equilibrate_aqueous_phase_inventory",
     "equilibrate_calphad_phase_inventory",
+    "equilibrate_molecular_multiphase_inventory",
     "equilibrate_molecular_phase_inventory",
     "evaluate_molecular_design",
+    "install_thermal_feedback",
     "make_chemworld_constitution",
     "mechanism_hash",
     "mechanism_id_for_scenario",
     "molecular_flash_inventory_enthalpy_j",
     "molecular_interface_from_ledger",
+    "molecular_interface_from_state",
+    "molecular_multiphase_inventory_energy_j",
+    "molecular_multiphase_inventory_state",
+    "molecular_multiphase_stream",
     "molecular_phase_stream",
     "optimize_molecular_process",
     "optimized_process_receiver",
@@ -92,6 +106,7 @@ __all__ = [
     "validate_calphad_thermal_state",
     "validate_mechanism_file",
     "validate_molecular_flash_state",
+    "validate_molecular_multiphase_thermal_state",
 ]
 
 _MECHANISM_EXPORTS = {
@@ -108,6 +123,26 @@ _MECHANISM_EXPORTS = {
 
 
 def __getattr__(name: str) -> Any:
+    if name == "analyze_sbml_design_world":
+        from chemworld.runtime.sbml_design import analyze_sbml_design_world
+
+        return analyze_sbml_design_world
+    if name == "analyze_sbml_lyapunov_world":
+        from chemworld.runtime.sbml_lyapunov import analyze_sbml_lyapunov_world
+
+        return analyze_sbml_lyapunov_world
+    if name == "analyze_sbml_timescales_world":
+        from chemworld.runtime.sbml_timescales import analyze_sbml_timescales_world
+
+        return analyze_sbml_timescales_world
+    if name == "analyze_sbml_steady_branch_world":
+        from chemworld.runtime.sbml_continuation import analyze_sbml_steady_branch_world
+
+        return analyze_sbml_steady_branch_world
+    if name == "install_thermal_feedback":
+        from chemworld.runtime.thermal_feedback import install_thermal_feedback
+
+        return install_thermal_feedback
     if name == "analyze_sbml_finite_time_world":
         from chemworld.runtime.sbml_finite_time import analyze_sbml_finite_time_world
 
@@ -126,6 +161,10 @@ def __getattr__(name: str) -> Any:
         from chemworld.runtime.gas_network_sensitivity import analyze_gas_network_world_state
 
         return analyze_gas_network_world_state
+    if name == "analyze_gas_network_steady_world":
+        from chemworld.runtime.gas_network_steady import analyze_gas_network_steady_world
+
+        return analyze_gas_network_steady_world
     if name == "MolecularFlashSeparatorAdapter":
         from chemworld.runtime.molecular_flash_separator import MolecularFlashSeparatorAdapter
 
@@ -167,6 +206,21 @@ def __getattr__(name: str) -> Any:
         from chemworld.runtime import molecular_flash_thermal
 
         return getattr(molecular_flash_thermal, name)
+    if name in {
+        "MolecularMultiphaseThermalSpec", "molecular_multiphase_inventory_energy_j",
+        "validate_molecular_multiphase_thermal_state",
+    }:
+        from chemworld.runtime import molecular_multiphase_thermal
+
+        return getattr(molecular_multiphase_thermal, name)
+    if name in {
+        "MolecularMultiphaseInventorySpec", "MolecularMultiphaseInventoryState",
+        "equilibrate_molecular_multiphase_inventory", "molecular_multiphase_inventory_state",
+        "molecular_multiphase_stream",
+    }:
+        from chemworld.runtime import molecular_multiphase_inventory
+
+        return getattr(molecular_multiphase_inventory, name)
     if name in {"AqueousMineralInventoryResult", "equilibrate_aqueous_mineral_inventory"}:
         from chemworld.runtime import aqueous_mineral_equilibrium
 
@@ -197,7 +251,10 @@ def __getattr__(name: str) -> Any:
         from chemworld.runtime import molecular_process_path
 
         return getattr(molecular_process_path, name)
-    if name in {"MolecularInventoryInterface", "molecular_interface_from_ledger"}:
+    if name in {
+        "MolecularInventoryInterface", "molecular_interface_from_ledger",
+        "molecular_interface_from_state",
+    }:
         from chemworld.runtime import molecular_interface
 
         return getattr(molecular_interface, name)

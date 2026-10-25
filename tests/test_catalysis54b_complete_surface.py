@@ -5,7 +5,7 @@ from copy import deepcopy
 import numpy as np
 import pytest
 
-from chemworld.examples.native_imported_surface import SOURCE, example_world
+from chemworld.examples.native_imported_surface import SOURCE, authored_declaration, example_world
 from chemworld.examples.native_surface_steady import (
     branching_declaration,
     branching_mechanism,
@@ -28,6 +28,63 @@ def boundary(temperature=700, pressure=5e4):
     return CatalyticAnalysisConditions(
         temperature, {"A": pressure, "B": 0, "C": 0}, {"surface": 1e-6}
     )
+
+
+def trace_pool():
+    payload = authored_declaration()
+    payload["reactions"] = [
+        {"equation": equation, "rate-constant": {"A": rate, "b": 0, "Ea": 0}}
+        for equation, rate in (("A + Pt => HA", 0.5), ("HA => HB", 200), ("HB => B + Pt", 1e18))
+    ]
+    spec = convert_surface_mechanism(
+        payload,
+        surface_phase="surface",
+        source=SOURCE,
+        minimum_temperature_K=300,
+        maximum_temperature_K=1900,
+    ).surface
+    conditions = CatalyticAnalysisConditions(700, {"A": 5e4, "B": 0}, {"surface": 1e-6})
+    return spec, conditions
+
+
+def test_connected_pool_resolves_sub_epsilon_trace_and_physical_spectrum():
+    spec, conditions = trace_pool()
+    seed = dict.fromkeys(spec.adsorbates, 1 / 3)
+    root = solve_catalytic_steady_state(spec, conditions, seed, target_species="B")
+    assert root["status"] == "converged", root
+    adsorption = 0.5 * 5e4 / (8.31446261815324 * 700)
+    vacant = 1 / (1 + adsorption / 200 + adsorption / 1e18)
+    expected = {"Pt": vacant, "HA": adsorption * vacant / 200, "HB": adsorption * vacant / 1e18}
+    for key, value in expected.items():
+        assert root["coverages"][key] == pytest.approx(value, rel=1e-7, abs=0)
+    assert 0 < root["coverages"]["HB"] < np.finfo(float).eps
+    assert root["stability"] == "stable"
+    # The fast physical rate is retained; a log-coordinate residual spectrum
+    # would scale it by the tiny trace coverage and be scientifically wrong.
+    assert min(v["real"] for v in root["eigenvalues_s_inv"]) == pytest.approx(-1e18, rel=1e-6)
+    assert max(v["real"] for v in root["eigenvalues_s_inv"]) == pytest.approx(
+        -200 - adsorption, rel=1e-5
+    )
+    assert root["steady_initialization"]["physical_time_advanced_s"] == 0
+    assert root["steady_initialization"]["experiment_resource_debit"] is None
+    assert seed == dict.fromkeys(spec.adsorbates, 1 / 3)
+
+
+def test_relaxation_budget_failure_has_no_root_and_direct_option_is_explicit():
+    spec, conditions = trace_pool()
+    seed = dict.fromkeys(spec.adsorbates, 1 / 3)
+    refused = solve_catalytic_steady_state(
+        spec, conditions, seed, target_species="B", relaxation_maximum_evaluations=1
+    )
+    assert refused["status"] == "not_converged"
+    assert refused["coverages"] is None
+    assert refused["steady_initialization"]["rate_evaluations"] == 1
+    assert "evaluation_budget_exhausted" in refused["failure_reason"]
+    direct = solve_catalytic_steady_state(
+        spec, conditions, seed, target_species="B", relaxation_time_s=0
+    )
+    assert direct["steady_initialization"]["method"] == "direct_root"
+    assert direct["steady_initialization"]["rate_evaluations"] == 0
 
 
 @pytest.mark.parametrize("disconnected", [False, True])

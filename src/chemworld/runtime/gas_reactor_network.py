@@ -304,14 +304,24 @@ class GasReactorNetworkRuntime:
             if current is None
             else GasReactorNetworkSpec.from_dict(current.settings["physical_model"])
         )
-        wall_model = bool((declared and declared.thermal_wall) or (actual and actual.thermal_wall))
+        wall_model = bool(
+            (declared and (declared.thermal_wall or declared.shaft_machine))
+            or (actual and (actual.thermal_wall or actual.shaft_machine))
+        )
         if wall_model and (
             source is None
             or current is None
             or source.equipment_id != current.equipment_id
             or declared != actual
         ):
-            raise ValueError("thermal wall gas model differs from original composition")
+            shaft_model = bool(
+                (declared and declared.shaft_machine) or (actual and actual.shaft_machine)
+            )
+            raise ValueError(
+                "shaft gas model differs from original composition"
+                if shaft_model
+                else "thermal wall gas model differs from original composition"
+            )
         return wall_model
 
     def _unpack_bound(
@@ -586,6 +596,11 @@ class GasReactorNetworkRuntime:
                         ),
                         **({"heat_loss_J": diagnostic["heat_loss_J"]} if spec.energy_nodes else {}),
                         **(
+                            {"flow_shaft_work_J": diagnostic["shaft_work_J"]}
+                            if spec.shaft_machine
+                            else {}
+                        ),
+                        **(
                             {"boundary_work_J": -diagnostic["boundary_work_on_J"]}
                             if spec.pressure_control
                             else {}
@@ -618,7 +633,10 @@ class GasReactorNetworkRuntime:
                 "solver": result.solver_diagnostic,
                 "stopping_event": result.stopping_event,
                 "energy_scope": (
-                    "finite constant-load piston; original U/Cv; "
+                    "finite two-tank gas shaft device; original inlet/outlet H; "
+                    "signed shaft work counted once in original resource ledger"
+                    if spec.shaft_machine
+                    else "finite constant-load piston; original U/Cv; "
                     "actual V and signed mechanical work"
                     if spec.pressure_control
                     else "finite constant-volume gas; independent node temperatures; "

@@ -4,15 +4,24 @@ Terms are mathematical data, not executable callbacks. One expression supplies
 voltages and analytic derivatives in all native battery models.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import exp, expm1, inf, isfinite, log, log1p, nextafter, tanh
 from numbers import Real
 
 from chemworld.data.scientific_inputs import InputSource, InputValue
 from chemworld.physchem.analytic_functions import smooth_function
-from chemworld.physchem.caloric_math import Interval, derivative_values, exponential, scalar_value
+from chemworld.physchem.caloric_math import (
+    Interval,
+    derivative_depth,
+    derivative_values,
+    exponential,
+    scalar_value,
+)
 
 OCV_VERSION = "polynomial-exp-tanh-ocv-v1"
+OCV_ENDPOINT_VERSION = "polynomial-exp-tanh-clipped-endpoint-ocv-v2"
+OCV_ENDPOINT_POLICY_VERSION = "clipped-rational-ocv-endpoint-v1"
 
 
 def _number(value):
@@ -22,8 +31,50 @@ def _number(value):
 
 
 @dataclass(frozen=True)
+class ElectrodeOCVEndpointPolicy:
+    """Sourced model convention: x=clip(theta, delta, 1-delta), U=Uraw(x)+b/x+b/(x-1).
+
+    PyBaMM 25.4.2's lithium_ion_parameters.py ``U`` applies the same clipped
+    coordinate to the material curve and the rational barrier. This is a model
+    convention with its own provenance, not a measurement of an electrode.
+    """
+
+    source: InputSource
+    barrier_V: float = 1e-6
+    stoichiometry_clip: float = 1e-10
+
+    def __post_init__(self):
+        if not isinstance(self.source, InputSource) or self.source.data_kind == "measured":
+            raise ValueError("OCV endpoint policy requires an explicit model InputSource")
+        barrier, clip = _number(self.barrier_V), _number(self.stoichiometry_clip)
+        if barrier <= 0 or not 0 < clip < 1 - clip < 1:
+            raise ValueError("OCV endpoint policy requires a positive barrier and clip in (0, 0.5)")
+        object.__setattr__(self, "barrier_V", barrier)
+        object.__setattr__(self, "stoichiometry_clip", clip)
+
+    def to_dict(self):
+        return {
+            "model_version": OCV_ENDPOINT_POLICY_VERSION,
+            "source": self.source.to_dict(),
+            "barrier_V": self.barrier_V,
+            "stoichiometry_clip": self.stoichiometry_clip,
+        }
+
+    @classmethod
+    def from_dict(cls, value):
+        if (
+            not isinstance(value, Mapping)
+            or set(value) != {"model_version", "source", "barrier_V", "stoichiometry_clip"}
+            or value["model_version"] != OCV_ENDPOINT_POLICY_VERSION
+        ):
+            raise ValueError("unsupported OCV endpoint policy version or fields")
+        return cls(InputSource.from_dict(value["source"]), value["barrier_V"],
+                   value["stoichiometry_clip"])
+
+
+@dataclass(frozen=True)
 class ElectrodeOCV:
-    """U(theta) = polynomial + sum(a exp(k(theta-s))) + sum(a tanh(k(theta-s)))."""
+    """Polynomial/exp/tanh material curve with an optional sourced endpoint convention."""
 
     material_id: str
     source: InputSource
@@ -34,6 +85,7 @@ class ElectrodeOCV:
     supported_models: tuple[str, ...] = ("SPM", "SPMe", "DFN")
     source_row_id: str = ""
     parameter_inputs: tuple[tuple[str, InputValue], ...] = ()
+    endpoint_policy: ElectrodeOCVEndpointPolicy | None = None
 
     def __post_init__(self):
         if not isinstance(self.material_id, str) or not self.material_id.strip():
@@ -72,6 +124,10 @@ class ElectrodeOCV:
         ):
             raise ValueError("OCV parameter inputs require unique names and a source row")
         object.__setattr__(self, "parameter_inputs", inputs)
+        if self.endpoint_policy is not None and not isinstance(
+            self.endpoint_policy, ElectrodeOCVEndpointPolicy
+        ):
+            raise ValueError("OCV endpoint policy requires an explicit declaration")
 
     def _check(self, theta, trial):
         if not isfinite(scalar_value(theta)):
@@ -85,6 +141,19 @@ class ElectrodeOCV:
             raise ValueError("OCV stoichiometry is outside its declared domain")
 
     def _expression(self, theta):
+        if self.endpoint_policy is None:
+            return self._raw_expression(theta)
+        policy = self.endpoint_policy
+        low, high = policy.stoichiometry_clip, 1 - policy.stoichiometry_clip
+        primal = scalar_value(theta)
+        if primal in (low, high) and derivative_depth(theta):
+            raise ValueError("OCV derivative is undefined at an endpoint clip breakpoint")
+        # Detach a clamped expression from the original derivative seed. This
+        # changes only the constitutive coordinate, never a particle inventory.
+        x = low if primal < low else high if primal > high else theta
+        return self._raw_expression(x) + policy.barrier_V * (1 / x + 1 / (x - 1))
+
+    def _raw_expression(self, theta):
         value = 0.0
         for coefficient in reversed(self.polynomial_V):
             value = value * theta + coefficient
@@ -102,6 +171,7 @@ class ElectrodeOCV:
         return value
 
     def derivatives(self, theta, *, order=1, trial=False):
+        """Classical analytic derivatives; clip breakpoints reject positive orders."""
         self._check(theta, trial)
         return derivative_values(self._expression, theta, order=order)
 
@@ -109,7 +179,28 @@ class ElectrodeOCV:
         """Exact integral in V; theta is dimensionless. No sampled fit or quadrature."""
         self._check(lower, trial)
         self._check(upper, trial)
+        if self.endpoint_policy is None:
+            return self._raw_integral(lower, upper)
+        if lower > upper:
+            return -self.integral(upper, lower, trial=trial)
+        policy = self.endpoint_policy
+        low, high = policy.stoichiometry_clip, 1 - policy.stoichiometry_clip
+        a, b = max(lower, low), min(upper, high)
+        result = 0.0
+        if lower < low:
+            result += (min(upper, low) - lower) * self._expression(low)
+        if a < b:
+            width = b - a
+            result += self._raw_integral(a, b) + policy.barrier_V * (
+                log1p(width / a) - log1p(width / (1 - b))
+            )
+        if upper > high:
+            result += (upper - max(lower, high)) * self._expression(high)
+        if not isfinite(result):
+            raise ValueError("nonfinite OCV integral")
+        return result
 
+    def _raw_integral(self, lower, upper):
         def logcosh(x):
             return abs(x) + log1p(exp(-2 * abs(x))) - log(2)
 
@@ -138,10 +229,32 @@ class ElectrodeOCV:
         return result
 
     def enclosure(self, lower, upper, *, derivative=False, trial=False):
-        """Outward interval for U or dU/dtheta on a closed declared sub-domain."""
+        """Outward interval on a closed declared sub-domain.
+
+        With a policy, derivative bounds enclose both one-sided slopes at a
+        clip breakpoint, including zero on the constant extension. They can
+        certify monotonicity across a kink without claiming its derivative.
+        """
         self._check(lower, trial)
         self._check(upper, trial)
         theta = Interval(lower, upper)
+        if self.endpoint_policy is None:
+            return self._raw_enclosure(theta, derivative=derivative)
+        policy = self.endpoint_policy
+        low, high = policy.stoichiometry_clip, 1 - policy.stoichiometry_clip
+        if derivative and (upper < low or lower > high):
+            return Interval(0.0, 0.0)
+        clipped = Interval(max(low, min(high, lower)), max(low, min(high, upper)))
+        result = self._raw_enclosure(clipped, derivative=derivative)
+        if derivative:
+            result -= policy.barrier_V * (1 / clipped**2 + 1 / (clipped - 1)**2)
+            if lower <= low or upper >= high:
+                result = Interval(min(result.lower, 0.0), max(result.upper, 0.0))
+        else:
+            result += policy.barrier_V * (1 / clipped + 1 / (clipped - 1))
+        return result
+
+    def _raw_enclosure(self, theta, *, derivative):
         result = Interval(0.0, 0.0)
         polynomial = (
             tuple(i * c for i, c in enumerate(self.polynomial_V) if i)
@@ -182,7 +295,7 @@ class ElectrodeOCV:
         return result
 
     def to_dict(self):
-        return {
+        result = {
             "model_version": OCV_VERSION,
             "material_id": self.material_id,
             "source": self.source.to_dict(),
@@ -194,6 +307,10 @@ class ElectrodeOCV:
             "source_row_id": self.source_row_id,
             "parameter_inputs": {k: v.to_dict() for k, v in self.parameter_inputs},
         }
+        if self.endpoint_policy is not None:
+            result["model_version"] = OCV_ENDPOINT_VERSION
+            result["endpoint_policy"] = self.endpoint_policy.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, value):
@@ -209,18 +326,28 @@ class ElectrodeOCV:
             "source_row_id",
             "parameter_inputs",
         }
-        if set(value) != keys or value["model_version"] != OCV_VERSION:
+        if not isinstance(value, Mapping):
             raise ValueError("unsupported OCV model version or fields")
+        version = value.get("model_version")
+        if version == OCV_ENDPOINT_VERSION:
+            keys.add("endpoint_policy")
+        if set(value) != keys or version not in (OCV_VERSION, OCV_ENDPOINT_VERSION):
+            raise ValueError("unsupported OCV model version or fields")
+        endpoint = (
+            {} if version == OCV_VERSION else
+            {"endpoint_policy": ElectrodeOCVEndpointPolicy.from_dict(value["endpoint_policy"])}
+        )
         return cls(
             **{
                 k: v
                 for k, v in value.items()
-                if k not in {"model_version", "source", "parameter_inputs"}
+                if k not in {"model_version", "source", "parameter_inputs", "endpoint_policy"}
             },
             source=InputSource.from_dict(value["source"]),
             parameter_inputs=tuple(
                 (k, InputValue.from_dict(v)) for k, v in value["parameter_inputs"].items()
             ),
+            **endpoint,
         )
 
     @classmethod

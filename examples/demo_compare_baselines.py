@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from chemworld.eval.leaderboard import aggregate_leaderboard
 from chemworld.eval.suite import run_suite
+from chemworld.legacy.leaderboard import aggregate_leaderboard
 
 
 def main() -> None:

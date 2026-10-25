@@ -23,7 +23,13 @@ def inventory_enthalpy_j(state, model):
         MolecularFlashThermalSpec,
         molecular_flash_inventory_enthalpy_j,
     )
+    from chemworld.runtime.molecular_multiphase_thermal import (
+        MolecularMultiphaseThermalSpec,
+        molecular_multiphase_inventory_enthalpy_j,
+    )
 
+    if isinstance(model, MolecularMultiphaseThermalSpec):
+        return molecular_multiphase_inventory_enthalpy_j(state, model)
     if isinstance(model, MolecularFlashThermalSpec):
         return molecular_flash_inventory_enthalpy_j(state, model)
     inventories = {
@@ -73,7 +79,13 @@ def validate_flash_state(state, model):
         MolecularFlashThermalSpec,
         validate_molecular_flash_state,
     )
+    from chemworld.runtime.molecular_multiphase_thermal import (
+        MolecularMultiphaseThermalSpec,
+        validate_molecular_multiphase_thermal_state,
+    )
 
+    if isinstance(model, MolecularMultiphaseThermalSpec):
+        return validate_molecular_multiphase_thermal_state(state, model)
     if isinstance(model, MolecularFlashThermalSpec):
         return validate_molecular_flash_state(state, model)
     if not (model.properties.temperature_bounds_K[0] <= state.temperature_K
@@ -105,20 +117,26 @@ class FlashThermalRuntime:
     supported_operations = ("wait",)
 
     def reconcile_pressure(self, state):
+        if self.multiphase.supports(state):
+            return self.multiphase.reconcile_pressure(state)
         model = self.composition.physics.models_of("flash")[state.vessel_id]
         return state.replace(pressure_Pa=model.pressure_Pa)
 
     def __init__(self, composition):
         from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalRuntime
+        from chemworld.runtime.molecular_multiphase_thermal import MolecularMultiphaseThermalRuntime
 
         self.composition = composition
         self.molecular = MolecularFlashThermalRuntime(composition)
+        self.multiphase = MolecularMultiphaseThermalRuntime(composition)
 
     def supports(self, state):
         return (self.composition is not None and self.composition.physics is not None
                 and state.vessel_id in self.composition.physics.models_of("flash"))
 
     def advance(self, state, action, *, heat, jacket_program=None):
+        if self.multiphase.supports(state):
+            return self.multiphase.advance(state, action, heat=heat, jacket_program=jacket_program)
         if self.molecular.supports(state):
             return self.molecular.advance(state, action, heat=heat, jacket_program=jacket_program)
         model = self.composition.physics.models_of("flash")[state.vessel_id]
@@ -212,11 +230,13 @@ class FlashThermalRuntime:
 
 def exchange_flash_packet(source, target, physics, amounts, *, fraction=0, fixed_source=False):
     from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalSpec
+    from chemworld.runtime.molecular_multiphase_thermal import MolecularMultiphaseThermalSpec
 
     model = physics.models_of("flash")[target.vessel_id]
-    if any(isinstance(physics.models_of("flash").get(vessel), MolecularFlashThermalSpec)
+    if any(isinstance(physics.models_of("flash").get(vessel),
+                      (MolecularFlashThermalSpec, MolecularMultiphaseThermalSpec))
            for vessel in (source.vessel_id, target.vessel_id)):
-        raise ValueError("molecular two-phase caloric branch does not declare material transfer")
+        raise ValueError("molecular thermal closure does not declare material transfer")
     if source.state_slots.slots or target.state_slots.slots:
         raise ValueError("flash packets do not support extra owned slots in this slice")
     source_model = model if fixed_source else physics.models_of("flash").get(source.vessel_id)

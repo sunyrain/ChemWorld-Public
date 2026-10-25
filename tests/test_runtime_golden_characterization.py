@@ -5,7 +5,6 @@ from typing import Any
 
 import gymnasium as gym
 import pytest
-import scipy
 
 import chemworld  # noqa: F401
 from chemworld.envs.chemworld_env import OBSERVATION_KEYS
@@ -246,11 +245,6 @@ def test_runtime_v2_golden_scripted_final_assay(
 ) -> None:
     monkeypatch.delenv("CHEMWORLD_PRIVATE_EVAL_SALT", raising=False)
     expected = GOLDEN[task.task_id]
-    # The lock selects SciPy 1.17.1 on Python 3.11 and 1.18.0 on newer Python.
-    # Main and public source both reproduce this 5.10e-9 difference under the
-    # same 1.17.1 environment. Keep the 1.18 baseline and the existing tolerance.
-    if task.task_id == "reaction-to-assay" and scipy.__version__ == "1.17.1":
-        expected = {**expected, "score": 0.34336650806871183}
     actions = _scripted_final_actions(task.task_id)
     assert len(actions) == expected["steps"]
 

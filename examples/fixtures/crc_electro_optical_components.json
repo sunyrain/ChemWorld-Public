@@ -1,7 +1,7 @@
 {
   "description": "Explicit reviewed CRC components from GSRS, ChEBI, NCI CIR, Sander, CAMEO, INERIS, EPA SRS, EPA DSSTox deposits and PubChem public identity fields, with material stereochemical scope and fixed adduct stoichiometry preserved. Source candidates and conflicts are provenance, not automatic aliases.",
   "original_gap_rows": 285,
-  "reviewed_source_rows": 221,
+  "reviewed_source_rows": 246,
   "components": [
     {
       "identifier": "crc:106-61-6",
@@ -17559,6 +17559,2414 @@
       "units": {
         "molecular_weight_g_mol": "g/mol"
       }
+    },
+    {
+      "identifier": "crc:615-39-4",
+      "formula": "C7H14O",
+      "cas_number": "615-39-4",
+      "inchi": "InChI=1/C7H14O/c1-6-4-2-3-5-7(6)8/h6-8H,2-5H2,1H3/t6-,7-/s3",
+      "inchi_key": "NDVWOBYBJYUSMF-QHDQTYHDNA-N",
+      "hill_formula": "C7H14O",
+      "composition": {
+        "C": 7.0,
+        "H": 14.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 114.185,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "trans-2-Methylcyclohexanol, (\u00b1)-"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC",
+          "source_name": "CRC Handbook of Chemistry and Physics",
+          "source_table": "Physical constants of organic compounds; table and facing structure diagram",
+          "source_key": "684:615-39-4",
+          "source_path": "https://s3.amazonaws.com/thm-monocle-interactive/0PC9TGZOtD/file.pdf",
+          "notes": [
+            "PDF pages 36 and 37; explicit trans and (+/-) material.",
+            "Original generic PubChem and ChemIDplus deposit retained as conflict."
+          ]
+        },
+        {
+          "source_id": "IUPAC_INCHI",
+          "source_name": "Official InChI reference software 1.07.5",
+          "source_table": "",
+          "source_key": "615-39-4",
+          "source_path": "https://github.com/IUPAC-InChI/InChI/releases/tag/v1.07.5",
+          "notes": [
+            "Default and SRac conversions of explicitly transcribed CRC diagram. No absolute enantiomer selected."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_primary_document_structure",
+          "source_CAS": "615-39-4",
+          "source_units": [
+            "CRC_RI/2072"
+          ],
+          "reviewed_date": "2026-10-24",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 2,
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "primary_document_fields": {
+            "CAS": "615-39-4",
+            "formula": "C7H14O",
+            "molecular_weight_g_mol": 114.185,
+            "refractive_index": 1.4616,
+            "temperature_K": 293.15,
+            "name": "trans-2-Methylcyclohexanol, (\u00b1)-",
+            "table_entry": 684,
+            "table_page": 36,
+            "diagram_page": 37,
+            "url": "https://s3.amazonaws.com/thm-monocle-interactive/0PC9TGZOtD/file.pdf",
+            "diagram_review": "adjacent OH solid wedge and methyl dashed wedge"
+          },
+          "conflicting_PubChem_candidates": [
+            {
+              "CID": 11418,
+              "InChI": "InChI=1S/C7H14O/c1-6-4-2-3-5-7(6)8/h6-8H,2-5H2,1H3",
+              "InChIKey": "NDVWOBYBJYUSMF-UHFFFAOYSA-N",
+              "MolecularFormula": "C7H14O"
+            }
+          ]
+        },
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "representative_InChI": "InChI=1S/C7H14O/c1-6-4-2-3-5-7(6)8/h6-8H,2-5H2,1H3/t6-,7-/m1/s1",
+          "representative_InChIKey": "NDVWOBYBJYUSMF-RNFRBKRXSA-N",
+          "input": "manual transcription of CRC diagram 684; OH solid and methyl dashed wedge"
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:998-41-4",
+      "formula": "C12H28Si",
+      "cas_number": "998-41-4",
+      "inchi": "InChI=1S/C12H28Si/c1-4-7-10-13(11-8-5-2)12-9-6-3/h13H,4-12H2,1-3H3",
+      "inchi_key": "HIAZFYQNGXRLTF-UHFFFAOYSA-N",
+      "hill_formula": "C12H28Si",
+      "composition": {
+        "C": 12.0,
+        "H": 28.0,
+        "Si": 1.0
+      },
+      "molecular_weight_g_mol": 200.44,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "Tributylsilane"
+      ],
+      "provenance": [
+        {
+          "source_id": "SIGMA_ALDRICH",
+          "source_name": "Sigma-Aldrich product 278777",
+          "source_table": "Indexed primary-page identity excerpt",
+          "source_key": "998-41-4",
+          "source_path": "https://www.sigmaaldrich.com/US/en/product/aldrich/278777",
+          "notes": [
+            "Saved web-connector source record, not a successful direct HTML download.",
+            "Si-H included; conflicting C12H27Si deposited identities retained."
+          ]
+        },
+        {
+          "source_id": "JST_JGLOBAL",
+          "source_name": "Japan Science and Technology Agency J-GLOBAL",
+          "source_table": "Indexed primary-page identity excerpt",
+          "source_key": "998-41-4",
+          "source_path": "https://jglobal.jst.go.jp/en/detail?JGLOBAL_ID=200907066237312881",
+          "notes": [
+            "Saved web-connector source record, not a successful direct HTML download.",
+            "Si-H included; conflicting C12H27Si deposited identities retained."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_primary_document_structure",
+          "source_CAS": "998-41-4",
+          "source_units": [
+            "CRC_RI/2776"
+          ],
+          "reviewed_date": "2026-10-24",
+          "stereochemistry": "ACHIRAL",
+          "material_kind": "single_achiral_compound"
+        },
+        "external_identity": {
+          "primary_document_fields": {
+            "CAS": "998-41-4",
+            "formula": "C12H28Si",
+            "name": "Tributylsilane",
+            "molecular_weight_g_mol": 200.44,
+            "pages": [
+              {
+                "url": "https://www.sigmaaldrich.com/US/en/product/aldrich/278777",
+                "CAS": "998-41-4",
+                "formula": "C12H28Si",
+                "inchi": "InChI=1S/C12H28Si/c1-4-7-10-13(11-8-5-2)12-9-6-3/h13H,4-12H2,1-3H3",
+                "inchi_key": "HIAZFYQNGXRLTF-UHFFFAOYSA-N",
+                "smiles": "CCCC[SiH](CCCC)CCCC"
+              },
+              {
+                "url": "https://jglobal.jst.go.jp/en/detail?JGLOBAL_ID=200907066237312881",
+                "CAS": "998-41-4",
+                "formula": "C12H28Si",
+                "inchi": "InChI=1S/C12H28Si/c1-4-7-10-13(11-8-5-2)12-9-6-3/h13H,4-12H2,1-3H3",
+                "inchi_key": "HIAZFYQNGXRLTF-UHFFFAOYSA-N",
+                "smiles": "CCCC[SiH](CCCC)CCCC"
+              }
+            ],
+            "source_access": "saved_search_connector_indexed_primary_page_excerpts",
+            "direct_download": "Sigma timed out; J-GLOBAL previously returned 503"
+          },
+          "conflicting_PubChem_candidates": [
+            {
+              "CID": 6327711,
+              "InChI": "InChI=1S/C12H27Si/c1-4-7-10-13(11-8-5-2)12-9-6-3/h4-12H2,1-3H3",
+              "InChIKey": "ISEIIPDWJVGTQS-UHFFFAOYSA-N",
+              "MolecularFormula": "C12H27Si"
+            }
+          ]
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:16177-46-1",
+      "formula": "C8H12",
+      "cas_number": "16177-46-1",
+      "inchi": "InChI=1S/C8H12/c1-3-7-5-6-8(7)4-2/h3-4,7-8H,1-2,5-6H2/t7-,8+",
+      "inchi_key": "UHHCYAAVGADGGP-OCAPTIKFSA-N",
+      "hill_formula": "C8H12",
+      "composition": {
+        "C": 8.0,
+        "H": 12.0
+      },
+      "molecular_weight_g_mol": 108.1809,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "cis-1,2-Divinylcyclobutane"
+      ],
+      "provenance": [
+        {
+          "source_id": "NIST_WEBBOOK",
+          "source_name": "NIST Chemistry WebBook SRD 69",
+          "source_table": "Indexed primary-page identity excerpt",
+          "source_key": "16177-46-1",
+          "source_path": "https://webbook.nist.gov/cgi/cbook.cgi?ID=C16177461&Mask=1",
+          "notes": [
+            "Explicit cis ring geometry; achiral molecule, no absolute enantiomer or racemate imposed.",
+            "Saved search-connector excerpt, not a direct NIST API download. No thermochemical data imported.",
+            "Original generic PubChem and ChemIDplus graph retained as a source difference."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_primary_document_structure",
+          "source_CAS": "16177-46-1",
+          "source_units": [
+            "CRC_RI/4189"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "ACHIRAL_RELATIVE_RING_GEOMETRY",
+          "relative_geometry": "cis",
+          "absolute_configuration": "not_applicable"
+        },
+        "external_identity": {
+          "primary_document_fields": {
+            "CAS": "16177-46-1",
+            "name": "cis-1,2-Divinylcyclobutane",
+            "url": "https://webbook.nist.gov/cgi/cbook.cgi?ID=C16177461&Mask=1",
+            "formula": "C8H12",
+            "molecular_weight_g_mol": 108.1809,
+            "inchi": "InChI=1S/C8H12/c1-3-7-5-6-8(7)4-2/h3-4,7-8H,1-2,5-6H2/t7-,8+",
+            "inchi_key": "UHHCYAAVGADGGP-OCAPTIKFSA-N",
+            "access": "saved_search_connector_indexed_NIST_page_excerpt"
+          },
+          "conflicting_PubChem_candidates": [
+            {
+              "CID": 17027,
+              "InChI": "InChI=1S/C8H12/c1-3-7-5-6-8(7)4-2/h3-4,7-8H,1-2,5-6H2",
+              "InChIKey": "UHHCYAAVGADGGP-UHFFFAOYSA-N",
+              "MolecularFormula": "C8H12"
+            }
+          ]
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:111675-77-5",
+      "formula": "C8H18O",
+      "cas_number": "111675-77-5",
+      "inchi": "InChI=1/C8H18O/c1-3-4-5-6-8(2)7-9/h8-9H,3-7H2,1-2H3/t8-/s3",
+      "inchi_key": "QZESEQBMSFFHRY-SBYBRXNCNA-N",
+      "hill_formula": "C8H18O",
+      "composition": {
+        "C": 8.0,
+        "H": 18.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 130.228,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "2-Methyl-1-heptanol, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "7289:111675-77-5",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 503; diagram page 504.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "7289",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "111675-77-5",
+          "source_units": [
+            "CRC_PERMITTIVITY/1300",
+            "CRC_RI/4484"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "111675-77-5",
+            "entry": 7289,
+            "page": 503,
+            "diagram_page": 504,
+            "name": "2-Methyl-1-heptanol, (±)",
+            "formula": "C8H18O",
+            "molecular_weight_g_mol": 130.228,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_PERMITTIVITY/1300",
+            "source_CAS": "111675-77-5",
+            "source_name": "2-Methyl-1-heptanol, ()-",
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C8H18O/c1-3-4-5-6-8(2)7-9/h8-9H,3-7H2,1-2H3/t8-/m0/s1",
+          "representative_InChIKey": "QZESEQBMSFFHRY-QMMMGPOBSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:111767-95-4",
+      "formula": "C8H18O",
+      "cas_number": "111767-95-4",
+      "inchi": "InChI=1/C8H18O/c1-3-8(2)6-4-5-7-9/h8-9H,3-7H2,1-2H3/t8-/s3",
+      "inchi_key": "KFARNLMRENFOHE-SBYBRXNCNA-N",
+      "hill_formula": "C8H18O",
+      "composition": {
+        "C": 8.0,
+        "H": 18.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 130.228,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "5-Methyl-1-heptanol, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "7292:111767-95-4",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 503; diagram page 504.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "7292",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "111767-95-4",
+          "source_units": [
+            "CRC_PERMITTIVITY/1301",
+            "CRC_RI/4485"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "111767-95-4",
+            "entry": 7292,
+            "page": 503,
+            "diagram_page": 504,
+            "name": "5-Methyl-1-heptanol, (±)",
+            "formula": "C8H18O",
+            "molecular_weight_g_mol": 130.228,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_PERMITTIVITY/1301",
+            "source_CAS": "111767-95-4",
+            "source_name": "5-Methyl-1-heptanol, ()-",
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C8H18O/c1-3-8(2)6-4-5-7-9/h8-9H,3-7H2,1-2H3/t8-/m1/s1",
+          "representative_InChIKey": "KFARNLMRENFOHE-MRVPVSSYSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:100296-26-2",
+      "formula": "C8H18O",
+      "cas_number": "100296-26-2",
+      "inchi": "InChI=1/C8H18O/c1-4-5-6-8(9)7(2)3/h7-9H,4-6H2,1-3H3/t8-/s3",
+      "inchi_key": "QGVFLDUEHSIZIG-SBYBRXNCNA-N",
+      "hill_formula": "C8H18O",
+      "composition": {
+        "C": 8.0,
+        "H": 18.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 130.228,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "2-Methyl-3-heptanol, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "7299:100296-26-2",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 505; diagram page 506.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "7299",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "100296-26-2",
+          "source_units": [
+            "CRC_PERMITTIVITY/1299",
+            "CRC_RI/4482"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "100296-26-2",
+            "entry": 7299,
+            "page": 505,
+            "diagram_page": 506,
+            "name": "2-Methyl-3-heptanol, (±)",
+            "formula": "C8H18O",
+            "molecular_weight_g_mol": 130.228,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_PERMITTIVITY/1299",
+            "source_CAS": "100296-26-2",
+            "source_name": "2-Methyl-3-heptanol, ()-",
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C8H18O/c1-4-5-6-8(9)7(2)3/h7-9H,4-6H2,1-3H3/t8-/m1/s1",
+          "representative_InChIKey": "QGVFLDUEHSIZIG-MRVPVSSYSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:100295-85-0",
+      "formula": "C8H18O",
+      "cas_number": "100295-85-0",
+      "inchi": "InChI=1/C8H18O/c1-4-8(9)6-5-7(2)3/h7-9H,4-6H2,1-3H3/t8-/s3",
+      "inchi_key": "MNBIBGDICHMQFN-SBYBRXNCNA-N",
+      "hill_formula": "C8H18O",
+      "composition": {
+        "C": 8.0,
+        "H": 18.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 130.228,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "6-Methyl-3-heptanol, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "7303:100295-85-0",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 505; diagram page 506.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "7303",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "100295-85-0",
+          "source_units": [
+            "CRC_PERMITTIVITY/1298",
+            "CRC_RI/4481"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "100295-85-0",
+            "entry": 7303,
+            "page": 505,
+            "diagram_page": 506,
+            "name": "6-Methyl-3-heptanol, (±)",
+            "formula": "C8H18O",
+            "molecular_weight_g_mol": 130.228,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_PERMITTIVITY/1298",
+            "source_CAS": "100295-85-0",
+            "source_name": "6-Methyl-3-heptanol, ()-",
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C8H18O/c1-4-8(9)6-5-7(2)3/h7-9H,4-6H2,1-3H3/t8-/m0/s1",
+          "representative_InChIKey": "MNBIBGDICHMQFN-QMMMGPOBSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:111768-04-8",
+      "formula": "C7H16O",
+      "cas_number": "111768-04-8",
+      "inchi": "InChI=1/C7H16O/c1-3-4-5-7(2)6-8/h7-8H,3-6H2,1-2H3/t7-/s3",
+      "inchi_key": "LCFKURIJYIJNRU-KPOCXSGKNA-N",
+      "hill_formula": "C7H16O",
+      "composition": {
+        "C": 7.0,
+        "H": 16.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 116.201,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "2-Methyl-1-hexanol, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "7331:111768-04-8",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 505; diagram page 506.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "7331",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "111768-04-8",
+          "source_units": [
+            "CRC_RI/4486"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "111768-04-8",
+            "entry": 7331,
+            "page": 505,
+            "diagram_page": 506,
+            "name": "2-Methyl-1-hexanol, (±)",
+            "formula": "C7H16O",
+            "molecular_weight_g_mol": 116.201,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/4486",
+            "source_CAS": "111768-04-8",
+            "source_name": null,
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C7H16O/c1-3-4-5-7(2)6-8/h7-8H,3-6H2,1-2H3/t7-/m0/s1",
+          "representative_InChIKey": "LCFKURIJYIJNRU-ZETCQYMHSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:55156-16-6",
+      "formula": "C6H12O",
+      "cas_number": "55156-16-6",
+      "inchi": "InChI=1/C6H12O/c1-4-5(2)6(3)7/h5H,4H2,1-3H3/t5-/s3",
+      "inchi_key": "UIHCLUNTQKBZGK-GQMHJJTINA-N",
+      "hill_formula": "C6H12O",
+      "composition": {
+        "C": 6.0,
+        "H": 12.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 100.158,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "3-Methyl-2-pentanone, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "7571:55156-16-6",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 519; diagram page 520.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "7571",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "55156-16-6",
+          "source_units": [
+            "CRC_RI/4435"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "55156-16-6",
+            "entry": 7571,
+            "page": 519,
+            "diagram_page": 520,
+            "name": "3-Methyl-2-pentanone, (±)",
+            "formula": "C6H12O",
+            "molecular_weight_g_mol": 100.158,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/4435",
+            "source_CAS": "55156-16-6",
+            "source_name": null,
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [
+          {
+            "source": "GSRS current CAS 565-61-7 via SRS former relation",
+            "uuid": "268737cb-f8bd-4c85-bb40-78d9d72d1a59",
+            "version": "10",
+            "stereochemistry": "ACHIRAL",
+            "stereoCenters": 1,
+            "opticalActivity": "( + / - )",
+            "inchi": "InChI=1S/C6H12O/c1-4-5(2)6(3)7/h5H,4H2,1-3H3",
+            "decision": "CRC84 explicitly defines the original CAS as racemic; retain the inconsistent GSRS ACHIRAL classification."
+          }
+        ],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C6H12O/c1-4-5(2)6(3)7/h5H,4H2,1-3H3/t5-/m1/s1",
+          "representative_InChIKey": "UIHCLUNTQKBZGK-RXMQYKEDSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:772-17-8",
+      "formula": "C10H12O2",
+      "cas_number": "772-17-8",
+      "inchi": "InChI=1/C10H12O2/c1-8(7-10(11)12)9-5-3-2-4-6-9/h2-6,8H,7H2,1H3,(H,11,12)/t8-/s3",
+      "inchi_key": "ZZEWMYILWXCRHZ-SBYBRXNCNA-N",
+      "hill_formula": "C10H12O2",
+      "composition": {
+        "C": 10.0,
+        "H": 12.0,
+        "O": 2.0
+      },
+      "molecular_weight_g_mol": 164.201,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "β-Methylbenzenepropanoic acid, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "7003:772-17-8",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 489; diagram page 490.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "7003",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "772-17-8",
+          "source_units": [
+            "CRC_RI/2598"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "772-17-8",
+            "entry": 7003,
+            "page": 489,
+            "diagram_page": 490,
+            "name": "β-Methylbenzenepropanoic acid, (±)",
+            "formula": "C10H12O2",
+            "molecular_weight_g_mol": 164.201,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/2598",
+            "source_CAS": "772-17-8",
+            "source_name": null,
+            "candidates": [
+              {
+                "CID": 20724,
+                "MolecularFormula": "C10H12O2",
+                "MolecularWeight": "164.20",
+                "InChI": "InChI=1S/C10H12O2/c1-8(7-10(11)12)9-5-3-2-4-6-9/h2-6,8H,7H2,1H3,(H,11,12)",
+                "InChIKey": "ZZEWMYILWXCRHZ-UHFFFAOYSA-N",
+                "IUPACName": "3-phenylbutanoic acid",
+                "annotation_status": "annotations_received",
+                "CAS_matches": [
+                  {
+                    "CAS": [
+                      "772-17-8"
+                    ],
+                    "annotation_url": null,
+                    "reference": {
+                      "ReferenceNumber": 6,
+                      "SourceName": "DTP/NCI",
+                      "SourceID": "NSC 67346",
+                      "Name": "NSC67346",
+                      "URL": "https://dtp.cancer.gov/dtpstandard/servlet/dwindex?searchtype=NSC&outputformat=html&searchlist=67346",
+                      "LicenseURL": "https://www.cancer.gov/policies/copyright-reuse"
+                    }
+                  }
+                ],
+                "local_exact_key_matches": [
+                  "pubchem-large:8740"
+                ],
+                "local_other_keys": []
+              }
+            ],
+            "status": "source_CAS_annotation_present",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C10H12O2/c1-8(7-10(11)12)9-5-3-2-4-6-9/h2-6,8H,7H2,1H3,(H,11,12)/t8-/m0/s1",
+          "representative_InChIKey": "ZZEWMYILWXCRHZ-QMMMGPOBSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:17556-48-8",
+      "formula": "C3H5F3O",
+      "cas_number": "17556-48-8",
+      "inchi": "InChI=1/C3H5F3O/c1-2(7)3(4,5)6/h2,7H,1H3/t2-/s3",
+      "inchi_key": "GILIYJDBJZWGBG-NVFNTWQMNA-N",
+      "hill_formula": "C3H5F3O",
+      "composition": {
+        "C": 3.0,
+        "H": 5.0,
+        "F": 3.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 114.066,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "1,1,1-Trifluoro-2-propanol, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "10420:17556-48-8",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 667; diagram page 668.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "10420",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "17556-48-8",
+          "source_units": [
+            "CRC_RI/4230"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "17556-48-8",
+            "entry": 10420,
+            "page": 667,
+            "diagram_page": 668,
+            "name": "1,1,1-Trifluoro-2-propanol, (±)",
+            "formula": "C3H5F3O",
+            "molecular_weight_g_mol": 114.066,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/4230",
+            "source_CAS": "17556-48-8",
+            "source_name": null,
+            "candidates": [
+              {
+                "CID": 6999971,
+                "MolecularFormula": "C3H5F3O",
+                "MolecularWeight": "114.07",
+                "InChI": "InChI=1S/C3H5F3O/c1-2(7)3(4,5)6/h2,7H,1H3/t2-/m0/s1",
+                "InChIKey": "GILIYJDBJZWGBG-REOHCLBHSA-N",
+                "IUPACName": "(2S)-1,1,1-trifluoropropan-2-ol",
+                "annotation_status": "annotations_received",
+                "CAS_matches": [],
+                "local_exact_key_matches": [],
+                "local_other_keys": [
+                  "GILIYJDBJZWGBG-UHFFFAOYSA-N"
+                ]
+              },
+              {
+                "CID": 9774,
+                "MolecularFormula": "C3H5F3O",
+                "MolecularWeight": "114.07",
+                "InChI": "InChI=1S/C3H5F3O/c1-2(7)3(4,5)6/h2,7H,1H3",
+                "InChIKey": "GILIYJDBJZWGBG-UHFFFAOYSA-N",
+                "IUPACName": "1,1,1-trifluoropropan-2-ol",
+                "annotation_status": "annotations_received",
+                "CAS_matches": [],
+                "local_exact_key_matches": [
+                  "pubchem-large:3810"
+                ],
+                "local_other_keys": []
+              }
+            ],
+            "status": "source_CAS_not_annotated",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C3H5F3O/c1-2(7)3(4,5)6/h2,7H,1H3/t2-/m1/s1",
+          "representative_InChIKey": "GILIYJDBJZWGBG-UWTATZPHSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:5183-77-7",
+      "formula": "C6H10Br2",
+      "cas_number": "5183-77-7",
+      "inchi": "InChI=1/C6H10Br2/c7-5-3-1-2-4-6(5)8/h5-6H,1-4H2/t5-,6-/s3",
+      "inchi_key": "CZNHKZKWKJNOTE-FJGCHTOXNA-N",
+      "hill_formula": "C6H10Br2",
+      "composition": {
+        "C": 6.0,
+        "H": 10.0,
+        "Br": 2.0
+      },
+      "molecular_weight_g_mol": 241.951,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "trans-1,2-Dibromocyclohexane, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "2927:5183-77-7",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 275; diagram page 276.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "2927",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "5183-77-7",
+          "source_units": [
+            "CRC_RI/3807"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 2,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected",
+          "relative_geometry": "trans"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "5183-77-7",
+            "entry": 2927,
+            "page": 275,
+            "diagram_page": 276,
+            "name": "trans-1,2-Dibromocyclohexane, (±)",
+            "formula": "C6H10Br2",
+            "molecular_weight_g_mol": 241.951,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 2,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/3807",
+            "source_CAS": "5183-77-7",
+            "source_name": null,
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C6H10Br2/c7-5-3-1-2-4-6(5)8/h5-6H,1-4H2/t5-,6-/m1/s1",
+          "representative_InChIKey": "CZNHKZKWKJNOTE-PHDIDXHHSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:57968-71-5",
+      "formula": "C8H14O6",
+      "cas_number": "57968-71-5",
+      "inchi": "InChI=1/C8H14O6/c1-3-13-7(11)5(9)6(10)8(12)14-4-2/h5-6,9-10H,3-4H2,1-2H3/t5-,6-/s3",
+      "inchi_key": "YSAVZVORKRDODB-FJGCHTOXNA-N",
+      "hill_formula": "C8H14O6",
+      "composition": {
+        "C": 8.0,
+        "H": 14.0,
+        "O": 6.0
+      },
+      "molecular_weight_g_mol": 206.193,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "Diethyl DL-tartrate"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "3533:57968-71-5",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 307; diagram page 308.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "3533",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "57968-71-5",
+          "source_units": [
+            "CRC_RI/4447"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 2,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected",
+          "relative_geometry": "RR/SS (DL), not meso"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "57968-71-5",
+            "entry": 3533,
+            "page": 307,
+            "diagram_page": 308,
+            "name": "Diethyl DL-tartrate",
+            "formula": "C8H14O6",
+            "molecular_weight_g_mol": 206.193,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 2,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/4447",
+            "source_CAS": "57968-71-5",
+            "source_name": null,
+            "candidates": [
+              {
+                "CID": 62333,
+                "MolecularFormula": "C8H14O6",
+                "MolecularWeight": "206.19",
+                "InChI": "InChI=1S/C8H14O6/c1-3-13-7(11)5(9)6(10)8(12)14-4-2/h5-6,9-10H,3-4H2,1-2H3",
+                "InChIKey": "YSAVZVORKRDODB-UHFFFAOYSA-N",
+                "IUPACName": "diethyl 2,3-dihydroxybutanedioate",
+                "annotation_status": "annotations_received",
+                "CAS_matches": [
+                  {
+                    "CAS": [
+                      "57968-71-5"
+                    ],
+                    "annotation_url": null,
+                    "reference": {
+                      "ReferenceNumber": 4,
+                      "SourceName": "ChemIDplus",
+                      "SourceID": "0057968715",
+                      "Name": "racemic-Dimethoxysuccinic acid, dimethyl ester",
+                      "URL": "https://pubchem.ncbi.nlm.nih.gov/substance/?source=chemidplus&sourceid=0057968715",
+                      "LicenseURL": "https://www.nlm.nih.gov/copyright.html"
+                    }
+                  }
+                ],
+                "local_exact_key_matches": [
+                  "pubchem-large:14781"
+                ],
+                "local_other_keys": []
+              }
+            ],
+            "status": "source_CAS_annotation_present",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [
+          {
+            "source": "ChemIDplus original CAS annotation",
+            "annotation": {
+              "ReferenceNumber": 4,
+              "SourceName": "ChemIDplus",
+              "SourceID": "0057968715",
+              "Name": "racemic-Dimethoxysuccinic acid, dimethyl ester",
+              "URL": "https://pubchem.ncbi.nlm.nih.gov/substance/?source=chemidplus&sourceid=0057968715",
+              "LicenseURL": "https://www.nlm.nih.gov/copyright.html"
+            },
+            "decision": "CRC84 names and draws diethyl DL-tartrate. The deposited graph agrees in connectivity but its annotation name describes a different constitutional isomer; do not add that name as an alias."
+          }
+        ],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C8H14O6/c1-3-13-7(11)5(9)6(10)8(12)14-4-2/h5-6,9-10H,3-4H2,1-2H3/t5-,6-/m1/s1",
+          "representative_InChIKey": "YSAVZVORKRDODB-PHDIDXHHSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:54638-10-7",
+      "formula": "C7H14O2",
+      "cas_number": "54638-10-7",
+      "inchi": "InChI=1S/C7H14O2/c1-4-5-6(2)9-7(3)8/h6H,4-5H2,1-3H3/t6-/m1/s1",
+      "inchi_key": "GQKZRWSUJHVIPE-ZCFIWIBFSA-N",
+      "hill_formula": "C7H14O2",
+      "composition": {
+        "C": 7.0,
+        "H": 14.0,
+        "O": 2.0
+      },
+      "molecular_weight_g_mol": 130.185,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "(R)-sec-Pentyl acetate"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "8663:54638-10-7",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 575; diagram page 576.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "8663",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "54638-10-7",
+          "source_units": [
+            "CRC_RI/4432"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "ABSOLUTE",
+          "stereo_centers": 1,
+          "material_kind": "single_absolute_stereoisomer",
+          "absolute_configuration": "R"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "54638-10-7",
+            "entry": 8663,
+            "page": 575,
+            "diagram_page": 576,
+            "name": "(R)-sec-Pentyl acetate",
+            "formula": "C7H14O2",
+            "molecular_weight_g_mol": 130.185,
+            "stereochemistry": "ABSOLUTE",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/4432",
+            "source_CAS": "54638-10-7",
+            "source_name": null,
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": []
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:10395-45-6",
+      "formula": "C10H16O",
+      "cas_number": "10395-45-6",
+      "inchi": "InChI=1S/C10H16O/c1-7(2)9-5-4-8(3)10(11)6-9/h6-8H,4-5H2,1-3H3/t8-/m0/s1",
+      "inchi_key": "RLYSXAZAJUMULG-QMMMGPOBSA-N",
+      "hill_formula": "C10H16O",
+      "composition": {
+        "C": 10.0,
+        "H": 16.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 152.233,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "Carvenone, (S)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "1786:10395-45-6",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 217; diagram page 218.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "1786",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "10395-45-6",
+          "source_units": [
+            "CRC_PERMITTIVITY/1218",
+            "CRC_RI/4075"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "ABSOLUTE",
+          "stereo_centers": 1,
+          "material_kind": "single_absolute_stereoisomer",
+          "absolute_configuration": "S"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "10395-45-6",
+            "entry": 1786,
+            "page": 217,
+            "diagram_page": 218,
+            "name": "Carvenone, (S)",
+            "formula": "C10H16O",
+            "molecular_weight_g_mol": 152.233,
+            "stereochemistry": "ABSOLUTE",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_PERMITTIVITY/1218",
+            "source_CAS": "10395-45-6",
+            "source_name": "Carvenone, (S)-",
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": []
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:13454-99-4",
+      "formula": "PCl2F3",
+      "cas_number": "13454-99-4",
+      "inchi": "",
+      "inchi_key": "",
+      "hill_formula": "Cl2F3P",
+      "composition": {
+        "P": 1.0,
+        "Cl": 2.0,
+        "F": 3.0
+      },
+      "molecular_weight_g_mol": 158.874,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "Phosphorus(V) dichloride trifluoride"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "1661:13454-99-4",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 770; diagram page None.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "13454-99-4",
+          "source_units": [
+            "CRC_PERMITTIVITY/1230"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "NOT_SPECIFIED_BY_SOURCE",
+          "stereo_centers": 0,
+          "material_kind": "named_stoichiometric_compound",
+          "absolute_configuration": "not_specified"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "13454-99-4",
+            "entry": 1661,
+            "page": 770,
+            "diagram_page": null,
+            "name": "Phosphorus(V) dichloride trifluoride",
+            "formula": "PCl2F3",
+            "molecular_weight_g_mol": 158.874,
+            "stereochemistry": "NOT_SPECIFIED_BY_SOURCE",
+            "stereo_centers": 0,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_PERMITTIVITY/1230",
+            "source_CAS": "13454-99-4",
+            "source_name": "Phosphorus(V) dichloride trifluoride",
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": []
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:2512-81-4",
+      "formula": "C7H15N",
+      "cas_number": "2512-81-4",
+      "inchi": "InChI=1/C7H15N/c1-7-5-3-4-6-8(7)2/h7H,3-6H2,1-2H3/t7-/s3",
+      "inchi_key": "MWUISCCBFHLWLY-KPOCXSGKNA-N",
+      "hill_formula": "C7H15N",
+      "composition": {
+        "C": 7.0,
+        "H": 15.0,
+        "N": 1.0
+      },
+      "molecular_weight_g_mol": 113.201,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "1,2-Dimethylpiperidine, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "4266:2512-81-4",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 347; diagram page 348.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "4266",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "2512-81-4",
+          "source_units": [
+            "CRC_RI/3372"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "2512-81-4",
+            "entry": 4266,
+            "page": 347,
+            "diagram_page": 348,
+            "name": "1,2-Dimethylpiperidine, (±)",
+            "formula": "C7H15N",
+            "molecular_weight_g_mol": 113.201,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/3372",
+            "source_CAS": "2512-81-4",
+            "source_name": null,
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C7H15N/c1-7-5-3-4-6-8(7)2/h7H,3-6H2,1-2H3/t7-/m1/s1",
+          "representative_InChIKey": "MWUISCCBFHLWLY-SSDOTTSWSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:6195-92-2",
+      "formula": "C6H10O",
+      "cas_number": "6195-92-2",
+      "inchi": "InChI=1/C6H10O/c1-5-2-3-6(7)4-5/h5H,2-4H2,1H3/t5-/s3",
+      "inchi_key": "AOKRXIIIYJGNNU-GQMHJJTINA-N",
+      "hill_formula": "C6H10O",
+      "composition": {
+        "C": 6.0,
+        "H": 10.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 98.142,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "3-Methylcyclopentanone, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "7171:6195-92-2",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 497; diagram page 498.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "7171",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "6195-92-2",
+          "source_units": [
+            "CRC_RI/3925"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "6195-92-2",
+            "entry": 7171,
+            "page": 497,
+            "diagram_page": 498,
+            "name": "3-Methylcyclopentanone, (±)",
+            "formula": "C6H10O",
+            "molecular_weight_g_mol": 98.142,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/3925",
+            "source_CAS": "6195-92-2",
+            "source_name": null,
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C6H10O/c1-5-2-3-6(7)4-5/h5H,2-4H2,1H3/t5-/m0/s1",
+          "representative_InChIKey": "AOKRXIIIYJGNNU-YFKPBYRVSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:42569-16-4",
+      "formula": "C5H10O",
+      "cas_number": "42569-16-4",
+      "inchi": "InChI=1/C5H10O/c1-3-4-5(2)6/h3-6H,1-2H3/b4-3+/t5-/s3",
+      "inchi_key": "GJYMQFMQRRNLCY-NXBCPGMHNA-N",
+      "hill_formula": "C5H10O",
+      "composition": {
+        "C": 5.0,
+        "H": 10.0,
+        "O": 1.0
+      },
+      "molecular_weight_g_mol": 86.132,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "3-Penten-2-ol, (±)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "8649:42569-16-4",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 573; diagram page 574.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "8649",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "42569-16-4",
+          "source_units": [
+            "CRC_RI/4410"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "RACEMIC",
+          "stereo_centers": 1,
+          "material_kind": "defined_racemate",
+          "enantiomer_mole_fractions": [
+            0.5,
+            0.5
+          ],
+          "absolute_configuration": "not_selected",
+          "double_bond_geometry": "E (CRC84 diagram)"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "42569-16-4",
+            "entry": 8649,
+            "page": 573,
+            "diagram_page": 574,
+            "name": "3-Penten-2-ol, (±)",
+            "formula": "C5H10O",
+            "molecular_weight_g_mol": 86.132,
+            "stereochemistry": "RACEMIC",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/4410",
+            "source_CAS": "42569-16-4",
+            "source_name": null,
+            "candidates": [],
+            "status": "no_external_candidates",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": [],
+        "identity_transformation": {
+          "mode": "racemic",
+          "reference_version": "InChI 1.07.5",
+          "representative_InChI": "InChI=1S/C5H10O/c1-3-4-5(2)6/h3-6H,1-2H3/b4-3+/t5-/m1/s1",
+          "representative_InChIKey": "GJYMQFMQRRNLCY-QLSVQJPWSA-N",
+          "options": [
+            "/Key",
+            "/AuxNone",
+            "/NoLabels",
+            "/SRac"
+          ],
+          "input": "Explicit reviewed CRC84 diagram transcription; representative stereo only encodes the source-defined racemate, not a selected enantiomer."
+        }
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    },
+    {
+      "identifier": "crc:20089-07-0",
+      "formula": "C5H12S",
+      "cas_number": "20089-07-0",
+      "inchi": "InChI=1S/C5H12S/c1-3-5(2)4-6/h5-6H,3-4H2,1-2H3/t5-/m0/s1",
+      "inchi_key": "WGQKBCSACFQGQY-YFKPBYRVSA-N",
+      "hill_formula": "C5H12S",
+      "composition": {
+        "C": 5.0,
+        "H": 12.0,
+        "S": 1.0
+      },
+      "molecular_weight_g_mol": 104.214,
+      "charge": 0,
+      "default_phase": "unknown",
+      "safety_tags": [],
+      "allowed_property_correlations": [],
+      "aliases": [
+        "2-Methyl-1-butanethiol, (+)"
+      ],
+      "provenance": [
+        {
+          "source_id": "CRC84",
+          "source_name": "CRC Handbook 84th edition, 2003-2004",
+          "source_table": "Physical constants and facing molecular diagrams",
+          "source_key": "7069:20089-07-0",
+          "source_path": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+          "notes": [
+            "PDF page 493; diagram page 494.",
+            "Exact CAS and material scope reviewed visually; identity only. No physical values imported or substituted from this edition."
+          ]
+        },
+        {
+          "source_id": "InChI-1.07.5",
+          "source_name": "Official IUPAC InChI reference executable",
+          "source_table": "CRC84 reviewed MOL transcription",
+          "source_key": "7069",
+          "source_path": "https://github.com/IUPAC-InChI/InChI",
+          "notes": [
+            "Default encoding; SRac additionally used for racemates. Source connectivity, relative geometry and R/S labels are preserved."
+          ]
+        }
+      ],
+      "uncertainty": [],
+      "metadata": {
+        "identity_scope": {
+          "evidence_route": "reviewed_CRC84_table_and_diagram",
+          "source_CAS": "20089-07-0",
+          "source_units": [
+            "CRC_RI/4272"
+          ],
+          "reviewed_date": "2026-10-25",
+          "stereochemistry": "ABSOLUTE",
+          "stereo_centers": 1,
+          "material_kind": "single_absolute_stereoisomer",
+          "absolute_configuration": "S"
+        },
+        "external_identity": {
+          "CRC84_identity": {
+            "CAS": "20089-07-0",
+            "entry": 7069,
+            "page": 493,
+            "diagram_page": 494,
+            "name": "2-Methyl-1-butanethiol, (+)",
+            "formula": "C5H12S",
+            "molecular_weight_g_mol": 104.214,
+            "stereochemistry": "ABSOLUTE",
+            "stereo_centers": 1,
+            "url": "https://fap.if.usp.br/~jhsevero/Fisica_Experimental_C_Semestral_2022/crc.pdf",
+            "edition": "CRC Handbook 84th edition, 2003-2004",
+            "identity_only": true
+          },
+          "original_PubChem_comparison": {
+            "unit": "CRC_RI/4272",
+            "source_CAS": "20089-07-0",
+            "source_name": null,
+            "candidates": [
+              {
+                "CID": 7058092,
+                "MolecularFormula": "C5H12S",
+                "MolecularWeight": "104.22",
+                "InChI": "InChI=1S/C5H12S/c1-3-5(2)4-6/h5-6H,3-4H2,1-2H3/t5-/m0/s1",
+                "InChIKey": "WGQKBCSACFQGQY-YFKPBYRVSA-N",
+                "IUPACName": "(2S)-2-methylbutane-1-thiol",
+                "annotation_status": "http_error",
+                "CAS_matches": [],
+                "local_exact_key_matches": [],
+                "local_other_keys": []
+              }
+            ],
+            "status": "source_CAS_not_annotated",
+            "known_source_conflict": null
+          }
+        },
+        "source_conflicts": []
+      },
+      "units": {
+        "molecular_weight_g_mol": "g/mol"
+      }
+    }
+  ],
+  "unresolved_source_rows": 39,
+  "source_gaps": [
+    {
+      "source_CAS": "615-38-3",
+      "source_units": [
+        "CRC_PERMITTIVITY/828",
+        "CRC_RI/2071"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "Relative cis structure in Wikidata does not establish enantiomeric composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "4549-74-0",
+      "source_units": [
+        "CRC_PERMITTIVITY/1137",
+        "CRC_RI/3738"
+      ],
+      "category": "unspecified_isomer_mixture",
+      "reason": "VWR explicitly lists cis/trans mixture; E-only database graphs do not establish the original mixture ratio.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "6120-13-4",
+      "source_units": [
+        "CRC_PERMITTIVITY/1157"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "Manufacturer/database connectivity does not establish the bornyl material stereochemical scope.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "7704-34-9",
+      "source_units": [
+        "CRC_PERMITTIVITY/1183"
+      ],
+      "category": "phase_and_substance_basis_conflict",
+      "reason": "Rhombic label and original 407-479 K interval remain inconsistent; S versus S8 is not a phase resolution.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "13537-23-0",
+      "source_units": [
+        "CRC_PERMITTIVITY/1235"
+      ],
+      "category": "primary_source_lead",
+      "reason": "Exact original CAS appears in CRC88 inorganic table transcription; verify original page before qualification. CRC84 lists another CAS.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "74112-36-0",
+      "source_units": [
+        "CRC_PERMITTIVITY/1288",
+        "CRC_RI/4470"
+      ],
+      "category": "constitutional_identity_conflict",
+      "reason": "CRC 2-methylheptyl acetate disagrees with SRS/current octan-2-yl acetate; no automatic alias.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "74742-10-2",
+      "source_units": [
+        "CRC_PERMITTIVITY/1292",
+        "CRC_RI/4473"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "No exact CAS result in the fixed supplemental query; prior CRC 2-decanol record lacks enantiomeric composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "74778-22-6",
+      "source_units": [
+        "CRC_PERMITTIVITY/1293",
+        "CRC_RI/4474"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "Indexed inventory mentions the CAS but adds no enantiomeric definition for 4-octanol.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "123434-07-1",
+      "source_units": [
+        "CRC_PERMITTIVITY/1302"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "No exact CAS result; original 2,4,6-trimethyl-3-heptene is explicitly an unspecified isomer.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "96-19-5",
+      "source_units": [
+        "CRC_RI/393"
+      ],
+      "category": "unspecified_isomer_mixture",
+      "reason": "Pfaltz & Bauer SDS explicitly identifies a cis/trans mixture without proportions.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "617-51-6",
+      "source_units": [
+        "CRC_RI/2099"
+      ],
+      "category": "conflicting_stereochemical_assignments",
+      "reason": "R and S supplier listings conflict under one CAS; no primary racemate definition found.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "930-89-2",
+      "source_units": [
+        "CRC_RI/2734"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "Relative cis identity does not determine the enantiomeric composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "1338-43-8",
+      "source_units": [
+        "CRC_RI/2955"
+      ],
+      "category": "representative_or_variable_composition",
+      "reason": "Sorbitan oleate representative structures do not specify commercial material composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "1458-99-7",
+      "source_units": [
+        "CRC_RI/2968"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "4-chloro-2-pentene connectivity does not resolve double-bond geometry or the carbon centre.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "2396-78-3",
+      "source_units": [
+        "CRC_RI/3332"
+      ],
+      "category": "unspecified_isomer_mixture",
+      "reason": "RIFM 2020 assessment explicitly includes a mixture of isomers; no original CRC sample ratio.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "2613-65-2",
+      "source_units": [
+        "CRC_RI/3400"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "Trans ring relationship does not determine enantiomeric composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "2613-66-3",
+      "source_units": [
+        "CRC_RI/3401"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "Cis ring relationship does not determine enantiomeric composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "2983-26-8",
+      "source_units": [
+        "CRC_RI/3473"
+      ],
+      "category": "primary_source_lead",
+      "reason": "Organic Syntheses names the reagent; indexed excerpt does not prove racemate and direct page was restricted.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "4219-24-3",
+      "source_units": [
+        "CRC_RI/3685"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "EFSA FGE.05Rev3 says the CAS specifies neither Z nor E; drawn E structure is not proof of material scope.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "5258-50-4",
+      "source_units": [
+        "CRC_RI/3812"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "Generic 3-methylthiopyran connectivity; autogenerated vendor racemate prose is insufficient primary evidence.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "6189-41-9",
+      "source_units": [
+        "CRC_RI/3924"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "Trans relative oxirane geometry alone does not define an equal enantiomer ratio.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "6553-48-6",
+      "source_units": [
+        "CRC_RI/3950"
+      ],
+      "category": "primary_source_lead",
+      "reason": "Organic Syntheses confirms trans-divinylcyclobutane name/CAS but indexed excerpt lacks enantiomer ratio; direct page restricted.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "7094-26-0",
+      "source_units": [
+        "CRC_RI/3992"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "1,1,2-trimethylcyclohexane connectivity lacks stereochemical scope.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "7614-93-9",
+      "source_units": [
+        "CRC_RI/4039"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "1,3-diphenyl-1-butene needs geometry and carbon-centre composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "7786-44-9",
+      "source_units": [
+        "CRC_RI/4054"
+      ],
+      "category": "unspecified_isomer_mixture",
+      "reason": "Synerzine states bounded 90-100%/0-10% isomers and an additional CAS; this is not an exact original composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "15220-85-6",
+      "source_units": [
+        "CRC_RI/4165"
+      ],
+      "category": "representative_or_variable_composition",
+      "reason": "Tetraisobutylene catalog contains isomers; a representative graph is not a complete composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "22104-78-5",
+      "source_units": [
+        "CRC_RI/4300"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "GSRS non-specific stereochemistry and sum-of-isomers assay prevent selecting the indexed E graph as pure material.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "33880-83-0",
+      "source_units": [
+        "CRC_RI/4372"
+      ],
+      "category": "conflicting_stereochemical_assignments",
+      "reason": "J-GLOBAL absolute (+)-beta-elemene and CRC drawn wedges do not override GSRS non-specific CAS scope.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "38552-72-6",
+      "source_units": [
+        "CRC_RI/4400"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "3-methyl-5-hepten-2-one remains unresolved at double-bond and carbon-centre scope.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "52387-50-5",
+      "source_units": [
+        "CRC_RI/4421"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "4-hexen-2-ol remains unresolved at double-bond and carbon-centre scope.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "91890-87-8",
+      "source_units": [
+        "CRC_RI/4480"
+      ],
+      "category": "primary_source_lead",
+      "reason": "Marketplace DL labels not corroborated by a primary racemate definition; manufacturer generic graph only.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "114489-96-2",
+      "source_units": [
+        "CRC_RI/4487"
+      ],
+      "category": "constitutional_identity_conflict",
+      "reason": "Atomax indexed 3-butenyl ester disagrees with CRC isobutyl ester; no scope established.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "116783-23-4",
+      "source_units": [
+        "CRC_RI/4488"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "Exact CRC/sec-butyl methyl ether name found; no enantiomeric composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
+    },
+    {
+      "source_CAS": "116836-32-9",
+      "source_units": [
+        "CRC_RI/4489"
+      ],
+      "category": "unspecified_stereochemical_composition",
+      "reason": "No exact supplemental hit; existing CRC sec-butyl pentanoate lacks enantiomeric composition.",
+      "review_reference": "workstreams/world_foundation/reports/convergence/22/NATIVE_CONV22G1_RESULTS.json#additional_identity_source_reviews/13"
     }
   ]
 }

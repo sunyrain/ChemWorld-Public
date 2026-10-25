@@ -72,6 +72,11 @@ def unpack_electrodialysis(state: Any) -> tuple[Any, ElectrodialysisSpec, Transp
     spec = ElectrodialysisSpec.from_dict(record.settings["physical_model"])
     if electrical_device(state).equipment_id != record.equipment_id:
         raise ValueError("periodic ED must own its unique connected electrical source")
+    return record, spec, unpack_periodic_liquid_inventory(state, spec)
+
+
+def unpack_periodic_liquid_inventory(state: Any, spec: ElectrodialysisSpec) -> TransportInventory:
+    """Validate the original two reservoirs independently of their electrical boundary."""
     names = electrodialysis_vessels(state, spec)
     amounts, enthalpies = [], []
     for index, name in enumerate(names):
@@ -107,7 +112,7 @@ def unpack_electrodialysis(state: Any) -> tuple[Any, ElectrodialysisSpec, Transp
                 raise ValueError("periodic ED owned enthalpy differs from physical liquid")
         amounts.append(n)
         enthalpies.append(sum(slot.values["enthalpy_J"] for slot in actual.values()))
-    return record, spec, TransportInventory(tuple(amounts), tuple(enthalpies), state.ledger.time_s)
+    return TransportInventory(tuple(amounts), tuple(enthalpies), state.ledger.time_s)
 
 
 class ElectrodialysisRuntime:

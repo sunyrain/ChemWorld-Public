@@ -15,6 +15,7 @@ from chemworld.physchem.catalysis_descriptors import (
     finite_number,
     validate_source,
 )
+from chemworld.physchem.catalysis_reservoirs import AqueousStandardThermo
 from chemworld.physchem.coupled_system import CoupledStateView, ProcessContribution
 from chemworld.physchem.data_conflicts import DataSourceProvenance
 from chemworld.physchem.hindered_adsorbate import HinderedAdsorbateThermo, harmonic_mode_totals
@@ -125,6 +126,7 @@ class CatalyticSpeciesThermo:
     gas_declaration: Mapping[str, Any] | None = None
     adsorbate: HarmonicAdsorbateThermo | HinderedAdsorbateThermo | None = None
     surface_declaration: Mapping[str, Any] | None = None
+    aqueous_standard: AqueousStandardThermo | None = None
 
     def __post_init__(self) -> None:
         validate_source(self.source)
@@ -132,6 +134,8 @@ class CatalyticSpeciesThermo:
             raise ValueError(
                 "catalytic energies require an explicit common caloric reference frame"
             )
+        if self.species.phase != "liquid" and self.aqueous_standard is not None:
+            raise ValueError("aqueous standard data require real liquid species")
         if self.species.phase == "gas":
             if (
                 self.gas_declaration is None
@@ -175,8 +179,16 @@ class CatalyticSpeciesThermo:
                     raise ValueError("unsupported surface thermochemistry declaration")
                 if dict(self.surface_model.composition) != self.species.composition:
                     raise ValueError("surface caloric and native elemental composition disagree")
+        elif self.species.phase == "liquid":
+            if self.aqueous_standard is None or any(
+                v is not None
+                for v in (self.gas_declaration, self.adsorbate, self.surface_declaration)
+            ):
+                raise ValueError("aqueous species require exactly a declared standard H/S/Cp model")
         else:
-            raise ValueError("catalytic profile supports gas and surface species")
+            raise ValueError(
+                "catalytic profile supports declared gas/surface/chemostat liquid species"
+            )
 
     @cached_property
     def gas_model(self) -> Any:
@@ -195,6 +207,8 @@ class CatalyticSpeciesThermo:
         )
 
     def evaluate(self, temperature_K: float) -> SpeciesThermoState:
+        if self.aqueous_standard is not None:
+            return self.aqueous_standard.evaluate(temperature_K, species_id=self.species.species_id)
         if self.adsorbate is not None:
             return self.adsorbate.evaluate(temperature_K, species_id=self.species.species_id)
         if self.surface_declaration is not None:
@@ -210,7 +224,12 @@ class CatalyticSpeciesThermo:
         return value - R if self.species.phase == "gas" else value
 
     def validate_temperature_interval(self, lower_K: float, upper_K: float) -> None:
-        if self.adsorbate is not None:
+        if self.aqueous_standard is not None:
+            lower, upper = (
+                self.aqueous_standard.minimum_temperature_K,
+                self.aqueous_standard.maximum_temperature_K,
+            )
+        elif self.adsorbate is not None:
             lower, upper = (
                 self.adsorbate.minimum_temperature_K,
                 self.adsorbate.maximum_temperature_K,
@@ -239,6 +258,11 @@ class CatalyticSpeciesThermo:
             else _plain_declaration(self.gas_declaration),
             "adsorbate": None if self.adsorbate is None else self.adsorbate.to_dict(),
             **(
+                {"aqueous_standard": self.aqueous_standard.to_dict()}
+                if self.aqueous_standard is not None
+                else {}
+            ),
+            **(
                 {"surface_declaration": _plain_declaration(self.surface_declaration)}
                 if self.surface_declaration is not None
                 else {}
@@ -254,6 +278,8 @@ class CatalyticSpeciesThermo:
         if composition is not None and composition != values["species"].composition:
             raise ValueError("encoded catalytic species composition conflicts with formula")
         values["source"] = DataSourceProvenance.from_dict(values["source"])
+        if values.get("aqueous_standard") is not None:
+            values["aqueous_standard"] = AqueousStandardThermo.from_dict(values["aqueous_standard"])
         if values["adsorbate"] is not None:
             encoded = values["adsorbate"]
             values["adsorbate"] = (

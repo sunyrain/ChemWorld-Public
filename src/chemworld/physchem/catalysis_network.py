@@ -28,6 +28,7 @@ from chemworld.physchem.coupled_system import (
     ProcessContribution,
 )
 from chemworld.physchem.data_conflicts import DataSourceProvenance
+from chemworld.physchem.electrochemistry import FARADAY_C_PER_MOL as F
 from chemworld.physchem.hindered_adsorbate import HinderedAdsorbateThermo
 from chemworld.physchem.inventory_interactions import (
     InventoryInteraction,
@@ -61,17 +62,26 @@ class CatalyticReactionSpec:
     bep: FreeEnergyBEP
     source: DataSourceProvenance
     rate_unit: str = "s^-1"
+    reservoir_reactants: Mapping[str, int] = field(default_factory=dict)
+    reservoir_products: Mapping[str, int] = field(default_factory=dict)
+    electron_stoichiometry: int = 0
 
     def __post_init__(self) -> None:
-        for name in ("reactants", "products"):
+        for name in ("reactants", "products", "reservoir_reactants", "reservoir_products"):
             values = dict(getattr(self, name))
-            if not values or any(
+            if (not values and name in {"reactants", "products"}) or any(
                 not key or type(v) is not int or v <= 0 for key, v in values.items()
             ):
                 raise ValueError(
                     "elementary catalytic sides require positive integer stoichiometry"
                 )
             object.__setattr__(self, name, MappingProxyType(values))
+        if type(self.electron_stoichiometry) is not int:
+            raise ValueError("external electron stoichiometry must be an explicit integer")
+        if (set(self.reactants) | set(self.products)) & (
+            set(self.reservoir_reactants) | set(self.reservoir_products)
+        ):
+            raise ValueError("a participant cannot also be an external reservoir participant")
         validate_source(self.source)
         finite_number(self.attempt_frequency_s_inv, "turnover prefactor")
         if (
@@ -87,10 +97,12 @@ class CatalyticReactionSpec:
 
     @property
     def stoichiometry(self) -> dict[str, int]:
+        reactants = {**self.reactants, **self.reservoir_reactants}
+        products = {**self.products, **self.reservoir_products}
         return {
-            k: self.products.get(k, 0) - self.reactants.get(k, 0)
-            for k in self.products.keys() | self.reactants.keys()
-            if self.products.get(k, 0) != self.reactants.get(k, 0)
+            k: products.get(k, 0) - reactants.get(k, 0)
+            for k in products.keys() | reactants.keys()
+            if products.get(k, 0) != reactants.get(k, 0)
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -101,6 +113,21 @@ class CatalyticReactionSpec:
             "rate_site": self.rate_site,
             "attempt_frequency_s_inv": self.attempt_frequency_s_inv,
             "rate_unit": self.rate_unit,
+            **(
+                {"reservoir_reactants": dict(self.reservoir_reactants)}
+                if self.reservoir_reactants
+                else {}
+            ),
+            **(
+                {"reservoir_products": dict(self.reservoir_products)}
+                if self.reservoir_products
+                else {}
+            ),
+            **(
+                {"electron_stoichiometry": self.electron_stoichiometry}
+                if self.electron_stoichiometry
+                else {}
+            ),
             "bep": self.bep.to_dict(),
             "source": self.source.to_dict(),
         }
@@ -127,8 +154,12 @@ class CatalyticMechanismSpec:
     site_species_complete: bool = False
     site_densities_mol_m2: Mapping[str, float] = field(default_factory=dict)
     site_occupancies: Mapping[str, int] = field(default_factory=dict)
+    reservoir_species: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "reservoir_species", tuple(self.reservoir_species))
+        if len(set(self.reservoir_species)) != len(self.reservoir_species):
+            raise ValueError("reservoir species must be unique")
         object.__setattr__(self, "species", tuple(self.species))
         object.__setattr__(self, "site_types", tuple(self.site_types))
         object.__setattr__(self, "adsorbate_sites", MappingProxyType(dict(self.adsorbate_sites)))
@@ -152,6 +183,10 @@ class CatalyticMechanismSpec:
             raise ValueError(
                 "catalytic mechanism requires unique nonreserved species and site identities"
             )
+        if {s.species.species_id for s in self.species if s.species.phase == "liquid"} != set(
+            self.reservoir_species
+        ):
+            raise ValueError("real liquid species must be explicitly registered chemostats")
         if not self.gas_species or not self.adsorbates:
             raise ValueError("finite gas/surface profile requires both gas and adsorbed species")
         if set(self.site_occupancies) - set(self.adsorbates) or any(
@@ -218,7 +253,9 @@ class CatalyticMechanismSpec:
             self.reactions
         ):
             raise ValueError("catalysis requires unique declared reaction identities")
-        known = set(ids) | {vacancy_key(site) for site in self.site_types}
+        known = (set(ids) - set(self.reservoir_species)) | {
+            vacancy_key(site) for site in self.site_types
+        }
         species = self.species_by_id
         elements = {e for s in self.species for e in s.species.composition}
         for reaction in self.reactions:
@@ -241,6 +278,18 @@ class CatalyticMechanismSpec:
                 set(reaction.reactants) | set(reaction.products)
             ) - known or reaction.rate_site not in self.site_types:
                 raise ValueError("catalytic reaction references undeclared species/site")
+            if isinstance(reaction, CatalyticReactionSpec):
+                external = set(reaction.reservoir_reactants) | set(reaction.reservoir_products)
+                if external - set(self.reservoir_species) or (
+                    reaction.electron_stoichiometry and not self.reservoir_species
+                ):
+                    raise ValueError(
+                        "external reaction needs registered real reservoirs and electron boundary"
+                    )
+            elif self.reservoir_species:
+                raise ValueError(
+                    "imported closed surface kinetics cannot implicitly acquire reservoirs"
+                )
             stoich = reaction.stoichiometry
             if self.site_species_complete and any(k.startswith("vacancy:") for k in stoich):
                 raise ValueError("complete surface configurations cannot use an implicit vacancy")
@@ -254,7 +303,15 @@ class CatalyticMechanismSpec:
                     != 0
                 ):
                     raise ValueError("catalytic reaction does not conserve elements")
-            if sum(n * species[k].species.charge for k, n in stoich.items() if k in species):
+            electron = (
+                reaction.electron_stoichiometry
+                if isinstance(reaction, CatalyticReactionSpec)
+                else 0
+            )
+            if (
+                sum(n * species[k].species.charge for k, n in stoich.items() if k in species)
+                - electron
+            ):
                 raise ValueError("catalytic reaction does not conserve charge")
             for site in self.site_types:
                 balance = stoich.get(vacancy_key(site), 0) + sum(
@@ -297,6 +354,11 @@ class CatalyticMechanismSpec:
     def to_dict(self) -> dict[str, Any]:
         return {
             "model": "descriptor-catalysis-v1",
+            **(
+                {"reservoir_species": list(self.reservoir_species)}
+                if self.reservoir_species
+                else {}
+            ),
             "mechanism_id": self.mechanism_id,
             "species": [s.to_dict() for s in self.species],
             "site_types": list(self.site_types),
@@ -454,12 +516,37 @@ def evaluate_catalytic_rates(
     spec: CatalyticMechanismSpec,
     *,
     solver_trial: bool = False,
+    reservoir_activities: Mapping[str, float] | None = None,
+    potential_V: float | None = None,
+    gas_volume_L: float | None = None,
 ) -> CatalyticRates:
     validate_catalytic_slot(slot, spec)
     if not spec.minimum_temperature_K <= state.temperature_K <= spec.maximum_temperature_K:
         raise ValueError("catalytic state outside declared temperature domain")
+    if spec.reservoir_species:
+        if (
+            reservoir_activities is None
+            or set(reservoir_activities) != set(spec.reservoir_species)
+            or potential_V is None
+        ):
+            raise ValueError(
+                "open catalysis requires explicit activities and fixed potential boundary"
+            )
+        finite_number(potential_V, "electrode potential")
+        for activity in reservoir_activities.values():
+            finite_number(activity, "reservoir activity")
+            if activity <= 0:
+                raise ValueError("reservoir activities must be positive")
+    elif reservoir_activities is not None or potential_V is not None:
+        raise ValueError("closed catalysis cannot silently acquire electrochemical boundaries")
+    if gas_volume_L is not None:
+        finite_number(gas_volume_L, "gas phase volume")
+        if gas_volume_L <= 0:
+            raise ValueError("gas phase volume must be positive")
     keys = {
-        k: k if k in spec.gas_species else catalytic_inventory_key(slot, k)
+        k: k
+        if k in (*spec.gas_species, *spec.reservoir_species)
+        else catalytic_inventory_key(slot, k)
         for k in spec.species_by_id
     }
     amounts = {k: state.amounts_mol[packed] for k, packed in keys.items()}
@@ -470,10 +557,11 @@ def evaluate_catalytic_rates(
         k: amounts[k]
         * R
         * state.temperature_K
-        / (state.volume_L / 1000)
+        / ((state.volume_L if gas_volume_L is None else gas_volume_L) / 1000)
         / spec.reference_pressure_Pa
         for k in spec.gas_species
     }
+    activities.update(reservoir_activities or {})
     for site, capacity in capacities.items():
         occupied = sum(
             amounts[k] * spec.site_occupancies[k]
@@ -530,19 +618,29 @@ def evaluate_catalytic_rates(
             forward[reaction.reaction_id], reverse[reaction.reaction_id] = f, r
             delta_g[reaction.reaction_id], barriers[reaction.reaction_id] = delta, None
             continue
+        if reaction.electron_stoichiometry:
+            if potential_V is None:
+                raise ValueError("electronic reaction requires an explicit SHE boundary")
+            delta -= reaction.electron_stoichiometry * F * potential_V
         barrier_f, barrier_r = reaction.bep.barriers(delta)
         scale = capacities[reaction.rate_site]
         f = (
             scale
             * reaction.attempt_frequency_s_inv
             * exp(-barrier_f / thermal)
-            * prod(activities[k] ** n for k, n in reaction.reactants.items())
+            * prod(
+                activities[k] ** n
+                for k, n in {**reaction.reactants, **reaction.reservoir_reactants}.items()
+            )
         )
         r = (
             scale
             * reaction.attempt_frequency_s_inv
             * exp(-barrier_r / thermal)
-            * prod(activities[k] ** n for k, n in reaction.products.items())
+            * prod(
+                activities[k] ** n
+                for k, n in {**reaction.products, **reaction.reservoir_products}.items()
+            )
         )
         for key, nu in reaction.stoichiometry.items():
             if key in keys:
@@ -555,11 +653,26 @@ def evaluate_catalytic_rates(
     return CatalyticRates(derivatives, forward, reverse, activities, delta_g, barriers)
 
 
-def catalytic_process(slot: StateSlot, spec: CatalyticMechanismSpec) -> CoupledProcess:
+def catalytic_process(
+    slot: StateSlot,
+    spec: CatalyticMechanismSpec,
+    *,
+    reservoir_activities: Mapping[str, float] | None = None,
+    potential_V: float | None = None,
+    gas_volume_L: float | None = None,
+) -> CoupledProcess:
     validate_catalytic_slot(slot, spec)
 
     def evaluate(state: CoupledStateView) -> ProcessContribution:
-        values = evaluate_catalytic_rates(state, slot, spec, solver_trial=True)
+        values = evaluate_catalytic_rates(
+            state,
+            slot,
+            spec,
+            solver_trial=True,
+            reservoir_activities=reservoir_activities,
+            potential_V=potential_V,
+            gas_volume_L=gas_volume_L,
+        )
         progress = {
             f"{slot.spec.slot_id}:{key}:forward": value
             for key, value in values.forward_rates_mol_s.items()
@@ -573,7 +686,14 @@ def catalytic_process(slot: StateSlot, spec: CatalyticMechanismSpec) -> CoupledP
         return ProcessContribution(values.amount_rates_mol_s, progress)
 
     def validate(state: CoupledStateView) -> None:
-        evaluate_catalytic_rates(state, slot, spec)
+        evaluate_catalytic_rates(
+            state,
+            slot,
+            spec,
+            reservoir_activities=reservoir_activities,
+            potential_V=potential_V,
+            gas_volume_L=gas_volume_L,
+        )
 
     return CoupledProcess(
         f"declared-catalysis:{slot.spec.slot_id}", evaluate, validate_state=validate

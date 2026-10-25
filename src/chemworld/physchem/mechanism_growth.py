@@ -11,6 +11,7 @@ from typing import Any
 from chemworld.physchem.mechanism_growth_binding import (
     enumerate_bound_candidates,
     make_growth_network,
+    validate_growth_library_identity,
 )
 from chemworld.physchem.mechanism_growth_specs import (
     CoreEdgeGrowthPolicy,
@@ -171,6 +172,7 @@ def grow_mechanism(
     # Execute the same fixed declarations that are recorded, even if a progress
     # consumer later mutates its original dictionaries. No second truth is read.
     library = MechanismGrowthLibrary.from_dict(_copy(library.to_dict()))
+    validate_growth_library_identity(library, policy)
     families = tuple(
         sorted(
             (ReactionFamily.from_dict(_copy(f.to_dict())) for f in families),

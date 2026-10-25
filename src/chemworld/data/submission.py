@@ -501,8 +501,9 @@ def build_example_submission_bundle(
     """
 
     from chemworld.eval.metrics import evaluate_records
-    from chemworld.eval.runner import make_agent, run_agent
+    from chemworld.eval.runner import run_agent
     from chemworld.eval.verify import verify_records
+    from chemworld.legacy.agent_registry import make_agent
 
     task = get_task(task_id)
     resolved_seeds = list(task.seeds[:1] if seeds is None else seeds)
@@ -510,7 +511,7 @@ def build_example_submission_bundle(
     command = [
         "python",
         "-m",
-        "chemworld.cli",
+        "chemworld.legacy.cli",
         "submission",
         "example",
         str(root),

@@ -126,7 +126,8 @@ class BatterySpatialThermalSPMSpec:
         for name in ("negative", "positive"):
             curve, particle = getattr(self, name + "_ocv"), getattr(self, name)
             if (
-                any(curve.polynomial_V[1:])
+                curve.endpoint_policy is not None
+                or any(curve.polynomial_V[1:])
                 or any(a * k != 0 for a, k, _ in curve.exponential_terms)
                 or any(a * k != 0 for a, k, _ in curve.tanh_terms)
                 or "SPM" not in curve.supported_models
@@ -512,6 +513,38 @@ def spatial_thermal_fields(spec, state, *, current_A=None, program=None):
         "mean_temperature_rate_K_s": mean_rate,
         "voltage_V": reading.voltage_V,
         "current_A": current_A,
+    }
+
+
+def spatial_thermal_field_ledger(spec, state, *, current_A=0.0, program=None):
+    """Return a JSON-safe read-only thermal/electrical field snapshot.
+
+    The snapshot is derived from the accepted coupled state and never feeds a
+    corrected temperature or heat term back into the solver. Local fields,
+    ambient losses, electrode means and the battery readout stay together so
+    event endpoints can be audited without NumPy objects.
+    """
+    validate_spatial_thermal_state(spec, state)
+    fields = spatial_thermal_fields(spec, state, current_A=current_A, program=program)
+    temperatures = tuple(float(v) for v in fields["temperature_K"])
+    local_rates = tuple(float(v) for v in fields["local_temperature_rates_K_s"])
+    return {
+        "time_s": float(state.time_s),
+        "temperature_K": temperatures,
+        "local_temperature_rates_K_s": local_rates,
+        "heat_capacity_mean_temperature_K": float(fields["heat_capacity_mean_temperature_K"]),
+        "volume_mean_temperature_K": float(fields["volume_mean_temperature_K"]),
+        "minimum_temperature_K": float(fields["minimum_temperature_K"]),
+        "maximum_temperature_K": float(fields["maximum_temperature_K"]),
+        "ambient_temperature_K": float(spec.heat_stack.ambient_temperature_K),
+        "generated_heat_W": float(np.sum(fields["generated_heat_W"])),
+        "boundary_heat_loss_W": float(np.sum(fields["boundary_heat_loss_W"])),
+        "mean_temperature_rate_K_s": float(fields["mean_temperature_rate_K_s"]),
+        "internal_energy_J": float(spatial_thermal_internal_energy_j(spec, state)),
+        "current_A": float(fields["current_A"]),
+        "voltage_V": float(fields["voltage_V"]),
+        "negative_mean_temperature_K": float(fields["negative_mean_temperature_K"]),
+        "positive_mean_temperature_K": float(fields["positive_mean_temperature_K"]),
     }
 
 

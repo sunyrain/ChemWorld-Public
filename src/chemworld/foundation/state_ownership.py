@@ -24,6 +24,7 @@ class StateFieldSpec:
     public: bool = False
     conserved_quantity: str | None = None
     species_id: str | None = None
+    maximum: float | None = None
 
     def __post_init__(self) -> None:
         if not self.name or not self.unit or self.mixing not in {"sum", "equal", "weighted"}:
@@ -36,6 +37,14 @@ class StateFieldSpec:
             raise ValueError("Bound species inventories use mol")
         if self.minimum is not None and not isfinite(self.minimum):
             raise ValueError("State bounds must be finite")
+        if self.maximum is not None and not isfinite(self.maximum):
+            raise ValueError("State bounds must be finite")
+        if (
+            self.minimum is not None
+            and self.maximum is not None
+            and self.maximum < self.minimum
+        ):
+            raise ValueError("State field maximum must be at least its minimum")
 
 
 @dataclass(frozen=True)
@@ -174,6 +183,8 @@ class StateSlot:
                     raise ValueError("State payload must contain finite numbers")
                 if spec.minimum is not None and value < spec.minimum:
                     raise ValueError(f"State field {spec.name} is below its lower bound")
+                if spec.maximum is not None and value > spec.maximum:
+                    raise ValueError(f"State field {spec.name} is above its upper bound")
             object.__setattr__(self, attr, dict(values))
             for constraint in self.spec.capacities:
                 occupied = sum(values[k] * n for k, n in constraint.occupied_fields)
@@ -251,7 +262,13 @@ class StateSlot:
 
     def to_dict(self, *, include_hidden: bool = True) -> dict[str, Any]:
         if include_hidden:
-            return asdict(self)
+            payload = asdict(self)
+            # Adding an optional bound must not rewrite every existing slot's
+            # serialized declaration or its original continuation bindings.
+            for field in payload["spec"]["fields"]:
+                if field["maximum"] is None:
+                    del field["maximum"]
+            return payload
         return {
             f.name: {"value": self.values[f.name], "unit": f.unit}
             for f in self.spec.fields

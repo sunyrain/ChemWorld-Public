@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 
-from chemworld.agents.rl import validate_frozen_rl_observation_space
+from chemworld.legacy.agents.rl import validate_frozen_rl_observation_space
 from chemworld.rl.checkpoint_contract import RL_CHECKPOINT_RUNTIME_SCHEMA_VERSIONS
 from chemworld.rl.environment import RLWorldAllocation, build_rl_environment
 from chemworld.rl.hybrid_actions import policy_distribution_contract
@@ -439,13 +439,13 @@ def evaluate_replay_verified_sb3_checkpoint(
         raise ValueError("replay evaluation seeds must be non-empty and unique")
     if operation_budget <= 0:
         raise ValueError("operation_budget must be positive")
-    from chemworld.agents.rl import FrozenSB3Agent
     from chemworld.data.logging import load_jsonl
     from chemworld.eval.result_artifacts import (
         build_verified_evaluation_result,
         validate_verified_evaluation_result,
     )
     from chemworld.eval.runner import run_agent
+    from chemworld.legacy.agents.rl import FrozenSB3Agent
 
     root = Path(output_dir)
     trajectory_dir = root / "trajectories"

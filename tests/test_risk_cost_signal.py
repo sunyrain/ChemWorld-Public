@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from chemworld.agents.random import RandomRecipeAgent
 from chemworld.data.logging import load_jsonl
 from chemworld.data.records import trajectory_value
 from chemworld.eval.risk_policy import (
@@ -12,6 +11,7 @@ from chemworld.eval.risk_policy import (
     load_risk_cost_protocol,
 )
 from chemworld.eval.runner import run_agent
+from chemworld.legacy.agents.random import RandomRecipeAgent
 from chemworld.tasks import SERIOUS_TASK_IDS, get_task
 
 

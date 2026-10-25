@@ -11,13 +11,13 @@ from examples.demo_dataset_agent_trace_export import build_demo
 import chemworld  # noqa: F401
 from chemworld.agent_interface import rl_observation_spec
 from chemworld.agents.interactive_codex_experiment import _material_information_payload
-from chemworld.agents.llm import LLMReplayAgent, ToolUsingLLMStubAgent
 from chemworld.data.datasets import flatten_record
 from chemworld.data.logging import load_jsonl
 from chemworld.data.records import trajectory_value
 from chemworld.envs.spaces import OBSERVATION_KEYS
 from chemworld.eval.runner import run_agent
 from chemworld.foundation.public_leakage import audit_public_payload
+from chemworld.legacy.agents.llm import LLMReplayAgent, ToolUsingLLMStubAgent
 from chemworld.wrappers import (
     ActionSuggestionWrapper,
     AgentInfoWrapper,

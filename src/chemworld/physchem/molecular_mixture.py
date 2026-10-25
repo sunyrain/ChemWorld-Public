@@ -16,6 +16,7 @@ from chemworld.physchem.caloric_math import partial_derivative
 from chemworld.physchem.coupled_system import CoupledStateView, ProcessContribution
 from chemworld.physchem.flash_units import phase_advection_rate
 from chemworld.physchem.helmholtz import HelmholtzFluid
+from chemworld.physchem.mechanism_ideal_reference import MechanismIdealReference
 from chemworld.physchem.molecular_consumers import (
     molecular_model_from_dict,
     molecular_model_to_dict,
@@ -52,14 +53,14 @@ class MolecularCaloricState(MolecularEOSState):
 @dataclass(frozen=True)
 class MolecularCaloricModel:
     residual_model: ResidualHelmholtzModel
-    ideal_references: tuple[HelmholtzFluid, ...]
+    ideal_references: tuple[HelmholtzFluid | MechanismIdealReference, ...]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ideal_references", tuple(self.ideal_references))
         if tuple(ref.fluid_id for ref in self.ideal_references) != self.component_ids:
             raise ValueError("ideal reference identities and molecular component order must agree")
         if not self.ideal_references or any(
-            type(ref) is not HelmholtzFluid
+            type(ref) not in (HelmholtzFluid, MechanismIdealReference)
             or ref.residual_terms
             or ref.pseudo_pure
             or ref.ideal_prefactor != 1
@@ -197,7 +198,12 @@ class MolecularCaloricModel:
             raise ValueError("unknown molecular caloric model encoding")
         return cls(
             molecular_model_from_dict(data["residual_model"]),
-            tuple(HelmholtzFluid.from_dict(ref) for ref in data["ideal_references"]),
+            tuple(
+                MechanismIdealReference.from_dict(ref)
+                if ref.get("model") == "mechanism-ideal-reference-v1"
+                else HelmholtzFluid.from_dict(ref)
+                for ref in data["ideal_references"]
+            ),
         )
 
 
@@ -224,6 +230,19 @@ class MolecularIsochoricThermodynamics:
     @property
     def inventory_keys(self) -> tuple[str, ...]:
         return self.model.component_ids
+
+    def validate_temperature_interval(self, lower_K: float, upper_K: float) -> None:
+        if not (0 < lower_K <= upper_K < float("inf")):
+            raise ValueError("molecular temperature interval must be positive and ordered")
+        for ref in self.model.ideal_references:
+            if isinstance(ref, MechanismIdealReference):
+                ref.validate_temperature_interval(lower_K, upper_K)
+            elif not (ref.minimum_temperature_K <= lower_K <= upper_K
+                      <= ref.maximum_temperature_K):
+                raise ValueError("molecular temperature interval exceeds ideal reference domain")
+        bounds = getattr(self.model.residual_model, "temperature_range_K", None)
+        if bounds is not None and not (bounds[0] <= lower_K <= upper_K <= bounds[1]):
+            raise ValueError("molecular temperature interval exceeds residual model domain")
 
     def molar_state(self, state: CoupledStateView) -> MolecularCaloricState:
         if set(state.amounts_mol) != set(self.inventory_keys) or state.volume_L != self.volume_L:

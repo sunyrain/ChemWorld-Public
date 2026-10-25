@@ -42,8 +42,8 @@ def close(rows, name, actual, expected, tolerance):
     compare(rows, name, abs(actual - expected) <= tolerance, actual, expected, tolerance)
 
 
-def design_unit(index, start, progress):
-    spec = specification(index, start)
+def design_unit(index, start, progress, *, declared_spec=None):
+    spec = specification(index, start) if declared_spec is None else declared_spec
     before = spec.to_dict()
     counts = []
 
@@ -106,8 +106,8 @@ def design_unit(index, start, progress):
     return {"checks": checks, "reference": expected, "result": result.to_dict()}
 
 
-def consumer_unit(index, event, progress, output):
-    spec = specification(index)
+def consumer_unit(index, event, progress, output, *, declared_spec=None):
+    spec = specification(index) if declared_spec is None else declared_spec
     template, initial = design_receiver(spec, maximum_amount_mol=0.065 if event else 0.3)
     world = build_molecular_process_world(
         template, initial, formulas={"A": "Ar", "B": "C3H8"}, duration_range_s=(0.5, 14400.0)
@@ -231,8 +231,8 @@ def consumer_unit(index, event, progress, output):
     }
 
 
-def negative_unit(kind, progress):
-    spec = specification(0)
+def negative_unit(kind, progress, *, declared_spec=None):
+    spec = specification(0) if declared_spec is None else declared_spec
     if kind == "budget":
         spec = replace(spec, policy=BoundedDesignPolicy(maximum_evaluations=2))
     else:

@@ -52,6 +52,7 @@ class SBMLKinetics:
     model: SBMLModel
     initial_model_time: float = 0.
     controlled_parameters: tuple[str, ...] = ()
+    integer_quantities: bool = False
     _initial: object = field(init=False, repr=False, compare=False)
     _initial_values: object = field(init=False, repr=False, compare=False)
     _recipes: object = field(init=False, repr=False, compare=False)
@@ -70,6 +71,8 @@ class SBMLKinetics:
     _extent_scale: float | None = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
+        if type(self.integer_quantities) is not bool:
+            raise ValueError("integer source quantity views require an explicit Boolean")
         if not isinstance(self.model, SBMLModel):
             raise ValueError("SBML kinetics requires validated original SBMLModel input")
         if (isinstance(self.initial_model_time, bool)
@@ -214,9 +217,9 @@ class SBMLKinetics:
                 result = value.evaluate({**context, **dict(recipe.local)},
                                         functions=self._functions)
             elif mode == "state":
-                result = values[value]/scale
+                result = self._source_coordinate(values, value, scale)
             elif mode == "concentration":
-                result = values[value]/scale/context[volume]
+                result = self._source_coordinate(values, value, scale)/context[volume]
             elif mode == "divide_volume":
                 result = value/context[volume]
             elif mode == "multiply_volume":
@@ -229,6 +232,17 @@ class SBMLKinetics:
                 raise ValueError("native SBML compartment volume must stay positive")
             context[name] = result
         return context
+
+    def _source_coordinate(self, values, key, scale):
+        if self.integer_quantities and key.startswith("N:"):
+            from chemworld.foundation.discrete_inventory import AVOGADRO, mol_to_counts
+
+            count = mol_to_counts({key: values[key]})[key]
+            quantum = AVOGADRO*scale
+            # Canonical item amounts are the exact original integer view. A
+            # float mol/display round trip must not falsify A+B==N guards.
+            return count if scale == 1./AVOGADRO else count/quantum
+        return values[key]/scale
 
     @property
     def initial_values(self):

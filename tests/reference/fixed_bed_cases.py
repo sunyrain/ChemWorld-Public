@@ -71,6 +71,7 @@ def specification(case, cells):
         dict(zip(IDS, (0.044, 0.018, 0.028), strict=True)),
         {k: SpeciesInternalEnergy(0.0, cv) for k, cv in zip(IDS, (28.0, 25.0, 20.8), strict=True)},
         1.8e-5,
+        inlet_resistance_Pa_s_m=case.get("inlet_resistance_Pa_s_m", 0.0),
     )
 
 

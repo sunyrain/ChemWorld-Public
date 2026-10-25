@@ -280,7 +280,6 @@ def test_solver_failure_retains_condition_and_does_not_skip_to_favorable_case(mo
         lambda: CoreEdgeGrowthPolicy(keep_relative_threshold=1),
         lambda: GrowthCondition("bad", {"ethyl": 1}, 500, 1, (0, 0.5, 0.5)),
         lambda: GrowthResourceLimits(maximum_rounds=0),
-        lambda: CoreEdgeGrowthPolicy(generation=GenerationPolicy(allylic_resonance=True)),
     ],
 )
 def test_explicit_invalid_semantics_rejected(factory):

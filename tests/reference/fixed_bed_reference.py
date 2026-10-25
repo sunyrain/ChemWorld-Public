@@ -31,7 +31,7 @@ def reference_case(case, cells):
             (cells - 1, collector, 0.05 / cells),
         ]
 
-        def velocities(amounts, faces=faces):
+        def velocities(amounts, faces=faces, source=source):
             pressure = amounts.sum(axis=1) * R * case["temperature"] / volume
             result = []
             for left, right, distance in faces:
@@ -41,6 +41,8 @@ def reference_case(case, cells):
                 )
                 delta = pressure[left] - pressure[right]
                 a = distance * 150 * 1.8e-5 * 0.6**2 / (0.4**3 * (1e-4) ** 2)
+                if left == source:
+                    a += case.get("inlet_resistance_Pa_s_m", 0.0)
                 b = distance * 1.75 * density * 0.6 / (0.4**3 * 1e-4)
                 result.append(
                     np.sign(delta) * 2 * abs(delta) / (a + np.sqrt(a * a + 4 * b * abs(delta)))

@@ -129,13 +129,24 @@ class PhysicalAdvanceCoordinator:
             *(getattr(s, "protected_lifecycle_vessels", set()) for _, s in self.declared)
         )
 
-    def reconcile_initialization(self, transition):
+    def reconcile_initialization(self, transition, *, previous=None):
         """Reclose retained apparatus and replacement material without time advance."""
         for _, strategy in self.declared:
+            with_previous = getattr(strategy, 'reconcile_initialization_from', None)
+            if with_previous is not None:
+                transition = with_previous(transition, previous)
+                continue
             reconcile = getattr(strategy, "reconcile_initialization", None)
             if reconcile is not None:
                 transition = reconcile(transition)
         return transition
+
+    def reconcile_material_change(self, before, after):
+        """Let an existing strategy invalidate its solver memory after real sampling."""
+        selected = self.strategy(before)
+        reconcile = None if selected is None else getattr(
+            selected[1], 'reconcile_material_change', None)
+        return after if reconcile is None else reconcile(before, after)
 
     def strategy(self, state, *, required=False):
         return select_advance_strategy(

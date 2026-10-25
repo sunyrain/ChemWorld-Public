@@ -10,7 +10,8 @@ from chemworld.data.logging import load_jsonl
 from chemworld.data.records import trajectory_value
 from chemworld.envs.spaces import OBSERVATION_KEYS
 from chemworld.eval.metrics import evaluate_records
-from chemworld.eval.runner import make_agent, run_agent
+from chemworld.eval.runner import run_agent
+from chemworld.legacy.agent_registry import make_agent
 from chemworld.world.domain_modules import DomainModuleRegistry
 from chemworld.world.operations import EQUILIBRIUM_OBSERVATION_KEYS
 

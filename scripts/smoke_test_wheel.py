@@ -18,7 +18,7 @@ PROBE = """
 import json, sys, platform
 from pathlib import Path
 from importlib.metadata import version, distribution
-from importlib.resources import files
+from importlib.util import find_spec
 import chemworld, gymnasium as gym
 from chemworld.tasks import list_tasks
 from chemworld.task_design import serious_task_readiness_manifest
@@ -48,23 +48,20 @@ assert root.resolve().is_relative_to(Path(sys.prefix).resolve())
 assert not (root / 'current.json').exists()
 assert not (root / 'private_eval.placeholder.json').exists()
 assert not (root / 'providers').exists()
-for asset in ('index.html', 'lab.css', 'lab.js'):
-    assert files('chemworld.lab').joinpath('static', asset).is_file()
-assert any(e.name == 'chemworld-lab' for e in distribution('chemworld-bench').entry_points)
-from chemworld.lab.session import LabSessionManager
-manager = LabSessionManager()
-session = manager.create('reaction-to-assay', 0)
-for action in (
-    {'operation': 'add_solvent', 'volume_L': 0.025, 'solvent': 0},
-    {'operation': 'add_reagent', 'amount_mol': 0.012},
-    {'operation': 'terminate'},
-    {'operation': 'measure', 'instrument': 'final_assay'},
-):
-    assert session.step(action)['accepted']
-assert session.replay()['verified']
-assert manager.close(session.session_id)['final_assay_count'] == 1
+assert find_spec('chemworld.lab') is None
+assert find_spec('chemworld.workbench') is None
+assert {e.name for e in distribution('chemworld-bench').entry_points
+        if e.group == 'console_scripts'} == {'chemworld'}
+from chemworld.examples.user_reward import run_example
+native = run_example(reward_fn=None)
+assert len(native['steps']) == 3
+assert native['steps'][-1]['observation']['native']['channels'][0]['unit'] == 'Pa'
+from chemworld.eval.runner import run_agent
+import chemworld.agents.interactive_codex_experiment
 print(json.dumps({'package': chemworld.__file__, 'version': chemworld.__version__,
                   'tasks': tasks, 'contracts': readiness['contract_ready_count'],
+                  'ui_packages_absent': True, 'console_commands': ['chemworld'],
+                  'native_user_actions': len(native['steps']), 'agent_imports': True,
                   'platform': {'system': platform.system(), 'machine': platform.machine(),
                                'python_version': platform.python_version()},
                   'runtime_semantics_id': RUNTIME_SEMANTICS_ID}))
@@ -211,7 +208,9 @@ def clean_environment() -> dict[str, str]:
         env.pop(key, None)
     for key in tuple(env):
         if key.upper().endswith("_API_KEY") or key.upper() in {
-            "OPENAI_KEY", "ANTHROPIC_KEY", "DEEPSEEK_KEY",
+            "OPENAI_KEY",
+            "ANTHROPIC_KEY",
+            "DEEPSEEK_KEY",
         }:
             env.pop(key)
     env["PYTHONNOUSERSITE"] = "1"
@@ -226,8 +225,9 @@ def captured_run(command, *, log_prefix=None, poll_interval_s=30, **kwargs):
         nonlocal shown
         if isinstance(stderr, bytes):
             stderr = stderr.decode("utf-8", errors="replace")
-        lines = [line for line in (stderr or "").splitlines()
-                 if line.startswith("CHEMWORLD_PROGRESS ")]
+        lines = [
+            line for line in (stderr or "").splitlines() if line.startswith("CHEMWORLD_PROGRESS ")
+        ]
         for line in lines[shown:]:
             print(line, flush=True)
         shown = len(lines)
@@ -239,7 +239,8 @@ def captured_run(command, *, log_prefix=None, poll_interval_s=30, **kwargs):
             )
             log_prefix = Path(temporary) / "command"
         stdout_path, stderr_path = (
-            log_prefix.with_suffix(".stdout.log"), log_prefix.with_suffix(".stderr.log"),
+            log_prefix.with_suffix(".stdout.log"),
+            log_prefix.with_suffix(".stderr.log"),
         )
         if stdout_path.exists() or stderr_path.exists():
             raise ValueError("Command evidence already exists; choose a new attempt")
@@ -254,8 +255,11 @@ def captured_run(command, *, log_prefix=None, poll_interval_s=30, **kwargs):
                     break
                 except subprocess.TimeoutExpired:
                     show_progress(stderr_path.read_text(encoding="utf-8", errors="replace"))
-                    print(f"Install check alive: pid={process.pid}, "
-                          f"elapsed={time.monotonic() - started:.0f}s", flush=True)
+                    print(
+                        f"Install check alive: pid={process.pid}, "
+                        f"elapsed={time.monotonic() - started:.0f}s",
+                        flush=True,
+                    )
         stdout = stdout_path.read_text(encoding="utf-8", errors="replace")
         stderr = stderr_path.read_text(encoding="utf-8", errors="replace")
         show_progress(stderr)
@@ -266,8 +270,9 @@ def captured_run(command, *, log_prefix=None, poll_interval_s=30, **kwargs):
         return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
-def check_install(archive: Path, *, python: str, root: Path, evidence: Path,
-                  native_only: bool = False) -> dict:
+def check_install(
+    archive: Path, *, python: str, root: Path, evidence: Path, native_only: bool = False
+) -> dict:
     evidence.mkdir(exist_ok=False)
     command_index = 0
 
@@ -301,13 +306,21 @@ def check_install(archive: Path, *, python: str, root: Path, evidence: Path,
             env=child_env,
         )
         if native_only:
-            print("Checking native examples, retained equipment and serialized continuation",
-                  flush=True)
-            probe = run(
-                [str(interpreter), "-I", "-c", NATIVE_PROBE], cwd=work, env=child_env,
+            print(
+                "Checking native examples, retained equipment and serialized continuation",
+                flush=True,
             )
-            return {"archive": archive.name, "requested_python": python,
-                    "installed_check": "passed", **json.loads(probe.stdout)}
+            probe = run(
+                [str(interpreter), "-I", "-c", NATIVE_PROBE],
+                cwd=work,
+                env=child_env,
+            )
+            return {
+                "archive": archive.name,
+                "requested_python": python,
+                "installed_check": "passed",
+                **json.loads(probe.stdout),
+            }
         probe = run(
             [str(interpreter), "-I", "-c", PROBE],
             cwd=work,
@@ -361,11 +374,22 @@ def check_install(archive: Path, *, python: str, root: Path, evidence: Path,
                 str(trajectory),
             ],
             ["verify", "--submission", str(trajectory)],
-            ["evaluate", "--submission", str(trajectory),
-             "--output", str(evidence / "legacy-result.json")],
+            [
+                "evaluate",
+                "--submission",
+                str(trajectory),
+                "--output",
+                str(evidence / "legacy-result.json"),
+            ],
         ):
             result = run(
-                [str(interpreter), "-I", "-c", "from chemworld.cli import main; main()", *args],
+                [
+                    str(interpreter),
+                    "-I",
+                    "-c",
+                    "from chemworld.legacy.cli import main; main()",
+                    *args,
+                ],
                 cwd=work,
                 env=child_env,
             )
@@ -388,12 +412,17 @@ def check_install(archive: Path, *, python: str, root: Path, evidence: Path,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--archive", type=Path, action="append",
-        help="Existing wheel or sdist (repeatable); otherwise build both"
+        "--archive",
+        type=Path,
+        action="append",
+        help="Existing wheel or sdist (repeatable); otherwise build both",
     )
     parser.add_argument("--python", default=sys.executable)
-    parser.add_argument("--native-foundation-only", action="store_true",
-                        help="Check native examples and continuation without optional libraries.")
+    parser.add_argument(
+        "--native-foundation-only",
+        action="store_true",
+        help="Check native examples and continuation without optional libraries.",
+    )
     parser.add_argument("--output", type=Path, help="Optional JSON result, outside the repository")
     parser.add_argument("--evidence", type=Path, help="New external directory for logs and replays")
     args = parser.parse_args()
@@ -422,37 +451,64 @@ def main() -> int:
         destination.mkdir()
         print("Building wheel and sdist", flush=True)
         try:
-            captured_run(["uv", "build", "--out-dir", str(destination)], cwd=root,
-                         log_prefix=evidence / "build")
+            captured_run(
+                ["uv", "build", "--out-dir", str(destination)],
+                cwd=root,
+                log_prefix=evidence / "build",
+            )
             archives = sorted([*destination.glob("*.whl"), *destination.glob("*.tar.gz")])
             if len(archives) != 2:
                 raise RuntimeError("Build must produce one wheel and one sdist")
         except Exception:
             failure = traceback.format_exc()
-            rows = [{"archive_kind": kind, "requested_python": args.python,
-                     "installed_check": "not_executed", "failure": failure,
-                     "evidence": str(evidence.resolve())} for kind in ("wheel", "sdist")]
+            rows = [
+                {
+                    "archive_kind": kind,
+                    "requested_python": args.python,
+                    "installed_check": "not_executed",
+                    "failure": failure,
+                    "evidence": str(evidence.resolve()),
+                }
+                for kind in ("wheel", "sdist")
+            ]
             write_result(rows)
             print(json.dumps(rows, indent=2))
             return 1
     revision = dirty = None
     if (root / ".git").exists():
-        revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
-                                  text=True, check=True).stdout.strip()
-        dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=root,
-                                    capture_output=True, text=True, check=True).stdout.strip())
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        dirty = bool(
+            subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        )
     rows = []
     started = time.monotonic()
     for index, archive in enumerate(archives, 1):
         unit = evidence / f"unit-{index}"
-        identity = {"archive": archive.name, "requested_python": args.python,
-                    "archive_kind": "wheel" if archive.suffix == ".whl" else "sdist",
-                    "source_commit": revision, "source_worktree_dirty": dirty,
-                    "evidence": str(unit.resolve())}
+        identity = {
+            "archive": archive.name,
+            "requested_python": args.python,
+            "archive_kind": "wheel" if archive.suffix == ".whl" else "sdist",
+            "source_commit": revision,
+            "source_worktree_dirty": dirty,
+            "evidence": str(unit.resolve()),
+        }
         try:
             identity["archive_sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
-            result = check_install(archive, python=args.python, root=root, evidence=unit,
-                                   native_only=args.native_foundation_only)
+            result = check_install(
+                archive,
+                python=args.python,
+                root=root,
+                evidence=unit,
+                native_only=args.native_foundation_only,
+            )
             row = {**result, **identity}
         except Exception:
             row = {**identity, "installed_check": "failed", "failure": traceback.format_exc()}
@@ -460,10 +516,19 @@ def main() -> int:
         write_result(rows)
         elapsed = time.monotonic() - started
         rate = index / elapsed if elapsed > 0 else None
-        print(json.dumps({"stage": "install", "completed": index, "total": len(archives),
-                          "units_per_s": rate,
-                          "eta_s": (len(archives) - index) / rate if rate else None,
-                          "status": row["installed_check"]}), flush=True)
+        print(
+            json.dumps(
+                {
+                    "stage": "install",
+                    "completed": index,
+                    "total": len(archives),
+                    "units_per_s": rate,
+                    "eta_s": (len(archives) - index) / rate if rate else None,
+                    "status": row["installed_check"],
+                }
+            ),
+            flush=True,
+        )
     report = json.dumps(rows, indent=2) + "\n"
     write_result(rows)
     print(report)

@@ -149,13 +149,26 @@ def molecular_density_from_pressure(
     )) or not low < initial_density_mol_m3 < high):
         raise ValueError("positive pressure and an interior initial density are required")
 
-    def state(log_density: Sequence[float]) -> MolecularEOSState:
-        return molecular_eos_state(model, temperature_K, exp(log_density[0]),
-                                   mole_fractions, require_stable=False)
+    def pressure_response(log_density: Sequence[float]) -> tuple[float, float]:
+        # Newton iterates are equation probes, not accepted physical states.
+        # A valid target may require crossing a source pressure ceiling from
+        # the caller's seed. Evaluate the same EOS P and dP/drho here, keeping
+        # alphar's T/rho/composition domain and finite-response requirements;
+        # the final full state below still enforces every source-state limit.
+        rho = exp(log_density[0])
+        ar = SecondOrderPair(0)+model.alphar(
+            SecondOrderPair(temperature_K, dx=1), SecondOrderPair(rho, dy=1),
+            tuple(mole_fractions))
+        rt = model.gas_constant_J_mol_K*temperature_K
+        pressure = rho*model.gas_constant_J_mol_K*temperature_K*(1+rho*ar.dy)
+        stiffness = rt*(1+2*rho*ar.dy+rho*rho*ar.dyy)
+        if not isfinite(pressure) or not isfinite(stiffness):
+            raise ValueError("nonfinite molecular pressure-density response")
+        return pressure, stiffness*rho
 
     root = solve_root(
-        lambda v: [state(v).pressure_Pa-pressure_Pa], [log(initial_density_mol_m3)],
-        jacobian=lambda v: [[state(v).dP_drho_T_Pa_m3_mol*exp(v[0])]],
+        lambda v: [pressure_response(v)[0]-pressure_Pa], [log(initial_density_mol_m3)],
+        jacobian=lambda v: [[pressure_response(v)[1]]],
         variables=(ResidualVariable("log_density", "dimensionless", role="algebraic",
                                     lower=log(low), upper=log(high)),),
         residual_scales=(pressure_Pa,), policy=RootPolicy(tolerance=2e-12),

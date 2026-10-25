@@ -18,13 +18,23 @@ _BOOL_FIELDS = {"constant", "boundaryCondition", "hasOnlySubstanceUnits", "initi
                 "persistent", "useValuesFromTriggerTime", "reversible", "fast"}
 
 
+def source_xml(root):
+    """Keep historical fixture bytes without leaking serializer state to consumers."""
+    namespaces = dict(ET._namespace_map)
+    try:
+        ET.register_namespace("", CORE)
+        return ET.tostring(root, encoding="unicode")
+    finally:
+        ET._namespace_map.clear()
+        ET._namespace_map.update(namespaces)
+
+
 def cases():
     template = Path(__file__).parents[1]/"test_sbml.py"
     assignments = [n for n in ast.parse(template.read_text(encoding="utf-8")).body
                    if isinstance(n, ast.Assign)
                    and any(isinstance(t, ast.Name) and t.id == "MODEL" for t in n.targets)]
     text = ast.literal_eval(assignments[0].value)
-    ET.register_namespace("", CORE)
     for index in range(12):
         root = ET.fromstring(text)
         model = root[0]
@@ -95,7 +105,7 @@ def cases():
             initial = ET.SubElement(assignments, "{"+CORE+"}initialAssignment", symbol="c1")
             expression = ET.SubElement(initial, "{"+MATH+"}math")
             ET.SubElement(expression, "{"+MATH+"}cn").text = "0.015"
-        yield f"input-{index:02}.xml", str(index), None, ET.tostring(root, encoding="unicode")
+        yield f"input-{index:02}.xml", str(index), None, source_xml(root)
 
 
 def typed_attribute(name, value):

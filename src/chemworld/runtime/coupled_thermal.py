@@ -25,6 +25,11 @@ from chemworld.physchem.inventory_interactions import with_inventory_interaction
 from chemworld.physchem.reaction_network import R_J_PER_MOL_K
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.kernel_contracts import ModelProviderResult
+from chemworld.runtime.thermal_feedback import (
+    store_thermal_feedback,
+    thermal_feedback_report,
+    with_thermal_feedback,
+)
 
 
 @dataclass(frozen=True)
@@ -268,15 +273,16 @@ def assemble_local_system(state, physics, modules, components):
         conservation_laws=laws,
         inventory_scales_mol={key: max(value, 1e-8) for key, value in amounts.items()},
         isothermal=isothermal,
-        # Small water temperature changes must still meet the unchanged energy
+        # Water and nonideal reaction temperature changes must meet the unchanged energy
         # closure budget. Refine the original BDF policy, not the acceptance
         # tolerance or a second integrator; its exact policy is in diagnostics.
         policy=(replace(DEFAULT_COUPLED_ODE_POLICY,
                         solver_id=f"chemworld_{model.pressure_law}_coupled_bdf_v1",
                         rtol=1e-11, atol=1e-13)
-                if model.pressure_law in {"if97", "humid_air"} else DEFAULT_COUPLED_ODE_POLICY),
+                if model.pressure_law in {"if97", "humid_air", "molecular"}
+                else DEFAULT_COUPLED_ODE_POLICY),
     )
-    return system, initial
+    return with_thermal_feedback(state, system, initial, physics=physics)
 
 
 def pressure_for_state(state, model):
@@ -296,17 +302,35 @@ def pressure_for_state(state, model):
 class CoupledThermalRuntime:
     supported_operations = ("wait",)
 
+    def supported_operations_for_state(self, state):
+        if self._uses_chemostatted_catalysis(state):
+            return self.chemostatted_catalysis.supported_operations
+        return self.supported_operations
+
     def temperature_bounds_k(self, state):
         model = self.composition.physics.models_of("thermal")[state.vessel_id]
         return model.minimum_temperature_K, model.maximum_temperature_K
 
     def reconcile_pressure(self, state):
+        if self._uses_chemostatted_catalysis(state):
+            return self.chemostatted_catalysis.reconcile_pressure(state)
         model = self.composition.physics.models_of("thermal")[state.vessel_id]
         return state.replace(pressure_Pa=pressure_for_state(state, model))
 
     def __init__(self, composition, modules):
+        from chemworld.runtime.chemostatted_catalysis import ChemostattedCatalysisRuntime
+
         self.composition = composition
         self.modules = modules
+        self.chemostatted_catalysis = ChemostattedCatalysisRuntime(composition, modules)
+
+    def _uses_chemostatted_catalysis(self, state):
+        if self.chemostatted_catalysis.supports(state):
+            return True
+        if self.composition is None or self.composition.physics is None:
+            return False
+        original = self.composition.physics.initial_states.get(state.vessel_id)
+        return original is not None and self.chemostatted_catalysis.supports(original)
 
     def supports(self, state):
         return (
@@ -318,6 +342,8 @@ class CoupledThermalRuntime:
 
     def validate_state(self, state):
         """Validate saved owned inventory through its original process declarations."""
+        if self._uses_chemostatted_catalysis(state):
+            return self.chemostatted_catalysis.validate_state(state)
         system, initial = assemble_local_system(
             state,
             self.composition.physics,
@@ -327,6 +353,10 @@ class CoupledThermalRuntime:
         system.validate_state(initial)
 
     def advance(self, state, action, *, heat, jacket_program=None):
+        if self._uses_chemostatted_catalysis(state):
+            return self.chemostatted_catalysis.advance(
+                state, action, heat=heat, jacket_program=jacket_program
+            )
         if jacket_program is not None:
             raise ValueError(
                 "native thermal devices use their own setpoint; "
@@ -434,6 +464,7 @@ class CoupledThermalRuntime:
         candidate = candidate.replace(
             pressure_Pa=pressure_for_state(candidate, physics.models_of("thermal")[state.vessel_id])
         )
+        candidate = store_thermal_feedback(candidate, final)
         return ModelProviderResult(
             outputs={},
             state=candidate,
@@ -444,5 +475,6 @@ class CoupledThermalRuntime:
                 "solver": dict(result.solver_diagnostic),
                 "energy_balance_residual_J": result.energy_balance_residual_J,
                 "conservation_residuals": dict(result.conservation_residuals),
+                **thermal_feedback_report(candidate),
             },
         )

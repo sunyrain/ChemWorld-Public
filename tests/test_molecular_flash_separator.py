@@ -6,7 +6,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-pytest.importorskip("thermo", reason="optional independent reference package")
+pytest.importorskip("thermo", reason="Optional independent reference dependency")
 
 from chemworld.examples.molecular_flash_separator import molecular_flash_separator_example
 from chemworld.physchem.molecular_flash_separator import evaluate_molecular_flash_separator

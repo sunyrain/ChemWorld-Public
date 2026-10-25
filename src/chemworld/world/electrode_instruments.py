@@ -9,9 +9,23 @@ from chemworld.world.instruments import InstrumentContract
 
 
 def read_electrical(state, action, rng):
-    from chemworld.runtime.transient_electrode import read_electrical_state
+    from chemworld.runtime.chemostatted_catalysis import (
+        chemostatted_record,
+        read_chemostatted_electrical,
+    )
+    from chemworld.runtime.reverse_electrodialysis import (
+        read_reverse_electrodialysis_electrical,
+        reverse_electrodialysis_record,
+    )
 
-    reading = read_electrical_state(state)
+    if reverse_electrodialysis_record(state) is not None:
+        reading = read_reverse_electrodialysis_electrical(state)
+    elif chemostatted_record(state) is not None:
+        reading = read_chemostatted_electrical(state)
+    else:
+        from chemworld.runtime.transient_electrode import read_electrical_state
+
+        reading = read_electrical_state(state)
     return electrical_observation(
         "electrical_meter", reading.terminal_potential_V, reading.applied_current_A
     )

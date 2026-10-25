@@ -519,6 +519,15 @@ class CompiledWorldComposition:
     def to_public_dict(self) -> dict[str, Any]:
         return deepcopy(self.public_surface)
 
+    def to_execution_ir(self, *, backend: str = "auto") -> dict[str, Any]:
+        """Lower this compiled authoring surface to the native execution IR.
+
+        The registry remains the sole source of module capability metadata;
+        this method only binds the already-validated component instances and
+        ownership map to that generated contract.
+        """
+        return self.spec.modules.lower_execution_ir(self, backend=backend)
+
     def env_kwargs(self, *, seed: int | None = None) -> dict[str, Any]:
         return {
             "composition": self,

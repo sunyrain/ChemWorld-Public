@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from functools import cached_property
 from math import exp, isclose, isfinite
 from types import MappingProxyType
+from typing import Any
 
 import numpy as np
 
@@ -415,6 +416,33 @@ class PlatingReadout:
     negative_electrode_potential_V: float
 
 
+@dataclass(frozen=True)
+class PlatingCycleResult:
+    """Explicit continuation result for a finite sequence of plating segments.
+
+    Every segment is solved by the shared coupled system and starts from the
+    previous segment's accepted state.  A terminal event stops the sequence;
+    no target capacity or post-step inventory correction is applied.
+    """
+
+    initial_state: CoupledState
+    final_state: CoupledState
+    segments: tuple[Any, ...]
+    outcome: str
+    stopping_event: str | None
+
+    @property
+    def duration_s(self):
+        return self.final_state.time_s - self.initial_state.time_s
+
+    def inventory_history(self, spec):
+        """Return one auditable inventory record for each accepted segment endpoint."""
+        records = [plating_inventory_ledger(spec, self.initial_state)]
+        records.extend(plating_inventory_ledger(spec, segment.final_state)
+                       for segment in self.segments)
+        return tuple(records)
+
+
 def _plating_owner(spec):
     validate_plating_configuration(spec)
     if getattr(spec, "model_family", None) == "mpm-isothermal-v1":
@@ -517,3 +545,76 @@ def advance_plating(spec, state, program, duration_s, *, evaluation_times_s=None
     return replace(result, solver_diagnostic={**result.solver_diagnostic,
         "battery_control_mode": mode, "plating_mode": spec.plating.mode,
         "energy_scope": "isothermal; terminal electrical work only; plating energy is undeclared"})
+
+
+def plating_inventory_ledger(spec, state):
+    """Expose the accepted metallic and negative-electrode inventories.
+
+    The Faradaic residual is calculated from the actual particle and metal
+    stocks plus the shared discharged-charge coordinate.  It is a diagnostic
+    readout only; it never repairs the state or infers inventory from SOC.
+    """
+    validate_plating_state(spec, state)
+    negative_keys = spec.negative.keys("negative")
+    negative_mobile_mol = float(sum(state.amounts_mol[key] for key in negative_keys))
+    plated_mol = float(state.amounts_mol["plating:Li"])
+    dead_mol = float(state.amounts_mol["dead:Li"])
+    metal_mol = plated_mol + dead_mol
+    initial_metal_mol = sum(spec.plating.initial_amounts().values())
+    is_constant_decay = spec.plating.mode == "partially reversible"
+    deactivated_mol = (dead_mol - spec.plating.initial_dead_mol
+                       if is_constant_decay else 0.0)
+    deactivation_rate_mol_s = (spec.plating.deactivation_rate_mol_s(plated_mol)
+                               if is_constant_decay else 0.0)
+    hysteresis_keys = spec.hysteresis_keys if hasattr(spec, "hysteresis_keys") else ()
+    hysteresis = {key: float(state.coordinates[key]) for key in hysteresis_keys}
+    initial_negative_mol = spec.negative.capacity_mol * spec.initial_negative_fraction
+    negative_total_mol = negative_mobile_mol + metal_mol
+    faradaic_residual_mol = (
+        negative_total_mol + state.coordinates["discharged_charge_C"] / F
+        - (initial_negative_mol + initial_metal_mol)
+    )
+    return {
+        "time_s": float(state.time_s),
+        "plated_mol": plated_mol,
+        "dead_mol": dead_mol,
+        "deactivated_mol": float(deactivated_mol),
+        "deactivation_rate_mol_s": float(deactivation_rate_mol_s),
+        "hysteresis": hysteresis,
+        "metal_mol": metal_mol,
+        "initial_metal_mol": float(initial_metal_mol),
+        "negative_mobile_mol": negative_mobile_mol,
+        "negative_total_mol": negative_total_mol,
+        "discharged_charge_C": float(state.coordinates["discharged_charge_C"]),
+        "faradaic_residual_mol": float(faradaic_residual_mol),
+        "faradaic_residual_C": float(faradaic_residual_mol * F),
+    }
+
+
+def advance_plating_cycle(spec, state, segments, *, thermal_device=None,
+                          control_events=()):
+    """Advance a finite plating/stripping sequence with exact state hand-off.
+
+    ``segments`` is an iterable of ``(program, duration_s)`` pairs.  The
+    program's start time must be at or before the segment's accepted start;
+    callers can use ``start=state.time_s`` for each new control phase.  A
+    terminal event returns the completed prefix and does not execute later
+    segments.
+    """
+    validate_plating_state(spec, state)
+    current = state
+    results = []
+    for program, duration_s in segments:
+        if not isfinite(duration_s) or duration_s <= 0:
+            raise ValueError("plating cycle durations must be finite and positive")
+        if not isfinite(program.value_at(current.time_s)):
+            raise ValueError("plating cycle control program must return a finite value")
+        result = advance_plating(spec, current, program, duration_s,
+                                 thermal_device=thermal_device,
+                                 control_events=control_events)
+        results.append(result)
+        current = result.final_state
+        if result.outcome != "success":
+            return PlatingCycleResult(state, current, tuple(results), result.outcome,
+                                      result.stopping_event)
+    return PlatingCycleResult(state, current, tuple(results), "success", None)

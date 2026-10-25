@@ -16,6 +16,7 @@ from scipy.optimize import brentq
 
 from chemworld.physchem.aqueous_transport import AqueousTransportLaw, BinaryAqueousProperties
 from chemworld.physchem.elements import molecular_weight
+from chemworld.physchem.multisolute_ro_properties import MultisoluteROProperties, ROFlatSheetChannel
 from chemworld.physchem.phase_inventory import PhaseInventoryRates, integrate_phase_inventory
 from chemworld.physchem.pressure_recovery import (
     IsothermalLiquidPressureRecoverySpec,
@@ -34,7 +35,7 @@ from chemworld.physchem.transport_devices import TransportInventory
 
 @dataclass(frozen=True)
 class DistributedROSpec:
-    properties: BinaryAqueousProperties
+    properties: BinaryAqueousProperties | MultisoluteROProperties
     water_permeability: AqueousTransportLaw
     salt_permeability: AqueousTransportLaw | None
     mass_transfer: AqueousTransportLaw
@@ -52,6 +53,7 @@ class DistributedROSpec:
     maximum_interface_concentration_mol_m3: float = 100.0
     support_heat_capacity_J_K: float = 5.0
     energy_recovery: IsothermalLiquidPressureRecoverySpec | None = None
+    flat_sheet_channel: ROFlatSheetChannel | None = None
 
     def __post_init__(self) -> None:
         numbers = (
@@ -94,6 +96,30 @@ class DistributedROSpec:
             temperature_K=self.temperature_K,
             pressure_Pa=self.reservoir_pressure_Pa,
         )
+        if (
+            isinstance(self.properties, MultisoluteROProperties)
+            and self.salt_permeability is not None
+        ):
+            raise ValueError("multi-solute RO uses each explicit channel permeability")
+        if (
+            isinstance(self.properties, MultisoluteROProperties)
+            and self.properties.property_approximation == "mcas-ideal-volume"
+            and self.energy_recovery is not None
+        ):
+            raise ValueError(
+                "independent MCAS H/V/osmotic fits do not define common-G reversible work"
+            )
+        if self.flat_sheet_channel is not None:
+            if not isinstance(self.properties, MultisoluteROProperties) or set(
+                dict(self.flat_sheet_channel.diffusivities)
+            ) != {c.channel_id for c in self.properties.channels}:
+                raise ValueError(
+                    "flat-sheet RO requires one diffusivity for each neutral solute channel"
+                )
+            if any(
+                law.source_id not in sources for _, law in self.flat_sheet_channel.diffusivities
+            ):
+                raise ValueError("flat-sheet diffusivities require declared database sources")
 
     def enthalpy(self, index: int, amounts: Mapping[str, float], temperature: float) -> float:
         return self.properties.enthalpy(amounts, temperature, self.reservoir_pressure_Pa) + (
@@ -131,6 +157,10 @@ class DistributedROSpec:
         if self.energy_recovery is not None:
             payload["schema"] = "declared-distributed-ro-v2"
             payload["energy_recovery"] = self.energy_recovery.to_dict()
+        if isinstance(self.properties, MultisoluteROProperties):
+            payload["schema"] = "declared-distributed-ro-multisolute-v1"
+            if self.flat_sheet_channel is not None:
+                payload["flat_sheet_channel"] = self.flat_sheet_channel.to_dict()
         # Equipment settings are a JSON declaration. Canonical containers also
         # normalize nested original aqueous-parameter bounds before persistence.
         return json.loads(json.dumps(payload))
@@ -139,15 +169,22 @@ class DistributedROSpec:
     def from_dict(cls, value: Mapping[str, Any]) -> "DistributedROSpec":
         data = dict(value)
         schema = data.pop("schema")
-        if schema not in {"declared-distributed-ro-v1", "declared-distributed-ro-v2"}:
+        multi = schema == "declared-distributed-ro-multisolute-v1"
+        if not multi and schema not in {"declared-distributed-ro-v1", "declared-distributed-ro-v2"}:
             raise ValueError("unsupported distributed RO schema")
-        if schema == "declared-distributed-ro-v2":
+        if schema == "declared-distributed-ro-v2" or (multi and "energy_recovery" in data):
             data["energy_recovery"] = IsothermalLiquidPressureRecoverySpec.from_dict(
                 data["energy_recovery"]
             )
         elif "energy_recovery" in data:
             raise ValueError("legacy RO schema cannot declare pressure recovery")
-        data["properties"] = BinaryAqueousProperties.from_dict(data["properties"])
+        data["properties"] = (
+            MultisoluteROProperties if multi else BinaryAqueousProperties
+        ).from_dict(data["properties"])
+        if "flat_sheet_channel" in data:
+            if not multi:
+                raise ValueError("legacy RO declarations do not contain flat-sheet geometry")
+            data["flat_sheet_channel"] = ROFlatSheetChannel.from_dict(data["flat_sheet_channel"])
         for key in ("water_permeability", "salt_permeability", "mass_transfer"):
             data[key] = None if data[key] is None else AqueousTransportLaw(**data[key])
         data["channel"], data["pump"] = PipeSpec(**data["channel"]), PumpSpec(**data["pump"])
@@ -162,6 +199,10 @@ def local_ro_flux(
     Jw is solvent-volume flux. Js is salt-basis molar flux. Actual ions are
     transported only by their declared integer stoichiometric vector.
     """
+    if isinstance(spec.properties, MultisoluteROProperties):
+        raise ValueError(
+            "multi-solute RO requires local_multisolute_ro_flux with all concentrations"
+        )
     prop, t, cb = spec.properties, spec.temperature_K, bulk_concentration_mol_m3
     if not 0 <= cb <= spec.maximum_interface_concentration_mol_m3:
         raise ValueError("bulk concentration outside declared membrane interface domain")
@@ -228,6 +269,12 @@ def distributed_ro_profile(
     samples: int = 17,
     rtol: float = 1e-7,
 ) -> dict[str, Any]:
+    if isinstance(spec.properties, MultisoluteROProperties):
+        from chemworld.physchem.multisolute_ro import multisolute_ro_profile
+
+        return multisolute_ro_profile(
+            spec, feed_amounts, requested_flow_m3_s, samples=samples, rtol=rtol
+        )
     prop, t, pr = spec.properties, spec.temperature_K, spec.reservoir_pressure_Pa
     prop.validate_amounts(feed_amounts)
     if type(samples) is not int or samples < 2:

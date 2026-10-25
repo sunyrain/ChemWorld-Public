@@ -156,12 +156,13 @@ class ElectrodeOCPSpec:
             return False
         identical = all(
             getattr(self.lithiation, k) == getattr(self.delithiation, k)
-            for k in ("polynomial_V", "exponential_terms", "tanh_terms")
+            for k in ("polynomial_V", "exponential_terms", "tanh_terms", "endpoint_policy")
         )
 
         def constant(curve):
             return (
-                not any(curve.polynomial_V[1:])
+                curve.endpoint_policy is None
+                and not any(curve.polynomial_V[1:])
                 and all(a * k == 0 for a, k, _ in curve.exponential_terms)
                 and all(a * k == 0 for a, k, _ in curve.tanh_terms)
             )

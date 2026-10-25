@@ -638,6 +638,58 @@ def lead_acid_readout(spec, state, current_A):
     )
 
 
+def lead_acid_profile(spec, state, *, current_A=None, program=None):
+    """Return a JSON-safe read-only six-inventory LOQS profile.
+
+    The profile is derived from the existing material state and voltage law.
+    It exposes the closed pore/acid/water composition and Faradaic residuals
+    without introducing a second inventory, volume, or integration path.
+    """
+    if current_A is None and program is None:
+        current_A = 0.0
+    fields = lead_acid_fields(spec, state, current_A=current_A, program=program)
+    amounts = {key: float(state.amounts_mol[key]) for key in LOQS_KEYS}
+    charge = float(state.coordinates[BATTERY_COORDINATES[0]])
+    elements = {
+        element: float(sum(count * amounts[key] for key, count in zip(
+            LOQS_KEYS, counts, strict=True
+        )))
+        for element, counts in _ELEMENTS.items()
+    }
+    faradaic = {
+        key: float(2 * F * (amounts[key] - initial) - nu * charge)
+        for key, initial, nu in zip(
+            LOQS_KEYS, spec.initial_amounts_mol, LOQS_STOICHIOMETRY, strict=True
+        )
+    }
+    return {
+        "model_family": LOQS_FAMILY,
+        "inventory_keys": list(LOQS_KEYS),
+        "amounts_mol": amounts,
+        "coordinates": {key: float(value) for key, value in state.coordinates.items()},
+        "volume_L": float(state.volume_L),
+        "current_A": float(fields["current_A"]),
+        "voltage_V": float(fields["voltage_V"]),
+        "acid_concentration_mol_m3": float(fields["acid_concentration_mol_m3"]),
+        "water_concentration_mol_m3": float(fields["water_concentration_mol_m3"]),
+        "molality_mol_kg": float(fields["molality_mol_kg"]),
+        "porosities": [float(value) for value in fields["porosities"]],
+        "pore_volumes_m3": [float(value) for value in fields["pore_volumes_m3"]],
+        "element_mol": elements,
+        "faradaic_residual_C": faradaic,
+        "negative_ocp_V": float(fields["negative_ocp_V"]),
+        "positive_ocp_V": float(fields["positive_ocp_V"]),
+        "negative_overpotential_V": float(fields["negative_overpotential_V"]),
+        "positive_overpotential_V": float(fields["positive_overpotential_V"]),
+        "negative_interfacial_current_A_m2": float(
+            fields["negative_interfacial_current_A_m2"]
+        ),
+        "positive_interfacial_current_A_m2": float(
+            fields["positive_interfacial_current_A_m2"]
+        ),
+    }
+
+
 def lead_acid_control_current(spec, state, program):
     return lead_acid_fields(spec, state, program=program)["current_A"]
 

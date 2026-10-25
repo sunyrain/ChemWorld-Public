@@ -345,12 +345,23 @@ def mass_action_rate(
     reactants: Mapping[str, float],
     concentrations_mol_L: Mapping[str, float],
     k: float,
+    *,
+    allow_signed_trial: bool = False,
 ) -> float:
     if k < 0 or not isfinite(k):
         raise ValueError("Rate coefficient must be finite and nonnegative")
     rate = k
+    if type(allow_signed_trial) is not bool:
+        raise ValueError("signed mass-action trial policy must be explicitly Boolean")
     for species_id, order in reactants.items():
-        concentration = max(float(concentrations_mol_L.get(species_id, 0.0)), 0.0)
+        value = float(concentrations_mol_L.get(species_id, 0.0))
+        if allow_signed_trial:
+            if (not isfinite(value) or isinstance(order, bool)
+                    or not isfinite(order) or order < 0 or not float(order).is_integer()):
+                raise ValueError("signed mass-action trials require finite integer powers")
+            concentration = value
+        else:
+            concentration = max(value, 0.0)
         rate *= concentration**order
     return rate
 

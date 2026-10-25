@@ -5,6 +5,7 @@ observation, numerical policy and finite task expansion is checked before a
 runtime may be created by an experiment runner.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from itertools import pairwise
 from math import prod
@@ -18,6 +19,7 @@ from chemworld.data.sedml_models import _derived, _model_target, resolve_models
 from chemworld.data.sedml_quantities import model_quantity
 from chemworld.data.sedml_ranges import _range_reference
 from chemworld.data.sedml_reports import SEDMLReports
+from chemworld.data.sedml_stochastic import SEDMLStochasticAlgorithm
 from chemworld.data.sedml_tasks import SEDMLTasks
 from chemworld.data.xml_inputs import bounded_xml
 from chemworld.world.domain_modules import normalize_number_map
@@ -203,6 +205,14 @@ class SEDMLProtocol:
             model = models[model_id]
             scale = model.model_unit("timeUnits").time_s(1.)
             numerical = algorithm.native_policy(seconds_per_source_time=scale)
+            if isinstance(algorithm, SEDMLStochasticAlgorithm):
+                worlds[model_id] = sbml_world(model, initial_model_time=origin, budget=budget,
+                    numerical_form="stochastic", solver_method=numerical.method,
+                    seed=numerical.seed, maximum_events=numerical.maximum_events,
+                    tau_policy=numerical.tau_policy, readout_relative_sd=self.readout_relative_sd,
+                    controlled_parameters=tuple(sorted(controls.get(model_id, ()))),
+                    observables=tuple(sorted(observations[model_id], key=lambda o: o.channel_id)))
+                continue
             worlds[model_id] = sbml_world(model, initial_model_time=origin, budget=budget,
                 solver_method=numerical.method, rtol=numerical.rtol, atol=numerical.atol,
                 maximum_step_s=numerical.max_step_s, readout_relative_sd=self.readout_relative_sd,
@@ -226,7 +236,9 @@ class SEDMLProtocol:
         """An XML-input recipe for a fresh reset, never a write to a live session."""
         original = self.models[model_id]
         spec = self.worlds[model_id].physics.models_of("sbml")["formal_workspace"]
-        values = normalize_number_map(values)
+        # A reset to the same lexical inputs still has a reset-input source recipe.
+        # The checkpoint decoder must reconstruct that recipe even with no deltas.
+        values = {} if isinstance(values, Mapping) and not values else normalize_number_map(values)
         if set(values)-set(spec.controlled_parameters):
             raise ValueError("reset inputs must be declared controlled parameters")
         tree = bounded_xml(original.to_xml())
@@ -237,6 +249,16 @@ class SEDMLProtocol:
                 node.set("value", format(values[node.get("id")], ".17g"))
         model = _derived(original, ET.tostring(tree, encoding="unicode"), self.document,
                          model_id+":reset-inputs")
+        if spec.integer_kinetics is not None:
+            algorithm = next(self.tasks.simulations[n.attributes["simulationReference"]].algorithm
+                for n in self.tasks.nodes.values() if n.local_name == "task"
+                and n.attributes["modelReference"] == model_id)
+            return sbml_world(model, initial_model_time=spec.initial_model_time,
+                numerical_form="stochastic", budget=self.worlds[model_id].task.budget,
+                solver_method=spec.solver_method, seed=algorithm.seed,
+                maximum_events=spec.maximum_events, tau_policy=spec.tau_policy,
+                readout_relative_sd=spec.readout_relative_sd,
+                controlled_parameters=spec.controlled_parameters, observables=spec.observables)
         return sbml_world(model, initial_model_time=spec.initial_model_time,
             numerical_form=spec.numerical_form, budget=self.worlds[model_id].task.budget,
             solver_method=spec.solver_method, rtol=spec.rtol, atol=spec.atol,

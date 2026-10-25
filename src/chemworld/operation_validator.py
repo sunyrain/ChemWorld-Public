@@ -633,6 +633,13 @@ class OperationValidator:
         from chemworld.runtime.component_network import operation_available
 
         preconditions["operation_available_in_vessel"] = operation_available(state, operation_type)
+        if operation_type == 'measure' and self._has_sde_model(state):
+            instrument = self.constitution.instruments.get(str(payload.get('instrument', 'hplc')))
+            if instrument is not None and instrument.sample_volume_L:
+                model = self.material_router.physics.models_of('stochastic_sde')[state.vessel_id]
+                preconditions['sde_sampling_volume_floor'] = (
+                    model.minimum_volume_L is not None
+                    and state.volume_L - instrument.sample_volume_L >= model.minimum_volume_L)
         if operation_type in {"configure_electrical_control", "queue_electrical_stage"}:
             from chemworld.runtime.control_program import electrical_device
 
@@ -1063,7 +1070,19 @@ class OperationValidator:
 
     def _has_hybrid_model(self, state: WorldState) -> bool:
         physics = None if self.material_router is None else self.material_router.physics
-        return physics is not None and state.vessel_id in physics.models_of("stochastic_hybrid")
+        return (physics is not None and state.vessel_id in physics.models_of("stochastic_hybrid")
+                and not self._has_adaptive_model(state))
+
+    def _has_adaptive_model(self, state: WorldState) -> bool:
+        from chemworld.physchem.stochastic_adaptive_hybrid import AdaptiveHybridSpec
+
+        physics = None if self.material_router is None else self.material_router.physics
+        return (physics is not None and isinstance(
+            physics.models_of("stochastic_hybrid").get(state.vessel_id), AdaptiveHybridSpec))
+
+    def _has_sde_model(self, state: WorldState) -> bool:
+        physics = None if self.material_router is None else self.material_router.physics
+        return physics is not None and state.vessel_id in physics.models_of("stochastic_sde")
 
     def _payload_checks(
         self,
@@ -1197,7 +1216,8 @@ class OperationValidator:
         if operation_type in {"add_reagent", "add_component"} and "amount_mol" in payload:
             if self._has_hybrid_model(state):
                 checks["hybrid_material_input_disabled"] = False
-            elif state.process.stochastic_continuation is not None:
+            elif (state.process.stochastic_continuation is not None
+                  and not self._has_sde_model(state) and not self._has_adaptive_model(state)):
                 from chemworld.foundation.discrete_inventory import MAX_COUNT, mol_to_counts
 
                 try:
@@ -1595,6 +1615,26 @@ class OperationValidator:
             # The declared fixed partition does not support material dosing;
             # its continuous stock must never be interpreted as integer SSA.
             return 0.0
+        if self._has_adaptive_model(state):
+            from chemworld.foundation.discrete_inventory import MAX_COUNT
+            from chemworld.physchem.stochastic_adaptive_hybrid import (
+                MOLECULAR_QUANTUM,
+                AdaptiveHybridModel,
+            )
+
+            physics = self.material_router.physics
+            model = AdaptiveHybridModel(physics.network,
+                physics.models_of("stochastic_hybrid")[state.vessel_id])
+            remaining = MAX_COUNT-sum(model.populations(state.species_amounts).values())
+            return max(0., remaining)*MOLECULAR_QUANTUM
+        if self._has_sde_model(state):
+            from sys import float_info
+
+            from chemworld.foundation.discrete_inventory import AVOGADRO
+
+            # Declared fixed-volume solutes; continuous coordinates have no
+            # integer-SSA quantum bound. Finite particle representation still applies.
+            return max(0., float_info.max / AVOGADRO - sum(state.species_amounts.values()))
         if state.process.stochastic_continuation is not None:
             from chemworld.foundation.discrete_inventory import AVOGADRO, MAX_COUNT, mol_to_counts
 

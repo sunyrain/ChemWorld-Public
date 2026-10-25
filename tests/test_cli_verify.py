@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from chemworld.cli import main
 from chemworld.data.records import trajectory_value
+from chemworld.legacy.cli import main
 
 
 def test_cli_run_verify_and_inspect(tmp_path, capsys) -> None:
@@ -66,3 +66,4 @@ def test_suite_scripted_agent(tmp_path) -> None:
         ]
     )
     assert (tmp_path / "suite_results.json").exists()
+

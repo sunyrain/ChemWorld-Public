@@ -62,8 +62,8 @@ def dielectric_case(T, molar_density, printed):
     ]
 
 
-def species_case(key, T, P):
-    th = hkf_source_species(key)
+def species_case(key, T, P, reference_authority="strict"):
+    th = hkf_source_species(key, reference_authority=reference_authority)
     native = th.evaluate_tp(T, P)
     basis = hkf_reference_basis()
     expected = hkf_state(
@@ -71,6 +71,7 @@ def species_case(key, T, P):
         T,
         P,
         {**basis.element_entropy_J_mol_K, "charge": basis.charge_entropy_J_mol_K},
+        reference_authority=reference_authority,
     )
     actual = {
         "G": native.gibbs_J_mol,

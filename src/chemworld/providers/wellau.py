@@ -1,4 +1,4 @@
-"""Auditable WellAU client for OpenAI-compatible structured chat completions."""
+"""Auditable WellAU client for OpenAI-compatible Responses requests."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class WellAUAPIError(DeepSeekAPIError):
 
 
 class WellAUClient(DeepSeekClient):
-    """Call the discovered WellAU Codex model without a silent model fallback."""
+    """Call the discovered WellAU Codex model through one Responses request."""
 
     def __init__(
         self,
@@ -69,6 +69,7 @@ class WellAUClient(DeepSeekClient):
             kwargs["sleep"] = sleep
         super().__init__(**kwargs)
         self.reasoning_effort = reasoning_effort
+        self.wire_api = "responses"
 
     def pricing_snapshot(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -77,6 +78,7 @@ class WellAUClient(DeepSeekClient):
             "currency": "USD",
             "requested_model_id": self.model,
             "base_url": self.base_url,
+            "wire_api": self.wire_api,
             "model_source": MODEL_SOURCE,
             "model_access_date": MODEL_ACCESS_DATE,
             "accounting_complete": False,
@@ -101,32 +103,28 @@ class WellAUClient(DeepSeekClient):
             if retry
             else ""
         )
+        text_format: dict[str, Any] = (
+            {
+                "type": "json_schema",
+                "name": "chemworld_decision",
+                "strict": True,
+                "schema": dict(output_schema),
+            }
+            if output_schema is not None
+            else {"type": "json_object"}
+        )
         return {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt + retry_note},
-            ],
-            "response_format": (
-                {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "chemworld_decision",
-                        "strict": True,
-                        "schema": output_schema,
-                    },
-                }
-                if output_schema is not None
-                else {"type": "json_object"}
-            ),
-            "reasoning_effort": self.reasoning_effort,
-            "stream": False,
-            "max_tokens": int(max_tokens),
+            "instructions": system_prompt,
+            "input": user_prompt + retry_note,
+            "reasoning": {"effort": self.reasoning_effort},
+            "text": {"format": text_format},
+            "max_output_tokens": int(max_tokens),
         }
 
     def _send(self, body: dict[str, Any]) -> tuple[str, str | None]:
         request = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
+            f"{self.base_url}/responses",
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {self._api_key}",
@@ -138,8 +136,9 @@ class WellAUClient(DeepSeekClient):
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+                raw = response.read().decode("utf-8")
                 return (
-                    response.read().decode("utf-8"),
+                    _responses_to_chat_envelope(raw, requested_model=self.model),
                     response.headers.get("x-request-id"),
                 )
         except urllib.error.HTTPError as exc:
@@ -153,6 +152,84 @@ class WellAUClient(DeepSeekClient):
             raise WellAUAPIError("WellAU connection failed", retryable=True) from exc
         except TimeoutError as exc:
             raise WellAUAPIError("WellAU request timed out", retryable=True) from exc
+
+
+def _responses_to_chat_envelope(raw: str, *, requested_model: str) -> str:
+    """Adapt a Responses envelope to the audited parser shared with DeepSeek."""
+
+    payload = json.loads(raw)
+    if not isinstance(payload, Mapping):
+        raise WellAUAPIError("WellAU Responses envelope is not an object")
+    output_text = payload.get("output_text")
+    if not isinstance(output_text, str) or not output_text.strip():
+        fragments: list[str] = []
+        output = payload.get("output")
+        if isinstance(output, list):
+            for item in output:
+                if not isinstance(item, Mapping) or item.get("type") != "message":
+                    continue
+                content = item.get("content")
+                if not isinstance(content, list):
+                    continue
+                for part in content:
+                    if not isinstance(part, Mapping) or part.get("type") != "output_text":
+                        continue
+                    text = part.get("text")
+                    if isinstance(text, str):
+                        fragments.append(text)
+        output_text = "".join(fragments)
+    if not output_text.strip():
+        raise WellAUAPIError("WellAU Responses output contains no output_text")
+
+    usage = payload.get("usage")
+    input_tokens = _response_usage_int(usage, "input_tokens")
+    output_tokens = _response_usage_int(usage, "output_tokens")
+    total_tokens = _response_usage_int(usage, "total_tokens")
+    cached_tokens = 0
+    if isinstance(usage, Mapping):
+        input_details = usage.get("input_tokens_details")
+        if isinstance(input_details, Mapping):
+            cached_tokens = _nonnegative_int(input_details.get("cached_tokens"))
+    cached_tokens = min(cached_tokens, input_tokens)
+    if total_tokens == 0:
+        total_tokens = input_tokens + output_tokens
+    status = str(payload.get("status") or "completed")
+    incomplete = payload.get("incomplete_details")
+    incomplete_reason = (
+        str(incomplete.get("reason"))
+        if isinstance(incomplete, Mapping) and incomplete.get("reason") is not None
+        else None
+    )
+    envelope = {
+        "id": payload.get("id"),
+        "model": payload.get("model") or requested_model,
+        "choices": [
+            {
+                "message": {"content": output_text},
+                "finish_reason": "stop" if status == "completed" else incomplete_reason or status,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "prompt_cache_hit_tokens": cached_tokens,
+            "prompt_cache_miss_tokens": max(input_tokens - cached_tokens, 0),
+        },
+    }
+    return json.dumps(envelope, ensure_ascii=False)
+
+
+def _response_usage_int(usage: object, key: str) -> int:
+    return _nonnegative_int(usage.get(key)) if isinstance(usage, Mapping) else 0
+
+
+def _nonnegative_int(value: object) -> int:
+    return (
+        int(value)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        else 0
+    )
 
 
 __all__ = [

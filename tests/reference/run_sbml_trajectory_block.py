@@ -26,8 +26,8 @@ def load_sibling(name):
 
 
 def cases():
-    declarations = list(load_sibling("run_sbml_input_block").cases())
-    ET.register_namespace("", CORE)
+    inputs = load_sibling("run_sbml_input_block")
+    declarations = list(inputs.cases())
     for index in range(18):
         root = ET.fromstring(declarations[5 if index == 1 else 3 if index == 16 else 0][3])
         model = root[0]
@@ -135,7 +135,7 @@ def cases():
         scales = {"amount_mol": .001 if index == 1 else 1.,
                   "volume_L": .001 if index == 1 else 1.,
                   "time_s": 60. if index == 1 else 1.}
-        yield f"trajectory-{index+1:02d}.xml", scales, index, ET.tostring(root, encoding="unicode")
+        yield f"trajectory-{index+1:02d}.xml", scales, index, inputs.source_xml(root)
 
 
 def progress(stage, report, started):

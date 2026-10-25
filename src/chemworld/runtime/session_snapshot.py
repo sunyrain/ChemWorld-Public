@@ -51,19 +51,35 @@ def declaration(value):
 
 
 def _execution_contract(binding):
-    """Exclude only module display notes, including legacy v2 bindings.
+    """Canonicalize display notes and neutral optional CPU declarations.
 
-    Every executable declaration and unknown field still participates in exact
-    equality. Do not recursively strip metadata from model or operation inputs.
+    The reference executor predates optional CPU metadata. Its entirely
+    undeclared capability and empty effects equal their legacy absence. Real
+    CPU contracts, effects and unknown fields still participate in equality.
     """
+    from chemworld.world.domain_modules import NativeExecutionSpec
+
+    cpu_default = NativeExecutionSpec()
+    neutral_cpu = all(
+        getattr(cpu_default, field) == "not_declared"
+        for field in ("lowering", "derivatives", "thread_safety", "snapshot")
+    )
+    default_declaration = declaration(cpu_default)
     result = dict(binding)
     modules = result.get("modules")
     if isinstance(modules, list):
-        result["modules"] = [
-            {key: value for key, value in module.items() if key != "scope_notes"}
-            if isinstance(module, Mapping) else module
-            for module in modules
-        ]
+        canonical = []
+        for module in modules:
+            if not isinstance(module, Mapping):
+                canonical.append(module)
+                continue
+            values = {key: value for key, value in module.items() if key != "scope_notes"}
+            if neutral_cpu and values.get("execution") == default_declaration:
+                values.pop("execution")
+            if values.get("effects") == []:
+                values.pop("effects")
+            canonical.append(values)
+        result["modules"] = canonical
     return result
 
 

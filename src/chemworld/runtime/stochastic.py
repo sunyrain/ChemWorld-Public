@@ -31,22 +31,30 @@ class StochasticRuntime:
 
     def __init__(self, composition=None):
         self.composition = composition
+        from chemworld.runtime.stochastic_adaptive import AdaptiveHybridStochasticRuntime
         from chemworld.runtime.stochastic_hybrid import HybridStochasticRuntime
+        from chemworld.runtime.stochastic_sde import SDEStochasticRuntime
 
         self.hybrid = HybridStochasticRuntime(composition)
+        self.sde = SDEStochasticRuntime(composition)
+        self.adaptive = AdaptiveHybridStochasticRuntime(composition)
 
     def supports(self, state):
         return (state.process.stochastic_continuation is not None
-                or state.vessel_id in self.hybrid.models)
+                or state.vessel_id in self.hybrid.models or state.vessel_id in self.sde.models
+                or state.vessel_id in self.adaptive.models)
 
     def validate_world(self):
         if self.composition is None or self.composition.physics is None:
             return
         physics = self.composition.physics
         self.hybrid.validate_world()
+        self.sde.validate_world()
+        self.adaptive.validate_world()
         declared = {c.vessel for c in self.composition.components if c.kind == "stochastic"}
         installed = {key for key, s in physics.initial_states.items() if self.supports(s)}
-        discrete = installed - self.hybrid.models.keys()
+        discrete = (installed - self.hybrid.models.keys() - self.sde.models.keys()
+                    - self.adaptive.models.keys())
         if declared != installed or bool(discrete) != (physics.network.stochastic is not None):
             raise ValueError("SSA network, components and owned process state must agree")
         if installed and installed != set(physics.initial_states) and physics.lab_clock is None:
@@ -55,7 +63,8 @@ class StochasticRuntime:
             )
         for vessel in installed:
             state = physics.initial_states[vessel]
-            if self.hybrid.supports(state):
+            if (vessel in self.hybrid.models or vessel in self.sde.models
+                    or vessel in self.adaptive.models):
                 continue
             self.validate(state)
             competing = (
@@ -93,13 +102,19 @@ class StochasticRuntime:
                     )
 
     def reconcile_initialization(self, transition):
+        return self.reconcile_initialization_from(transition, None)
+
+    def reconcile_initialization_from(self, transition, previous):
         if self.composition is None or self.composition.physics is None:
             return transition
         transition = self.hybrid.reconcile_initialization(transition)
+        transition = self.sde.reconcile_initialization(transition, previous=previous)
+        transition = self.adaptive.reconcile_initialization(transition, previous=previous)
 
         def reset_local(state):
             template = self.composition.physics.initial_states[state.vessel_id]
-            if self.hybrid.supports(template):
+            if (self.hybrid.supports(template) or self.sde.supports(template)
+                    or self.adaptive.supports(template)):
                 return state
             if self.supports(template) and not self.supports(state):
                 continuation = deepcopy(template.process.stochastic_continuation)
@@ -120,6 +135,10 @@ class StochasticRuntime:
         )
 
     def validate(self, state):
+        if self.adaptive.supports(state):
+            return self.adaptive.validate(state)
+        if self.sde.supports(state):
+            return self.sde.validate(state)
         if self.hybrid.supports(state):
             return self.hybrid.validate(state)
         network = self.composition.physics.network
@@ -142,10 +161,23 @@ class StochasticRuntime:
         return counts
 
     def validate_state(self, state):
-        if self.hybrid.supports(state):
+        if self.adaptive.supports(state):
+            self.adaptive.validate(state)
+        elif self.sde.supports(state):
+            self.sde.validate(state)
+        elif self.hybrid.supports(state):
             self.hybrid.validate(state)
 
+    def reconcile_material_change(self, before, after):
+        if self.sde.supports(before):
+            return self.sde.reconcile_material_change(before, after)
+        return after
+
     def advance(self, state, action, *, heat=False, jacket_program=None):
+        if self.adaptive.supports(state):
+            return self.adaptive.advance(state, action, heat=heat, jacket_program=jacket_program)
+        if self.sde.supports(state):
+            return self.sde.advance(state, action, heat=heat, jacket_program=jacket_program)
         if self.hybrid.supports(state):
             return self.hybrid.advance(state, action, heat=heat, jacket_program=jacket_program)
         if heat or jacket_program is not None:

@@ -13,7 +13,10 @@ from pathlib import Path
 import numpy as np
 
 from chemworld.examples.battery_newman_tobias import default_spec
-from chemworld.physchem.battery_impedance import battery_impedance
+from chemworld.physchem.battery_impedance import (
+    battery_impedance,
+    battery_impedance_spatial_response,
+)
 
 
 def state_record(state):
@@ -31,6 +34,7 @@ def run(output, *, spec=None, state=None, frequencies_Hz=(1e-5, 1e-2, 1.)):
     state = spec.initial_state() if state is None else state
     original = state_record(state)
     spectrum = battery_impedance(spec, frequencies_Hz, state=state)
+    spatial_response = battery_impedance_spatial_response(spec, spectrum)
     names = [v.name for v in spectrum.response.variables]
     groups = {
         "negative_Li_mol_per_A": [names.index("negative:Li")],
@@ -38,7 +42,6 @@ def run(output, *, spec=None, state=None, frequencies_Hz=(1e-5, 1e-2, 1.)):
         "signed_charge_C_per_A": [names.index("discharged_charge_C")],
         "signed_work_J_per_A": [names.index("delivered_work_J")],
     }
-    algebraic_indices = [names.index(key) for key in spec.algebraic_names]
     cell_labels = [
         f"{electrode}:cell:{i}"
         for electrode, region in (("negative", 0), ("positive", 2))
@@ -46,6 +49,10 @@ def run(output, *, spec=None, state=None, frequencies_Hz=(1e-5, 1e-2, 1.)):
     ]
     inventory = []
     spatial = []
+    projected_by_frequency = {
+        point["frequency_Hz"]: point["fields"]
+        for point in spatial_response["points"]
+    }
     for point in spectrum.response.points:
         responses = {}
         for label, indices in groups.items():
@@ -54,18 +61,13 @@ def run(output, *, spec=None, state=None, frequencies_Hz=(1e-5, 1e-2, 1.)):
                 "real": float(value.real), "imag": float(value.imag),
             }
         inventory.append({"frequency_Hz": point.frequency_Hz, "responses": responses})
-        # Each electrode stores N-1 independent reaction currents. The original
-        # electrical map reconstructs its last cell from terminal conservation.
-        currents = None if point.response is None else (
-            spec.electrical_maps[0] @ point.response[algebraic_indices, 0]
-        )
+        fields = projected_by_frequency[point.frequency_Hz]
+        currents = None if fields is None else fields["reaction_current_A_per_A"]
         spatial.append({
             "frequency_Hz": point.frequency_Hz,
             "cell_current_A_per_A": {
-                label: None if currents is None else {
-                    "real": float(currents[i].real), "imag": float(currents[i].imag),
-                }
-                for i, label in enumerate(cell_labels)
+                label: None if currents is None else currents[label]
+                for label in cell_labels
             },
         })
     if state_record(state) != original:

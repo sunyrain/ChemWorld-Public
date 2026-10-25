@@ -6,7 +6,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-pytest.importorskip("thermo", reason="optional independent reference package")
+pytest.importorskip("thermo", reason="Optional independent reference dependency")
 
 from chemworld.examples.molecular_cascade import molecular_cascade_example
 from chemworld.physchem.molecular_cascade import MolecularCascadeSpec, solve_molecular_cascade

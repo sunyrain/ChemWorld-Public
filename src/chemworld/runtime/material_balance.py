@@ -15,7 +15,7 @@ from chemworld.foundation.balances import (
     MaterialExchange,
     MaterialPacket,
     TransitionBalance,
-    formal_inventory_exclusions,
+    inventory_balance_exclusions,
 )
 from chemworld.foundation.solvents import SOLVENT_IDS
 from chemworld.runtime.action_values import action_float
@@ -44,7 +44,7 @@ class ServiceMaterialBoundary:
                 return boundary(before, after, action)
         exchanges: list[MaterialExchange] = []
         stocks: dict[str, float] = {}
-        unmodeled: list[str] = list(formal_inventory_exclusions(before))
+        unmodeled: list[str] = list(inventory_balance_exclusions(before))
         vessel = f"vessel:{before.vessel_id}"
 
         def exchange(

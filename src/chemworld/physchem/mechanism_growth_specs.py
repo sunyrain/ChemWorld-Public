@@ -189,10 +189,6 @@ class CoreEdgeGrowthPolicy:
             or self.keep_absolute_threshold_mol_L_s > self.promotion_absolute_threshold_mol_L_s
         ):
             raise ValueError("edge keep thresholds must not exceed promotion thresholds")
-        if self.generation.allylic_resonance:
-            raise ValueError(
-                "growth v1 uses exact explicit graphs, not inferred resonance identity"
-            )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

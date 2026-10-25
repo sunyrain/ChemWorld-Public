@@ -23,6 +23,15 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 INVENTORY_PATH = (
     REPOSITORY_ROOT / "configs" / "benchmark" / "work_i_world_fork_component_inventory_v0.1.json"
 )
+REPORT_PATH = (
+    REPOSITORY_ROOT
+    / "workstreams"
+    / "arxiv_v1"
+    / "reports"
+    / "work-i-world-component-inventory-v0.1.json"
+)
+
+
 def _payload() -> dict[str, Any]:
     loaded = json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
@@ -76,9 +85,7 @@ def test_inventory_audit_resolves_every_implementation_anchor() -> None:
         "fork_policy_counts": {"derived": 2, "intervention_target": 3, "invariant": 12},
     }
     assert report["implementation_anchor_audit"]["missing"] == []
-    assert report["passed"] is True
-    assert report["summary"]["component_count"] == 17
-    assert report["summary"]["implementation_anchor_count"] == 32
+    assert json.loads(REPORT_PATH.read_text(encoding="utf-8")) == report
 
 
 def test_manifest_schema_freezes_root_and_component_shapes() -> None:

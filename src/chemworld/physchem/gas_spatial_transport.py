@@ -1,4 +1,4 @@
-"""Isothermal low-Mach closure using original whole-mixture transport."""
+"""Explicit isothermal/thermal spatial declaration and original isothermal closure."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ class GasSpatialTransportSpec:
     flux_model: str = "stefan-maxwell"
     maximum_mach: float = 0.05
     boundary_mode: str = "sealed"
+    energy_equation: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell_vessel_ids", tuple(self.cell_vessel_ids))
@@ -37,6 +38,8 @@ class GasSpatialTransportSpec:
             raise ValueError("unsupported spatial gas flux model")
         if self.boundary_mode not in {"sealed", "finite-flow"}:
             raise ValueError("unsupported spatial gas boundary mode")
+        if type(self.energy_equation) is not bool:
+            raise ValueError("spatial energy equation must be explicitly boolean")
         if (
             isinstance(self.maximum_mach, bool)
             or not isfinite(self.maximum_mach)
@@ -53,7 +56,11 @@ class GasSpatialTransportSpec:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "model": "sealed-isothermal-low-mach-v1"
+            "model": "sealed-thermal-low-mach-v1"
+            if self.energy_equation and self.boundary_mode == "sealed"
+            else "finite-flow-thermal-low-mach-v1"
+            if self.energy_equation
+            else "sealed-isothermal-low-mach-v1"
             if self.boundary_mode == "sealed"
             else "finite-flow-isothermal-low-mach-v1",
             "mesh": {
@@ -71,7 +78,12 @@ class GasSpatialTransportSpec:
     def from_dict(cls, payload: Mapping[str, Any]) -> GasSpatialTransportSpec:
         value = dict(payload)
         model = value.pop("model")
-        if model not in {"sealed-isothermal-low-mach-v1", "finite-flow-isothermal-low-mach-v1"}:
+        if model not in {
+            "sealed-isothermal-low-mach-v1",
+            "finite-flow-isothermal-low-mach-v1",
+            "sealed-thermal-low-mach-v1",
+            "finite-flow-thermal-low-mach-v1",
+        }:
             raise ValueError("unsupported spatial gas closure")
         return cls(
             DiffusionMesh(**value["mesh"]),
@@ -79,7 +91,8 @@ class GasSpatialTransportSpec:
             GasTransportSpec.from_dict(value["transport"]),
             value["flux_model"],
             value["maximum_mach"],
-            "sealed" if model == "sealed-isothermal-low-mach-v1" else "finite-flow",
+            "sealed" if model.startswith("sealed-") else "finite-flow",
+            "-thermal-" in model,
         )
 
 
@@ -100,6 +113,8 @@ def spatial_gas_faces(
     species fluxes are zero for sealed mode. Finite-flow mode uses declared total
     molar boundary flows in the same continuity equation. Signed faces point right.
     """
+    if spec.energy_equation:
+        raise ValueError("thermal spatial gas requires the coupled energy/continuity closure")
     ids, mesh = network.species_ids, spec.mesh
     totals = [fsum(n.values()) for n in amounts]
     if len(amounts) != mesh.cells or len(chemical_rates) != mesh.cells or min(totals) <= 0:

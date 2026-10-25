@@ -20,6 +20,7 @@ from chemworld.physchem.battery_plating import (
     plating_algebraic,
     plating_control_mode,
     plating_fields,
+    plating_inventory_ledger,
     plating_readout,
     plating_system,
     validate_plating_state,
@@ -134,6 +135,22 @@ def test_zero_electrochemical_rate_preserves_real_analytic_deactivation():
         assert plating_fields(s, state, current_A=0.)["stripping_current_A"] == 0.
         validate_plating_state(s, state)
     assert result.energy_balance_residual_J is None
+
+
+def test_inventory_ledger_exposes_declared_constant_decay_without_relabeling_plating():
+    s = model(rate=0., gamma=.02)
+    initial = s.initial_state()
+    before = plating_inventory_ledger(s, initial)
+    result = advance_plating(s, initial, program(0.), 2.)
+    after = plating_inventory_ledger(s, result.final_state)
+    expected_dead = s.plating.initial_plated_mol * (1 - exp(-.02 * 2.0))
+    assert before["deactivated_mol"] == pytest.approx(0.0, abs=1e-14)
+    assert before["deactivation_rate_mol_s"] == pytest.approx(.02 * 4e-5)
+    assert after["deactivated_mol"] == pytest.approx(expected_dead, rel=2e-6)
+    assert after["deactivation_rate_mol_s"] == pytest.approx(
+        .02 * result.final_state.amounts_mol["plating:Li"])
+    assert after["plated_mol"] + after["deactivated_mol"] == pytest.approx(
+        s.plating.initial_plated_mol, rel=2e-6)
 
 
 def test_gamma_zero_does_not_insert_structural_zero_in_shared_jacobian():

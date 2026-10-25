@@ -65,6 +65,7 @@ class FixedBedSpec:
     maximum_pressure_Pa: float = 160000.0
     maximum_velocity_m_s: float = 0.5
     momentum_root: RootPolicy = field(default_factory=RootPolicy)
+    inlet_resistance_Pa_s_m: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell_phase_ids", tuple(self.cell_phase_ids))
@@ -101,6 +102,9 @@ class FixedBedSpec:
             or not 0.05 < self.void_fraction < 0.95
             or any(not isinstance(c, SpeciesInternalEnergy) for c in self.gas_calorics.values())
             or not isinstance(self.momentum_root, RootPolicy)
+            or isinstance(self.inlet_resistance_Pa_s_m, bool)
+            or not isfinite(self.inlet_resistance_Pa_s_m)
+            or self.inlet_resistance_Pa_s_m < 0
         ):
             raise ValueError("fixed bed requires positive geometry, declared calorics and limits")
 
@@ -142,6 +146,7 @@ class FixedBedSpec:
             "maximum_pressure_Pa": self.maximum_pressure_Pa,
             "maximum_velocity_m_s": self.maximum_velocity_m_s,
             "momentum_root": asdict(self.momentum_root),
+            "inlet_resistance_Pa_s_m": self.inlet_resistance_Pa_s_m,
         }
 
     @classmethod
@@ -205,8 +210,16 @@ def fixed_bed_face_velocity(
     distance_m: float,
     density_kg_m3: float,
     pressure_difference_Pa: float,
+    series_resistance_Pa_s_m: float = 0.0,
 ) -> tuple[float, dict[str, Any]]:
-    """Invert the existing forward Ergun law through the common root solver."""
+    """Invert Ergun plus a declared linear series valve: deltaP = Ergun(u) + R*u.
+
+    Resistance uses superficial bed velocity and is independent of mesh spacing.
+    It is bidirectional, has no storage, and zero preserves the original law.
+    """
+    if (isinstance(series_resistance_Pa_s_m, bool)
+            or not isfinite(series_resistance_Pa_s_m) or series_resistance_Pa_s_m < 0):
+        raise ValueError("series resistance must be finite and nonnegative")
     if not isfinite(pressure_difference_Pa):
         raise ValueError("face pressure difference must be finite")
     if pressure_difference_Pa == 0:
@@ -217,7 +230,9 @@ def fixed_bed_face_velocity(
     scale = max(pressure, 1.0)
 
     def forward(velocity: float) -> float:
-        return packed_bed_pressure(bed, fluid, superficial_velocity_m_s=velocity).pressure_drop_Pa
+        return (packed_bed_pressure(bed, fluid,
+                                   superficial_velocity_m_s=velocity).pressure_drop_Pa
+                + series_resistance_Pa_s_m * velocity)
 
     def residual(point: Any) -> Any:
         return np.array([(forward(float(point[0])) - pressure) / scale])
@@ -334,6 +349,7 @@ def build_fixed_bed_system(
         "maximum_root_iterations": 0,
         "maximum_observed_speed_m_s": 0.0,
         "faces": faces,
+        "inlet_resistance_Pa_s_m": spec.inlet_resistance_Pa_s_m,
     }
     cache: dict[str, Any] = {}
 
@@ -354,6 +370,9 @@ def build_fixed_bed_system(
                 distance_m=distance,
                 density_kg_m3=density,
                 pressure_difference_Pa=pressures[left] - pressures[right],
+                series_resistance_Pa_s_m=(
+                    spec.inlet_resistance_Pa_s_m if left == inlet_phase_id else 0.0
+                ),
             )
             diagnostic["momentum_evaluations"] += 1
             diagnostic["maximum_root_iterations"] = max(

@@ -1,4 +1,4 @@
-"""Declared deterministic algorithm policies and source-time output grids."""
+"""Declared algorithm policies and source-time output grids, without substitution."""
 
 from dataclasses import dataclass
 from math import isfinite
@@ -6,24 +6,18 @@ from math import isfinite
 import numpy as np
 
 from chemworld.data.sedml_declarations import finite_number, records, step_count
+from chemworld.data.sedml_stochastic import (
+    INTEGER_METHODS,
+    INTEGER_PARAMETERS,
+    SEDMLStochasticAlgorithm,
+    parameter_ids,
+    stochastic_algorithm,
+)
 from chemworld.physchem.solver_backend import ODESolverPolicy
 
 _METHODS = {"KISAO:0000288": "BDF", "KISAO:0000088": "LSODA"}
 _OPTIONS = {"KISAO:0000209": "rtol", "KISAO:0000211": "atol",
             "KISAO:0000467": "maximum_step_source"}
-
-
-def _parameters(nodes):
-    result = {}
-    for node in nodes:
-        key = node.attributes["kisaoID"]
-        if key not in _OPTIONS or key in result:
-            raise ValueError("unsupported or duplicate deterministic algorithm parameter")
-        value = finite_number(node.attributes["value"])
-        if value <= 0:
-            raise ValueError("deterministic numerical options must be positive")
-        result[key] = value
-    return result
 
 
 @dataclass(frozen=True)
@@ -62,14 +56,14 @@ class UniformTimeCourse:
     output_start: float
     output_end: float
     number_of_steps: int
-    algorithm: SEDMLAlgorithm
+    algorithm: SEDMLAlgorithm | SEDMLStochasticAlgorithm
 
     def __post_init__(self):
         values = (self.initial_time, self.output_start, self.output_end)
         if (any(isinstance(v, bool) or not isinstance(v, (int, float)) or not isfinite(v)
                 for v in values) or not self.initial_time <= self.output_start <= self.output_end
                 or type(self.number_of_steps) is not int or not 1 <= self.number_of_steps <= 10000
-                or not isinstance(self.algorithm, SEDMLAlgorithm)
+                or not isinstance(self.algorithm, (SEDMLAlgorithm, SEDMLStochasticAlgorithm))
                 or not isinstance(self.simulation_id, str) or not self.simulation_id):
             raise ValueError("uniform experiment must declare a finite ordered source-time grid")
 
@@ -81,23 +75,49 @@ class UniformTimeCourse:
         return tuple(float(value) for value in values)
 
 
+def _raw_parameters(nodes):
+    result = {}
+    for node in nodes:
+        key = node.attributes["kisaoID"]
+        if key not in _OPTIONS.keys() | INTEGER_PARAMETERS.keys() or key in result:
+            raise ValueError("unsupported or duplicate algorithm parameter")
+        result[key] = node.attributes["value"]
+    return result
+
+
+def _algorithm(kisao_id, values):
+    if kisao_id in INTEGER_METHODS:
+        return stochastic_algorithm(kisao_id, values)
+    numbers = {key: finite_number(value) for key, value in values.items()}
+    if set(numbers)-_OPTIONS.keys() or any(v <= 0 for v in numbers.values()):
+        raise ValueError("unsupported or nonpositive deterministic numerical option")
+    return SEDMLAlgorithm(kisao_id, **{_OPTIONS[k]: v for k, v in numbers.items()})
+
+
 def resolve_simulations(document):
-    global_parameters = _parameters(records(document.declaration, "listOfAlgorithmParameters"))
+    global_parameters = _raw_parameters(records(document.declaration, "listOfAlgorithmParameters"))
+    used_global = set()
     result = {}
     for node in records(document.declaration, "listOfSimulations"):
         algorithm = next(child for child in node.children if child.local_name == "algorithm")
         kisao_id = algorithm.attributes["kisaoID"]
-        if kisao_id not in _METHODS:
+        if kisao_id not in _METHODS and kisao_id not in INTEGER_METHODS:
             raise ValueError("requested algorithm is unavailable; no KiSAO substitution is enabled")
         # L1V4 local Simulation options override global values with the same KiSAO ID.
-        values = {**global_parameters,
-                  **_parameters(records(algorithm, "listOfAlgorithmParameters"))}
-        policy = SEDMLAlgorithm(kisao_id, **{_OPTIONS[key]: value for key, value in values.items()})
+        eligible = parameter_ids(kisao_id) if kisao_id in INTEGER_METHODS else _OPTIONS.keys()
+        globals_here = {k: v for k, v in global_parameters.items() if k in eligible}
+        used_global.update(globals_here)
+        _algorithm(kisao_id, globals_here)  # Validate globals before local overrides, as before.
+        local_parameters = _raw_parameters(records(algorithm, "listOfAlgorithmParameters"))
+        values = {**globals_here, **local_parameters}
+        policy = _algorithm(kisao_id, values)
         attributes = node.attributes
         simulation = UniformTimeCourse(attributes["id"],
             finite_number(attributes["initialTime"]), finite_number(attributes["outputStartTime"]),
             finite_number(attributes["outputEndTime"]), step_count(attributes), policy)
         result[simulation.simulation_id] = simulation
     if not result:
-        raise ValueError("experiment needs at least one supported deterministic simulation")
+        raise ValueError("experiment needs at least one supported simulation")
+    if set(global_parameters)-used_global:
+        raise ValueError("global algorithm parameters have no supported applicable simulation")
     return result

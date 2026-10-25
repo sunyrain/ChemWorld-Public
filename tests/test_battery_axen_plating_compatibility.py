@@ -6,7 +6,7 @@ from math import fsum
 
 import pytest
 
-from chemworld.foundation.state_ownership import StateSlots
+from chemworld.foundation.state_ownership import StateSlot, StateSlots
 from chemworld.physchem.battery_degradation import SEISpec
 from chemworld.physchem.battery_impedance import battery_impedance, battery_impedance_system
 from chemworld.physchem.battery_models import (
@@ -83,9 +83,7 @@ def test_hysteresis_and_metal_have_one_original_equipment_owner(modes):
         fields = {field.name: field for field in slot.spec.fields}
         for key in spec.hysteresis_keys:
             assert fields[key].unit == "dimensionless" and fields[key].species_id is None
-            # The original slot schema has a lower bound only. The accepted
-            # physical state enforces the upper bound (covered below).
-            assert fields[key].minimum == -1
+            assert fields[key].minimum == -1 and fields[key].maximum == 1
             assert state.coordinates[key] == spec.initial_state().coordinates[key]
         for key in METAL:
             assert fields[key].unit == "mol" and fields[key].species_id == "Li"
@@ -106,6 +104,21 @@ def test_hysteresis_and_metal_have_one_original_equipment_owner(modes):
         runtime.close()
         if restored is not None:
             restored.close()
+
+
+@pytest.mark.parametrize("h", (1.000001, float("inf"), float("nan")))
+def test_equipment_slot_rejects_hysteresis_above_declared_upper_bound(h):
+    spec = model()
+    runtime = ChemWorldRuntime(composition=battery_world_spec(spec))
+    runtime.reset(seed=46)
+    try:
+        _, slot, _, _, _ = unpack_battery(runtime._state)
+        payload = slot.to_dict()
+        payload["values"][spec.hysteresis_keys[0]] = h
+        with pytest.raises(ValueError, match=r"upper bound|finite"):
+            StateSlot.from_dict(payload)
+    finally:
+        runtime.close()
 
 
 @pytest.mark.parametrize("defect", (

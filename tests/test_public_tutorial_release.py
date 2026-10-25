@@ -97,11 +97,11 @@ def test_interactive_payload_matches_readme_visual_payload() -> None:
 
 def test_showcase_home_uses_the_public_hero_and_frozen_trace() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    hero_marker = "docs/assets/chemworld-hero.png"
+    hero_marker = "docs/assets/chemworld-readme-banner.png"
     evidence_marker = "docs/assets/representative-agent-and-world-change.svg"
     assert (ROOT / hero_marker).is_file()
-    assert readme.index(hero_marker) < readme.index("## Start in five minutes")
-    assert readme.index(evidence_marker) > readme.index("## Frozen evidence")
+    assert readme.index(hero_marker) < readme.index("## Quick start")
+    assert readme.index(evidence_marker) > readme.index("### Frozen evidence")
 
     for suffix in ("", ".zh"):
         home = (ROOT / "docs" / f"index{suffix}.md").read_text(encoding="utf-8")

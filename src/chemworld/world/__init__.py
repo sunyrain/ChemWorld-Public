@@ -29,6 +29,13 @@ from chemworld.world.composition_coverage import (
 from chemworld.world.continuous_flow import ContinuousFlowModuleSpec
 from chemworld.world.crystallization import CrystallizationModuleSpec
 from chemworld.world.distillation import DistillationModuleSpec
+from chemworld.world.domain_modules import (
+    ExecutionCapabilitySpec,
+    ExecutionEffectSpec,
+    NativeCapabilityError,
+    NativeExecutionSpec,
+    SemanticEffectSpec,
+)
 from chemworld.world.electrochemistry import ElectrochemistryModuleSpec
 from chemworld.world.equilibrium_entity import (
     EQUILIBRIUM_ENTITY_PANEL_VERSION,
@@ -112,15 +119,20 @@ __all__ = [
     "ElectrochemistryModuleSpec",
     "EquilibriumEntityPanelIntervention",
     "EquilibriumEntityProfileSpec",
+    "ExecutionCapabilitySpec",
+    "ExecutionEffectSpec",
     "GeneratedCompositionCase",
     "InstrumentContract",
     "MaterialLawCounterfactual",
     "MechanismFamilyIntervention",
+    "NativeCapabilityError",
+    "NativeExecutionSpec",
     "OrderedWorkflowTemplate",
     "ScenarioFamilySpec",
     "ScenarioGenerator",
     "ScenarioInstance",
     "ScenarioSpec",
+    "SemanticEffectSpec",
     "WorldAxisSpec",
     "WorldCompatibilityReport",
     "WorldComponentRequest",
@@ -133,8 +145,12 @@ __all__ = [
     "apply_equilibrium_entity_panel",
     "apply_material_law_counterfactual",
     "axes_for_task",
+    "build_activated_sludge_world",
+    "build_chemostatted_catalysis_world",
     "build_molecular_cascade_world",
     "build_molecular_flash_separator_world",
+    "build_nonideal_mechanism_world",
+    "build_seawater_ro_world",
     "check_world_composition_compatibility",
     "compile_recipe",
     "compile_world_composition",
@@ -156,6 +172,7 @@ __all__ = [
     "material_law_counterfactual_hash",
     "nmr_spectrum",
     "pairwise_covering_rows",
+    "reverse_electrodialysis_world_spec",
     "suspension_treatment_world_spec",
     "uvvis_spectrum",
     "validate_recipe",
@@ -164,6 +181,26 @@ __all__ = [
 
 
 def __getattr__(name: str):
+    if name == "build_seawater_ro_world":
+        from chemworld.world.seawater_ro_world import seawater_ro_world_spec
+
+        return seawater_ro_world_spec
+    if name == "build_activated_sludge_world":
+        from chemworld.world.activated_sludge_world import activated_sludge_world
+
+        return activated_sludge_world
+    if name == "build_nonideal_mechanism_world":
+        from chemworld.world.nonideal_mechanism_world import nonideal_mechanism_world
+
+        return nonideal_mechanism_world
+    if name == "reverse_electrodialysis_world_spec":
+        from chemworld.world.reverse_electrodialysis_world import reverse_electrodialysis_world_spec
+
+        return reverse_electrodialysis_world_spec
+    if name == "build_chemostatted_catalysis_world":
+        from chemworld.world.chemostatted_catalysis_world import chemostatted_catalysis_world
+
+        return chemostatted_catalysis_world
     if name == "suspension_treatment_world_spec":
         from chemworld.world.suspension_treatment_world import suspension_treatment_world_spec
 

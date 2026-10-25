@@ -19,7 +19,8 @@ from chemworld.eval.result_artifacts import (
     build_verified_evaluation_result,
     validate_verified_evaluation_result,
 )
-from chemworld.eval.runner import make_agent, run_agent
+from chemworld.eval.runner import run_agent
+from chemworld.legacy.agent_registry import make_agent
 from chemworld.physchem.mechanism_library import configuration_root
 from chemworld.task_design import SERIOUS_TASK_DESIGNS
 from chemworld.tasks import SERIOUS_TASK_IDS

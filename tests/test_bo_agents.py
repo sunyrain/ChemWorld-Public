@@ -4,7 +4,12 @@ import math
 
 import pytest
 
-from chemworld.agents.bo import (
+from chemworld.agents.task_recipes import TASK_RECIPE_SPACE_VERSION
+from chemworld.data.logging import load_jsonl
+from chemworld.data.records import trajectory_value
+from chemworld.eval.metrics import evaluate_records
+from chemworld.eval.runner import run_agent
+from chemworld.legacy.agents.bo import (
     GaussianProcessBOAgent,
     GaussianProcessPIAgent,
     GaussianProcessUCBAgent,
@@ -16,11 +21,6 @@ from chemworld.agents.bo import (
     StructuredRandomForestEIAgent,
     StructuredSafetyConstrainedBOAgent,
 )
-from chemworld.agents.task_recipes import TASK_RECIPE_SPACE_VERSION
-from chemworld.data.logging import load_jsonl
-from chemworld.data.records import trajectory_value
-from chemworld.eval.metrics import evaluate_records
-from chemworld.eval.runner import run_agent
 
 
 def test_safe_bo_uses_the_stricter_public_task_limit() -> None:
@@ -130,7 +130,7 @@ def test_default_gp_bo_enters_acquisition_under_benchmark_budget(tmp_path) -> No
         task_id="reaction-optimization-standard",
         output_path=gp_path,
     )
-    from chemworld.agents.random import RandomAgent
+    from chemworld.legacy.agents.random import RandomAgent
 
     run_agent(
         env_id="ChemWorld",

@@ -5,7 +5,7 @@ from copy import deepcopy
 import numpy as np
 import pytest
 
-pytest.importorskip("pybamm", reason="optional independent reference package")
+pytest.importorskip("pybamm", reason="Optional independent reference dependency")
 from battery_split_ocvr_assess import assess, compare, history_contract, invariants, passes
 from battery_split_ocvr_cases import NAMES, analysis_data, case_data
 from battery_split_ocvr_oracle import cv_at, equilibrium_polynomial, response, soh

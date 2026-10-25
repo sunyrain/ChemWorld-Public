@@ -20,6 +20,8 @@ from chemworld.physchem.molecular_eos import ResidualHelmholtzModel
 # arbitrary Python import. Existing model declarations keep their own schema.
 _MODELS = {
     "MultifluidModel": "multifluid",
+    "MultifluidAssociationModel": "multifluid_coupling",
+    "MultifluidActivityModel": "multifluid_coupling",
     "GenericSAFTModel": "generic_saft",
     "FundamentalMeasureBulkModel": "fundamental_measure",
     "PCSAFTModel": "pcsaft",

@@ -1,0 +1,2998 @@
+{
+  "schema_version": "chemworld-battery-parameter-set-1",
+  "name": "Chen2020",
+  "version": "PyBaMM-25.4.2",
+  "material_id": "LG-M50-lithium-ion",
+  "sources": [
+    {
+      "provenance": {
+        "source_id": "pybamm-25.4.2-Chen2020",
+        "priority": 0,
+        "citation": "Chen et al., Development of Experimental Techniques for Parameterization of Multi-scale Lithium-ion Battery Models, J. Electrochem. Soc. 167 (2020) 080534, doi:10.1149/1945-7111/ab9050; PyBaMM 25.4.2 input/parameters/lithium_ion/Chen2020.py",
+        "version": "PyBaMM-25.4.2",
+        "license": "BSD-3-Clause (PyBaMM released parameter implementation); underlying article license is separately attributable",
+        "checksum": ""
+      },
+      "data_kind": "literature"
+    },
+    {
+      "provenance": {
+        "source_id": "pybamm-25.4.2-Nyman2008",
+        "priority": 0,
+        "citation": "Nyman, Behm and Lindbergh, Electrochemical characterisation and modelling of the mass transport phenomena in LiPF6-EC-EMC electrolyte, Electrochimica Acta 53 (2008) 6356-6365; released Chen2020 parameter implementation in PyBaMM 25.4.2",
+        "version": "PyBaMM-25.4.2",
+        "license": "BSD-3-Clause (PyBaMM released parameter implementation); underlying article license is separately attributable",
+        "checksum": ""
+      },
+      "data_kind": "literature"
+    }
+  ],
+  "parameters": {
+    "schema_version": "chemworld-scientific-table-1",
+    "dataset_id": "Chen2020-PyBaMM-25.4.2-scalars",
+    "kind": "parameters",
+    "columns": [
+      {
+        "quantity_id": "Ratio of lithium moles to SEI moles",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "SEI partial molar volume [m3.mol-1]",
+        "unit": "m^3/mol",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "SEI reaction exchange current density [A.m-2]",
+        "unit": "A/m^2",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "SEI resistivity [Ohm.m]",
+        "unit": "Ohm*m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "SEI solvent diffusivity [m2.s-1]",
+        "unit": "m^2/s",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Bulk solvent concentration [mol.m-3]",
+        "unit": "mol/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "SEI open-circuit potential [V]",
+        "unit": "V",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "SEI electron conductivity [S.m-1]",
+        "unit": "S/m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "SEI lithium interstitial diffusivity [m2.s-1]",
+        "unit": "m^2/s",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Lithium interstitial reference concentration [mol.m-3]",
+        "unit": "mol/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Initial SEI thickness [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "EC initial concentration in electrolyte [mol.m-3]",
+        "unit": "mol/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "EC diffusivity [m2.s-1]",
+        "unit": "m^2/s",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "SEI kinetic rate constant [m.s-1]",
+        "unit": "m/s",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "SEI growth activation energy [J.mol-1]",
+        "unit": "J/mol",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode reaction-driven LAM factor [m3.mol-1]",
+        "unit": "m^3/mol",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode reaction-driven LAM factor [m3.mol-1]",
+        "unit": "m^3/mol",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative current collector thickness [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode thickness [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Separator thickness [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode thickness [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive current collector thickness [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Electrode height [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Electrode width [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Cell cooling surface area [m2]",
+        "unit": "m^2",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Cell volume [m3]",
+        "unit": "m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Cell thermal expansion coefficient [m.K-1]",
+        "unit": "m/K",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative current collector conductivity [S.m-1]",
+        "unit": "S/m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive current collector conductivity [S.m-1]",
+        "unit": "S/m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative current collector density [kg.m-3]",
+        "unit": "kg/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive current collector density [kg.m-3]",
+        "unit": "kg/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative current collector specific heat capacity [J.kg-1.K-1]",
+        "unit": "J/(kg*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive current collector specific heat capacity [J.kg-1.K-1]",
+        "unit": "J/(kg*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative current collector thermal conductivity [W.m-1.K-1]",
+        "unit": "W/(m*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive current collector thermal conductivity [W.m-1.K-1]",
+        "unit": "W/(m*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Nominal cell capacity [A.h]",
+        "unit": "Ah",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Current function [A]",
+        "unit": "A",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Contact resistance [Ohm]",
+        "unit": "Ohm",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode conductivity [S.m-1]",
+        "unit": "S/m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Maximum concentration in negative electrode [mol.m-3]",
+        "unit": "mol/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative particle diffusivity [m2.s-1]",
+        "unit": "m^2/s",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode porosity",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode active material volume fraction",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative particle radius [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode Bruggeman coefficient (electrolyte)",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode Bruggeman coefficient (electrode)",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode charge transfer coefficient",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode double-layer capacity [F.m-2]",
+        "unit": "F/m^2",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode density [kg.m-3]",
+        "unit": "kg/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode specific heat capacity [J.kg-1.K-1]",
+        "unit": "J/(kg*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode thermal conductivity [W.m-1.K-1]",
+        "unit": "W/(m*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Negative electrode OCP entropic change [V.K-1]",
+        "unit": "V/K",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode conductivity [S.m-1]",
+        "unit": "S/m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Maximum concentration in positive electrode [mol.m-3]",
+        "unit": "mol/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive particle diffusivity [m2.s-1]",
+        "unit": "m^2/s",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode porosity",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode active material volume fraction",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive particle radius [m]",
+        "unit": "m",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode Bruggeman coefficient (electrolyte)",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode Bruggeman coefficient (electrode)",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode charge transfer coefficient",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode double-layer capacity [F.m-2]",
+        "unit": "F/m^2",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode density [kg.m-3]",
+        "unit": "kg/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode specific heat capacity [J.kg-1.K-1]",
+        "unit": "J/(kg*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode thermal conductivity [W.m-1.K-1]",
+        "unit": "W/(m*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Positive electrode OCP entropic change [V.K-1]",
+        "unit": "V/K",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Separator porosity",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Separator Bruggeman coefficient (electrolyte)",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Separator density [kg.m-3]",
+        "unit": "kg/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Separator specific heat capacity [J.kg-1.K-1]",
+        "unit": "J/(kg*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Separator thermal conductivity [W.m-1.K-1]",
+        "unit": "W/(m*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Initial concentration in electrolyte [mol.m-3]",
+        "unit": "mol/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Cation transference number",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Thermodynamic factor",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Reference temperature [K]",
+        "unit": "K",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Total heat transfer coefficient [W.m-2.K-1]",
+        "unit": "W/(m^2*K)",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Ambient temperature [K]",
+        "unit": "K",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Number of electrodes connected in parallel to make a cell",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Number of cells connected in series to make a battery",
+        "unit": "dimensionless",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Lower voltage cut-off [V]",
+        "unit": "V",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Upper voltage cut-off [V]",
+        "unit": "V",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Open-circuit voltage at 0% SOC [V]",
+        "unit": "V",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Open-circuit voltage at 100% SOC [V]",
+        "unit": "V",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Initial concentration in negative electrode [mol.m-3]",
+        "unit": "mol/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Initial concentration in positive electrode [mol.m-3]",
+        "unit": "mol/m^3",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      },
+      {
+        "quantity_id": "Initial temperature [K]",
+        "unit": "K",
+        "role": "parameter",
+        "valid_range": [
+          -1e+100,
+          1e+100
+        ],
+        "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+      }
+    ],
+    "sources": [
+      {
+        "provenance": {
+          "source_id": "pybamm-25.4.2-Chen2020",
+          "priority": 0,
+          "citation": "Chen et al., Development of Experimental Techniques for Parameterization of Multi-scale Lithium-ion Battery Models, J. Electrochem. Soc. 167 (2020) 080534, doi:10.1149/1945-7111/ab9050; PyBaMM 25.4.2 input/parameters/lithium_ion/Chen2020.py",
+          "version": "PyBaMM-25.4.2",
+          "license": "BSD-3-Clause (PyBaMM released parameter implementation); underlying article license is separately attributable",
+          "checksum": ""
+        },
+        "data_kind": "literature"
+      }
+    ],
+    "rows": [
+      {
+        "row_id": "parameters",
+        "source_id": "pybamm-25.4.2-Chen2020",
+        "group_id": "Chen2020",
+        "sample_id": "Chen2020-PyBaMM-25.4.2-scalars",
+        "split": "parameters",
+        "values": {
+          "Ratio of lithium moles to SEI moles": {
+            "value": 2.0,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "SEI partial molar volume [m3.mol-1]": {
+            "value": 9.585e-05,
+            "unit": "m^3/mol",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "SEI reaction exchange current density [A.m-2]": {
+            "value": 1.5e-07,
+            "unit": "A/m^2",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "SEI resistivity [Ohm.m]": {
+            "value": 200000.0,
+            "unit": "Ohm*m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "SEI solvent diffusivity [m2.s-1]": {
+            "value": 2.5e-22,
+            "unit": "m^2/s",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Bulk solvent concentration [mol.m-3]": {
+            "value": 2636.0,
+            "unit": "mol/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "SEI open-circuit potential [V]": {
+            "value": 0.4,
+            "unit": "V",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "SEI electron conductivity [S.m-1]": {
+            "value": 8.95e-14,
+            "unit": "S/m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "SEI lithium interstitial diffusivity [m2.s-1]": {
+            "value": 1e-20,
+            "unit": "m^2/s",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Lithium interstitial reference concentration [mol.m-3]": {
+            "value": 15.0,
+            "unit": "mol/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Initial SEI thickness [m]": {
+            "value": 5e-09,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "EC initial concentration in electrolyte [mol.m-3]": {
+            "value": 4541.0,
+            "unit": "mol/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "EC diffusivity [m2.s-1]": {
+            "value": 2e-18,
+            "unit": "m^2/s",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "SEI kinetic rate constant [m.s-1]": {
+            "value": 1e-12,
+            "unit": "m/s",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "SEI growth activation energy [J.mol-1]": {
+            "value": 0.0,
+            "unit": "J/mol",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode reaction-driven LAM factor [m3.mol-1]": {
+            "value": 0.0,
+            "unit": "m^3/mol",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode reaction-driven LAM factor [m3.mol-1]": {
+            "value": 0.0,
+            "unit": "m^3/mol",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative current collector thickness [m]": {
+            "value": 1.2e-05,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode thickness [m]": {
+            "value": 8.52e-05,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Separator thickness [m]": {
+            "value": 1.2e-05,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode thickness [m]": {
+            "value": 7.56e-05,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive current collector thickness [m]": {
+            "value": 1.6e-05,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Electrode height [m]": {
+            "value": 0.065,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Electrode width [m]": {
+            "value": 1.58,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Cell cooling surface area [m2]": {
+            "value": 0.00531,
+            "unit": "m^2",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Cell volume [m3]": {
+            "value": 2.42e-05,
+            "unit": "m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Cell thermal expansion coefficient [m.K-1]": {
+            "value": 1.1e-06,
+            "unit": "m/K",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative current collector conductivity [S.m-1]": {
+            "value": 58411000.0,
+            "unit": "S/m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive current collector conductivity [S.m-1]": {
+            "value": 36914000.0,
+            "unit": "S/m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative current collector density [kg.m-3]": {
+            "value": 8960.0,
+            "unit": "kg/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive current collector density [kg.m-3]": {
+            "value": 2700.0,
+            "unit": "kg/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative current collector specific heat capacity [J.kg-1.K-1]": {
+            "value": 385.0,
+            "unit": "J/(kg*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive current collector specific heat capacity [J.kg-1.K-1]": {
+            "value": 897.0,
+            "unit": "J/(kg*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative current collector thermal conductivity [W.m-1.K-1]": {
+            "value": 401.0,
+            "unit": "W/(m*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive current collector thermal conductivity [W.m-1.K-1]": {
+            "value": 237.0,
+            "unit": "W/(m*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Nominal cell capacity [A.h]": {
+            "value": 5.0,
+            "unit": "Ah",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Current function [A]": {
+            "value": 5.0,
+            "unit": "A",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Contact resistance [Ohm]": {
+            "value": 0.0,
+            "unit": "Ohm",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode conductivity [S.m-1]": {
+            "value": 215.0,
+            "unit": "S/m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Maximum concentration in negative electrode [mol.m-3]": {
+            "value": 33133.0,
+            "unit": "mol/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative particle diffusivity [m2.s-1]": {
+            "value": 3.3e-14,
+            "unit": "m^2/s",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode porosity": {
+            "value": 0.25,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode active material volume fraction": {
+            "value": 0.75,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative particle radius [m]": {
+            "value": 5.86e-06,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode Bruggeman coefficient (electrolyte)": {
+            "value": 1.5,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode Bruggeman coefficient (electrode)": {
+            "value": 0.0,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode charge transfer coefficient": {
+            "value": 0.5,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode double-layer capacity [F.m-2]": {
+            "value": 0.2,
+            "unit": "F/m^2",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode density [kg.m-3]": {
+            "value": 1657.0,
+            "unit": "kg/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode specific heat capacity [J.kg-1.K-1]": {
+            "value": 700.0,
+            "unit": "J/(kg*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode thermal conductivity [W.m-1.K-1]": {
+            "value": 1.7,
+            "unit": "W/(m*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Negative electrode OCP entropic change [V.K-1]": {
+            "value": 0.0,
+            "unit": "V/K",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode conductivity [S.m-1]": {
+            "value": 0.18,
+            "unit": "S/m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Maximum concentration in positive electrode [mol.m-3]": {
+            "value": 63104.0,
+            "unit": "mol/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive particle diffusivity [m2.s-1]": {
+            "value": 4e-15,
+            "unit": "m^2/s",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode porosity": {
+            "value": 0.335,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode active material volume fraction": {
+            "value": 0.665,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive particle radius [m]": {
+            "value": 5.22e-06,
+            "unit": "m",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode Bruggeman coefficient (electrolyte)": {
+            "value": 1.5,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode Bruggeman coefficient (electrode)": {
+            "value": 0.0,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode charge transfer coefficient": {
+            "value": 0.5,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode double-layer capacity [F.m-2]": {
+            "value": 0.2,
+            "unit": "F/m^2",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode density [kg.m-3]": {
+            "value": 3262.0,
+            "unit": "kg/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode specific heat capacity [J.kg-1.K-1]": {
+            "value": 700.0,
+            "unit": "J/(kg*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode thermal conductivity [W.m-1.K-1]": {
+            "value": 2.1,
+            "unit": "W/(m*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Positive electrode OCP entropic change [V.K-1]": {
+            "value": 0.0,
+            "unit": "V/K",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Separator porosity": {
+            "value": 0.47,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Separator Bruggeman coefficient (electrolyte)": {
+            "value": 1.5,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Separator density [kg.m-3]": {
+            "value": 397.0,
+            "unit": "kg/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Separator specific heat capacity [J.kg-1.K-1]": {
+            "value": 700.0,
+            "unit": "J/(kg*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Separator thermal conductivity [W.m-1.K-1]": {
+            "value": 0.16,
+            "unit": "W/(m*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Initial concentration in electrolyte [mol.m-3]": {
+            "value": 1000.0,
+            "unit": "mol/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Cation transference number": {
+            "value": 0.2594,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Thermodynamic factor": {
+            "value": 1.0,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Reference temperature [K]": {
+            "value": 298.15,
+            "unit": "K",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Total heat transfer coefficient [W.m-2.K-1]": {
+            "value": 10.0,
+            "unit": "W/(m^2*K)",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Ambient temperature [K]": {
+            "value": 298.15,
+            "unit": "K",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Number of electrodes connected in parallel to make a cell": {
+            "value": 1.0,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Number of cells connected in series to make a battery": {
+            "value": 1.0,
+            "unit": "dimensionless",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Lower voltage cut-off [V]": {
+            "value": 2.5,
+            "unit": "V",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Upper voltage cut-off [V]": {
+            "value": 4.2,
+            "unit": "V",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Open-circuit voltage at 0% SOC [V]": {
+            "value": 2.5,
+            "unit": "V",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Open-circuit voltage at 100% SOC [V]": {
+            "value": 4.2,
+            "unit": "V",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Initial concentration in negative electrode [mol.m-3]": {
+            "value": 29866.0,
+            "unit": "mol/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Initial concentration in positive electrode [mol.m-3]": {
+            "value": 17038.0,
+            "unit": "mol/m^3",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          },
+          "Initial temperature [K]": {
+            "value": 298.15,
+            "unit": "K",
+            "uncertainty": null,
+            "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+            "quality": "valid"
+          }
+        }
+      }
+    ]
+  },
+  "functions": [
+    {
+      "source_field": "Negative electrode OCP [V]",
+      "function_id": "graphite_LGM50_ocp_Chen2020",
+      "kind": "polynomial-exp-tanh",
+      "arguments": [
+        "sto"
+      ],
+      "parameters": {
+        "schema_version": "chemworld-scientific-table-1",
+        "dataset_id": "graphite_LGM50_ocp_Chen2020",
+        "kind": "parameters",
+        "columns": [
+          {
+            "quantity_id": "p0",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "exp0_amplitude",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "exp0_scale",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "exp0_shift",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh0_amplitude",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh0_scale",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh0_shift",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh1_amplitude",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh1_scale",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh1_shift",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh2_amplitude",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh2_scale",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh2_shift",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          }
+        ],
+        "sources": [
+          {
+            "provenance": {
+              "source_id": "pybamm-25.4.2-Chen2020",
+              "priority": 0,
+              "citation": "Chen et al., Development of Experimental Techniques for Parameterization of Multi-scale Lithium-ion Battery Models, J. Electrochem. Soc. 167 (2020) 080534, doi:10.1149/1945-7111/ab9050; PyBaMM 25.4.2 input/parameters/lithium_ion/Chen2020.py",
+              "version": "PyBaMM-25.4.2",
+              "license": "BSD-3-Clause (PyBaMM released parameter implementation); underlying article license is separately attributable",
+              "checksum": ""
+            },
+            "data_kind": "literature"
+          }
+        ],
+        "rows": [
+          {
+            "row_id": "parameters",
+            "source_id": "pybamm-25.4.2-Chen2020",
+            "group_id": "Chen2020",
+            "sample_id": "graphite_LGM50_ocp_Chen2020",
+            "split": "parameters",
+            "values": {
+              "p0": {
+                "value": 0.2482,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "exp0_amplitude": {
+                "value": 1.9793,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "exp0_scale": {
+                "value": -39.3631,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "exp0_shift": {
+                "value": 0.0,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh0_amplitude": {
+                "value": -0.0909,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh0_scale": {
+                "value": 29.8538,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh0_shift": {
+                "value": 0.1234,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh1_amplitude": {
+                "value": -0.04478,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh1_scale": {
+                "value": 14.9159,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh1_shift": {
+                "value": 0.2769,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh2_amplitude": {
+                "value": -0.0205,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh2_scale": {
+                "value": 30.4444,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh2_shift": {
+                "value": 0.6103,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              }
+            }
+          }
+        ]
+      },
+      "validity_note": "Finite mathematical expression; empirical concentration/temperature validity not supplied. The SPM projection consumes only fixed T=298.15 K and c_e=1000 mol/m^3. Nyman laws declare no temperature dependence."
+    },
+    {
+      "source_field": "Negative electrode exchange-current density [A.m-2]",
+      "function_id": "graphite_LGM50_electrolyte_exchange_current_density_Chen2020",
+      "kind": "symmetric-arrhenius-bv",
+      "arguments": [
+        "c_e",
+        "c_s_surf",
+        "c_s_max",
+        "T"
+      ],
+      "parameters": {
+        "schema_version": "chemworld-scientific-table-1",
+        "dataset_id": "graphite_LGM50_electrolyte_exchange_current_density_Chen2020",
+        "kind": "parameters",
+        "columns": [
+          {
+            "quantity_id": "m_ref",
+            "unit": "A*m^(5/2)/mol^(3/2)",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "activation_energy",
+            "unit": "J/mol",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "reference_temperature",
+            "unit": "K",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          }
+        ],
+        "sources": [
+          {
+            "provenance": {
+              "source_id": "pybamm-25.4.2-Chen2020",
+              "priority": 0,
+              "citation": "Chen et al., Development of Experimental Techniques for Parameterization of Multi-scale Lithium-ion Battery Models, J. Electrochem. Soc. 167 (2020) 080534, doi:10.1149/1945-7111/ab9050; PyBaMM 25.4.2 input/parameters/lithium_ion/Chen2020.py",
+              "version": "PyBaMM-25.4.2",
+              "license": "BSD-3-Clause (PyBaMM released parameter implementation); underlying article license is separately attributable",
+              "checksum": ""
+            },
+            "data_kind": "literature"
+          }
+        ],
+        "rows": [
+          {
+            "row_id": "parameters",
+            "source_id": "pybamm-25.4.2-Chen2020",
+            "group_id": "Chen2020",
+            "sample_id": "graphite_LGM50_electrolyte_exchange_current_density_Chen2020",
+            "split": "parameters",
+            "values": {
+              "m_ref": {
+                "value": 6.48e-07,
+                "unit": "A*m^(5/2)/mol^(3/2)",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "activation_energy": {
+                "value": 35000.0,
+                "unit": "J/mol",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "reference_temperature": {
+                "value": 298.15,
+                "unit": "K",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              }
+            }
+          }
+        ]
+      },
+      "validity_note": "Finite mathematical expression; empirical concentration/temperature validity not supplied. The SPM projection consumes only fixed T=298.15 K and c_e=1000 mol/m^3. Nyman laws declare no temperature dependence."
+    },
+    {
+      "source_field": "Positive electrode OCP [V]",
+      "function_id": "nmc_LGM50_ocp_Chen2020",
+      "kind": "polynomial-exp-tanh",
+      "arguments": [
+        "sto"
+      ],
+      "parameters": {
+        "schema_version": "chemworld-scientific-table-1",
+        "dataset_id": "nmc_LGM50_ocp_Chen2020",
+        "kind": "parameters",
+        "columns": [
+          {
+            "quantity_id": "p0",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "p1",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh0_amplitude",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh0_scale",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh0_shift",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh1_amplitude",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh1_scale",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh1_shift",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh2_amplitude",
+            "unit": "V",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh2_scale",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "tanh2_shift",
+            "unit": "dimensionless",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          }
+        ],
+        "sources": [
+          {
+            "provenance": {
+              "source_id": "pybamm-25.4.2-Chen2020",
+              "priority": 0,
+              "citation": "Chen et al., Development of Experimental Techniques for Parameterization of Multi-scale Lithium-ion Battery Models, J. Electrochem. Soc. 167 (2020) 080534, doi:10.1149/1945-7111/ab9050; PyBaMM 25.4.2 input/parameters/lithium_ion/Chen2020.py",
+              "version": "PyBaMM-25.4.2",
+              "license": "BSD-3-Clause (PyBaMM released parameter implementation); underlying article license is separately attributable",
+              "checksum": ""
+            },
+            "data_kind": "literature"
+          }
+        ],
+        "rows": [
+          {
+            "row_id": "parameters",
+            "source_id": "pybamm-25.4.2-Chen2020",
+            "group_id": "Chen2020",
+            "sample_id": "nmc_LGM50_ocp_Chen2020",
+            "split": "parameters",
+            "values": {
+              "p0": {
+                "value": 4.4875,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "p1": {
+                "value": -0.809,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh0_amplitude": {
+                "value": -0.0428,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh0_scale": {
+                "value": 18.5138,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh0_shift": {
+                "value": 0.5542,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh1_amplitude": {
+                "value": -17.7326,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh1_scale": {
+                "value": 15.789,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh1_shift": {
+                "value": 0.3117,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh2_amplitude": {
+                "value": 17.5842,
+                "unit": "V",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh2_scale": {
+                "value": 15.9308,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "tanh2_shift": {
+                "value": 0.312,
+                "unit": "dimensionless",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              }
+            }
+          }
+        ]
+      },
+      "validity_note": "Finite mathematical expression; empirical concentration/temperature validity not supplied. The SPM projection consumes only fixed T=298.15 K and c_e=1000 mol/m^3. Nyman laws declare no temperature dependence."
+    },
+    {
+      "source_field": "Positive electrode exchange-current density [A.m-2]",
+      "function_id": "nmc_LGM50_electrolyte_exchange_current_density_Chen2020",
+      "kind": "symmetric-arrhenius-bv",
+      "arguments": [
+        "c_e",
+        "c_s_surf",
+        "c_s_max",
+        "T"
+      ],
+      "parameters": {
+        "schema_version": "chemworld-scientific-table-1",
+        "dataset_id": "nmc_LGM50_electrolyte_exchange_current_density_Chen2020",
+        "kind": "parameters",
+        "columns": [
+          {
+            "quantity_id": "m_ref",
+            "unit": "A*m^(5/2)/mol^(3/2)",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "activation_energy",
+            "unit": "J/mol",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "reference_temperature",
+            "unit": "K",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          }
+        ],
+        "sources": [
+          {
+            "provenance": {
+              "source_id": "pybamm-25.4.2-Chen2020",
+              "priority": 0,
+              "citation": "Chen et al., Development of Experimental Techniques for Parameterization of Multi-scale Lithium-ion Battery Models, J. Electrochem. Soc. 167 (2020) 080534, doi:10.1149/1945-7111/ab9050; PyBaMM 25.4.2 input/parameters/lithium_ion/Chen2020.py",
+              "version": "PyBaMM-25.4.2",
+              "license": "BSD-3-Clause (PyBaMM released parameter implementation); underlying article license is separately attributable",
+              "checksum": ""
+            },
+            "data_kind": "literature"
+          }
+        ],
+        "rows": [
+          {
+            "row_id": "parameters",
+            "source_id": "pybamm-25.4.2-Chen2020",
+            "group_id": "Chen2020",
+            "sample_id": "nmc_LGM50_electrolyte_exchange_current_density_Chen2020",
+            "split": "parameters",
+            "values": {
+              "m_ref": {
+                "value": 3.42e-06,
+                "unit": "A*m^(5/2)/mol^(3/2)",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "activation_energy": {
+                "value": 17800.0,
+                "unit": "J/mol",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "reference_temperature": {
+                "value": 298.15,
+                "unit": "K",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              }
+            }
+          }
+        ]
+      },
+      "validity_note": "Finite mathematical expression; empirical concentration/temperature validity not supplied. The SPM projection consumes only fixed T=298.15 K and c_e=1000 mol/m^3. Nyman laws declare no temperature dependence."
+    },
+    {
+      "source_field": "Electrolyte diffusivity [m2.s-1]",
+      "function_id": "electrolyte_diffusivity_Nyman2008",
+      "kind": "nyman-electrolyte-diffusivity",
+      "arguments": [
+        "c_e",
+        "T"
+      ],
+      "parameters": {
+        "schema_version": "chemworld-scientific-table-1",
+        "dataset_id": "electrolyte_diffusivity_Nyman2008",
+        "kind": "parameters",
+        "columns": [
+          {
+            "quantity_id": "quadratic",
+            "unit": "m^2/s",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "linear",
+            "unit": "m^2/s",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "constant",
+            "unit": "m^2/s",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "concentration_reference",
+            "unit": "mol/m^3",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          }
+        ],
+        "sources": [
+          {
+            "provenance": {
+              "source_id": "pybamm-25.4.2-Nyman2008",
+              "priority": 0,
+              "citation": "Nyman, Behm and Lindbergh, Electrochemical characterisation and modelling of the mass transport phenomena in LiPF6-EC-EMC electrolyte, Electrochimica Acta 53 (2008) 6356-6365; released Chen2020 parameter implementation in PyBaMM 25.4.2",
+              "version": "PyBaMM-25.4.2",
+              "license": "BSD-3-Clause (PyBaMM released parameter implementation); underlying article license is separately attributable",
+              "checksum": ""
+            },
+            "data_kind": "literature"
+          }
+        ],
+        "rows": [
+          {
+            "row_id": "parameters",
+            "source_id": "pybamm-25.4.2-Nyman2008",
+            "group_id": "Chen2020",
+            "sample_id": "electrolyte_diffusivity_Nyman2008",
+            "split": "parameters",
+            "values": {
+              "quadratic": {
+                "value": 8.794e-11,
+                "unit": "m^2/s",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "linear": {
+                "value": -3.972e-10,
+                "unit": "m^2/s",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "constant": {
+                "value": 4.862e-10,
+                "unit": "m^2/s",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "concentration_reference": {
+                "value": 1000.0,
+                "unit": "mol/m^3",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              }
+            }
+          }
+        ]
+      },
+      "validity_note": "Finite mathematical expression; empirical concentration/temperature validity not supplied. The SPM projection consumes only fixed T=298.15 K and c_e=1000 mol/m^3. Nyman laws declare no temperature dependence."
+    },
+    {
+      "source_field": "Electrolyte conductivity [S.m-1]",
+      "function_id": "electrolyte_conductivity_Nyman2008",
+      "kind": "nyman-electrolyte-conductivity",
+      "arguments": [
+        "c_e",
+        "T"
+      ],
+      "parameters": {
+        "schema_version": "chemworld-scientific-table-1",
+        "dataset_id": "electrolyte_conductivity_Nyman2008",
+        "kind": "parameters",
+        "columns": [
+          {
+            "quantity_id": "cubic",
+            "unit": "S/m",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "three_halves",
+            "unit": "S/m",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "linear",
+            "unit": "S/m",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          },
+          {
+            "quantity_id": "concentration_reference",
+            "unit": "mol/m^3",
+            "role": "parameter",
+            "valid_range": [
+              -1e+100,
+              1e+100
+            ],
+            "reference_state": "Released PyBaMM 25.4.2 Chen2020 value; SI unless explicitly Ah; empirical validity and uncertainty not supplied"
+          }
+        ],
+        "sources": [
+          {
+            "provenance": {
+              "source_id": "pybamm-25.4.2-Nyman2008",
+              "priority": 0,
+              "citation": "Nyman, Behm and Lindbergh, Electrochemical characterisation and modelling of the mass transport phenomena in LiPF6-EC-EMC electrolyte, Electrochimica Acta 53 (2008) 6356-6365; released Chen2020 parameter implementation in PyBaMM 25.4.2",
+              "version": "PyBaMM-25.4.2",
+              "license": "BSD-3-Clause (PyBaMM released parameter implementation); underlying article license is separately attributable",
+              "checksum": ""
+            },
+            "data_kind": "literature"
+          }
+        ],
+        "rows": [
+          {
+            "row_id": "parameters",
+            "source_id": "pybamm-25.4.2-Nyman2008",
+            "group_id": "Chen2020",
+            "sample_id": "electrolyte_conductivity_Nyman2008",
+            "split": "parameters",
+            "values": {
+              "cubic": {
+                "value": 0.1297,
+                "unit": "S/m",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "three_halves": {
+                "value": -2.51,
+                "unit": "S/m",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "linear": {
+                "value": 3.329,
+                "unit": "S/m",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              },
+              "concentration_reference": {
+                "value": 1000.0,
+                "unit": "mol/m^3",
+                "uncertainty": null,
+                "uncertainty_note": "Standard uncertainty not supplied by the released parameter set",
+                "quality": "valid"
+              }
+            }
+          }
+        ]
+      },
+      "validity_note": "Finite mathematical expression; empirical concentration/temperature validity not supplied. The SPM projection consumes only fixed T=298.15 K and c_e=1000 mol/m^3. Nyman laws declare no temperature dependence."
+    }
+  ],
+  "metadata": {
+    "chemistry": "lithium_ion",
+    "citations": [
+      "Chen2020"
+    ]
+  },
+  "fields": [
+    {
+      "source_field": "chemistry",
+      "kind": "metadata",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Ratio of lithium moles to SEI moles",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "SEI partial molar volume [m3.mol-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "SEI reaction exchange current density [A.m-2]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "SEI resistivity [Ohm.m]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "SEI solvent diffusivity [m2.s-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Bulk solvent concentration [mol.m-3]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "SEI open-circuit potential [V]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "SEI electron conductivity [S.m-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "SEI lithium interstitial diffusivity [m2.s-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Lithium interstitial reference concentration [mol.m-3]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Initial SEI thickness [m]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "EC initial concentration in electrolyte [mol.m-3]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "EC diffusivity [m2.s-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "SEI kinetic rate constant [m.s-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "SEI growth activation energy [J.mol-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative electrode reaction-driven LAM factor [m3.mol-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive electrode reaction-driven LAM factor [m3.mol-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative current collector thickness [m]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative electrode thickness [m]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Separator thickness [m]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive electrode thickness [m]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Positive current collector thickness [m]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Electrode height [m]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Electrode width [m]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Cell cooling surface area [m2]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Cell volume [m3]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Cell thermal expansion coefficient [m.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative current collector conductivity [S.m-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive current collector conductivity [S.m-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative current collector density [kg.m-3]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive current collector density [kg.m-3]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative current collector specific heat capacity [J.kg-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive current collector specific heat capacity [J.kg-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative current collector thermal conductivity [W.m-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive current collector thermal conductivity [W.m-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Nominal cell capacity [A.h]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Current function [A]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Contact resistance [Ohm]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Negative electrode conductivity [S.m-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Maximum concentration in negative electrode [mol.m-3]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Negative particle diffusivity [m2.s-1]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Negative electrode OCP [V]",
+      "kind": "function",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Negative electrode porosity",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Negative electrode active material volume fraction",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Negative particle radius [m]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Negative electrode Bruggeman coefficient (electrolyte)",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative electrode Bruggeman coefficient (electrode)",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative electrode charge transfer coefficient",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Negative electrode double-layer capacity [F.m-2]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative electrode exchange-current density [A.m-2]",
+      "kind": "function",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Negative electrode density [kg.m-3]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative electrode specific heat capacity [J.kg-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative electrode thermal conductivity [W.m-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Negative electrode OCP entropic change [V.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive electrode conductivity [S.m-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Maximum concentration in positive electrode [mol.m-3]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Positive particle diffusivity [m2.s-1]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Positive electrode OCP [V]",
+      "kind": "function",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Positive electrode porosity",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Positive electrode active material volume fraction",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Positive particle radius [m]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Positive electrode Bruggeman coefficient (electrolyte)",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive electrode Bruggeman coefficient (electrode)",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive electrode charge transfer coefficient",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Positive electrode double-layer capacity [F.m-2]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive electrode exchange-current density [A.m-2]",
+      "kind": "function",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Positive electrode density [kg.m-3]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive electrode specific heat capacity [J.kg-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive electrode thermal conductivity [W.m-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Positive electrode OCP entropic change [V.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Separator porosity",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Separator Bruggeman coefficient (electrolyte)",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Separator density [kg.m-3]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Separator specific heat capacity [J.kg-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Separator thermal conductivity [W.m-1.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Initial concentration in electrolyte [mol.m-3]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Cation transference number",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Thermodynamic factor",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Electrolyte diffusivity [m2.s-1]",
+      "kind": "function",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Electrolyte conductivity [S.m-1]",
+      "kind": "function",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Reference temperature [K]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Total heat transfer coefficient [W.m-2.K-1]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Ambient temperature [K]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Number of electrodes connected in parallel to make a cell",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Number of cells connected in series to make a battery",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Lower voltage cut-off [V]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Upper voltage cut-off [V]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Open-circuit voltage at 0% SOC [V]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Open-circuit voltage at 100% SOC [V]",
+      "kind": "number",
+      "usage": "retained-not-consumed",
+      "scope": "Retained source data; not implemented by the fixed-temperature SPM projection"
+    },
+    {
+      "source_field": "Initial concentration in negative electrode [mol.m-3]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Initial concentration in positive electrode [mol.m-3]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "Initial temperature [K]",
+      "kind": "number",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    },
+    {
+      "source_field": "citations",
+      "kind": "metadata",
+      "usage": "consumed",
+      "scope": "SPM-fixed-T-v1"
+    }
+  ],
+  "notes": [
+    "These are the released PyBaMM Chen2020 parameter data, not a claim that all values are true measured material properties.",
+    "Released SEI entries are example fitted parameters citing Ramadass2004, Ploehn2004, Single2018, Safari2008 and Yang2017; they are retained, not consumed by this SPM projection.",
+    "The source Current function [A] is a default protocol value, not an equipment maximum-current rating.",
+    "Source nominal capacity is distinct from initial stoichiometric charge and voltage-window deliverable capacity."
+  ],
+  "license_notice": "Copyright (c) 2018-2025, the PyBaMM team.\nAll rights reserved.\n\nRedistribution and use in source and binary forms, with or without\nmodification, are permitted provided that the following conditions are met:\n\n* Redistributions of source code must retain the above copyright notice, this\n  list of conditions and the following disclaimer.\n\n* Redistributions in binary form must reproduce the above copyright notice,\n  this list of conditions and the following disclaimer in the documentation\n  and/or other materials provided with the distribution.\n\n* Neither the name of the copyright holder nor the names of its\n  contributors may be used to endorse or promote products derived from\n  this software without specific prior written permission.\n\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"\nAND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE\nIMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\nDISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE\nFOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL\nDAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR\nSERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER\nCAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,\nOR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\nOF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\n"
+}

@@ -46,6 +46,7 @@ from chemworld.physchem.gas_network_surface import (
     GasSurfaceContext,
     gas_phase_network,
 )
+from chemworld.physchem.gas_shaft_machine import GasShaftMachineSpec, shaft_key
 from chemworld.physchem.gas_spatial_transport import GasSpatialTransportSpec
 from chemworld.physchem.gas_thermal_wall import GasThermalWallSpec, wall_key
 from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
@@ -149,6 +150,7 @@ class GasReactorNetworkSpec:
     surfaces: tuple[GasSurfaceAttachment, ...] = ()
     pressure_control: GasPressureControlSpec | None = None
     thermal_wall: GasThermalWallSpec | None = None
+    shaft_machine: GasShaftMachineSpec | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "nodes", tuple(sorted(self.nodes, key=lambda x: x.vessel_id)))
@@ -163,6 +165,25 @@ class GasReactorNetworkSpec:
         )
         _positive(self.temperature_K, "temperature_K")
         names = [n.vessel_id for n in self.nodes]
+        if self.shaft_machine is not None:
+            machine = self.shaft_machine
+            if (
+                not isinstance(machine, GasShaftMachineSpec)
+                or len(self.nodes) != 2
+                or len(self.connections) != 1
+                or not self.energy_nodes
+                or self.pressure_control is not None
+                or self.thermal_wall is not None
+                or self.surfaces
+                or self.spatial_transport is not None
+                or any(n.chemistry_enabled for n in self.nodes)
+                or self.connections[0].connection_id != machine.connection_id
+                or self.connections[0].mode == "pressure-valve"
+            ):
+                raise ValueError(
+                    "shaft machine requires two nonreactive thermal nodes and one declared "
+                    "molar/mass-flow edge, without piston, wall, surface or spatial coupling"
+                )
         if self.thermal_wall is not None:
             wall = self.thermal_wall
             if (
@@ -212,8 +233,12 @@ class GasReactorNetworkSpec:
             )
         if self.spatial_transport is not None:
             spatial = self.spatial_transport
-            if self.energy_nodes or self.heat_links:
-                raise ValueError("isothermal spatial gas cannot combine heaters or energy nodes")
+            if bool(self.energy_nodes) != spatial.energy_equation:
+                raise ValueError(
+                    "thermal spatial gas requires all node energy declarations"
+                    if spatial.energy_equation
+                    else "isothermal spatial gas cannot combine heaters or energy nodes"
+                )
             volumes = dict(zip(spatial.cell_vessel_ids, spatial.mesh.cell_volumes_m3, strict=True))
             if spatial.boundary_mode == "sealed":
                 if self.connections or set(volumes) != set(names):
@@ -273,7 +298,9 @@ class GasReactorNetworkSpec:
     def to_dict(self) -> dict[str, Any]:
         return {
             "model": (
-                "finite-thermal-wall-gas-network-v1"
+                "finite-thermal-shaft-gas-network-v1"
+                if self.shaft_machine is not None
+                else "finite-thermal-wall-gas-network-v1"
                 if self.thermal_wall is not None
                 else "finite-thermal-piston-gas-network-v1"
                 if self.pressure_control is not None and self.energy_nodes
@@ -283,6 +310,12 @@ class GasReactorNetworkSpec:
                 if self.surfaces and self.energy_nodes
                 else "finite-isothermal-surface-gas-network-v1"
                 if self.surfaces
+                else "sealed-thermal-spatial-gas-network-v1"
+                if self.spatial_transport is not None
+                and self.energy_nodes
+                and self.spatial_transport.boundary_mode == "sealed"
+                else "finite-flow-thermal-spatial-gas-network-v1"
+                if self.spatial_transport is not None and self.energy_nodes
                 else "sealed-spatial-gas-network-v1"
                 if self.spatial_transport is not None
                 and self.spatial_transport.boundary_mode == "sealed"
@@ -296,6 +329,7 @@ class GasReactorNetworkSpec:
             "connections": [asdict(e) for e in self.connections],
             "temperature_K": self.temperature_K,
             "anchor_vessel_id": self.anchor_vessel_id,
+            **({"shaft_machine": self.shaft_machine.to_dict()} if self.shaft_machine else {}),
             **(
                 {"thermal_wall": self.thermal_wall.to_dict()}
                 if self.thermal_wall is not None
@@ -325,11 +359,14 @@ class GasReactorNetworkSpec:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> GasReactorNetworkSpec:
         if value.get("model") not in {
+            "finite-thermal-shaft-gas-network-v1",
             "finite-thermal-wall-gas-network-v1",
             "finite-isothermal-gas-network-v1",
             "finite-thermal-gas-network-v1",
             "sealed-spatial-gas-network-v1",
             "finite-flow-spatial-gas-network-v1",
+            "sealed-thermal-spatial-gas-network-v1",
+            "finite-flow-thermal-spatial-gas-network-v1",
             "finite-isothermal-surface-gas-network-v1",
             "finite-thermal-surface-gas-network-v1",
             "finite-thermal-piston-gas-network-v1",
@@ -337,11 +374,20 @@ class GasReactorNetworkSpec:
         }:
             raise ValueError("unsupported gas network declaration")
         thermal = value["model"] in {
+            "finite-thermal-shaft-gas-network-v1",
             "finite-thermal-wall-gas-network-v1",
             "finite-thermal-gas-network-v1",
             "finite-thermal-surface-gas-network-v1",
             "finite-thermal-piston-gas-network-v1",
         }
+        thermal = thermal or value["model"] in {
+            "sealed-thermal-spatial-gas-network-v1",
+            "finite-flow-thermal-spatial-gas-network-v1",
+        }
+        if (value["model"] == "finite-thermal-shaft-gas-network-v1") != bool(
+            value.get("shaft_machine")
+        ):
+            raise ValueError("shaft-machine declaration differs from its model version")
         if (value["model"] == "finite-thermal-wall-gas-network-v1") != bool(
             value.get("thermal_wall")
         ):
@@ -352,12 +398,17 @@ class GasReactorNetworkSpec:
             raise ValueError("surface declaration differs from its model version")
         if (
             value["model"]
-            in {"sealed-spatial-gas-network-v1", "finite-flow-spatial-gas-network-v1"}
+            in {
+                "sealed-spatial-gas-network-v1",
+                "finite-flow-spatial-gas-network-v1",
+                "sealed-thermal-spatial-gas-network-v1",
+                "finite-flow-thermal-spatial-gas-network-v1",
+            }
         ) != bool(value.get("spatial_transport")):
             raise ValueError("spatial gas declaration differs from its model version")
         if value.get("spatial_transport"):
             mode = GasSpatialTransportSpec.from_dict(value["spatial_transport"]).boundary_mode
-            if (value["model"] == "finite-flow-spatial-gas-network-v1") != (mode == "finite-flow"):
+            if value["model"].startswith("finite-flow-") != (mode == "finite-flow"):
                 raise ValueError("spatial boundary mode differs from its model version")
         if thermal != bool(value.get("energy_nodes")) or (not thermal and value.get("heat_links")):
             raise ValueError("gas energy declaration differs from its model version")
@@ -377,6 +428,9 @@ class GasReactorNetworkSpec:
             else None,
             GasThermalWallSpec.from_dict(value["thermal_wall"])
             if value.get("thermal_wall")
+            else None,
+            GasShaftMachineSpec.from_dict(value["shaft_machine"])
+            if value.get("shaft_machine")
             else None,
         )
 
@@ -398,6 +452,7 @@ def gas_network_coordinates(
     if spec.surfaces:
         network = gas_phase_network(network)
     original = (
+        *(spec.shaft_machine.coordinates() if spec.shaft_machine else ()),
         *(
             (CoupledCoordinate(gas_work_key(spec.pressure_control.vessel_id), "J", 1),)
             if spec.pressure_control
@@ -419,6 +474,19 @@ def gas_network_coordinates(
     if spec.spatial_transport is not None:
         from chemworld.physchem.gas_spatial_reactor import spatial_coordinates
 
+        if spec.energy_nodes:
+            from chemworld.physchem.gas_network_energy import gas_energy_coordinates
+            from chemworld.physchem.gas_spatial_energy import spatial_fourier_key
+
+            return (
+                *original,
+                *spatial_coordinates(spec, network),
+                *gas_energy_coordinates(spec),
+                *(
+                    CoupledCoordinate(spatial_fourier_key(face), "J", 1)
+                    for face, _, _ in gas_material_topology(spec)
+                ),
+            )
         return (*original, *spatial_coordinates(spec, network))
     if not spec.energy_nodes:
         return original
@@ -518,9 +586,13 @@ def pack_gas_reactor_network_state(
             else 0.0
         ),
         coordinates=coordinates,
-        work_J=coordinates[gas_work_key(spec.pressure_control.vessel_id)]
-        if spec.pressure_control
-        else 0.0,
+        work_J=(
+            coordinates[shaft_key(spec.shaft_machine.connection_id, "shaft_work_J")]
+            if spec.shaft_machine
+            else coordinates[gas_work_key(spec.pressure_control.vessel_id)]
+            if spec.pressure_control
+            else 0.0
+        ),
     )
 
 
@@ -589,6 +661,10 @@ def gas_reactor_network_system(
     surface_slots: Sequence[StateSlot] = (),
 ) -> CoupledSystem:
     """Compile native processes; no solver, clock or persistent inventory is added."""
+    if spec.energy_nodes and spec.spatial_transport is not None:
+        from chemworld.physchem.gas_spatial_energy import gas_spatial_energy_system
+
+        return gas_spatial_energy_system(spec, network, thermal_device=thermal_device)
     if spec.energy_nodes:
         from chemworld.physchem.gas_network_energy import gas_energy_system
 
@@ -861,6 +937,12 @@ def advance_gas_reactor_network(
     thermal_device: ThermalDeviceSpec | None = None,
     surface_slots: Sequence[StateSlot] = (),
 ) -> tuple[CoupledAdvanceResult, dict[str, Any]]:
+    if spec.energy_nodes and spec.spatial_transport is not None:
+        from chemworld.physchem.gas_spatial_energy import advance_gas_spatial_energy
+
+        return advance_gas_spatial_energy(
+            spec, network, state, duration_s, thermal_device=thermal_device
+        )
     if spec.energy_nodes:
         from chemworld.physchem.gas_network_energy import advance_gas_energy
 

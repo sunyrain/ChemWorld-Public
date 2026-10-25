@@ -35,8 +35,19 @@ from chemworld.physchem import (
 from chemworld.physchem.transport import PumpSpec
 
 
-def environment_checks(params):
+def main():
     checks = {}
+    # Exercise every lazy export in an actual filesystem installation. This
+    # catches misrouted symbols such as the cooling-tower geometry facade.
+    exports = [name for names in public._MODULE_EXPORTS.values() for name in names]
+    checks["public_export_resolution"] = all(getattr(public, name) is not None for name in exports)
+    air = standard_atmosphere(2000)
+    pipe = PipeSpec(1, 0.01, fittings_loss_coefficient=2)
+    pressure = pipe_pressure_drop(pipe, air.fluid_state(), volumetric_flow_m3_s=1e-4)
+    checks["standard_atmosphere_actual_pipe"] = (
+        pressure.pressure_drop_total_Pa > 0 and air.pressure_Pa < 101325
+    )
+    params = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
     atmosphere = MSISAtmosphere(MSISParameters.from_dict(params["msis"])).evaluate(
         100000, latitude_degrees=35, longitude_degrees=110, day_of_year=172, seconds_utc=43200
     )
@@ -59,23 +70,6 @@ def environment_checks(params):
     checks["explicit_solar_parameters_and_power"] = irradiation.absorbed_power_w(2, 0.7) > 0
     events = solar_events(ephemeris, moment, 35, 0)
     checks["actual_civil_solar_events"] = events.sunrise < events.transit < events.sunset
-    return checks
-
-
-def main():
-    checks = {}
-    # Exercise every lazy export in an actual filesystem installation. This
-    # catches misrouted symbols such as the cooling-tower geometry facade.
-    exports = [name for names in public._MODULE_EXPORTS.values() for name in names]
-    checks["public_export_resolution"] = all(getattr(public, name) is not None for name in exports)
-    air = standard_atmosphere(2000)
-    pipe = PipeSpec(1, 0.01, fittings_loss_coefficient=2)
-    pressure = pipe_pressure_drop(pipe, air.fluid_state(), volumetric_flow_m3_s=1e-4)
-    checks["standard_atmosphere_actual_pipe"] = (
-        pressure.pressure_drop_total_Pa > 0 and air.pressure_Pa < 101325
-    )
-    if len(sys.argv) > 2:
-        checks.update(environment_checks(json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))))
     gas = IsothermalGasState(300, 287.05, 0.98)
     gas_geometry = {"diameter_m": 0.05, "length_m": 100, "darcy_friction_factor": 0.02}
     gas_flow = isothermal_gas_pipe(
@@ -147,9 +141,6 @@ def main():
     )
     summary = {
         "installed_engineering_checks": len(checks),
-        "empirical_environment_arrays": (
-            "checked" if len(sys.argv) > 2 else "optional reference test"
-        ),
         "passed": sum(checks.values()),
         "public_symbols_resolved": len(exports),
         "failures": [name for name, value in checks.items() if not value],

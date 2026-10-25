@@ -298,6 +298,7 @@ class CompositionPhysics:
         from chemworld.runtime.calphad_thermal import CalphadThermalSpec
         from chemworld.runtime.electrodialysis import electrodialysis_record
         from chemworld.runtime.molecular_flash_thermal import MolecularFlashThermalSpec
+        from chemworld.runtime.molecular_multiphase_thermal import MolecularMultiphaseThermalSpec
 
         local_state = self.initial_states[vessel]
         if precipitation_record(local_state) is not None:
@@ -316,9 +317,19 @@ class CompositionPhysics:
                 "wait", "select_vessel", "terminate",
             })
         if vessel in self.models_of("stochastic_hybrid"):
+            from chemworld.physchem.stochastic_adaptive_hybrid import AdaptiveHybridSpec
+
+            adaptive = isinstance(self.models_of("stochastic_hybrid")[vessel], AdaptiveHybridSpec)
             operations = tuple(op for op in operations if op in {
                 "wait", "measure", "configure_instrument", "select_vessel", "terminate",
+            } or (adaptive and op == "add_component"))
+        if vessel in self.models_of("stochastic_sde"):
+            operations = tuple(op for op in operations if op in {
+                "wait", "add_component", "measure", "configure_instrument", "select_vessel",
+                "terminate", 'set_sde_parameters',
             })
+        if not getattr(self.models_of('stochastic_sde').get(vessel), 'controls', ()):
+            operations = tuple(op for op in operations if op != 'set_sde_parameters')
         if vessel in self.models_of("molecular_process"):
             operations = tuple(op for op in operations if op in {"wait", "terminate"})
         if isinstance(self.models_of("calphad_material").get(vessel), CalphadThermalSpec):
@@ -326,7 +337,8 @@ class CompositionPhysics:
                 "heat", "wait", "measure", "configure_instrument", "pause_control",
                 "resume_control", "select_vessel", "terminate",
             })
-        if isinstance(self.models_of("flash").get(vessel), MolecularFlashThermalSpec):
+        if isinstance(self.models_of("flash").get(vessel),
+                      (MolecularFlashThermalSpec, MolecularMultiphaseThermalSpec)):
             operations = tuple(op for op in operations if op in {
                 "heat", "wait", "measure", "configure_instrument", "pause_control",
                 "resume_control", "select_vessel", "terminate",
@@ -541,6 +553,9 @@ class CompositionPhysics:
         selected = self.advance_strategy(state, modules)
         supported = set() if selected is None else set(selected[1].supported_operations)
         if selected is not None:
+            state_operations = getattr(selected[1], "supported_operations_for_state", None)
+            if state_operations is not None:
+                supported = set(state_operations(state))
             for record in state.equipment.equipment.values():
                 if (
                     record.equipment_type == "thermal_device"
@@ -648,6 +663,7 @@ class CompositionPhysics:
                         declaration.validate_feed(source, model)
         if self.network.stochastic is None and bool(self.network.reactions) != (
             "reaction" in spec.component_kinds or bool(self.models_of("stochastic_hybrid"))
+            or bool(self.models_of("stochastic_sde"))
         ):
             raise ValueError("bulk reactions require a reaction component and a nonempty network")
         instance = self.generate(self.scenario_spec(spec.composition_id, spec.world_split), 0)

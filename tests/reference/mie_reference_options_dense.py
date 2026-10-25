@@ -21,8 +21,8 @@ from chemworld.physchem.saftvrmie import MieSegment, SAFTVRMieModel
 
 
 @cache
-def diameter_series(component, temperature):
-    _, _, sigma0, eps0, lr0 = PARAMETERS[component]
+def diameter_series(component, temperature, parameters=PARAMETERS):
+    _, _, sigma0, eps0, lr0 = parameters[component]
     sigma, eps, lr = (mp.mpf(str(v)) for v in (sigma0 * 1e10, eps0, lr0))
     t = mp.mpf(temperature)
     prefactor = lr / (lr - 6) * (lr / 6) ** (6 / (lr - 6))
@@ -46,18 +46,18 @@ def diameter_series(component, temperature):
     return tuple(result)
 
 
-def mixture_expression(case, temperature):
-    ids, _ = CASES[case]
+def mixture_expression(case, temperature, *, cases=CASES, parameters=PARAMETERS, kij=0.02):
+    ids, _ = cases[case]
     n = len(ids)
     components = [
         [
             mp.mpf(str(v))
-            for v in (PARAMETERS[i][1], PARAMETERS[i][2] * 1e10, PARAMETERS[i][3], PARAMETERS[i][4])
+            for v in (parameters[i][1], parameters[i][2] * 1e10, parameters[i][3], parameters[i][4])
         ]
         for i in ids
     ]
     t0 = mp.mpf(temperature)
-    ds = [diameter_series(i, temperature) for i in ids]
+    ds = [diameter_series(i, temperature, parameters) for i in ids]
     phi = [[mp.mpf(v) for v in row.split()] for row in PHI_ROWS]
     ceff = [[mp.mpf(v) for v in row.split()] for row in EFFECTIVE_ROWS]
 
@@ -109,7 +109,7 @@ def mixture_expression(case, temperature):
         for i, j in product(range(n), repeat=2):
             left, right = components[i], components[j]
             sigma = (left[1] + right[1]) / 2
-            eps = (1 - (mp.mpf(".02") if i != j else 0)) * mp.sqrt(left[2] * right[2])
+            eps = (1 - (mp.mpf(str(kij)) if i != j else 0)) * mp.sqrt(left[2] * right[2])
             eps *= (left[1] * right[1]) ** mp.mpf("1.5") / sigma**3
             lr, la = 3 + mp.sqrt((left[3] - 3) * (right[3] - 3)), mp.mpf(6)
             d = (diameter[i] + diameter[j]) / 2

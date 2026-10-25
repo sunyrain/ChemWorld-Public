@@ -168,21 +168,6 @@ def git_worktree_dirty(
     return False
 
 
-def git_tracked_tree_dirty(
-    root: Path,
-    *,
-    excluded_paths: Iterable[str] = (),
-    excluded_prefixes: Iterable[str] = (),
-) -> bool:
-    """Compatibility alias for :func:`git_worktree_dirty`."""
-
-    return git_worktree_dirty(
-        root,
-        excluded_paths=excluded_paths,
-        excluded_prefixes=excluded_prefixes,
-    )
-
-
 def _normalize_git_path(path: str) -> str:
     return path.strip('"').replace("\\", "/")
 
@@ -290,7 +275,6 @@ __all__ = [
     "canonical_json_sha256",
     "file_sha256",
     "git_source_commit",
-    "git_tracked_tree_dirty",
     "git_worktree_dirty",
     "write_json_atomic",
 ]

@@ -15,6 +15,7 @@ from chemworld.physchem.battery_lead_acid import (
     advance_lead_acid,
     lead_acid_control_mode,
     lead_acid_fields,
+    lead_acid_profile,
     lead_acid_readout,
     lead_acid_system,
     validate_lead_acid_state,
@@ -51,6 +52,22 @@ def test_initial_zero_products_are_real_and_codec_keeps_all_six_materials():
     reading = lead_acid_readout(spec, spec.initial_state(), 0.2)
     assert reading.amounts_mol == dict(spec.initial_state().amounts_mol)
     assert not hasattr(reading, "negative_surface_fraction")
+
+
+def test_profile_is_json_safe_and_reports_closed_six_inventory_balances():
+    spec = model()
+    state = spec.initial_state()
+    before = state
+    profile = lead_acid_profile(spec, state, current_A=0.2)
+    assert profile["model_family"] == "lead-acid-loqs-isothermal-v1"
+    assert profile["inventory_keys"] == list(LOQS_KEYS)
+    assert set(profile["amounts_mol"]) == set(LOQS_KEYS)
+    expected = lead_acid_fields(spec, state, current_A=0.2)
+    assert profile["porosities"] == pytest.approx(expected["porosities"])
+    assert profile["element_mol"]["Pb"] > 0
+    assert max(abs(value) for value in profile["faradaic_residual_C"].values()) < 1e-10
+    json.dumps(profile, allow_nan=False)
+    assert state == before
 
 
 @pytest.mark.parametrize("current", [0.2, -0.2, 0.0])

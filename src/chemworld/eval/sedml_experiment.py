@@ -8,9 +8,9 @@ clock. Historical sample coordinates and native HistoryRecords are outputs.
 import hashlib
 from dataclasses import dataclass, replace
 from types import MappingProxyType
+from uuid import UUID, uuid5
 
 from chemworld.agents.base import HistoryRecord
-from chemworld.data.sedml_declarations import boolean, records
 from chemworld.data.sedml_models import calculation
 from chemworld.data.sedml_ranges import _range_reference
 from chemworld.data.sedml_reports import SEDMLArray
@@ -19,10 +19,10 @@ from chemworld.world.sedml_protocol import SEDMLProtocol, parameter_target
 
 
 class SEDMLExecutionError(RuntimeError):
-    def __init__(self, message, *, history, runtime):
+    def __init__(self, message, *, history, runtime=None):
         super().__init__(message)
         self.history = tuple(history)
-        self.snapshot = runtime.snapshot().to_dict()
+        self.snapshot = None if runtime is None else runtime.snapshot().to_dict()
 
 
 @dataclass(frozen=True)
@@ -126,9 +126,10 @@ class SEDMLExperimentResult:
 class _TaskRunner:
     """Finite protocol orchestration; every physical effect is a native action."""
 
-    def __init__(self, protocol, root_id, seed, noise_mode):
+    def __init__(self, protocol, root_id, seed, noise_mode, identity_namespace=None):
         self.protocol, self.root_id = protocol, root_id
         self.seed, self.noise_mode = seed, noise_mode
+        self.identity_namespace = identity_namespace
         self.runtimes, self.worlds, self.epochs = {}, {}, {}
         self.history, self.iterations = [], []
         self._readings = {}
@@ -146,7 +147,10 @@ class _TaskRunner:
         seed = int.from_bytes(hashlib.sha256(binding).digest()[:4], "big")
         runtime = ChemWorldRuntime(composition=world, seed=seed,
                                    observation_noise_mode=self.noise_mode)
-        runtime.reset(seed=seed)
+        options = None if self.identity_namespace is None else {"replay_campaign_id":
+            "episode-"+uuid5(UUID(self.identity_namespace),
+                            f"{self.root_id}:{model_id}:{epoch}").hex}
+        runtime.reset(seed=seed, options=options)
         self.runtimes[model_id], self.worlds[model_id] = runtime, world
         self.epochs[model_id] = epoch+1
         self._readings.pop(model_id, None)
@@ -209,95 +213,11 @@ class _TaskRunner:
                 self.execute(model_id, task_id,
                              {"operation": "set_model_parameters", "values": values})
 
-    def task(self, identity):
-        node = self.protocol.tasks.nodes[identity]
-        if node.local_name == "task":
-            model_id = node.attributes["modelReference"]
-            runtime = self.session(model_id)
-            simulation = self.protocol.tasks.simulations[node.attributes["simulationReference"]]
-            try:
-                result = _run_course(self.worlds[model_id], simulation, runtime=runtime)
-            except SEDMLExecutionError as exc:
-                self._history(exc.history, model_id, identity)
-                exc.history = tuple(self.history)
-                raise
-            self._history(result.history, model_id, identity)
-            return {model_id: result.native_channels}
-        parts = []
-        reset = boolean(node.attributes["resetModel"])
-        for index in range(self.protocol.tasks.ranges[identity].count):
-            if reset:
-                for model_id in sorted(self.protocol.tasks.model_ids[identity]):
-                    self.reset(model_id)
-            self._readings.clear()
-            ranges = self.protocol.tasks.ranges[identity].values_at(index,
-                                                                   model_value=self.model_value)
-            self.iterations.append({"task_reference": identity, "index": index,
-                                     "range_values": dict(ranges)})
-            self.changes(records(node, "listOfChanges"), ranges, identity, initialize=reset)
-            for sub_index, child in enumerate(self.protocol.tasks.sub_tasks[identity]):
-                self.changes(records(child, "listOfChanges"), ranges, identity)
-                result = self.task(child.attributes["task"])
-                prefix = ("repeat:"+identity, index, "subtask", sub_index,
-                          *(value for pair in sorted(ranges.items()) for value in pair))
-                parts.append({model: {key: SEDMLArray(array.values, array.shape, array.axes,
-                    tuple((*prefix, *sample) for sample in array.sample_keys), array.unit)
-                    for key, array in arrays.items()} for model, arrays in result.items()})
-        result = {}
-        for model_id, (shape, axes) in self.protocol.layouts[identity].items():
-            model_parts = [part[model_id] for part in parts if model_id in part]
-            result[model_id] = {key: SEDMLArray(
-                tuple(v for part in model_parts for v in part[key].values), shape, axes,
-                tuple(sample for part in model_parts for sample in part[key].sample_keys),
-                model_parts[0][key].unit) for key in model_parts[0]}
-        return result
-
-
 def run_sedml_experiment(protocol, *, seed=0, observation_noise_mode="sequential"):
     """Execute all requested task outputs, preserving independent task roots."""
-    if (not isinstance(protocol, SEDMLProtocol) or type(seed) is not int or seed < 0
-            or observation_noise_mode not in ("sequential", "keyed")):
-        raise ValueError("experiment requires a compiled protocol, seed and native noise mode")
-    selected = {identity for identity, _, _ in protocol.reports.bindings.values()}
-    if not selected:
-        selected = set(protocol.tasks.roots)
-    arrays, history, iterations, snapshots = {}, [], [], {}
-    for identity in protocol.tasks.nodes:
-        if identity not in selected:
-            continue
-        runner = _TaskRunner(protocol, identity, seed, observation_noise_mode)
-        try:
-            channels = runner.task(identity)
-        except (ValueError, ArithmeticError, RuntimeError) as exc:
-            saved = {**snapshots, identity: {model: session.snapshot().to_dict()
-                     for model, session in runner.runtimes.items()}}
-            failed_history = (*history, *(replace(record, step=len(history)+i+1)
-                for i, record in enumerate(runner.history)))
-            error = SEDMLExecutionError(str(exc), history=failed_history,
-                                        runtime=next(reversed(runner.runtimes.values())))
-            if isinstance(exc, SEDMLExecutionError):
-                error.snapshot = exc.snapshot
-            error.snapshots = saved
-            error.iterations = (*iterations, *runner.iterations)
-            raise error from exc
-        for key, (task_id, model_id, quantity) in protocol.reports.bindings.items():
-            if task_id != identity:
-                continue
-            spec = protocol.worlds[model_id].physics.models_of("sbml")["formal_workspace"]
-            course = SEDMLCourseResult(runner.runtimes[model_id], channels[model_id], (),
-                                        spec.initial_model_time)
-            arrays[key] = course.source_array(quantity)
-        for record in runner.history:
-            history.append(replace(record, step=len(history)+1))
-        iterations.extend(runner.iterations)
-        snapshots[identity] = {model: session.snapshot().to_dict()
-                               for model, session in runner.runtimes.items()}
-    try:
-        reports = protocol.reports.evaluate(arrays)
-    except (ValueError, ArithmeticError, RuntimeError) as exc:
-        error = SEDMLExecutionError(str(exc), history=history,
-                                    runtime=next(reversed(runner.runtimes.values())))
-        error.snapshots, error.iterations = snapshots, tuple(iterations)
-        error.variable_arrays = {str(key): array.to_dict() for key, array in arrays.items()}
-        raise error from exc
-    return SEDMLExperimentResult(reports, tuple(history), tuple(iterations), snapshots)
+    from chemworld.eval.sedml_continuation import SEDMLExperimentSession
+
+    session = SEDMLExperimentSession(protocol, seed=seed,
+                                    observation_noise_mode=observation_noise_mode)
+    session.advance()
+    return session.result()

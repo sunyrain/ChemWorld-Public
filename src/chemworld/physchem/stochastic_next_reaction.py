@@ -76,6 +76,7 @@ def _validate_pending(
 def advance_next_reaction(
     channels: tuple[EventChannel, ...], counts: dict[str, int], state: dict[str, Any],
     spec: StochasticSpec, rng: np.random.Generator, duration_s: float,
+    *, stop_after_boundary: bool = False,
 ) -> StochasticAdvance:
     """Consume the validated, copied original SSA candidate; no second runtime."""
     start = float(state["time_s"])
@@ -165,12 +166,15 @@ def advance_next_reaction(
             if len(queue) > 2 * len(channels) + 16:
                 queue = [(when, i) for i, when in enumerate(times) if when is not None]
                 heapify(queue)
+            if stop_after_boundary:
+                end = time
+                break
     state.update(
         time_s=end, pending=pending, rng_state=deepcopy(rng.bit_generator.state),
         signature=_signature(counts, channels, spec),
         events_committed=state["events_committed"] + len(events),
     )
     return StochasticAdvance(
-        counts, state, tuple(events), duration_s,
+        counts, state, tuple(events), end-start if stop_after_boundary else duration_s,
         {"propensity_evaluations": evaluations, "random_draws": draws},
     )

@@ -7,8 +7,9 @@ import pytest
 from chemworld.data.logging import load_jsonl
 from chemworld.data.records import trajectory_value
 from chemworld.eval.golden import core_golden_targets
-from chemworld.eval.runner import make_agent, run_agent
+from chemworld.eval.runner import run_agent
 from chemworld.eval.scoring_audit import audit_scoring_contract
+from chemworld.legacy.agent_registry import make_agent
 from chemworld.tasks import TASK_REGISTRY
 
 

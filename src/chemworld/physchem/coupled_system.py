@@ -200,12 +200,17 @@ class CoupledEvent:
     value: Callable[[CoupledStateView], float]
     direction: int = -1
     terminal: bool = True
+    feasible_side: bool = False
 
     def __post_init__(self) -> None:
         if not self.event_id or self.direction not in {-1, 0, 1}:
             raise ValueError("stopping event needs an identity and crossing direction")
         if type(self.terminal) is not bool:
             raise ValueError("coupled event terminal flag must be boolean")
+        if type(self.feasible_side) is not bool or (
+            self.feasible_side and (not self.terminal or self.direction == 0)
+        ):
+            raise ValueError("feasible-side selection requires a directed terminal event")
 
 
 @dataclass(frozen=True)
@@ -641,6 +646,10 @@ class CoupledSystem:
     # NEGATIVE algebraic constraints. Arguments are the current view and exact
     # packed identities. Units are physical (not normalized solver coordinates).
     residual_rhs_jacobian: Callable | None = None
+    # Explicit independence only; omitted coordinates retain conservative feedback.
+    rate_independent_coordinates: tuple[str, ...] = ()
+    # A declared numerical RHS extension, never an accepted-state projection.
+    trial_state_extension: Callable[[CoupledStateView], CoupledStateView] | None = None
 
     def __post_init__(self) -> None:
         for name in ("processes", "ports", "events", "energy_ports", "coordinates"):
@@ -651,6 +660,15 @@ class CoupledSystem:
                              "no physical ports")
         keys = self.thermodynamics.inventory_keys
         coordinate_keys = tuple(item.name for item in self.coordinates)
+        object.__setattr__(self, "rate_independent_coordinates",
+                           tuple(self.rate_independent_coordinates))
+        if (len(set(self.rate_independent_coordinates)) != len(self.rate_independent_coordinates)
+                or set(self.rate_independent_coordinates) - set(coordinate_keys)):
+            raise ValueError("rate-independent coordinates must name distinct declared coordinates")
+        if self.trial_state_extension is not None and (
+            not callable(self.trial_state_extension) or self.numerical_form != "ode"
+        ):
+            raise ValueError("a trial-state extension requires the original ODE RHS")
         if (self.numerical_form not in {"ode", "residual"}
                 or (self.algebraic is not None and self.numerical_form != "residual")):
             raise ValueError("algebraic constraints require the explicit residual numerical form")
@@ -682,6 +700,8 @@ class CoupledSystem:
             ):
                 raise ValueError("process sparsity refers to unknown inventory")
         all_events = self.all_events
+        if self.numerical_form != "ode" and any(event.feasible_side for event in all_events):
+            raise ValueError("feasible-side event selection requires the ODE interpolant")
         if len({event.event_id for event in all_events}) != len(all_events):
             raise ValueError("duplicate stopping event identity")
         scales = _finite_mapping(self.inventory_scales_mol)
@@ -716,7 +736,9 @@ class CoupledSystem:
         dependencies stay dense, so adding a spatial process cannot hide a
         reaction or material-port dependence from numerical differentiation.
         """
-        if not any(p.inventory_dependencies is not None for p in self.processes):
+        if not self.rate_independent_coordinates and not any(
+            p.inventory_dependencies is not None for p in self.processes
+        ):
             return None
         keys = self.thermodynamics.inventory_keys
         count = len(keys)
@@ -738,6 +760,9 @@ class CoupledSystem:
         # Signed coordinates may influence any physical rate. Receipt columns
         # remain independent: only declared evolving coordinates feed back.
         pattern[:, base_size:] = True
+        for index, coordinate in enumerate(self.coordinates):
+            if coordinate.name in self.rate_independent_coordinates:
+                pattern[:, base_size + index] = False
         return pattern.tocsr()
 
     def validate_state(self, state):
@@ -807,6 +832,10 @@ class CoupledSystem:
         corrections: dict[str, float] = {}
         trial_extensions: dict[str, float] = {}
         property_trial_warnings: set[str] = set()
+        extended_rhs_calls = 0
+        maximum_temperature_extension_K = 0.0
+        coordinate_extensions: dict[str, float] = {}
+        jacobian_rhs_calls = 0
 
         def amounts(vector: np.ndarray, *, record: bool = False) -> dict[str, float]:
             result = {}
@@ -838,7 +867,27 @@ class CoupledSystem:
             )
 
         def rhs(time: float, scaled: np.ndarray, algebraic_values=None) -> np.ndarray:
+            nonlocal extended_rhs_calls, maximum_temperature_extension_K
             candidate = view(time, scaled * scales, algebraic_values)
+            if self.trial_state_extension is not None:
+                extended = self.trial_state_extension(candidate)
+                if (not isinstance(extended, CoupledStateView)
+                        or extended.amounts_mol != candidate.amounts_mol
+                        or extended.volume_L != candidate.volume_L
+                        or extended.time_s != candidate.time_s
+                        or extended.algebraic_values != candidate.algebraic_values
+                        or set(extended.coordinates) != set(candidate.coordinates)):
+                    raise ValueError("RHS extension may only extend temperature/coordinate values")
+                delta_t = abs(extended.temperature_K - candidate.temperature_K)
+                deltas = {k: abs(extended.coordinates[k] - v)
+                          for k, v in candidate.coordinates.items()
+                          if extended.coordinates[k] != v}
+                if delta_t or deltas:
+                    extended_rhs_calls += 1
+                    maximum_temperature_extension_K = max(maximum_temperature_extension_K, delta_t)
+                    for key, delta in deltas.items():
+                        coordinate_extensions[key] = max(coordinate_extensions.get(key, 0), delta)
+                candidate = extended
             validity = getattr(self.thermodynamics, "validity_warnings", None)
             if validity is not None:
                 property_trial_warnings.update(validity(candidate))
@@ -956,6 +1005,8 @@ class CoupledSystem:
                 callback.direction = event.direction  # type: ignore[attr-defined]
                 callbacks.append(callback)
             policy = replace(self.policy, event_names=tuple(e.event_id for e in self.all_events))
+            if any(event.feasible_side for event in self.all_events):
+                policy = replace(policy, dense_output=True)
             if self.numerical_form == "residual":
                 from chemworld.physchem.coupled_residual import solve_coupled_residual
 
@@ -968,6 +1019,32 @@ class CoupledSystem:
                 # for the residual path, which assembles its own Jacobian.
                 sparsity = self.jacobian_sparsity() if policy.method in {"BDF", "Radau"} else None
                 sparse_options = {} if sparsity is None else {"jac_sparsity": sparsity}
+                if self.rate_independent_coordinates and sparsity is not None:
+                    from chemworld.physchem.residual_system import finite_jacobian
+
+                    active_columns = np.unique(sparsity.nonzero()[1])
+
+                    def feedback_jacobian(time: float, point: np.ndarray) -> np.ndarray:
+                        def sample(candidate: np.ndarray) -> np.ndarray:
+                            nonlocal jacobian_rhs_calls
+                            jacobian_rhs_calls += 1
+                            return rhs(time, candidate)
+
+                        # Reset a finite physical-coordinate stencil on every
+                        # Jacobian. SciPy's persistent zero-column adaptation
+                        # can otherwise grow a receipt perturbation to infinity.
+                        lower = np.full(len(point), -np.inf)
+                        lower[:count] = np.minimum(point[:count], 0.0)
+                        lower[count] = 0.0
+                        values = finite_jacobian(
+                            sample, point, np.ones(len(point)), lower=lower,
+                            indices=active_columns,
+                        )
+                        matrix = np.zeros(sparsity.shape)
+                        matrix[:, active_columns] = values
+                        return matrix
+
+                    sparse_options = {"jac": feedback_jacobian}
                 report = solve_ode(
                     rhs,
                     initial / scales,
@@ -979,6 +1056,7 @@ class CoupledSystem:
                 )
                 report.raise_for_failure("coupled physical advance")
                 points = [(float(t), report.y[:, i] * scales) for i, t in enumerate(report.t)]
+                terminal_adjustment = None
                 if report.diagnostic.status == 1:
                     terminal = max(
                         ((float(times[-1]), states[-1], i)
@@ -991,12 +1069,43 @@ class CoupledSystem:
                     if terminal is None:
                         raise RuntimeError("solver stopped without an event state")
                     terminal_time, terminal_vector, event_index = terminal
-                    stopping_event = self.all_events[event_index].event_id
+                    event = self.all_events[event_index]
+                    stopping_event = event.event_id
+                    if event.feasible_side:
+                        from chemworld.physchem.coupled_events import feasible_terminal_point
+
+                        def feasible(time, scaled):
+                            raw = scaled * scales
+                            return (
+                                np.all(np.isfinite(raw)) and np.all(raw[:count] >= 0)
+                                and all(
+                                    (item.minimum is None or value >= item.minimum)
+                                    and (item.maximum is None or value <= item.maximum)
+                                    for item, value in zip(
+                                        self.coordinates, raw[coordinate_offset:], strict=True)
+                                )
+                                and event.direction * callbacks[event_index](time, scaled) <= 0
+                            )
+
+                        root_time = terminal_time
+                        terminal_time, terminal_vector = feasible_terminal_point(
+                            terminal_time, terminal_vector, report.raw_result.sol, feasible)
+                        if terminal_time != root_time:
+                            terminal_adjustment = {
+                                "event": stopping_event, "root_time_s": root_time,
+                                "accepted_time_s": terminal_time,
+                                "retreat_s": root_time - terminal_time,
+                                "event_value": callbacks[event_index](
+                                    terminal_time, terminal_vector),
+                            }
+                            points = [point for point in points if point[0] < terminal_time]
                     if points and abs(points[-1][0] - terminal_time) < 1e-12:
                         points[-1] = (terminal_time, terminal_vector * scales)
                     else:
                         points.append((terminal_time, terminal_vector * scales))
                 solver_diagnostic = report.diagnostic.to_dict()
+                if terminal_adjustment is not None:
+                    solver_diagnostic["terminal_feasible_side"] = terminal_adjustment
             trajectory = (state,) if len(points) == 1 and points[0][0] == 0 else tuple(
                 snapshot(t, values) for t, values in points
             )
@@ -1011,6 +1120,18 @@ class CoupledSystem:
             }
             if property_trial_warnings:
                 diagnostic["property_trial_warnings"] = sorted(property_trial_warnings)
+            if extended_rhs_calls:
+                diagnostic["rhs_state_extension"] = {
+                    "extended_evaluations": extended_rhs_calls,
+                    "maximum_temperature_offset_K": maximum_temperature_extension_K,
+                    "maximum_coordinate_offsets": coordinate_extensions,
+                    "accepted_states_projected": False,
+                }
+            if jacobian_rhs_calls:
+                diagnostic["feedback_jacobian_rhs_evaluations"] = jacobian_rhs_calls
+                diagnostic["total_reported_rhs_evaluations"] = (
+                    int(diagnostic["nfev"]) + jacobian_rhs_calls
+                )
         final = trajectory[-1]
         if isinstance(self.thermodynamics, KineticOnlyThermodynamics):
             diagnostic["energy_scope"] = "not_declared_formal_kinetics"

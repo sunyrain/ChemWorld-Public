@@ -1,13 +1,13 @@
-"""Frozen deterministic use-case qualification.
+"""Frozen deterministic use-case qualification for the first paper.
 
-The independent units are the eight cases frozen in the public protocol.
+The independent units are the eight cases frozen in
+``workstreams/arxiv_v1/experiments/first-paper-deterministic-use-cases.md``.
 Every submitted action is inspected; sampling is never used as a pass gate.
 """
 
 from __future__ import annotations
 
 import copy
-import gzip
 import hashlib
 import json
 import math
@@ -40,8 +40,8 @@ from chemworld.eval.report_io import write_report_outputs
 from chemworld.eval.verify import verify_records
 from chemworld.tasks import TASK_CONTRACT_VERSION, TaskSpec, get_task
 
-REPORT_SCHEMA_VERSION = "chemworld-deterministic-use-cases-report-0.2"
-QUALIFICATION_ID = "deterministic-use-cases-v1"
+REPORT_SCHEMA_VERSION = "chemworld-first-paper-deterministic-use-cases-report-0.1"
+QUALIFICATION_ID = "first-paper-deterministic-use-cases-v1"
 
 EXPECTED_CASE_COUNT = 8
 EXPECTED_SUBMITTED_ACTION_COUNT = 89
@@ -49,9 +49,11 @@ EXPECTED_COMMITTED_ACTION_COUNT = 88
 EXPECTED_ROLLBACK_COUNT = 1
 EXPECTED_FINAL_ASSAY_COUNT = 8
 
-PROTOCOL = Path("protocols/deterministic-use-cases.md")
-CONTROLLED_FORK_EVIDENCE = Path("evidence/reports/controlled-world-forks.json.gz")
-COMPOSITION_EVIDENCE = Path("evidence/reports/composition-qualification.json.gz")
+EXPERIMENT_NOTE = Path(
+    "workstreams/arxiv_v1/experiments/first-paper-deterministic-use-cases.md"
+)
+TODO_PATH = Path("workstreams/arxiv_v1/FIRST_PAPER_TODOLIST.md")
+CURRENT_CONFIG = Path("configs/current.json")
 REFERENCE_PATHS = Path("examples/world-authoring/use-case-reference-paths-v0.1.json")
 
 _TASK_SOURCE_PATHS = (
@@ -89,6 +91,9 @@ _U05_COMPOSITION_ID = "qualification-reaction-distillation-observation-coverage-
 _U05_REQUEST_SHA256 = "687007fb2fe9e7cb7bde1eff10219469fecc73903648d2fa34fec17c10694b4f"
 _U05_GENERATION_SEED = 105
 _U05_GENERATION_INDEX = 0
+_COMPLETED_CLAIM = "Claim: Codex /root — U01-U03/U06/E01-DET — DONE"
+
+
 class DeterministicUseCaseProtocolError(ValueError):
     """Raised when a frozen input or current evidence binding has drifted."""
 
@@ -134,11 +139,7 @@ def _sha256_path(path: Path) -> str:
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
-    if path.suffix == ".gz":
-        with gzip.open(path, "rt", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    else:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise DeterministicUseCaseProtocolError(f"JSON root must be an object: {path}")
     return payload
@@ -182,20 +183,20 @@ def validate_launch_preconditions(
     if git_root != root:
         errors.append(f"repository_root is not the Git root: {root}")
 
-    protocol_path = _resolve_repository_path(root, PROTOCOL)
-    if not protocol_path.is_file():
-        errors.append("frozen public protocol is missing")
+    note_path = _resolve_repository_path(root, EXPERIMENT_NOTE)
+    todo_path = _resolve_repository_path(root, TODO_PATH)
+    if not note_path.is_file():
+        errors.append("frozen experiment note is missing")
     else:
-        protocol_text = protocol_path.read_text(encoding="utf-8")
-        required = (
-            "frozen before execution",
-            "Eight complete cases",
-            "89 submitted actions",
-            "All eight complete submitted-action traces replay exactly",
-        )
-        missing = [fragment for fragment in required if fragment not in protocol_text]
-        if missing:
-            errors.append("public protocol drifted: " + ", ".join(missing))
+        note_text = note_path.read_text(encoding="utf-8")
+        if "FROZEN BEFORE DATA GENERATION" not in note_text:
+            errors.append("experiment note is not frozen before data generation")
+    if not todo_path.is_file():
+        errors.append("first-paper TODO is missing")
+    else:
+        todo_text = todo_path.read_text(encoding="utf-8")
+        if _COMPLETED_CLAIM not in todo_text:
+            errors.append("completed deterministic use-case claim is missing or not DONE")
 
     branch = _git(root, "branch", "--show-current")
     dirty = _git(root, "status", "--porcelain", "--untracked-files=all")
@@ -210,7 +211,8 @@ def validate_launch_preconditions(
         "branch": branch,
         "worktree_clean": not bool(dirty),
         "task_contract_version": TASK_CONTRACT_VERSION,
-        "protocol": _source_binding(root, PROTOCOL),
+        "experiment_note": _source_binding(root, EXPERIMENT_NOTE),
+        "todo": _source_binding(root, TODO_PATH),
     }
 
 
@@ -441,27 +443,64 @@ def _case_spec(plan: _CasePlan) -> dict[str, Any]:
     }
 
 
-def _public_evidence_binding(root: Path, relative_path: Path) -> dict[str, Any]:
+def _current_node_binding(
+    root: Path,
+    current: dict[str, Any],
+    node_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    dag = current.get("evidence_dag")
+    nodes = dag.get("nodes") if isinstance(dag, Mapping) else None
+    node = nodes.get(node_id) if isinstance(nodes, Mapping) else None
+    if not isinstance(node, Mapping):
+        raise DeterministicUseCaseProtocolError(f"current evidence node is missing: {node_id}")
+    required_state = {
+        "artifact_state": "current",
+        "freshness": "fresh",
+        "gate_state": "passed",
+    }
+    for field, expected in required_state.items():
+        if node.get(field) != expected:
+            raise DeterministicUseCaseProtocolError(
+                f"current evidence node {node_id} has {field}={node.get(field)!r}"
+            )
+    relative_path = node.get("path")
+    expected_sha = node.get("sha256")
+    if not isinstance(relative_path, str) or not isinstance(expected_sha, str):
+        raise DeterministicUseCaseProtocolError(
+            f"current evidence node {node_id} has an incomplete path/SHA binding"
+        )
     path = _resolve_repository_path(root, relative_path)
     if not path.is_file():
-        raise DeterministicUseCaseProtocolError(f"public evidence is missing: {relative_path}")
-    return {
-        "path": relative_path.as_posix(),
-        "sha256": _sha256_path(path),
+        raise DeterministicUseCaseProtocolError(
+            f"current evidence artifact is missing for {node_id}: {relative_path}"
+        )
+    actual_sha = _sha256_path(path)
+    if actual_sha != expected_sha:
+        raise DeterministicUseCaseProtocolError(
+            f"current evidence SHA drifted for {node_id}: {actual_sha} != {expected_sha}"
+        )
+    binding = {
+        "node_id": node_id,
+        "path": relative_path,
+        "expected_sha256": expected_sha,
+        "actual_sha256": actual_sha,
+        "artifact_state": node["artifact_state"],
+        "freshness": node["freshness"],
+        "gate_state": node["gate_state"],
         "binding_verified": True,
     }
+    return binding, _read_json_object(path)
 
 
 def resolve_existing_evidence(repository_root: str | Path) -> dict[str, Any]:
-    """Resolve prerequisites through the stable public evidence files."""
+    """Resolve U04/U05 exclusively through ``configs/current.json`` and verify SHA."""
 
     root = Path(repository_root).resolve()
-    u04_path = _resolve_repository_path(root, CONTROLLED_FORK_EVIDENCE)
-    u05_path = _resolve_repository_path(root, COMPOSITION_EVIDENCE)
-    u04_binding = _public_evidence_binding(root, CONTROLLED_FORK_EVIDENCE)
-    u05_binding = _public_evidence_binding(root, COMPOSITION_EVIDENCE)
-    u04_report = _read_json_object(u04_path)
-    u05_report = _read_json_object(u05_path)
+    current_path = _resolve_repository_path(root, CURRENT_CONFIG)
+    current = _read_json_object(current_path)
+    current_sha = _sha256_path(current_path)
+    u04_binding, u04_report = _current_node_binding(root, current, _U04_NODE_ID)
+    u05_binding, u05_report = _current_node_binding(root, current, _U05_NODE_ID)
 
     u04_passed = bool(
         u04_report.get("passed") is True
@@ -497,6 +536,10 @@ def resolve_existing_evidence(repository_root: str | Path) -> dict[str, Any]:
         raise DeterministicUseCaseProtocolError("current U05 frozen composition evidence drifted")
 
     return {
+        "current_registry": {
+            "path": CURRENT_CONFIG.as_posix(),
+            "sha256": current_sha,
+        },
         "U04": {
             "evidence_role": "single-private-component controlled world forks",
             "binding": u04_binding,
@@ -1563,15 +1606,13 @@ def write_outputs(
 
 
 __all__ = [
-    "COMPOSITION_EVIDENCE",
-    "CONTROLLED_FORK_EVIDENCE",
+    "CURRENT_CONFIG",
     "EXPECTED_ACTION_SHA256",
     "EXPECTED_CASE_COUNT",
     "EXPECTED_COMMITTED_ACTION_COUNT",
     "EXPECTED_FINAL_ASSAY_COUNT",
     "EXPECTED_ROLLBACK_COUNT",
     "EXPECTED_SUBMITTED_ACTION_COUNT",
-    "PROTOCOL",
     "QUALIFICATION_ID",
     "REPORT_SCHEMA_VERSION",
     "DeterministicUseCaseProtocolError",

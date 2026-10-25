@@ -13,6 +13,7 @@ from chemworld.physchem.battery_plating import (
     plating_algebraic,
     plating_control_mode,
     plating_fields,
+    plating_inventory_ledger,
     plating_readout,
     plating_system,
     validate_plating_state,
@@ -111,6 +112,18 @@ def test_rest_internal_stripping_drives_negative_memory_without_terminal_charge(
     assert sum(final.amounts_mol.values()) == pytest.approx(
         sum(initial.amounts_mol.values()), abs=1e-12)
     validate_plating_state(s, final)
+
+
+def test_inventory_ledger_keeps_axen_memory_with_real_plating_inventory():
+    s = model(plated=.001, maximum_current_A=.001)
+    initial = s.initial_state()
+    result = advance_plating(s, initial, program(0.), 2.)
+    ledger = plating_inventory_ledger(s, result.final_state)
+    assert set(ledger["hysteresis"]) == set(s.hysteresis_keys)
+    assert ledger["hysteresis"][s.hysteresis_keys[0]] < initial.coordinates[s.hysteresis_keys[0]]
+    assert ledger["hysteresis"][s.hysteresis_keys[1]] == initial.coordinates[s.hysteresis_keys[1]]
+    assert ledger["faradaic_residual_C"] == pytest.approx(0.0, abs=1e-10)
+    assert ledger["plated_mol"] < initial.amounts_mol["plating:Li"]
 
 
 @pytest.mark.parametrize("current", [-.2, .2])

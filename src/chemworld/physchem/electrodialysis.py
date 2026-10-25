@@ -119,8 +119,10 @@ def electrodialysis_point(
     policy: RootPolicy = DEFAULT_ED_POLICY,
     numerical_trial: bool = False,
 ) -> dict[str, Any]:
-    if len(amounts) != 2 or unit not in {"A", "V"} or not isfinite(target):
-        raise ValueError("ED needs two finite liquids and a finite current or voltage target")
+    if len(amounts) != 2 or unit not in {"A", "V", "Ohm"} or not isfinite(target):
+        raise ValueError("ED needs two finite liquids and a finite current, voltage or load")
+    if unit == "Ohm" and (isinstance(target, bool) or target < 0):
+        raise ValueError("passive load resistance must be finite nonnegative Ohm")
     prop = spec.properties
     if not numerical_trial:
         for n in amounts:
@@ -157,7 +159,9 @@ def electrodialysis_point(
         / (F * F * float(np.sum(b.z * b.z * b.diffusion * np.mean(b.end_c, axis=0))))
         for b in blocks
     )
-    initial_j = target / area if unit == "A" else target / approximate_resistance
+    initial_j = (
+        0.0 if unit == "Ohm" else target / area if unit == "A" else target / approximate_resistance
+    )
     variables = tuple(
         replace(v, name=f"{name}:{v.name}")
         for name, b in zip(("aem", "cem"), blocks, strict=True)
@@ -179,6 +183,8 @@ def electrodialysis_point(
         electrical = (
             (j - target / area) / jscale if unit == "A" else (voltage(y, j) - target) / vscale
         )
+        if unit == "Ohm":
+            electrical = (voltage(y, j) + area * j * target) / vscale
         return np.r_[
             blocks[0].residual(y[:split], j), blocks[1].residual(y[split:-1], j), electrical
         ]
@@ -192,10 +198,12 @@ def electrodialysis_point(
             native, dj = b.jacobian(y[offset : offset + width], j)
             jac[offset : offset + width, offset : offset + width] = native
             jac[offset : offset + width, -1] = dj * jscale
-            if unit == "V":
+            if unit in {"V", "Ohm"}:
                 jac[-1, offset + b.nc + b.nphi - 1] = -R * spec.temperature_K / F / vscale
             offset += width
         jac[-1, -1] = 1 if unit == "A" else jscale * spec.solution_resistance_Ohm_m2 / vscale
+        if unit == "Ohm":
+            jac[-1, -1] += jscale * area * target / vscale
         return jac
 
     system = ResidualSystem(

@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 
 SOURCE_INDEX = "scripts/community_release_source_files.json"
 BUILD_HOOK = "scripts/community_release_build.py"
+INTERNAL_UI_PREFIXES = ("apps/", "src/chemworld/lab/", "src/chemworld/workbench/")
 RUNTIME_CONFIGS = frozenset(
     {
         "configs/scenarios/mechanism_scenarios.yaml",
@@ -25,6 +26,8 @@ RUNTIME_CONFIGS = frozenset(
 SOURCE_EXTRAS = frozenset(
     {
         BUILD_HOOK,
+        "scripts/build_cpu.py",
+        "scripts/smoke_test_wheel.py",
         "pyproject.toml",
         "uv.lock",
         "README.md",
@@ -39,16 +42,18 @@ SOURCE_EXTRAS = frozenset(
         "examples/demo_minimal_agent.py",
         "examples/native_surface_research.py",
         "examples/reuse_native_equipment.py",
-        "examples/native_biochemical.py",
         "docs/native_foundation.md",
+        "docs/environment.md",
+        "docs/environment.en.md",
+        "docs/environment-authoring.md",
+        "docs/environment-authoring.en.md",
+        "docs/legacy.md",
+        "docs/legacy.en.md",
         "docs/native_domains.md",
         "docs/native_capabilities.md",
-        "docs/native_shared_lab.md",
+        "docs/native_cpu.md",
         "docs/native_biochemical.md",
-        "docs/native_stochastic.md",
-        "docs/native_mechanisms.md",
-        "docs/extension-roadmap.md",
-        "docs/extension-roadmap.zh.md",
+        "docs/native_shared_lab.md",
         "docs/community_release.md",
         "docs/community_release.en.md",
         "docs/getting_started.md",
@@ -66,6 +71,12 @@ def public_path(name: str) -> bool:
     path = PurePosixPath(name)
     if path.is_absolute() or ".." in path.parts or "__pycache__" in path.parts:
         return False
+    if name.startswith(INTERNAL_UI_PREFIXES):
+        return False
+    if name.startswith("native/chemworld_cpu/"):
+        return path.suffix in {".cpp", ".h", ".hpp", ".txt", ".md", ".cmake"} or name.endswith(
+            "CMakeLists.txt"
+        )
     if name in SOURCE_EXTRAS or name in RUNTIME_CONFIGS:
         return True
     if name.startswith("configs/mechanisms/") and path.suffix == ".yaml":
@@ -73,17 +84,12 @@ def public_path(name: str) -> bool:
     if name.startswith("src/chemworld/"):
         return (
             path.suffix == ".py"
-            or name in {
-                "src/chemworld/data/parameters/incompressible.json",
-                "src/chemworld/data/parameters/CoolProp-MIT.txt",
-            }
+            or name in {"src/chemworld/data/parameters/incompressible.json",
+                        "src/chemworld/data/parameters/CoolProp-MIT.txt",
+                        "src/chemworld/data/parameters/battery_chen2020_pybamm_25_4_2.json"}
+            or (name.startswith("src/chemworld/schemas/") and path.suffix == ".json")
             or (name.startswith("src/chemworld/physchem/atomic_data/")
                 and path.suffix in {".csv", ".json"})
-            or (name.startswith("src/chemworld/schemas/") and path.suffix == ".json")
-            or (
-                name.startswith("src/chemworld/lab/static/")
-                and path.suffix in {".html", ".css", ".js", ".svg", ".woff2"}
-            )
         )
     return False
 

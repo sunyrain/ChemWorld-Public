@@ -135,12 +135,21 @@ class MaterialExchange:
         }
 
 
-def formal_inventory_exclusions(state):
+def inventory_balance_exclusions(state):
     """Registered chemical balances make no claims about unformulated entities."""
-    if any(local.phase == "formal" for local in (state, *state.inactive_vessels.values())):
-        return ("formal_entity_element_inventory", "formal_entity_charge_inventory",
-                "formal_entity_energy", "formal_compartment_carrier_mass")
-    return ()
+    states = (state, *state.inactive_vessels.values())
+    exclusions = []
+    if any(local.phase == "formal" for local in states):
+        exclusions.extend(("formal_entity_element_inventory", "formal_entity_charge_inventory",
+                           "formal_entity_energy", "formal_compartment_carrier_mass"))
+    if any(record.attached_vessel_id == local.vessel_id
+           and record.settings.get("empirical_reaction_balance") is not None
+           for local in states for record in local.equipment.equipment.values()):
+        # A COD/N/equivalent source matrix is not a molecular formula, charge or
+        # reaction-enthalpy model. Registered carrier water keeps its own balance.
+        exclusions.extend(("empirical_full_element_inventory", "empirical_full_charge_inventory",
+                           "empirical_biochemical_reaction_energy"))
+    return tuple(exclusions)
 
 
 @dataclass(frozen=True)

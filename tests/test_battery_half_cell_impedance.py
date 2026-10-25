@@ -23,7 +23,11 @@ from chemworld.physchem.battery_half_cell import (
     half_cell_system,
     validate_half_cell_state,
 )
-from chemworld.physchem.battery_impedance import battery_impedance, battery_impedance_system
+from chemworld.physchem.battery_impedance import (
+    battery_impedance,
+    battery_impedance_system,
+    half_cell_impedance,
+)
 from chemworld.physchem.battery_materials import ElectrodeOCV
 from chemworld.physchem.battery_models import ParticleSpec
 from chemworld.physchem.data_conflicts import DataSourceProvenance
@@ -108,6 +112,15 @@ def test_actual_finite_reservoir_particle_charge_and_work_have_faradaic_phasors(
         assert s*values[indices["delivered_work_J"]] == pytest.approx(voltage, abs=2e-10)
     assert result.response.diagnostics["derivative_modes"]["state"] == "analytic"
     assert result.response.diagnostics["derivative_modes"]["parameter"] == "analytic"
+
+
+def test_explicit_half_cell_impedance_entrypoint_reuses_shared_spectrum():
+    spec = model()
+    direct = battery_impedance(spec, FREQUENCIES)
+    explicit = half_cell_impedance(spec, FREQUENCIES)
+    assert explicit.to_dict() == direct.to_dict()
+    with pytest.raises(ValueError, match="finite-metal half-cell"):
+        half_cell_impedance(object(), FREQUENCIES)
 
 
 def test_resolved_sphere_has_positive_working_surface_response_and_two_bv_terms():

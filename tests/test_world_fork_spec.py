@@ -28,6 +28,11 @@ INVENTORY_PATH = (
     REPOSITORY_ROOT / "configs" / "benchmark" / "work_i_world_fork_component_inventory_v0.1.json"
 )
 SPEC_PATH = REPOSITORY_ROOT / "configs" / "benchmark" / "work_i_world_fork_spec_v0.1.json"
+REPORT_PATH = (
+    REPOSITORY_ROOT / "workstreams" / "arxiv_v1" / "reports" / "work-i-world-fork-spec-v0.1.json"
+)
+
+
 def _inventory() -> WorldComponentInventory:
     return load_world_component_inventory(INVENTORY_PATH)
 
@@ -76,9 +81,7 @@ def test_frozen_fork_audit_is_reproducible_and_claim_bounded() -> None:
         "divergence_claim": False,
         "agent_performance_claim": False,
     }
-    assert report["component_diff"]["changed_component_ids"] == [
-        "private_physics.constitutive_laws"
-    ]
+    assert json.loads(REPORT_PATH.read_text(encoding="utf-8")) == report
 
 
 def test_builder_supports_material_law_target_and_nested_parent_lineage() -> None:

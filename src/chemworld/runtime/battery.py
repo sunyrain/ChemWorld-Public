@@ -69,7 +69,7 @@ def initial_battery_slot(record, spec):
             ),
             StateFieldSpec("discharged_charge_C", "C", minimum=None),
             StateFieldSpec("delivered_work_J", "J", minimum=None),
-            *(StateFieldSpec(key, "dimensionless", mixing="equal", minimum=-1.0)
+            *(StateFieldSpec(key, "dimensionless", mixing="equal", minimum=-1.0, maximum=1.0)
               for key in spec.hysteresis_keys),
             *(StateFieldSpec(key, "K", mixing="equal", minimum=None)
               for key in getattr(spec, "thermal_coordinate_keys", ())),

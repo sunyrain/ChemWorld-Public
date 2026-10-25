@@ -14,10 +14,10 @@ import numpy as np
 
 from chemworld import __version__
 from chemworld.data.submission import git_commit
-from chemworld.eval.leaderboard import aggregate_leaderboard
 from chemworld.eval.provenance import build_solver_provenance_manifest
 from chemworld.eval.seed_suite import task_seed_plan
 from chemworld.eval.suite import run_suite
+from chemworld.legacy.leaderboard import aggregate_leaderboard
 from chemworld.tasks import CORE_TASK_IDS, SERIOUS_TASK_IDS, get_task
 
 DEFAULT_BASELINE_AGENTS = (

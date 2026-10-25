@@ -26,9 +26,11 @@ from chemworld.physchem.battery_plating import (
     PLATING_UNITS,
     LithiumPlatingSpec,
     advance_plating,
+    advance_plating_cycle,
     plating_algebraic,
     plating_control_mode,
     plating_fields,
+    plating_inventory_ledger,
     plating_particle_flux,
     plating_readout,
     plating_system,
@@ -274,3 +276,43 @@ def test_uncertified_material_or_inconsistent_inventory_cannot_enter_closure():
 def test_finite_metal_amount_cannot_overflow_its_real_faradaic_inventory():
     with pytest.raises(ValueError, match="Faradaic inventory"):
         model(dead=1e306)
+
+
+def test_inventory_ledger_reports_real_metal_and_faradaic_closure():
+    s = model(mode="reversible", plated=0.0, dead=0.0)
+    initial = s.initial_state()
+    before = plating_inventory_ledger(s, initial)
+    assert before["metal_mol"] == 0.0
+    assert before["faradaic_residual_C"] == pytest.approx(0.0, abs=1e-12)
+    final = advance_plating(s, initial, program(.2), .5).final_state
+    after = plating_inventory_ledger(s, final)
+    assert after["plated_mol"] > 0.0
+    assert after["dead_mol"] == pytest.approx(0.0, abs=1e-14)
+    assert after["faradaic_residual_C"] == pytest.approx(0.0, abs=1e-10)
+    assert after["negative_total_mol"] + final.coordinates["discharged_charge_C"] / F == (
+        pytest.approx(before["negative_total_mol"] + before["discharged_charge_C"] / F,
+                      abs=1e-12)
+    )
+
+
+def test_plating_cycle_hands_off_accepted_state_and_keeps_inventory_history():
+    s = model(mode="irreversible", plated=0.0, dead=0.0)
+    initial = s.initial_state()
+    first = program(.2)
+    second = program(-.2, start=.5)
+    cycle = advance_plating_cycle(s, initial, ((first, .5), (second, .5)))
+    explicit_first = advance_plating(s, initial, first, .5)
+    explicit_second = advance_plating(s, explicit_first.final_state, second, .5)
+    assert cycle.outcome == "success"
+    assert cycle.final_state == explicit_second.final_state
+    assert len(cycle.segments) == 2
+    history = cycle.inventory_history(s)
+    assert len(history) == 3
+    assert history[1]["dead_mol"] > history[0]["dead_mol"]
+    assert history[-1]["faradaic_residual_C"] == pytest.approx(0.0, abs=1e-10)
+
+
+def test_plating_cycle_rejects_nonpositive_duration():
+    s = model()
+    with pytest.raises(ValueError, match="finite and positive"):
+        advance_plating_cycle(s, s.initial_state(), ((program(.2), 0.0),))

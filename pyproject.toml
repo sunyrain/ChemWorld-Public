@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "chemworld-bench"
 version = "0.5.0.dev0"
-description = "Programmable chemical worlds for controlled and replayable agent experimentation."
+description = "A programmable physical-chemistry environment with native observations, persistent experiments and replay."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = [
   "ai4science",
-  "benchmark",
+  "scientific-computing",
   "chemical-engineering",
   "gymnasium",
   "world-model",
@@ -72,7 +72,6 @@ physchem-ref = [
 
 [project.scripts]
 chemworld = "chemworld.cli:main"
-chemworld-lab = "chemworld.lab.server:main"
 
 [project.urls]
 Homepage = "https://github.com/sunyrain/ChemWorld-Public"

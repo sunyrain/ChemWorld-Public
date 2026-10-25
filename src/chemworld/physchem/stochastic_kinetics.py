@@ -7,6 +7,7 @@ subtraction, fractional molecules, automatic ODE switch or hidden upstream.
 """
 
 import json
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
@@ -78,11 +79,57 @@ class StochasticSpec:
 
 
 @dataclass(frozen=True)
+class EventProcessSpec:
+    """Numerical event policy for already compiled channels, without fake T/V.
+
+    The caller binds its own immutable source and fixed inputs in context. This
+    does not declare chemical composition, thermodynamics or a live inventory.
+    """
+
+    algorithm: str
+    max_events_per_advance: int
+    context: str
+    tau_policy: object = None
+
+    def __post_init__(self):
+        if self.algorithm not in {"gillespie-direct-v1", "gibson-bruck-next-reaction-v1",
+                                  TAU_ALGORITHM}:
+            raise ValueError("unsupported compiled event algorithm")
+        if type(self.max_events_per_advance) is not int or self.max_events_per_advance < 1:
+            raise ValueError("compiled event budget must be a positive integer")
+        if not isinstance(self.context, str) or not self.context:
+            raise ValueError("compiled channels require an explicit source context")
+        if self.algorithm == TAU_ALGORITHM:
+            from chemworld.physchem.stochastic_tau_leap import TauLeapPolicy
+
+            if not isinstance(self.tau_policy, TauLeapPolicy):
+                object.__setattr__(self, "tau_policy", TauLeapPolicy.from_dict(self.tau_policy))
+        elif self.tau_policy is not None:
+            raise ValueError("tau_policy requires the explicit tau-leap algorithm")
+
+
+@dataclass(frozen=True)
 class EventChannel:
     reaction_id: str
     changes: tuple
     reactants: tuple
     constant: float
+
+    @property
+    def has_regenerated_reactants(self) -> bool:
+        """Full reactants include material retained in or produced by this channel."""
+        return dict(self.reactants) != {key: -v for key, v in self.changes if v < 0}
+
+    def firing_limit(self, counts: Mapping[str, int]) -> int:
+        """Isolated-channel availability, without borrowing other leap products."""
+        orders = dict(self.reactants)
+        if any(counts.get(key, 0) < n for key, n in self.reactants):
+            return 0
+        return min(
+            (1 + (counts.get(key, 0) - orders[key]) // -change
+             for key, change in self.changes if change < 0),
+            default=MAX_COUNT,
+        )
 
     def propensity(self, counts):
         value = self.constant
@@ -107,7 +154,6 @@ def compile_channels(network, spec):
             reaction.reversible
             or reaction.rate_law.equation_id != "mass_action"
             or reaction.rate_law.uses_activities
-            or reaction.kinetic_forward_orders != reaction.reactants
             or set(reaction.rate_law.parameters) != {"k"}
         ):
             raise ValueError(
@@ -119,7 +165,11 @@ def compile_channels(network, spec):
         k = reaction.rate_law.parameters["k"]
         if isinstance(k, bool) or not isfinite(k) or k < 0:
             raise ValueError("SSA rate constant must be finite and nonnegative")
-        reactants = tuple(sorted((key, int(n)) for key, n in reaction.reactants.items()))
+        orders = reaction.kinetic_forward_orders
+        if (any(not float(n).is_integer() or n <= 0 for n in orders.values())
+                or any(orders.get(key, 0) < n for key, n in reaction.reactants.items())):
+            raise ValueError("SSA requires full integer elementary reactants")
+        reactants = tuple(sorted((key, int(n)) for key, n in orders.items()))
         order = sum(n for _, n in reactants)
         if order > 3:
             raise ValueError("SSA supports elementary molecularity at most three")
@@ -155,7 +205,12 @@ def initial_continuation(seed, time_s=0.0, *, algorithm="gillespie-direct-v1"):
 
 
 def _signature(counts, channels, spec):
-    values = [counts, [asdict(c) for c in channels], spec.volume_L, spec.temperature_K]
+    if isinstance(spec, EventProcessSpec):
+        values = ["compiled-event-channels-v1", counts, [asdict(c) for c in channels],
+                  spec.context, spec.algorithm]
+    else:
+        # Historical physical-network signatures and draw order stay exact.
+        values = [counts, [asdict(c) for c in channels], spec.volume_L, spec.temperature_K]
     if spec.algorithm == TAU_ALGORITHM:
         values.extend((spec.algorithm, spec.tau_policy.to_dict()))
     return sha256(
@@ -212,10 +267,21 @@ def advance_stochastic(network, counts, continuation, duration_s):
         raise ValueError("network has not declared a stochastic strategy")
     spec = StochasticSpec(**network.stochastic)
     channels = network.stochastic_channels
+    return advance_event_channels(channels, network.species_ids, spec,
+                                  counts, continuation, duration_s)
+
+
+def advance_event_channels(channels, species_ids, spec, counts, continuation, duration_s, *,
+                           stop_after_boundary=False):
+    """Shared pure direct/next/tau kernel; callers retain state and source units."""
+    if type(stop_after_boundary) is not bool:
+        raise ValueError("event boundary selection must be an explicit Boolean")
+    if not isinstance(spec, (StochasticSpec, EventProcessSpec)):
+        raise ValueError("compiled channels require an explicit event policy")
     counts = validate_counts(counts)
-    if set(counts) - set(network.species_ids):
+    if set(counts) - set(species_ids):
         raise ValueError("unknown SSA species")
-    counts = {key: counts.get(key, 0) for key in network.species_ids}
+    counts = {key: counts.get(key, 0) for key in species_ids}
     state = deepcopy(continuation)
     if not isfinite(duration_s) or duration_s < 0:
         raise ValueError("SSA duration must be finite and nonnegative")
@@ -237,7 +303,8 @@ def advance_stochastic(network, counts, continuation, duration_s):
     if spec.algorithm == TAU_ALGORITHM:
         from chemworld.physchem.stochastic_tau_leap import advance_tau_leap
 
-        return advance_tau_leap(channels, counts, state, spec, rng, duration_s, signature)
+        return advance_tau_leap(channels, counts, state, spec, rng, duration_s, signature,
+                                stop_after_boundary=stop_after_boundary)
     if state["signature"] != signature:
         # A genuine instantaneous inventory/rate intervention invalidates the
         # old exponential event, but preserves the independent process stream.
@@ -245,7 +312,8 @@ def advance_stochastic(network, counts, continuation, duration_s):
     if spec.algorithm == "gibson-bruck-next-reaction-v1":
         from chemworld.physchem.stochastic_next_reaction import advance_next_reaction
 
-        return advance_next_reaction(channels, counts, state, spec, rng, duration_s)
+        return advance_next_reaction(channels, counts, state, spec, rng, duration_s,
+                                     stop_after_boundary=stop_after_boundary)
     pending = state["pending"]
     if pending is not None and (
         not isfinite(pending["time_s"])
@@ -282,6 +350,9 @@ def advance_stochastic(network, counts, continuation, duration_s):
         validate_counts(counts)
         events.append((time, channel.reaction_id))
         pending = None
+        if stop_after_boundary:
+            end = time
+            break
     state.update(
         time_s=end,
         rng_state=deepcopy(rng.bit_generator.state),
@@ -290,6 +361,6 @@ def advance_stochastic(network, counts, continuation, duration_s):
         events_committed=state["events_committed"] + len(events),
     )
     return StochasticAdvance(
-        counts, state, tuple(events), duration_s,
+        counts, state, tuple(events), end-start if stop_after_boundary else duration_s,
         {"propensity_evaluations": evaluations, "random_draws": draws},
     )

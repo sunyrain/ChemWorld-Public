@@ -13,9 +13,10 @@ import pytest
 import chemworld  # noqa: F401
 from chemworld.campaign_resources import CampaignResourceCard
 from chemworld.data.logging import load_jsonl
-from chemworld.eval.runner import make_agent, run_agent
+from chemworld.eval.runner import run_agent
 from chemworld.eval.verify import verify_records
 from chemworld.foundation import Observation, equipment_settings
+from chemworld.legacy.agent_registry import make_agent
 from chemworld.physchem.batch_reactors import DynamicBatchReactorModel
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 

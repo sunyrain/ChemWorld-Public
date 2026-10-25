@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     )
     from chemworld.physchem.helmholtz_thermal import HelmholtzIsochoricThermodynamics
     from chemworld.physchem.humid_air_thermal import HumidAirIsochoricThermodynamics
+    from chemworld.physchem.molecular_mixture import MolecularIsochoricThermodynamics
     from chemworld.physchem.water_if97_thermal import IF97IsochoricThermodynamics
 
 from chemworld.physchem.coupled_system import ConstantCvThermodynamics, SpeciesInternalEnergy
@@ -120,9 +121,10 @@ class ThermalSystemSpec:
         | HelmholtzIsochoricThermodynamics | HelmholtzEquilibriumIsochoricThermodynamics
         | IF97IsochoricThermodynamics | HumidAirIsochoricThermodynamics
         | CatalyticThermodynamics
+        | MolecularIsochoricThermodynamics
     )
     pressure_law: Literal[
-        "ideal_gas", "fixed_pressure", "helmholtz", "if97", "humid_air"
+        "ideal_gas", "fixed_pressure", "helmholtz", "if97", "humid_air", "molecular"
     ] = "ideal_gas"
     environment_temperature_K: float = 300.0
     loss_conductance_W_K: float = 0.01
@@ -140,12 +142,17 @@ class ThermalSystemSpec:
         )
         from chemworld.physchem.helmholtz_thermal import HelmholtzIsochoricThermodynamics
         from chemworld.physchem.humid_air_thermal import HumidAirIsochoricThermodynamics
+        from chemworld.physchem.molecular_mixture import MolecularIsochoricThermodynamics
         from chemworld.physchem.water_if97_thermal import IF97IsochoricThermodynamics
 
         is_helmholtz = isinstance(self.thermodynamics, (
             HelmholtzIsochoricThermodynamics, HelmholtzEquilibriumIsochoricThermodynamics))
         if is_helmholtz != (self.pressure_law == "helmholtz"):
             raise ValueError("Helmholtz calorics and pressure must use the same EOS")
+        if isinstance(self.thermodynamics, MolecularIsochoricThermodynamics) != (
+            self.pressure_law == "molecular"
+        ):
+            raise ValueError("molecular calorics and pressure must use the same EOS")
         if isinstance(self.thermodynamics, IF97IsochoricThermodynamics) != (
             self.pressure_law == "if97"
         ):
@@ -178,7 +185,7 @@ class ThermalSystemSpec:
         ) or not isfinite(self.maximum_temperature_K):
             raise ValueError("thermal limits must be finite, positive and ordered")
         if self.pressure_law not in {
-            "ideal_gas", "fixed_pressure", "helmholtz", "if97", "humid_air"
+            "ideal_gas", "fixed_pressure", "helmholtz", "if97", "humid_air", "molecular"
         }:
             raise ValueError("unsupported local pressure law")
         if self.condensed_background is not None and (
@@ -201,7 +208,7 @@ class ThermalSystemSpec:
     @property
     def uses_eos_pressure(self) -> bool:
         """Pressure and energy come from the same declared fixed-volume model."""
-        return self.pressure_law in {"helmholtz", "if97", "humid_air"}
+        return self.pressure_law in {"helmholtz", "if97", "humid_air", "molecular"}
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -241,6 +248,10 @@ class ThermalSystemSpec:
                 **values["condensed_background"]
             )
         thermal = dict(values.pop("thermodynamics"))
+        if thermal.get("model") == "molecular-isochoric-thermal-v1":
+            from chemworld.physchem.molecular_mixture import MolecularIsochoricThermodynamics
+
+            return cls(MolecularIsochoricThermodynamics.from_dict(thermal), **values)
         if thermal.get("model") == "declared-catalytic-thermochemistry-v1":
             from chemworld.physchem.catalysis_thermochemistry import CatalyticThermodynamics
 

@@ -24,6 +24,7 @@ from chemworld.physchem.battery_spatial_thermal import (
     BatterySpatialThermalSPMSpec,
     advance_spatial_thermal,
     spatial_thermal_control_mode,
+    spatial_thermal_field_ledger,
     spatial_thermal_fields,
     spatial_thermal_internal_energy_j,
     spatial_thermal_readout,
@@ -270,6 +271,19 @@ def test_nonuniform_temperature_controls_local_bv_and_heat_not_only_bulk_mean():
     heat = sum(a["generated_heat_W"])
     assert heat == pytest.approx(0.5 * (3.8 - a["voltage_V"]), abs=1e-14)
     assert np.min(a["generated_heat_W"]) >= 0
+
+
+def test_thermal_field_ledger_is_json_safe_and_keeps_environment_balance():
+    s = model(cooling=True, initial_temperatures_K=tuple(np.linspace(295, 315, 9)))
+    ledger = spatial_thermal_field_ledger(s, s.initial_state(), current_A=.5)
+    restored = json.loads(json.dumps(ledger, allow_nan=False))
+    assert len(restored["temperature_K"]) == len(s.heat_stack.node_ids)
+    assert len(restored["local_temperature_rates_K_s"]) == len(s.heat_stack.node_ids)
+    assert restored["ambient_temperature_K"] == pytest.approx(s.heat_stack.ambient_temperature_K)
+    assert restored["boundary_heat_loss_W"] > 0
+    assert restored["current_A"] == pytest.approx(.5)
+    assert restored["minimum_temperature_K"] == pytest.approx(min(restored["temperature_K"]))
+    assert restored["maximum_temperature_K"] == pytest.approx(max(restored["temperature_K"]))
 
 
 @pytest.mark.parametrize("current", [-0.5, 0.5])

@@ -20,7 +20,7 @@ from chemworld.physchem.molecular_eos import (
 
 
 class Oracle:
-    def __init__(self, source, case, basis):
+    def __init__(self, source, case, basis, source_topology=False):
         # Parse independent Fortran table, never import native coefficients.
         pattern = r'b\((\d+),(\d+),(\d+)\)\s*=\s*([-+\d.Ee]+)'
         table = re.findall(pattern, source.read_text())
@@ -28,6 +28,7 @@ class Oracle:
         self.coeff = [(int(i), int(j), int(k), mp.mpf(c)) for i, j, k, c in table]
         self.ps = [PARAMS[i] for i in CASES[case][0]]
         self.basis = basis
+        self.source_topology = source_topology
         self.m = [mp.mpf(str(p[1])) for p in self.ps]
         self.sigma = [mp.mpf(str(p[2])) for p in self.ps]
         self.na = mp.mpf('6.02214076e23')
@@ -57,7 +58,10 @@ class Oracle:
         for key, (eps, hb, vol, coeff) in self.pair.items():
             integral = mp.fsum(c*rs**i*(t/eps)**j for (i, j), c in coeff.items())
             strengths[key] = rho*self.na*vol*mp.expm1(hb/t)*integral
-        matrix = mp.matrix([[x[j]*self.counts[b]*strengths[i, j] if a % 2 != b % 2 else 0
+        matrix = mp.matrix([[x[j]*self.counts[b]*strengths[i, j] if (
+            a % 2 != b % 2 or (self.source_topology and i != j
+                               and (self.ps[i][0] == 'NH3' or self.ps[j][0] == 'NH3'))
+        ) else 0
             for b, j in enumerate(self.site_owners)] for a, i in enumerate(self.site_owners)])
         n = len(self.counts)
         def residual(*xs):

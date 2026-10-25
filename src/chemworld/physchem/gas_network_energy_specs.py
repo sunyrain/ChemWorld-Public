@@ -27,7 +27,6 @@ class GasNodeEnergySpec:
             raise ValueError("gas node energy needs a vessel identity")
         for name in (
             "initial_temperature_K",
-            "support_heat_capacity_J_K",
             "reference_temperature_K",
             "environment_temperature_K",
             "minimum_temperature_K",
@@ -36,11 +35,16 @@ class GasNodeEnergySpec:
             positive(getattr(self, name), name)
         if (
             not self.minimum_temperature_K < self.initial_temperature_K < self.maximum_temperature_K
+            or isinstance(self.support_heat_capacity_J_K, bool)
+            or not isfinite(self.support_heat_capacity_J_K)
+            or self.support_heat_capacity_J_K < 0
             or isinstance(self.loss_conductance_W_K, bool)
             or not isfinite(self.loss_conductance_W_K)
             or self.loss_conductance_W_K < 0
         ):
-            raise ValueError("node requires interior initial temperature and nonnegative loss law")
+            raise ValueError(
+                "node requires interior initial temperature and nonnegative support/loss"
+            )
 
 
 @dataclass(frozen=True)

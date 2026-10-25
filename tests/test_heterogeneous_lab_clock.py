@@ -104,15 +104,22 @@ def test_battery_cutoff_aligns_reaction_adsorption_and_ssa_to_actual_time(noise)
     runtime = session(reactive_closed_lab(battery_spec=battery), noise)
     try:
         before = local_states(runtime._state)
+        advancer = runtime.runtime.domain_services.reaction_thermal.advancer
+        battery_prefix = advancer.batch(before["cell"], {"duration_s": 100}, heat=False)
         result = execute(runtime, "wait", duration_s=100)
         assert result.info["operation_outcome"] == "stopped"
         elapsed = runtime._state.ledger.time_s
         assert 0 < elapsed < 100
+        assert battery_prefix.actual_duration_s == elapsed
         assert runtime._state.vessel_elapsed_s == dict.fromkeys(before, elapsed)
-        advancer = runtime.runtime.domain_services.reaction_thermal.advancer
         for key, local in local_states(runtime._state).items():
-            expected = advancer.batch(before[key], {"duration_s": elapsed}, heat=False)
+            # The limiting strategy supplies the already-complete event prefix.
+            # A second integration at that root has a different adaptive mesh
+            # and can move the root; only the other systems need truncation.
+            expected = (battery_prefix if key == "cell" else
+                        advancer.batch(before[key], {"duration_s": elapsed}, heat=False))
             assert expected.outcome in {"success", "stopped"}
+            assert local.ledger.time_s == elapsed
             assert_local_physics(local, expected.state)
         assert runtime._state.lab_clock.stopped
     finally:

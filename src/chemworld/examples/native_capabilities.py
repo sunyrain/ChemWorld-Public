@@ -74,6 +74,8 @@ def execution_inventory(registry=None):
     from chemworld.physchem import _MODULE_EXPORTS
 
     registry = registry or DomainModuleRegistry.default()
+    lowered = registry.lower_execution_ir()
+    lowered_modules = {module["id"]: module for module in lowered["modules"]}
 
     def address(function):
         return f"{function.__module__}:{function.__qualname__}"
@@ -82,10 +84,20 @@ def execution_inventory(registry=None):
     rows = capability_rows(registry)
     for row in rows:
         module = declarations[row["module"]]
+        native_ir = lowered_modules[module.module_id]
         row["execution"] = {
             "python": "installed_declaration; validity_depends_on_bound_world",
-            "cpu_lowering": "not_declared",
-            "thread_safety": "not_declared",
+            # Keep the two original summary keys for consumers of the v1
+            # inventory; the structured contract is generated beside them.
+            "cpu_lowering": module.execution.lowering,
+            "thread_safety": module.execution.thread_safety,
+            "derivatives": module.execution.derivatives,
+            "snapshot": module.execution.snapshot,
+            "public_result_type": module.execution.public_result_type,
+            "private_diagnostic_type": module.execution.private_diagnostic_type,
+            "cpu_eligible": module.execution.cpu_eligible,
+            "effects": [effect.to_dict() for effect in module.effects],
+            "semantic_ir": native_ir,
             "continuation": "runtime_session_v2; model_specific_qualification_required",
             "model_codecs": [
                 {

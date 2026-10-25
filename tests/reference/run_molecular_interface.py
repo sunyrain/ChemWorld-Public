@@ -105,9 +105,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--refinement-seed", type=Path)
+    parser.add_argument("--resolved-sequence", action="store_true")
     args = parser.parse_args()
     if args.refinement_seed is not None:
-        return refinement(args.refinement_seed, args.output)
+        return refinement(args.refinement_seed, args.output,
+                          node_counts=(513, 1025, 2049) if args.resolved_sequence
+                          else (257, 513, 1025))
     started = monotonic()
     units = []
     for name in ("analytic_pure", "analytic_binary", "PR_propane_280", "PR_propane_300",
@@ -196,7 +199,9 @@ def main():
     return int(any(not c["pass"] for u in units for c in u["comparisons"]))
 
 
-def refinement(seed_path, output_path):
+def refinement(seed_path, output_path, *, node_counts=(257, 513, 1025)):
+    if output_path.exists():
+        raise FileExistsError("retain existing interface attempts; use a new output file")
     original = json.loads(seed_path.read_text(encoding="utf-8"))
     unit = next(u for u in original["units"] if u["name"] == "PR_binary_300")
     model, _source, influence, states, _pressure = source_pair(300, True)
@@ -211,11 +216,12 @@ def refinement(seed_path, output_path):
 
     Thread(target=heartbeat, daemon=True).start()
     report = {"scope": "separately_declared_fixed_resolution_supplement",
+              "node_counts": list(node_counts),
               "expected_runs": 6, "runs": runs,
               "reference_tension_N_m": unit["reference_tension_N_m"]}
     for length, seed_index in ((12e-9, 2), (24e-9, 5)):
         previous = unit["runs"][seed_index]
-        for nodes in (257, 513, 1025):
+        for nodes in node_counts:
             mesh = DiffusionMesh.planar(length, nodes-1)
             old = np.asarray(previous["component_densities_mol_m3"])
             seed = np.column_stack([np.interp(mesh.faces_m, previous["positions_m"], old[:, i])

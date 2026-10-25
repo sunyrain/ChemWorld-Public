@@ -12,7 +12,7 @@ import chemworld  # noqa: F401
 from chemworld.agent_interface import tool_json_view
 from chemworld.data.logging import load_jsonl
 from chemworld.envs.spaces import OBSERVATION_KEYS, to_observation
-from chemworld.eval.runner import make_agent, run_agent
+from chemworld.eval.runner import run_agent
 from chemworld.eval.verify import verify_records
 from chemworld.foundation import (
     ChannelAxis,
@@ -25,6 +25,7 @@ from chemworld.foundation import (
 )
 from chemworld.foundation.observations import LEGACY_PROJECTION_VERSION
 from chemworld.foundation.state_ledgers import ProcessLedger
+from chemworld.legacy.agent_registry import make_agent
 from chemworld.world.domain_modules import (
     ComponentCapability,
     DomainModuleRegistry,

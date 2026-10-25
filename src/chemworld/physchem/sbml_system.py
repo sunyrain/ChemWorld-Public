@@ -7,6 +7,7 @@ never evolving coordinates or a clock. Live data belong to EquipmentRecord.
 from dataclasses import dataclass, field
 from math import isfinite
 from types import MappingProxyType
+from typing import Any
 
 from chemworld.data.sbml import SBMLModel
 from chemworld.foundation.dimensions import dimension_definition
@@ -95,9 +96,11 @@ class SBMLSystemSpec:
     readout_relative_sd: float = .01
     controlled_parameters: tuple[str, ...] = ()
     solver_method: str = "BDF"
+    tau_policy: Any = None
     _frame: object = field(init=False, repr=False, compare=False)
     _events: tuple = field(init=False, repr=False, compare=False)
     _roots: object = field(init=False, repr=False, compare=False)
+    _integer: object = field(init=False, repr=False, compare=False, default=None)
 
     def __post_init__(self):
         for name in ("maximum_events", "maximum_segments", "maximum_pending_events",
@@ -107,21 +110,41 @@ class SBMLSystemSpec:
         if (not _finite_real(self.readout_relative_sd) or self.readout_relative_sd < 0
                 or any(not _finite_real(v) or v <= 0 for v in (self.rtol, self.atol))):
             raise ValueError("formal tolerances and detector noise require finite declared values")
-        if self.solver_method not in ("BDF", "LSODA") or (
+        from chemworld.physchem.sbml_stochastic import ALGORITHMS
+
+        integer_mode = self.solver_method in ALGORITHMS
+        if ((integer_mode and self.numerical_form != "stochastic")
+                or (not integer_mode and self.solver_method not in ("BDF", "LSODA"))) or (
                 self.numerical_form == "residual" and self.solver_method != "BDF"):
             raise ValueError("formal model solver/form must name an implemented common method")
-        frame = SBMLKinetics(self.model, self.initial_model_time, self.controlled_parameters)
+        if not integer_mode and self.tau_policy is not None:
+            raise ValueError("tau_policy requires a stochastic formal model")
+        source_boundaries = integer_mode and any(self.model.declaration.items(name)
+            for name in ("listOfRules", "listOfEvents", "listOfConstraints"))
+        frame = SBMLKinetics(self.model, self.initial_model_time, self.controlled_parameters,
+                            integer_quantities=source_boundaries)
         if not frame._compartments:
             raise ValueError("native formal worlds require at least one declared 3D compartment")
         if len(frame.initial_values) > self.maximum_coordinates:
             raise ValueError("formal model exceeds its declared coordinate budget")
         events = sbml_coordinate_events(frame)
-        if events and self.maximum_step_s is None:
+        if events and not integer_mode and self.maximum_step_s is None:
             raise ValueError("source events require an authored finite root maximum step")
         if self.maximum_step_s is not None and (
                 not _finite_real(self.maximum_step_s) or self.maximum_step_s <= 0):
             raise ValueError("formal root maximum step must be finite positive seconds")
-        roots = SBMLTriggerRoots(frame)
+        if integer_mode:
+            from chemworld.physchem.sbml_stochastic import SBMLIntegerKinetics
+
+            integer = SBMLIntegerKinetics(frame)
+        else:
+            integer = None
+        if integer is not None and integer.requires_boundaries:
+            from chemworld.physchem.sbml_jump_triggers import SBMLJumpTriggers
+
+            roots = SBMLJumpTriggers(frame, integer.rules)
+        else:
+            roots = SBMLTriggerRoots(frame)
         observables = tuple(self.observables)
         if (any(not isinstance(o, SBMLObservable) for o in observables)
                 or len({o.channel_id for o in observables}) != len(observables)):
@@ -149,7 +172,13 @@ class SBMLSystemSpec:
         object.__setattr__(self, "_frame", frame)
         object.__setattr__(self, "_events", events)
         object.__setattr__(self, "_roots", roots)
-        self.continuous_system()  # Validate the common numerical declaration now.
+        if integer_mode:
+            policy = integer.policy(frame.initial_values, self.solver_method,
+                                    self.maximum_events, self.tau_policy)
+            object.__setattr__(self, "tau_policy", policy.tau_policy)
+            object.__setattr__(self, "_integer", integer)
+        else:
+            self.continuous_system()  # Validate the common numerical declaration now.
 
     @property
     def frame(self):
@@ -163,7 +192,13 @@ class SBMLSystemSpec:
     def roots(self):
         return self._roots
 
+    @property
+    def integer_kinetics(self):
+        return self._integer
+
     def continuous_system(self):
+        if self.integer_kinetics is not None:
+            raise ValueError("an integer SBML declaration is not a continuous ODE system")
         policy = ODESolverPolicy("chemworld_formal_sbml_"+self.solver_method.lower()+"_v1",
             self.solver_method,
             rtol=self.rtol, atol=self.atol, max_step_s=self.maximum_step_s)
@@ -202,6 +237,9 @@ class SBMLSystemSpec:
             payload.update(format="chemworld_sbml_system_v2",
                 controlled_parameters=list(self.controlled_parameters),
                 solver_method=self.solver_method)
+        if self.integer_kinetics is not None:
+            payload.update(format="chemworld_sbml_system_v3",
+                tau_policy=None if self.tau_policy is None else self.tau_policy.to_dict())
         return payload
 
     @classmethod
@@ -212,15 +250,21 @@ class SBMLSystemSpec:
             "coordinate_scales"}
         if not isinstance(payload, dict):
             raise ValueError("formal model declaration must be an object")
-        if payload.get("format") == "chemworld_sbml_system_v2":
+        if payload.get("format") in {"chemworld_sbml_system_v2", "chemworld_sbml_system_v3"}:
             expected |= {"controlled_parameters", "solver_method"}
             if not isinstance(payload.get("controlled_parameters"), list):
                 raise ValueError("external model controls must be an explicit JSON list")
+            if payload["format"] == "chemworld_sbml_system_v3":
+                expected |= {"tau_policy"}
         elif payload.get("format") != "chemworld_sbml_system_v1":
             raise ValueError("unknown formal model declaration format")
         if set(payload) != expected or not isinstance(payload["observables"], list):
             raise ValueError("unknown formal model declaration fields/format")
-        return cls(**{**{k: v for k, v in payload.items()
+        result = cls(**{**{k: v for k, v in payload.items()
                          if k not in {"format", "model", "observables"}},
             "model": SBMLModel.from_dict(payload["model"]),
             "observables": tuple(SBMLObservable.from_dict(p) for p in payload["observables"])})
+        if ((payload["format"] == "chemworld_sbml_system_v3")
+                != (result.integer_kinetics is not None)):
+            raise ValueError("integer SBML declarations require the v3 codec")
+        return result

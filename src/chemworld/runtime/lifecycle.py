@@ -290,7 +290,7 @@ def prepare_initialization(current, fresh_initial, *, scope, options, physics, a
         )
     if shared:
         transition = reconcile_shared_initialization(current, transition)
-    transition = advancer.reconcile_initialization(transition)
+    transition = advancer.reconcile_initialization(transition, previous=current)
     advancer.validate_snapshot_state(transition.state)
     report = constitution.check_state(transition.state)
     if not report.passed:

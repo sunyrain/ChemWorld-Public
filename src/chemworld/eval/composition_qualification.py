@@ -1,4 +1,4 @@
-"""Deterministic public composition-qualification runner."""
+"""Deterministic first-paper composition qualification runner."""
 
 from __future__ import annotations
 
@@ -35,8 +35,8 @@ from chemworld.foundation.public_leakage import audit_public_payload
 from chemworld.tasks import list_tasks
 from chemworld.world.composition import WorldCompositionError
 
-REPORT_SCHEMA_VERSION = "chemworld-composition-qualification-report-0.3"
-QUALIFICATION_ID = "composition-qualification-v1"
+REPORT_SCHEMA_VERSION = "chemworld-first-paper-composition-qualification-report-0.2"
+QUALIFICATION_ID = "first-paper-composition-qualification-v1"
 EXPECTED_REFERENCE_UNIT_COUNT = 64
 EXPECTED_REFERENCE_RECIPE_COUNT = 1786
 EXPECTED_NEGATIVE_PROBE_COUNT = 192
@@ -44,7 +44,7 @@ EXPECTED_COMPILE_MUTANT_COUNT = 7
 EXPECTED_MODULE_PROBE_COUNT = 32
 EXPECTED_INTERFACE_PATH_COUNT = 7
 
-PROTOCOL = Path("protocols/composition-qualification.md")
+EXPERIMENT_NOTE = Path("workstreams/arxiv_v1/experiments/first-paper-composition-qualification.md")
 
 _REFERENCE_RESOURCE_CARD = {
     "operation_attempt_limit": 8,
@@ -572,10 +572,21 @@ def validate_launch_preconditions(
 ) -> dict[str, Any]:
     root = Path(repository_root).resolve()
     errors: list[str] = []
+    current_path = root / "configs/current.json"
+    current = json.loads(current_path.read_text(encoding="utf-8"))
+    task_design = current.get("task_design", {})
+    matrix_path = root / str(task_design.get("matrix", ""))
+    if task_design.get("status") != "all_registered_task_designs_executable_and_metric_bound":
+        errors.append("current task_design status is not executable and metric-bound")
+    if not matrix_path.is_file():
+        errors.append("current task_design matrix is missing")
+        matrix: dict[str, Any] = {}
+    else:
+        matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
     tasks = list_tasks()
     reference_units = sum(len(task.seeds) for task in tasks)
     reference_recipes = sum(len(task.seeds) * len(recipe_cases(task)) for task in tasks)
-    if len(tasks) != 15:
+    if len(tasks) != 15 or matrix.get("task_count") != 15:
         errors.append("registered task denominator drifted")
     if reference_units != EXPECTED_REFERENCE_UNIT_COUNT:
         errors.append(f"reference unit denominator drifted: {reference_units}")
@@ -585,20 +596,9 @@ def validate_launch_preconditions(
     generated_count = sum(len(suite.cases) for suite in suites)
     if generated_count != EXPECTED_GENERATED_CASE_COUNT:
         errors.append(f"generated composition denominator drifted: {generated_count}")
-    protocol_path = root / PROTOCOL
-    if not protocol_path.is_file():
-        errors.append("frozen public protocol is missing")
-    else:
-        protocol_text = protocol_path.read_text(encoding="utf-8")
-        required = (
-            "frozen before qualification execution",
-            "64 registered task-world units",
-            "52 coverage-generated compositions",
-            "192 invalid-action probes",
-        )
-        missing = [fragment for fragment in required if fragment not in protocol_text]
-        if missing:
-            errors.append("public protocol drifted: " + ", ".join(missing))
+    note_path = root / EXPERIMENT_NOTE
+    if not note_path.is_file():
+        errors.append("qualification experiment note is missing")
     if require_clean and _git(root, "status", "--porcelain", "--untracked-files=all"):
         errors.append("formal execution requires a clean worktree")
     if errors:
@@ -606,14 +606,19 @@ def validate_launch_preconditions(
     return {
         "status": "passed",
         "execution_commit": _git(root, "rev-parse", "HEAD"),
-        "protocol": PROTOCOL.as_posix(),
-        "protocol_sha256": _sha256_path(protocol_path),
+        "experiment_note": EXPERIMENT_NOTE.as_posix(),
+        "experiment_note_sha256": _sha256_path(note_path),
+        "current_registry": "configs/current.json",
+        "current_registry_sha256": _sha256_path(current_path),
+        "task_design_matrix": str(matrix_path.relative_to(root)).replace("\\", "/"),
+        "task_design_matrix_sha256": _sha256_path(matrix_path),
         "qualification_design_version": QUALIFICATION_DESIGN_VERSION,
     }
 
 
 def build_task_structure_baseline(repository_root: str | Path) -> dict[str, Any]:
-    del repository_root
+    root = Path(repository_root).resolve()
+    current = json.loads((root / "configs/current.json").read_text(encoding="utf-8"))
     rows = []
     all_components: set[str] = set()
     all_interfaces: set[str] = set()
@@ -680,6 +685,7 @@ def build_task_structure_baseline(repository_root: str | Path) -> dict[str, Any]
         )
     return {
         "status": "passed",
+        "task_design_binding": copy.deepcopy(current["task_design"]),
         "registered_task_count": len(rows),
         "world_unit_count": sum(row["world_seed_count"] for row in rows),
         "coverage": {
@@ -2004,7 +2010,6 @@ __all__ = [
     "EXPECTED_NEGATIVE_PROBE_COUNT",
     "EXPECTED_REFERENCE_RECIPE_COUNT",
     "EXPECTED_REFERENCE_UNIT_COUNT",
-    "PROTOCOL",
     "QUALIFICATION_ID",
     "REPORT_SCHEMA_VERSION",
     "build_interface_receipts",

@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from math import fsum, isclose, isfinite
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from chemworld.foundation.state_ledgers import PhaseLedger, PhaseRecord
 from chemworld.physchem.molecular_consumers import (
@@ -23,6 +23,9 @@ from chemworld.physchem.molecular_flash import (
     molecular_tp_flash,
 )
 from chemworld.physchem.molecular_mixture import MolecularCaloricModel, MolecularStream
+
+if TYPE_CHECKING:
+    from chemworld.physchem.molecular_multiphase import MolecularMultiphaseResult
 
 
 @dataclass(frozen=True)
@@ -85,7 +88,7 @@ class MolecularPhaseEquilibriumSpec:
 class MolecularPhaseInventoryResult:
     success: bool
     ledger: PhaseLedger
-    flash: MolecularTPFlashResult
+    flash: MolecularTPFlashResult | MolecularMultiphaseResult
     installed_phase_ids: tuple[str, ...] = ()
     phase_enthalpies_J: dict[str, float] | None = None
     total_enthalpy_J: float | None = None
@@ -110,19 +113,11 @@ def _amounts(record: PhaseRecord, component_ids: tuple[str, ...]) -> dict[str, f
     return {key: float(record.species_amounts_mol.get(key, 0)) for key in component_ids}
 
 
-def equilibrate_molecular_phase_inventory(
+def _molecular_inventory_feed(
     ledger: PhaseLedger, specification: MolecularPhaseEquilibriumSpec, *, vessel_id: str,
-    source_phase_ids: Sequence[str], temperature_K: float, pressure_Pa: float,
-    composition_starts: Sequence[Sequence[float]] | None = None,
-    max_iterations: int = 200, tpd_tolerance: float = 1e-8,
-) -> MolecularPhaseInventoryResult:
-    """Replace only explicitly selected same-vessel phases after successful TP closure.
-
-    Multiple targets may name one basin: their declaration order receives the
-    returned phases in composition order, so an LLE split has distinct phase IDs.
-    This is an isothermal/isobaric material closure, not a fixed-volume evolution
-    or a heat-duty calculation. Unrelated phases retain their content and owners.
-    """
+    source_phase_ids: Sequence[str],
+) -> dict[str, float]:
+    """Read real source stock and validate the common phase ownership boundary."""
     sources = tuple(source_phase_ids)
     if not sources or len(set(sources)) != len(sources):
         raise ValueError("molecular closure needs distinct explicit source phase IDs")
@@ -136,11 +131,17 @@ def equilibrate_molecular_phase_inventory(
            for t in specification.phase_targets):
         raise ValueError("molecular phase target would overwrite an unrelated phase")
     inventories = [_amounts(p, specification.residual_model.component_ids) for p in records]
-    feed = {k: fsum(ns[k] for ns in inventories)
+    return {k: fsum(ns[k] for ns in inventories)
             for k in specification.residual_model.component_ids}
-    flash = molecular_tp_flash(specification.residual_model, temperature_K, pressure_Pa, feed,
-        basins=specification.basins, composition_starts=composition_starts,
-        max_iterations=max_iterations, tpd_tolerance=tpd_tolerance)
+
+
+def _install_molecular_phase_result(
+    ledger: PhaseLedger, specification: MolecularPhaseEquilibriumSpec,
+    flash: MolecularTPFlashResult | MolecularMultiphaseResult, *, vessel_id: str,
+    source_phase_ids: Sequence[str], temperature_K: float, pressure_Pa: float,
+) -> MolecularPhaseInventoryResult:
+    """The common material/caloric commit boundary for accepted equilibrium results."""
+    sources = tuple(source_phase_ids)
     if not flash.success:
         return MolecularPhaseInventoryResult(False, ledger, flash,
                                                failure_reason=flash.failure_reason)
@@ -179,6 +180,29 @@ def equilibrate_molecular_phase_inventory(
                                                failure_reason="phase_ledger_material_mismatch")
     return MolecularPhaseInventoryResult(True, candidate, flash, tuple(installed), enthalpies,
                                           None if enthalpies is None else fsum(enthalpies.values()))
+
+
+def equilibrate_molecular_phase_inventory(
+    ledger: PhaseLedger, specification: MolecularPhaseEquilibriumSpec, *, vessel_id: str,
+    source_phase_ids: Sequence[str], temperature_K: float, pressure_Pa: float,
+    composition_starts: Sequence[Sequence[float]] | None = None,
+    max_iterations: int = 200, tpd_tolerance: float = 1e-8,
+) -> MolecularPhaseInventoryResult:
+    """Replace only explicitly selected same-vessel phases after successful TP closure.
+
+    Multiple targets may name one basin: their declaration order receives the
+    returned phases in composition order, so an LLE split has distinct phase IDs.
+    This is an isothermal/isobaric material closure, not a fixed-volume evolution
+    or a heat-duty calculation. Unrelated phases retain their content and owners.
+    """
+    sources = tuple(source_phase_ids)
+    feed = _molecular_inventory_feed(ledger, specification, vessel_id=vessel_id,
+                                     source_phase_ids=sources)
+    flash = molecular_tp_flash(specification.residual_model, temperature_K, pressure_Pa, feed,
+        basins=specification.basins, composition_starts=composition_starts,
+        max_iterations=max_iterations, tpd_tolerance=tpd_tolerance)
+    return _install_molecular_phase_result(ledger, specification, flash, vessel_id=vessel_id,
+        source_phase_ids=sources, temperature_K=temperature_K, pressure_Pa=pressure_Pa)
 
 
 def molecular_phase_stream(

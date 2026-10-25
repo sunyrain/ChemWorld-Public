@@ -32,3 +32,4 @@ def test_budget_truncates_episode() -> None:
     _, _, _, truncated, _ = env.step(env.action_space.sample())
     assert truncated
     env.close()
+

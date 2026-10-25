@@ -117,10 +117,10 @@ def steady_unit(temperatures, ratio):
     }
 
 
-def world_unit(kind, output):
+def world_unit(kind, output, *, ratio=1.25):
     # Explicit fixed ratio, independent of the user example's feasible default.
-    spec, amounts, temperatures, _ = molecular_cascade_example(4, flow_ratio=1.25)
-    reference = steady((300.0,) * 4, 1.25)
+    spec, amounts, temperatures, _ = molecular_cascade_example(4, flow_ratio=ratio)
+    reference = steady((300.0,) * 4, ratio)
     duration = 1.0
     if kind == "source":
         amounts = (
@@ -159,6 +159,7 @@ def world_unit(kind, output):
         if kind == "receiver_resume":
             first = runtime.execute({"operation": "wait", "duration_s": 0.5})
             data["first_info"] = first.info
+            data["first_time_s"] = unpack_cascade(runtime._state)[2].time_s
             snapshot = output / "unit19-initial-snapshot.json"
             snapshot.write_text(json.dumps(runtime.snapshot().to_dict()), encoding="utf-8")
         outcome = runtime.execute({"operation": "wait", "duration_s": duration})
@@ -206,7 +207,7 @@ def world_unit(kind, output):
         if outcome.info["transaction_status"] != "committed":
             data["failure_reason"] = "expected finite operation was not executed"
             return data
-        target = finite([list(n.values()) for n in amounts], (300.0,) * 4, 1.25, expected_time)
+        target = finite([list(n.values()) for n in amounts], (300.0,) * 4, ratio, expected_time)
         if not target["success"]:
             data["failure_reason"] = "independent model has no positive two-phase flow solution"
             return data
@@ -284,6 +285,11 @@ def world_unit(kind, output):
             consistent = process.returncode == 0 and json.loads(
                 resumed.read_text(encoding="utf-8")
             )["snapshot"] == json.loads(json.dumps(runtime.snapshot().to_dict()))
+            consistent = (
+                consistent
+                and data["first_info"]["transaction_status"] == "committed"
+                and abs(data["first_time_s"] - 0.5) <= 2e-7
+            )
         check(rows, WORLD_CHECKS[9], consistent)
     except (ValueError, RuntimeError, ArithmeticError) as exc:
         data["failure_reason"] = str(exc)

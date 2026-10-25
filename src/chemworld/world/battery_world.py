@@ -1,4 +1,4 @@
-"""A synthetic battery fixture; physics is independent of task completion."""
+"""A battery world consuming its explicit physical model and equipment state."""
 
 from chemworld.foundation import WorldState
 from chemworld.foundation.state_ledgers import (
@@ -22,6 +22,8 @@ from chemworld.world.physical_world import CompositionPhysics
 
 def battery_world_spec(spec=None, *, budget=80, thermal_device=None):
     spec = spec or BatterySPMSpec()
+    if getattr(spec, "parameter_binding", None) is not None and thermal_device is not None:
+        raise ValueError("source SPM thermal-device coupling is unsupported")
     plating = getattr(spec, "plating", None) is not None
     if plating and thermal_device is not None:
         raise ValueError("plating thermal coupling is unsupported")
@@ -37,9 +39,18 @@ def battery_world_spec(spec=None, *, budget=80, thermal_device=None):
     msmr = getattr(spec, "model_family", None) == "msmr-spm-isothermal-v1"
     if msmr and thermal_device is not None:
         raise ValueError("MSMR thermal coupling is unsupported")
+    half_cell_dfn = getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1"
+    if half_cell_dfn and thermal_device is not None:
+        raise ValueError("DFN half-cell thermal coupling is unsupported")
     half_cell = getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1"
     if half_cell and thermal_device is not None:
         raise ValueError("finite half-cell thermal coupling is unsupported")
+    composite_dfn = getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1"
+    if composite_dfn and thermal_device is not None:
+        raise ValueError("composite DFN thermal coupling is unsupported")
+    collector_spm = getattr(spec, "model_family", None) == "collector-spm-isothermal-v1"
+    if collector_spm and thermal_device is not None:
+        raise ValueError("collector SPM thermal coupling is unsupported")
     composite = getattr(spec, "model_family", None) == "composite-spm-isothermal-v1"
     if composite and thermal_device is not None:
         raise ValueError("composite thermal coupling is unsupported")
@@ -141,8 +152,14 @@ def battery_world_spec(spec=None, *, budget=80, thermal_device=None):
                                if msmr
                                else "native-battery-spatial-thermal"
                                if spatial
+                               else "native-battery-composite-dfn"
+                               if composite_dfn
+                               else "native-battery-collector-spm"
+                               if collector_spm
                                else "native-battery-composite"
                                if composite
+                               else "native-battery-half-cell-dfn"
+                               if half_cell_dfn
                                else "native-battery-half-cell"
                                if half_cell
                                else "native-battery-mpm"

@@ -283,6 +283,49 @@ class HalfCellReadout:
     metal_ohmic_V: float
     metal_resistance_ohm: float
 
+    def __post_init__(self):
+        """Keep the diagnostic codec finite so strict JSON remains possible."""
+        for name in (
+            "voltage_V",
+            "current_A",
+            "working_surface_fraction",
+            "working_average_fraction",
+            "metal_amount_mol",
+            "metal_overpotential_V",
+            "working_overpotential_V",
+            "metal_ohmic_V",
+            "metal_resistance_ohm",
+        ):
+            try:
+                finite = isfinite(float(getattr(self, name)))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"half-cell readout {name} must be finite") from exc
+            if not finite:
+                raise ValueError(f"half-cell readout {name} must be finite")
+
+    def to_dict(self):
+        """Return a JSON-safe diagnostic payload without persistent state."""
+        return {
+            "model_family": HALF_CELL_FAMILY,
+            "voltage_V": float(self.voltage_V),
+            "current_A": float(self.current_A),
+            "working_surface_fraction": float(self.working_surface_fraction),
+            "working_average_fraction": float(self.working_average_fraction),
+            "metal_amount_mol": float(self.metal_amount_mol),
+            "metal_overpotential_V": float(self.metal_overpotential_V),
+            "working_overpotential_V": float(self.working_overpotential_V),
+            "metal_ohmic_V": float(self.metal_ohmic_V),
+            "metal_resistance_ohm": float(self.metal_resistance_ohm),
+        }
+
+    @classmethod
+    def from_dict(cls, value):
+        """Decode a readout payload, rejecting a different battery family."""
+        payload = dict(value)
+        if payload.pop("model_family", HALF_CELL_FAMILY) != HALF_CELL_FAMILY:
+            raise ValueError("unknown half-cell readout family")
+        return cls(**{key: float(item) for key, item in payload.items()})
+
 
 def _half_cell_voltage(spec, state, current):
     """Port and its actual partial derivatives, including the surface FV closure."""

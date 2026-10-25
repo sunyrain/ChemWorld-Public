@@ -42,6 +42,7 @@ from typing import Any
 from chemworld.physchem.aqueous_database import (
     AqueousDatabase,
     AqueousDataSource,
+    AqueousReaction,
     AqueousSpecies,
     AqueousStandardState,
 )
@@ -126,6 +127,7 @@ def hkf_species_from_record(
     source_id: str,
     units: str,
     consistency_tolerance_J_mol: float,
+    reference_authority: str = "strict",
 ) -> RevisedHKFSpeciesThermo:
     """Explicit unit conversion; all source reference quantities participate in validation."""
     if units != "cal-mol-bar-K":
@@ -148,14 +150,21 @@ def hkf_species_from_record(
         record["omega"] * 4.184,
         source_id,
         consistency_tolerance_J_mol,
+        reference_authority=reference_authority,
     )
 
 
-def hkf_source_species(species_id: str) -> RevisedHKFSpeciesThermo:
+def hkf_source_species(
+    species_id: str, *, reference_authority: str = "strict"
+) -> RevisedHKFSpeciesThermo:
     """Strict source ingestion; OH- fails its printed Hf/Gf/S consistency check.
 
     Bound = 0.5 cal for each integer Hf/Gf + 0.005 cal/K for S, plus 0.001
     J/mol/K elemental-printing allowance; this is a rounding bound, not uncertainty.
+    An explicit gibbs_entropy choice retains the full triple and its failed
+    consistency diagnostic, while using G/S for the working reference datum.
+    This policy is documented by Cantera PDSS_HKFT's optional inconsistency mode;
+    it is not a claim of matching Cantera's water EOS or default behavior.
     """
     if species_id not in _RECORDS:
         raise ValueError("unknown HKF source species")
@@ -166,6 +175,7 @@ def hkf_source_species(species_id: str) -> RevisedHKFSpeciesThermo:
         source_id=_SOURCE,
         units="cal-mol-bar-K",
         consistency_tolerance_J_mol=4.184 * (1 + 298.15 * 0.005) + 0.29815,
+        reference_authority=reference_authority,
     )
 
 
@@ -176,12 +186,16 @@ def hkf_source_water() -> IF97AqueousWaterThermo:
     )
 
 
-def hkf_aqueous_database() -> AqueousDatabase:
+def hkf_aqueous_database(*, hydroxide_reference_authority: str = "strict") -> AqueousDatabase:
     """Actual Na+/Cl-/H+ + finite water, ideal molality; no fitted solution activity.
 
     OH- is deliberately absent because its full source record fails ingestion.
-    This database therefore does not advertise water dissociation equilibrium.
+    The default therefore has no water dissociation. Explicit gibbs_entropy
+    authoring includes OH- and H2O <=> H+ + OH-, preserving the printed source
+    triple and policy in the ordinary database codec.
     """
+    if hydroxide_reference_authority not in ("strict", "gibbs_entropy"):
+        raise ValueError("declare strict or gibbs_entropy hydroxide reference authority")
     sources = (
         AqueousDataSource(
             _SOURCE,
@@ -213,6 +227,9 @@ def hkf_aqueous_database() -> AqueousDatabase:
         water,
         *(hkf_source_species(k) for k in ("Na+", "Cl-", "H+")),
     ]
+    dissociation = hydroxide_reference_authority == "gibbs_entropy"
+    if dissociation:
+        thermos.append(hkf_source_species("OH-", reference_authority="gibbs_entropy"))
     species = tuple(
         AqueousSpecies(
             th.species_id,
@@ -229,10 +246,16 @@ def hkf_aqueous_database() -> AqueousDatabase:
     activity = ElectrolyteActivityModel(
         "hkf-ideal-molality",
         "ideal",
-        (("Na+", 1), ("Cl-", -1), ("H+", 1)),
+        (("Na+", 1), ("Cl-", -1), ("H+", 1)) + ((("OH-", -1),) if dissociation else ()),
         "chemworld-ideal-molality",
         1.0,
         (273.15, 623.15),
         (1, 1e8),
     )
-    return AqueousDatabase("HKF-IF97-qualified-source-subset", sources, species, (), activity)
+    reactions = ((AqueousReaction(
+        "water-dissociation", {"H2O": -1, "H+": 1, "OH-": 1}, _SOURCE),)
+        if dissociation else ())
+    identity = (
+        "HKF-IF97-GS-water-dissociation" if dissociation else "HKF-IF97-qualified-source-subset"
+    )
+    return AqueousDatabase(identity, sources, species, reactions, activity)

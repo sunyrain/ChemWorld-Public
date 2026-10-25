@@ -127,6 +127,8 @@ class ChemWorldInstrumentCostServices:
                 specimen = state
         complete = advancement.outcome == "success"
         sampled = withdraw_sample(state, volume)
+        if volume and self.thermal is not None:
+            sampled = self.thermal.advancer.reconcile_material_change(state, sampled)
         spectral = instrument_id in SPECTRAL_INSTRUMENTS
         configuration = spectral_settings(state, instrument_id) if spectral else {}
         cost = acquisition_cost(instrument_id, configuration) if spectral else instrument.cost

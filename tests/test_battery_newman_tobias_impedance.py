@@ -8,7 +8,11 @@ import pytest
 from scipy.integrate import quad
 from scipy.linalg import expm
 
-from chemworld.physchem.battery_impedance import battery_impedance, battery_impedance_system
+from chemworld.physchem.battery_impedance import (
+    battery_impedance,
+    battery_impedance_spatial_response,
+    battery_impedance_system,
+)
 from chemworld.physchem.battery_newman_tobias import (
     BatteryNewmanTobiasSpec,
     F,
@@ -176,6 +180,38 @@ def test_thickness_currents_are_frequency_independent_and_obey_every_charge_boun
         np.testing.assert_allclose(solid[0]+ionic[:nn+1], 1/area, atol=2e-12)
         np.testing.assert_allclose(solid[1]+ionic[-np_-1:], 1/area, atol=2e-12)
     assert np.ptp(first[0][:nn].real) > .005
+
+
+def test_public_spatial_response_projects_all_thickness_fields_without_mutation():
+    spec = model(cells=(4, 3, 5))
+    state = spec.initial_state()
+    before = state
+    spectrum = battery_impedance(spec, FREQUENCIES, state=state)
+    projected = battery_impedance_spatial_response(spec, spectrum)
+    assert projected["model_family"] == "newman-tobias-isothermal-v1"
+    assert projected["thickness_cells"] == [4, 3, 5]
+    assert len(projected["cell_labels"]) == 9
+    assert state == before
+    for item, point in zip(projected["points"], spectrum.response.points, strict=True):
+        assert item["frequency_Hz"] == point.frequency_Hz
+        fields = item["fields"]
+        assert fields is not None
+        currents = {
+            key: complex(value["real"], value["imag"])
+            for key, value in fields["reaction_current_A_per_A"].items()
+        }
+        assert sum(
+            value for key, value in currents.items() if key.startswith("negative:")
+        ) == pytest.approx(1.)
+        assert sum(
+            value for key, value in currents.items() if key.startswith("positive:")
+        ) == pytest.approx(-1.)
+        ionic = [complex(value["real"], value["imag"])
+                 for value in fields["electrolyte_face_current_A_per_A"]]
+        assert ionic[0] == 0j
+        assert ionic[-1] == pytest.approx(0j, abs=2e-12)
+        assert len(fields["electrolyte_potential_V_per_A"]) == sum(spec.geometry.cells)
+        assert len(fields["solid_face_current_A_per_A"]) == 2
 
 
 def test_voltage_potentials_and_local_reactions_match_actual_residual_perturbations():

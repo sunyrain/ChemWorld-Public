@@ -763,6 +763,8 @@ def _battery_soh_inputs(spec, state=None):
         )
     if getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1":
         raise ValueError("lead-acid LOQS equilibrium-SOH/SOC mapping is unsupported")
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        raise ValueError("composite DFN automatic equilibrium-SOH/SOC mapping is unsupported")
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         raise ValueError("Newman-Tobias equilibrium-SOH mapping is unsupported")
     if getattr(spec, "model_family", None) == "msmr-spm-isothermal-v1":
@@ -771,6 +773,8 @@ def _battery_soh_inputs(spec, state=None):
         raise ValueError("spatial thermal automatic equilibrium-SOH mapping is unsupported")
     if getattr(spec, "model_family", None) == "composite-spm-isothermal-v1":
         raise ValueError("composite automatic equilibrium-SOH mapping is unsupported")
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        raise ValueError("DFN half-cell automatic equilibrium-SOH mapping is unsupported")
     if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
         raise ValueError("finite half-cell dynamics have no automatic equilibrium-SOH mapping")
     for electrode in ("negative", "positive"):
@@ -839,6 +843,8 @@ def battery_spec_at_soc(spec, result, soc, *, branch=None):
         raise ValueError("lithium plating automatic equilibrium-SOH/SOC mapping is unsupported")
     if getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1":
         raise ValueError("lead-acid LOQS equilibrium-SOH/SOC mapping is unsupported")
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        raise ValueError("composite DFN automatic equilibrium-SOH/SOC mapping is unsupported")
     if getattr(spec, "model_family", None) == "newman-tobias-isothermal-v1":
         raise ValueError("Newman-Tobias equilibrium-SOH mapping is unsupported")
     if getattr(spec, "model_family", None) == "msmr-spm-isothermal-v1":
@@ -847,6 +853,8 @@ def battery_spec_at_soc(spec, result, soc, *, branch=None):
         raise ValueError("spatial thermal automatic SOC configuration mapping is unsupported")
     if getattr(spec, "model_family", None) == "composite-spm-isothermal-v1":
         raise ValueError("composite automatic SOC configuration mapping is unsupported")
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        raise ValueError("DFN half-cell automatic equilibrium-SOH mapping is unsupported")
     if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
         raise ValueError("finite half-cell dynamics have no automatic SOC configuration mapping")
     split = getattr(spec, "model_family", None) == "split-ocvr-isothermal-v1"

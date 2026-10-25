@@ -12,6 +12,7 @@ import numpy as np
 from scipy import sparse
 
 from chemworld.physchem.battery_models import BATTERY_ALGEBRAIC, F, battery_system
+from chemworld.physchem.battery_porous_electrical import linear_electrical
 from chemworld.physchem.coupled_system import CoupledStateView, assemble_coupled_rates
 from chemworld.physchem.reactor_shared import ScalarControlProgram
 from chemworld.physchem.residual_frequency import FrequencyResponse, residual_frequency_response
@@ -32,6 +33,12 @@ def battery_impedance_system(spec, state):
     """
     if getattr(spec, "plating", None) is not None:
         raise ValueError("lithium plating requires a side-reaction impedance closure; unsupported")
+    if getattr(spec, "model_family", None) == "half-cell-dfn-isothermal-v1":
+        raise ValueError("DFN half-cell impedance is unsupported")
+    if getattr(spec, "model_family", None) == "collector-spm-isothermal-v1":
+        raise ValueError("collector SPM impedance is unsupported")
+    if getattr(spec, "model_family", None) == "composite-dfn-isothermal-v1":
+        raise ValueError("composite DFN impedance closure is unsupported")
     if getattr(spec, "model_family", None) == "lead-acid-loqs-isothermal-v1":
         raise ValueError("lead-acid LOQS impedance is unsupported")
     if getattr(spec, "model_family", None) == "spm-spatial-thermal-v1":
@@ -316,4 +323,97 @@ def battery_impedance(spec, frequencies_Hz, *, state=None, stationary_tolerance=
     return BatteryImpedance(response, index)
 
 
-__all__ = ["BatteryImpedance", "battery_impedance", "battery_impedance_system"]
+def half_cell_impedance(spec, frequencies_Hz, *, state=None, stationary_tolerance=1e-9):
+    """Compute finite-metal half-cell EIS through the shared residual kernel."""
+    if getattr(spec, "model_family", None) != "half-cell-spm-isothermal-v1":
+        raise ValueError("half_cell_impedance requires the finite-metal half-cell family")
+    return battery_impedance(
+        spec,
+        frequencies_Hz,
+        state=state,
+        stationary_tolerance=stationary_tolerance,
+    )
+
+
+def battery_impedance_spatial_response(spec, spectrum):
+    """Project Newman--Tobias phasors onto the resolved thickness network.
+
+    The projection is read-only and uses the same geometry map as the native
+    residual.  Values are normalized by the small-signal current amplitude,
+    so cell currents are A/A and potentials are V/A.  Failed frequency points
+    remain ``None`` instead of being silently dropped.
+    """
+    if getattr(spec, "model_family", None) != "newman-tobias-isothermal-v1":
+        raise ValueError("spatial impedance response requires Newman-Tobias")
+    names = tuple(v.name for v in spectrum.response.variables)
+    indices = {name: names.index(name) for name in spec.algebraic_names}
+    cell_labels = tuple(
+        f"{electrode}:cell:{index}"
+        for electrode, region in (("negative", 0), ("positive", 2))
+        for index in range(spec.geometry.cells[region])
+    )
+
+    def pair(value):
+        return {"real": float(np.real(value)), "imag": float(np.imag(value))}
+
+    projected = []
+    for point in spectrum.response.points:
+        record = {"frequency_Hz": point.frequency_Hz}
+        if point.response is None:
+            record["fields"] = None
+            projected.append(record)
+            continue
+        values = {
+            name: point.response[index, 0]
+            for name, index in indices.items()
+        }
+        # The geometry helper keeps the positive-electrode integral as a real
+        # scalar for ordinary time-domain use.  Project the two phasor
+        # components separately so no imaginary response is cast away.
+        real = linear_electrical(
+            spec.geometry,
+            spec.reaction_keys,
+            spec.resistance_ohm,
+            {key: np.real(value) for key, value in values.items()},
+        )
+        imaginary = linear_electrical(
+            spec.geometry,
+            spec.reaction_keys,
+            spec.resistance_ohm,
+            {key: np.imag(value) for key, value in values.items()},
+        )
+        q = real[0] + 1j * imaginary[0]
+        ionic = real[1] + 1j * imaginary[1]
+        phi_e = real[2] + 1j * imaginary[2]
+        phi_s = real[3] + 1j * imaginary[3]
+        solid_faces = [
+            a + 1j * b for a, b in zip(real[4], imaginary[4], strict=True)
+        ]
+        record["fields"] = {
+            "reaction_current_A_per_A": {
+                label: pair(value) for label, value in zip(cell_labels, q, strict=True)
+            },
+            "electrolyte_face_current_A_per_A": [pair(value) for value in ionic],
+            "electrolyte_potential_V_per_A": [pair(value) for value in phi_e],
+            "solid_potential_V_per_A": [pair(value) for value in phi_s],
+            "solid_face_current_A_per_A": [
+                [pair(value) for value in faces] for faces in solid_faces
+            ],
+        }
+        projected.append(record)
+    return {
+        "model_family": "newman-tobias-isothermal-v1",
+        "normalization": "small-signal current amplitude = 1 A",
+        "cell_labels": list(cell_labels),
+        "thickness_cells": list(spec.geometry.cells),
+        "points": projected,
+    }
+
+
+__all__ = [
+    "BatteryImpedance",
+    "battery_impedance",
+    "battery_impedance_spatial_response",
+    "battery_impedance_system",
+    "half_cell_impedance",
+]

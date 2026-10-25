@@ -1,8 +1,8 @@
 """Declarative local Cantera gas YAML/JSON into the existing native network.
 
 Every selected species and reaction is converted or the whole import fails.
-External includes, nonideal/surface/plasma/linear-Burke models and executable
-inputs remain explicit boundaries; transport declarations are metadata only.
+Explicit local source sections resolve before conversion. Nonideal/surface/
+plasma/linear-Burke models remain boundaries; transport is metadata only.
 """
 
 from __future__ import annotations
@@ -422,7 +422,7 @@ def _reaction(
     return result
 
 
-def convert_mechanism(
+def _convert_mechanism(
     payload: Mapping, *, phase_name: str | None = None, source: str = "in-memory declarative input"
 ) -> ReactionNetworkSpec:
     """Return one balanced native network, with all selected thermo/source data."""
@@ -459,9 +459,9 @@ def convert_mechanism(
     if (
         phase.get("thermo") != "ideal-gas"
         or phase.get("kinetics") != "gas"
-        or phase.get("reactions", "all") != "all"
+        or phase.get("reactions", "all") not in {"all", "none"}
     ):
-        raise ValueError("only an ideal-gas phase using all local reactions is supported")
+        raise ValueError("only an ideal-gas phase with resolved local reactions is supported")
     names = phase["species"]
     if (
         not isinstance(names, list)
@@ -481,7 +481,7 @@ def convert_mechanism(
         raw = next(s for s in source_species if s["name"] == name)
         _keys(
             raw,
-            {"name", "composition", "thermo", "transport", "equation-of-state", "note"},
+            {"name", "composition", "thermo", "transport", "equation-of-state", "note", "units"},
             "species",
         )
         composition = raw["composition"]
@@ -499,7 +499,8 @@ def convert_mechanism(
                 {"model", "temperature-ranges", "data", "reference-pressure", "note"},
                 "NASA7 thermochemistry",
             )
-        pressure = _pressure(node.get("reference-pressure", "1 atm"), units)
+        species_units = _units(raw["units"]) if "units" in raw else units
+        pressure = _pressure(node.get("reference-pressure", "1 atm"), species_units)
         if pressure <= 0:
             raise ValueError("reference pressure must be positive")
         species_thermo_from_cantera_yaml(
@@ -507,7 +508,7 @@ def convert_mechanism(
             thermo=node,
             composition=composition,
             reference_pressure_Pa=pressure,
-            units=units,
+            units=species_units,
         )
         pressures.add(pressure)
         formula = "".join(
@@ -520,12 +521,12 @@ def convert_mechanism(
             "thermo": node,
             "composition": composition,
             "reference_pressure_Pa": pressure,
-            "units": units,
+            "units": species_units,
         }
     if len(pressures) != 1:
         raise ValueError("mixed thermochemical reference pressures are unsupported")
     reactions = payload["reactions"]
-    if not isinstance(reactions, list) or not reactions:
+    if not isinstance(reactions, list) or (not reactions and phase.get("reactions") != "none"):
         raise ValueError("gas mechanism needs a nonempty reaction list")
     converted = tuple(
         _reaction(node, i, units, set(names), next(iter(pressures)))
@@ -551,16 +552,49 @@ def convert_mechanism(
     )
 
 
-def import_mechanism(path: str | Path, *, phase_name: str | None = None) -> ReactionNetworkSpec:
-    path = Path(path)
-    if path.suffix.lower() not in {".yaml", ".yml", ".json"}:
-        raise ValueError("only declarative YAML/JSON files are supported")
-    payload = (
-        yaml.load(path.read_text(encoding="utf-8"), Loader=_MechanismLoader)
-        if path.suffix.lower() != ".json"
-        else json.loads(path.read_text(encoding="utf-8"))
+def convert_mechanism(
+    payload: Mapping, *, phase_name: str | None = None,
+    source: str = "in-memory declarative input",
+    source_documents: Mapping[str, Mapping[str, Any]] | None = None,
+) -> ReactionNetworkSpec:
+    """Convert selected local sections, with optional explicitly supplied documents."""
+    from chemworld.physchem.mechanism_source import resolve_gas_source
+
+    def read_external(name: str) -> Mapping[str, Any]:
+        if source_documents is None or name not in source_documents:
+            raise ValueError(f"external mechanism source document not supplied: {name}")
+        return source_documents[name]
+
+    resolved, provenance = resolve_gas_source(
+        payload, phase_name=phase_name,
+        read_external=read_external if source_documents is not None else None,
     )
-    return convert_mechanism(payload, phase_name=phase_name, source=path.name)
+    network = _convert_mechanism(resolved, phase_name=phase_name, source=source)
+    if provenance is not None:
+        network.metadata["source_resolution"] = provenance
+    return network
+
+
+def import_mechanism(
+    path: str | Path, *, phase_name: str | None = None,
+    search_paths: Iterable[str | Path] = (),
+) -> ReactionNetworkSpec:
+    """Import with relative references and caller-specified local search directories."""
+    from chemworld.physchem.mechanism_source import (
+        local_document_reader,
+        read_mechanism_document,
+        resolve_gas_source,
+    )
+
+    path = Path(path)
+    resolved, provenance = resolve_gas_source(
+        read_mechanism_document(path), phase_name=phase_name,
+        read_external=local_document_reader(path, tuple(search_paths)),
+    )
+    network = _convert_mechanism(resolved, phase_name=phase_name, source=path.name)
+    if provenance is not None:
+        network.metadata["source_resolution"] = provenance
+    return network
 
 
 def mechanism_import_capabilities() -> dict[str, Any]:
@@ -594,12 +628,17 @@ def mechanism_import_capabilities() -> dict[str, Any]:
             "P-log signed sums at equal pressures",
             "JSON replay",
             "YAML 1.2 NO species",
+            "explicit local file/section references and search_paths",
+            "caller-supplied in-memory source_documents",
+            "named species/reaction sections with source unit scopes",
+            "all/none/declared-species reaction selection with omission provenance",
+            "explicit skip-undeclared-elements and skip-undeclared-third-bodies",
         ],
         "metadata_only": ["transport", "state", "equation-of-state", "unselected phases"],
         "unsupported": [
             "CHEMKIN input",
-            "external includes",
-            "named reaction sections",
+            "automatic source downloads or implicit Cantera data paths",
+            "external element/adjacent-phase sections",
             "ionic/electron species",
             "surface/electrochemical/nonideal phases",
             "linear-Burke",
@@ -629,9 +668,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path)
     parser.add_argument("--phase")
+    parser.add_argument(
+        "--search-path", type=Path, action="append", default=[], metavar="DIRECTORY",
+        help="Explicit local source directory; repeat in lookup order after the input directory.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    network = import_mechanism(args.input, phase_name=args.phase)
+    network = import_mechanism(args.input, phase_name=args.phase, search_paths=args.search_path)
     with args.output.open("x", encoding="utf-8") as stream:
         json.dump(network.to_dict(), stream, indent=2, allow_nan=False)
         stream.write("\n")

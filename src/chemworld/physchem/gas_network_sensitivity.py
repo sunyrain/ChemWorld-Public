@@ -18,6 +18,11 @@ from chemworld.physchem.gas_reactor_network import (
     gas_node_view,
     gas_transfer_key,
 )
+from chemworld.physchem.gas_thermochemistry_parameters import (
+    GasThermochemistryParameter,
+    species_enthalpy_parameter,
+    with_species_enthalpy,
+)
 from chemworld.physchem.reaction_rate_laws import (
     positive_reaction_parameter,
     with_reaction_parameter,
@@ -64,8 +69,18 @@ class GasSensitivityPolicy:
 
 
 def _parameter(
-    spec: Any, network: Any, parameter: GasSensitivityParameter, value: float | None = None
+    spec: Any,
+    network: Any,
+    parameter: GasSensitivityParameter | GasThermochemistryParameter,
+    value: float | None = None,
 ) -> tuple[Any, Any, float]:
+    if isinstance(parameter, GasThermochemistryParameter):
+        original = species_enthalpy_parameter(network, parameter)
+        return (
+            spec,
+            network if value is None else with_species_enthalpy(network, parameter, value),
+            original,
+        )
     if parameter.kind == "reaction":
         reaction = next((r for r in network.reactions if r.reaction_id == parameter.owner_id), None)
         if (
@@ -116,7 +131,11 @@ def _parameter(
     return spec, network, original
 
 
-def _parameter_unit(spec: Any, network: Any, parameter: GasSensitivityParameter) -> str:
+def _parameter_unit(
+    spec: Any, network: Any, parameter: GasSensitivityParameter | GasThermochemistryParameter
+) -> str:
+    if isinstance(parameter, GasThermochemistryParameter):
+        return "J/mol"
     if parameter.kind in {"heat_link", "loss"}:
         return "W/K"
     if parameter.kind == "flow":
@@ -232,8 +251,11 @@ def gas_network_trajectory_sensitivities(
     if spec.spatial_transport is not None:
         raise ValueError("spatial networks are outside this finite-network sensitivity scope")
     parameters = tuple(parameters)
-    if not parameters or any(not isinstance(p, GasSensitivityParameter) for p in parameters):
-        raise ValueError("declare at least one GasSensitivityParameter")
+    if not parameters or any(
+        not isinstance(p, (GasSensitivityParameter, GasThermochemistryParameter))
+        for p in parameters
+    ):
+        raise ValueError("declare at least one gas sensitivity or thermochemistry parameter")
     if len({p.parameter_id for p in parameters}) != len(parameters):
         raise ValueError("sensitivity parameters must be unique")
     times = tuple(times_s)
@@ -253,26 +275,39 @@ def gas_network_trajectory_sensitivities(
     ):
         raise ValueError("analysis clock interval is unrepresentable")
     _, units, _ = gas_sensitivity_observables(spec, network, state, state)
-    candidates = [("baseline", None, 0.0, spec, network)]
+    candidates: list[tuple[str, str | None, float, Any, Any]] = [
+        ("baseline", None, 0.0, spec, network)
+    ]
     bindings = []
     for parameter in parameters:
         _, _, value = _parameter(spec, network, parameter)
+        additive = isinstance(parameter, GasThermochemistryParameter)
         bindings.append(
             {
                 **asdict(parameter),
                 "parameter_id": parameter.parameter_id,
                 "baseline_value": value,
                 "parameter_unit": _parameter_unit(spec, network, parameter),
+                **(
+                    {"coordinate": "additive_species_enthalpy", "step_J_mol": parameter.step_J_mol}
+                    if isinstance(parameter, GasThermochemistryParameter)
+                    else {}
+                ),
             }
         )
+        full_step = (
+            parameter.step_J_mol
+            if isinstance(parameter, GasThermochemistryParameter)
+            else policy.log_step
+        )
         for label, step in (
-            ("plus", policy.log_step),
-            ("minus", -policy.log_step),
-            ("plus_half", policy.log_step / 2),
-            ("minus_half", -policy.log_step / 2),
+            ("plus", full_step),
+            ("minus", -full_step),
+            ("plus_half", full_step / 2),
+            ("minus_half", -full_step / 2),
         ):
-            varied = value * exp(step)
-            if not isfinite(varied) or varied <= 0 or varied == value:
+            varied = value + step if additive else value * exp(step)
+            if not isfinite(varied) or (not additive and varied <= 0) or varied == value:
                 raise ValueError("parameter perturbation is unrepresentable")
             altered_spec, altered_network, _ = _parameter(spec, network, parameter, varied)
             candidates.append(
@@ -317,6 +352,18 @@ def gas_network_trajectory_sensitivities(
         },
     }
     work = report["work"]
+    additive_ids = {
+        p.parameter_id for p in parameters if isinstance(p, GasThermochemistryParameter)
+    }
+    if additive_ids:
+        report["method"] = (
+            "two central differences: explicit additive species enthalpy; "
+            "original positive log parameters"
+        )
+        report["thermochemistry_semantics"] = (
+            "fixed initialized n/T; original source H/G integration constants shifted, "
+            "Cp/S unchanged"
+        )
     for candidate_id, parameter_id, step, candidate_spec, candidate_network in candidates:
         candidate: dict[str, Any] = {
             "candidate_id": candidate_id,
@@ -331,6 +378,8 @@ def gas_network_trajectory_sensitivities(
                 for t in times
             ],
         }
+        if parameter_id in additive_ids:
+            candidate["enthalpy_offset_J_mol"] = candidate.pop("log_offset")
         report["trajectories"].append(candidate)
         current, halted = state, None
         for record in candidate["records"]:
@@ -472,6 +521,21 @@ def gas_network_trajectory_sensitivities(
                 y, plus, minus, half_plus, half_minus = [
                     record["values"][key] for record in records
                 ]
+                if binding["parameter_id"] in additive_ids:
+                    step = binding["step_J_mol"]
+                    coarse, fine = (plus - minus) / (2 * step), (half_plus - half_minus) / step
+                    row["coefficients"][key] = {
+                        "baseline": y,
+                        "coarse_dy_dp": coarse,
+                        "fine_dy_dp": fine,
+                        "dy_dp": fine,
+                        "normalized": None
+                        if y == 0 or binding["baseline_value"] == 0
+                        else fine * binding["baseline_value"] / y,
+                        "estimated_discretization_error": abs(fine - coarse) / 3,
+                        "unit_dy_dp": f"{units[key]} / (J/mol)",
+                    }
+                    continue
                 coarse = (plus - minus) / (2 * policy.log_step)
                 fine = (half_plus - half_minus) / policy.log_step
                 row["coefficients"][key] = {

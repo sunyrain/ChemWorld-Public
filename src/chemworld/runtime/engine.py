@@ -444,9 +444,11 @@ class ChemWorldRuntime:
     ) -> tuple[Observation, dict[str, Any]]:
         scope = (options or {}).get("scope", "world")
         if scope != "world":
-            if seed is not None or (options or {}).get("scenario_id") is not None:
+            if (seed is not None or (options or {}).get("scenario_id") is not None
+                    or (options or {}).get("replay_campaign_id") is not None):
                 raise ValueError("partial initialization cannot change the world or noise seed")
             return self._initialize_entities(scope, options or {})
+        campaign_id = self._make_campaign_id((options or {}).get("replay_campaign_id"))
         if seed is not None:
             self.seed = seed
         self._rng = np.random.default_rng(self._observation_seed(self.seed))
@@ -502,7 +504,7 @@ class ChemWorldRuntime:
         self._last_reading = empty_reading()
         self._last_operation_record = None
         self._last_info = {}
-        self._campaign_id = self._make_campaign_id()
+        self._campaign_id = campaign_id
         self._experiment_summaries = []
         self._lifecycle_history = []
         self._campaign_terminal = False
@@ -1037,12 +1039,14 @@ class ChemWorldRuntime:
 
         if self._campaign_resource_ledger is None:
             return None
-        snapshot = self._campaign_resource_ledger.snapshot()
+        bounded = self._campaign_resource_ledger.bounded_state()
         payload: dict[str, Any] = {
             "schema_version": "chemworld-public-campaign-resource-state-0.1",
-            "state": deepcopy(snapshot["state"]),
-            "ledger_sha256": snapshot["ledger_sha256"],
-            "last_event_id": snapshot["last_event_id"],
+            "state": deepcopy(bounded["state"]),
+            "ledger_sha256": bounded["ledger_sha256"],
+            "history_root_sha256": bounded["history_root_sha256"],
+            "event_count": bounded["event_count"],
+            "last_event_id": bounded["last_event_id"],
             "current_experiment": {
                 "experiment_index": self._experiment_index,
                 "vessel_started": (self._campaign_resource_current_vessel_started),
@@ -1053,9 +1057,14 @@ class ChemWorldRuntime:
         }
         lifecycle_reserve = self._campaign_lifecycle_reserve()
         if self._batch_resource_ledger is not None:
+            batch_bounded = self._batch_resource_ledger.bounded_state()
             payload["current_batch_resources"] = {
                 "hard_limits": self._batch_resource_ledger.card.to_dict()["hard_limits"],
-                "state": self._batch_resource_ledger.snapshot()["state"],
+                "state": batch_bounded["state"],
+                "ledger_sha256": batch_bounded["ledger_sha256"],
+                "history_root_sha256": batch_bounded["history_root_sha256"],
+                "event_count": batch_bounded["event_count"],
+                "last_event_id": batch_bounded["last_event_id"],
                 "assigned_rounds": self.campaign_resource_card.vessel_start_limit,
                 "closed_rounds": self._experiment_index,
                 "unused_quota_carries_over": False,
@@ -1068,6 +1077,24 @@ class ChemWorldRuntime:
                 raise RuntimeError("campaign resource card is missing")
             payload["card"] = card.to_dict()
         return payload
+
+    def recent_campaign_resource_events(
+        self,
+        limit: int = 8,
+        *,
+        scope: str = "campaign",
+    ) -> list[dict[str, Any]] | None:
+        """Return a bounded defensive receipt window without full replay."""
+
+        if scope == "campaign":
+            ledger = self._campaign_resource_ledger
+        elif scope == "batch":
+            ledger = self._batch_resource_ledger
+        else:
+            raise ValueError("scope must be 'campaign' or 'batch'")
+        if ledger is None:
+            return None
+        return deepcopy(ledger.recent_events(limit))
 
     def _campaign_lifecycle_reserve(self) -> dict[str, Any] | None:
         """Publish an advisory, non-reserving closeout feasibility projection.
@@ -1085,7 +1112,7 @@ class ChemWorldRuntime:
             or self.electrochemical_workflow_mode != ELECTROCHEMICAL_WORKFLOW_AUTONOMOUS_OPEN_V1
         ):
             return None
-        state = ledger.snapshot()["state"]
+        state = ledger.bounded_state()["state"]
         remaining = state["remaining"]
         remaining_attempts = int(remaining["operation_attempts"])
         remaining_vessels = int(remaining["vessel_starts"])
@@ -1361,10 +1388,16 @@ class ChemWorldRuntime:
             }
         return delta
 
-    def _make_campaign_id(self) -> str:
+    def _make_campaign_id(self, replay_identity=None) -> str:
         # Public episode identity must not be a reversible encoding of the
         # hidden-world seed. Replay identity is carried separately in private
         # evaluator provenance.
+        if replay_identity is not None:
+            if (not isinstance(replay_identity, str) or not replay_identity.startswith("episode-")
+                    or len(replay_identity) != 40
+                    or any(char not in "0123456789abcdef" for char in replay_identity[8:])):
+                raise ValueError("private replay identity must be an opaque episode UUID")
+            return replay_identity
         return f"episode-{uuid4().hex}"
 
     def _load_process_time_policy(self) -> ProcessTimeBudgetPolicy | None:

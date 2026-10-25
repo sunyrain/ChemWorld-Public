@@ -53,6 +53,7 @@ from chemworld.physchem.gas_reactor_network import (
     gas_node_view,
     gas_transfer_key,
 )
+from chemworld.physchem.gas_shaft_machine import gas_shaft_operating_point, shaft_key
 from chemworld.physchem.gas_thermal_wall import wall_key
 from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
@@ -237,6 +238,42 @@ def gas_energy_system(
         getattr(model, "base", model).validate_temperature_interval(
             energy.minimum_temperature_K, energy.maximum_temperature_K
         )
+    source_bounds = {
+        name: (
+            max(s.min_temperature_K for s in thermo.values()),
+            min(s.max_temperature_K for s in thermo.values()),
+        )
+        for name in nodes
+    }
+    if surface is not None:
+        for name, attachment in surface.attachments.items():
+            low, high = source_bounds[name]
+            source_bounds[name] = (
+                max(low, attachment.mechanism.minimum_temperature_K),
+                min(high, attachment.mechanism.maximum_temperature_K),
+            )
+
+    def extend_source_boundary_trial(state: CoupledStateView) -> CoupledStateView:
+        # Only the RHS uses this continuous boundary extension. Original event
+        # callbacks and every accepted state retain their raw temperatures.
+        coordinates = dict(state.coordinates)
+        anchor_t = state.temperature_K
+        changed = False
+        for name, (low, high) in source_bounds.items():
+            value = (
+                anchor_t
+                if name == spec.anchor_vessel_id
+                else coordinates[gas_temperature_key(name)]
+            )
+            bounded = max(low, min(high, value))
+            if bounded != value:
+                changed = True
+                if name == spec.anchor_vessel_id:
+                    anchor_t = bounded
+                else:
+                    coordinates[gas_temperature_key(name)] = bounded
+        return replace(state, temperature_K=anchor_t, coordinates=coordinates) if changed else state
+
     reaction = reaction_network_process(network, species_thermo=thermo)
     masses = {s.species_id: molecular_weight(s.composition) / 1000 for s in network.species}
     ports = {
@@ -258,6 +295,41 @@ def gas_energy_system(
         )
         for name in nodes
     }
+
+    def machine_point(state: CoupledStateView) -> dict[str, Any]:
+        machine = spec.shaft_machine
+        if machine is None:
+            return {}
+        edge = spec.connections[0]
+        views = {name: gas_node_view(state, node, network) for name, node in nodes.items()}
+        source, target = views[edge.source_vessel_id], views[edge.target_vessel_id]
+        total, target_total = sum(source.amounts_mol.values()), sum(target.amounts_mol.values())
+        if total <= 0 or target_total <= 0:
+            # Numerical trial extension only; finite positive-stock events own
+            # every accepted state. No substitute gas is introduced.
+            return {
+                "status": "empty_trial",
+                "molar_rate_mol_s": 0.0,
+                "shaft_power_W": 0.0,
+                "entropy_generation_W_K": 0.0,
+                "pressure_ratio": 0.0,
+                "outlet_temperature_K": source.temperature_K,
+            }
+        return gas_shaft_operating_point(
+            machine,
+            thermo,
+            inlet_temperature_K=source.temperature_K,
+            inlet_pressure_Pa=gas_node_pressure(
+                nodes[edge.source_vessel_id], total, source.temperature_K
+            ),
+            outlet_pressure_Pa=gas_node_pressure(
+                nodes[edge.target_vessel_id], target_total, target.temperature_K
+            ),
+            mole_fractions={s: n / total for s, n in source.amounts_mol.items()},
+            requested_molar_rate_mol_s=gas_connection_molar_rate(edge, nodes, views, masses),
+            enabled=edge.enabled,
+            check_limits=False,
+        )
 
     def fluxes(state: CoupledStateView) -> tuple[dict[str, float], dict[str, float]]:
         external, loss = {}, {}
@@ -314,10 +386,19 @@ def gas_energy_system(
             source = views[edge.source_vessel_id]
             total = sum(source.amounts_mol.values())
             flow = gas_connection_molar_rate(edge, nodes, views, masses)
+            machine = machine_point(state) if spec.shaft_machine else None
+            if machine is not None:
+                flow = machine["molar_rate_mol_s"]
             transported_h = 0.0
+            delivered_h = 0.0
             for species in network.species_ids:
                 rate = flow * source.amounts_mol[species] / total if total > 0 else 0.0
                 h = thermo[species].evaluate(source.temperature_K).enthalpy_J_mol
+                outlet_h = (
+                    thermo[species].evaluate(machine["outlet_temperature_K"]).enthalpy_J_mol
+                    if machine is not None and flow > 0
+                    else h
+                )
                 transfers.append(
                     InternalTransfer(
                         _key("flow", edge.connection_id, species),
@@ -328,13 +409,23 @@ def gas_energy_system(
                 )
                 counters[gas_transfer_key(edge.connection_id, species)] = rate
                 transported_h += rate * h
+                delivered_h += rate * outlet_h
                 for direction, endpoint in (
                     ("out", edge.source_vessel_id),
                     ("in", edge.target_vessel_id),
                 ):
                     key = _key("local", edge.connection_id, species, direction)
-                    port_rates[endpoint][key], port_enthalpies[endpoint][key] = rate, h
+                    port_rates[endpoint][key] = rate
+                    port_enthalpies[endpoint][key] = outlet_h if direction == "in" else h
             counters[gas_enthalpy_key(edge.connection_id)] = transported_h
+            if machine is not None:
+                counters[shaft_key(edge.connection_id, "delivered_enthalpy_J")] = delivered_h
+                counters[shaft_key(edge.connection_id, "shaft_work_J")] = (
+                    delivered_h - transported_h
+                )
+                counters[shaft_key(edge.connection_id, "entropy_generated_J_K")] = machine[
+                    "entropy_generation_W_K"
+                ]
         for name, node in nodes.items():
             view = views[name]
             chemistry = reaction.evaluate(view) if node.chemistry_enabled else ProcessContribution()
@@ -399,6 +490,18 @@ def gas_energy_system(
         return ProcessContribution(amounts, progress, tuple(transfers), coordinate_rates=counters)
 
     def validate(state: CoupledStateView) -> None:
+        if spec.shaft_machine is not None:
+            machine = machine_point(state)
+            declaration = spec.shaft_machine
+            if spec.connections[0].enabled and spec.connections[0].coefficient > 0:
+                if machine["pressure_ratio"] > declaration.maximum_pressure_ratio * (1 + 1e-9):
+                    raise ValueError("shaft pressure ratio exceeds its operating envelope")
+                if machine["status"] == "running" and not (
+                    declaration.minimum_outlet_temperature_K - 1e-6
+                    <= machine["outlet_temperature_K"]
+                    <= declaration.maximum_outlet_temperature_K + 1e-6
+                ):
+                    raise ValueError("shaft outlet temperature exceeds its operating envelope")
         if spec.thermal_wall is not None:
             wall = spec.thermal_wall
             temperature = state.coordinates[wall_key(wall.owner_id, "temperature_K")]
@@ -484,6 +587,31 @@ def gas_energy_system(
     events = tuple(e for node in nodes.values() for e in node_events(node)) + piston_events(
         spec, network
     )
+    if spec.shaft_machine and spec.connections[0].enabled and spec.connections[0].coefficient > 0:
+        machine = spec.shaft_machine
+        identity = machine.connection_id
+        events += (
+            CoupledEvent(
+                f"shaft:{identity}:pressure_direction",
+                lambda s: machine_point(s)["pressure_ratio"] - 1.0,
+            ),
+            CoupledEvent(
+                f"shaft:{identity}:maximum_pressure_ratio",
+                lambda s: machine.maximum_pressure_ratio - machine_point(s)["pressure_ratio"],
+            ),
+            CoupledEvent(
+                f"shaft:{identity}:minimum_outlet_temperature",
+                lambda s: (
+                    machine_point(s)["outlet_temperature_K"] - machine.minimum_outlet_temperature_K
+                ),
+            ),
+            CoupledEvent(
+                f"shaft:{identity}:maximum_outlet_temperature",
+                lambda s: (
+                    machine.maximum_outlet_temperature_K - machine_point(s)["outlet_temperature_K"]
+                ),
+            ),
+        )
     elements = {element for s in network.species for element in s.composition}
 
     def external_flux(state: CoupledStateView) -> HeatFlux:
@@ -497,7 +625,9 @@ def gas_energy_system(
         return HeatFlux(
             sum(heater.values()),
             sum(loss.values()) + wall_loss,
-            evaluate(state).coordinate_rates[gas_work_key(spec.pressure_control.vessel_id)]
+            machine_point(state)["shaft_power_W"]
+            if spec.shaft_machine
+            else evaluate(state).coordinate_rates[gas_work_key(spec.pressure_control.vessel_id)]
             if spec.pressure_control
             else 0.0,
         )
@@ -520,6 +650,16 @@ def gas_energy_system(
         (CoupledProcess("gas-network-energy", evaluate, validate_state=validate),),
         heat_flux=external_flux,
         coordinates=gas_network_coordinates(spec, network),
+        rate_independent_coordinates=tuple(
+            c.name
+            for c in gas_network_coordinates(spec, network)
+            if c.name not in {gas_temperature_key(n) for n in nodes}
+            and (
+                spec.thermal_wall is None
+                or c.name != wall_key(spec.thermal_wall.owner_id, "temperature_K")
+            )
+        ),
+        trial_state_extension=extend_source_boundary_trial,
         # Several nonlinear local energies cancel in the aggregate first law.
         # Resolve that cancellation without loosening the common energy check.
         policy=replace(DEFAULT_COUPLED_ODE_POLICY, rtol=1e-10),
@@ -563,6 +703,19 @@ def advance_gas_energy(
                 s: delta[gas_transfer_key(e.connection_id, s)] for s in network.species_ids
             },
             "enthalpy_J": delta[gas_enthalpy_key(e.connection_id)],
+            **(
+                {
+                    "delivered_enthalpy_J": delta[
+                        shaft_key(e.connection_id, "delivered_enthalpy_J")
+                    ],
+                    "shaft_work_J": delta[shaft_key(e.connection_id, "shaft_work_J")],
+                    "entropy_generated_J_K": delta[
+                        shaft_key(e.connection_id, "entropy_generated_J_K")
+                    ],
+                }
+                if spec.shaft_machine
+                else {}
+            ),
         }
         for e in spec.connections
     }
@@ -612,7 +765,11 @@ def advance_gas_energy(
         energy = models[name].internal_energy_j(thermal.node_view(final, node)) - models[
             name
         ].internal_energy_j(thermal.node_view(state, node))
-        incoming = sum(f["enthalpy_J"] for f in flows.values() if f["target"] == name)
+        incoming = sum(
+            f.get("delivered_enthalpy_J", f["enthalpy_J"])
+            for f in flows.values()
+            if f["target"] == name
+        )
         outgoing = sum(f["enthalpy_J"] for f in flows.values() if f["source"] == name)
         conducted = sum(
             ((1 if f["target"] == name else 0) - (1 if f["source"] == name else 0)) * f["heat_J"]
@@ -661,6 +818,18 @@ def advance_gas_energy(
         + (wall_details["heat_loss_J"] if wall_details else 0.0),
     )
     work_sum = sum(d.get("boundary_work_on_J", 0.0) for d in details.values())
+    shaft_work = sum(f.get("shaft_work_J", 0.0) for f in flows.values())
+    if spec.shaft_machine:
+        for flow in flows.values():
+            if not isclose(
+                flow["delivered_enthalpy_J"] - flow["enthalpy_J"],
+                flow["shaft_work_J"],
+                abs_tol=2e-7,
+                rel_tol=2e-7,
+            ):
+                raise RuntimeError("shaft device inlet/outlet enthalpy and work disagree")
+        if not isclose(shaft_work, final.work_J - state.work_J, abs_tol=2e-7, rel_tol=2e-7):
+            raise RuntimeError("shaft work differs from original common energy ledger")
     if spec.pressure_control and not isclose(
         work_sum, final.work_J - state.work_J, abs_tol=2e-7, rel_tol=2e-7
     ):
@@ -677,12 +846,16 @@ def advance_gas_energy(
         "bath_heat_J": heater,
         "heat_loss_J": loss,
         **({"boundary_work_on_J": work_sum} if spec.pressure_control else {}),
+        **({"shaft_work_J": shaft_work} if spec.shaft_machine else {}),
         "actual_duration_s": result.actual_duration_s,
         "stopping_event": result.stopping_event,
         "energy_residual_J": result.energy_balance_residual_J,
         "element_residuals_mol": dict(result.conservation_residuals),
         "energy_scope": (
-            "node gas+support U; independent wall C/T; internal contacts; "
+            "two original gas+support U inventories; actual inlet/outlet H; "
+            "adiabatic shaft work once, positive into gas"
+            if spec.shaft_machine
+            else "node gas+support U; independent wall C/T; internal contacts; "
             "external grey radiation/conduction"
             if spec.thermal_wall
             else "node gas+support U; source H; actual signed constant-load piston work"

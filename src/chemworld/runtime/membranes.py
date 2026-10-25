@@ -187,6 +187,8 @@ class MembraneRuntime:
         from chemworld.runtime.membrane_distillation import MembraneDistillationRuntime
         from chemworld.runtime.nanofiltration import NanofiltrationRuntime
         from chemworld.runtime.osmotic_membrane import OsmoticMembraneRuntime
+        from chemworld.runtime.reverse_electrodialysis import ReverseElectrodialysisRuntime
+        from chemworld.runtime.seawater_ro import SeawaterRORuntime
 
         self.composition = composition
         self.distributed = DistributedRORuntime(composition)
@@ -194,9 +196,11 @@ class MembraneRuntime:
         self.nanofiltration = NanofiltrationRuntime(composition)
         self.electrodialysis = ElectrodialysisRuntime(composition)
         self.osmotic = OsmoticMembraneRuntime(composition)
+        self.reverse_electrodialysis = ReverseElectrodialysisRuntime(composition)
+        self.seawater = SeawaterRORuntime(composition)
         self.adapters = (
             self.distributed, self.distillation, self.nanofiltration, self.electrodialysis,
-            self.osmotic,
+            self.osmotic, self.reverse_electrodialysis, self.seawater,
         )
 
     def supports(self, state):
@@ -209,6 +213,8 @@ class MembraneRuntime:
     def validate_state(self, state):
         if self.osmotic.supports(state):
             self.osmotic.validate_state(state)
+        if self.reverse_electrodialysis.supports(state):
+            self.reverse_electrodialysis.validate_state(state)
 
     def shared_system(self, state, strategy_id):
         for adapter in self.adapters:

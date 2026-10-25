@@ -15,10 +15,10 @@ from typing import Any, Literal
 from chemworld.providers.deepseek import DeepSeekAPIError, JsonCompletion
 
 DEFAULT_MODEL = "gpt-5.6-sol"
-MODEL_ACCESS_DATE = "2026-07-28"
+MODEL_ACCESS_DATE = "2026-09-27"
 MODEL_SOURCE = "https://developers.openai.com/api/docs/guides/latest-model"
 AUTH_SOURCE = "https://learn.chatgpt.com/docs/auth"
-SUPPORTED_MODELS = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+SUPPORTED_MODELS = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-6-astra")
 HTTPS_PROVIDER_ID = "chemworld_openai_https"
 ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
 CommandRunner = Callable[[Sequence[str], str | None, float], subprocess.CompletedProcess[str]]

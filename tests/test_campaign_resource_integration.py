@@ -755,6 +755,30 @@ def test_public_resource_state_does_not_repeat_event_history() -> None:
         env.close()
 
 
+def test_public_resource_queries_do_not_require_full_ledger_snapshot(monkeypatch) -> None:
+    env = _make_electrochemical_env(_card(operation_attempt_limit=30))
+    try:
+        env.reset(seed=0)
+        campaign_ledger = env.unwrapped._campaign_resource_ledger
+        batch_ledger = env.unwrapped._batch_resource_ledger
+
+        def no_full_snapshot():
+            raise AssertionError("public query called full resource snapshot")
+
+        monkeypatch.setattr(campaign_ledger, "snapshot", no_full_snapshot)
+        if batch_ledger is not None:
+            monkeypatch.setattr(batch_ledger, "snapshot", no_full_snapshot)
+        state = env.unwrapped.public_campaign_resource_state()
+        assert state["event_count"] == 0
+        if batch_ledger is not None:
+            assert state["current_batch_resources"]["event_count"] == 0
+        assert env.unwrapped.action_schema("add_solvent")["operation"] == "add_solvent"
+        assert env.unwrapped.recent_campaign_resource_events(3) == []
+        assert env.unwrapped._campaign_lifecycle_reserve()["future_unstarted_batches"] == 2
+    finally:
+        env.close()
+
+
 def test_runner_reconciles_usage_learned_during_agent_update() -> None:
     class DeferredUsageAgent:
         name = "deferred-usage-test"

@@ -129,7 +129,16 @@ class ChemWorldPrimitiveOperationServices:
         return self._add_feed(state, self.feed_additions(state, action))
 
     def _add_feed(self, state: WorldState, additions: dict[str, float]) -> WorldState:
-        discrete = state.process.stochastic_continuation is not None
+        from chemworld.foundation.discrete_inventory import (
+            CONTINUOUS_ADAPTIVE_ALGORITHM,
+            CONTINUOUS_SDE_ALGORITHM,
+        )
+
+        continuation = state.process.stochastic_continuation
+        sde = continuation is not None and continuation.get("algorithm") == CONTINUOUS_SDE_ALGORITHM
+        adaptive = (continuation is not None
+                    and continuation.get("algorithm") == CONTINUOUS_ADAPTIVE_ALGORITHM)
+        discrete = continuation is not None and not (sde or adaptive)
         if discrete:
             from chemworld.foundation.discrete_inventory import counts_to_mol, mol_to_counts
 
@@ -153,6 +162,28 @@ class ChemWorldPrimitiveOperationServices:
         if discrete and amount > 0:
             process = replace(process, stochastic_continuation={
                 **process.stochastic_continuation, "pending": None, "signature": None})
+        if sde and amount > 0:
+            from chemworld.physchem.stochastic_sde import rebind_sde_continuation
+
+            physics = None if self.material_router is None else self.material_router.physics
+            model = (None if physics is None else
+                     physics.models_of("stochastic_sde").get(state.vessel_id))
+            if model is None:
+                raise ValueError("SDE dosing requires its actual physical model declaration")
+            process = replace(process, stochastic_continuation=rebind_sde_continuation(
+                physics.network, model, state.species_amounts, species, continuation,
+            ))
+        if adaptive and amount > 0:
+            from chemworld.physchem.stochastic_adaptive_advance import rebind_adaptive_continuation
+
+            physics = None if self.material_router is None else self.material_router.physics
+            model = (None if physics is None else
+                     physics.models_of("stochastic_hybrid").get(state.vessel_id))
+            if model is None:
+                raise ValueError("adaptive dosing requires its actual physical model declaration")
+            process = replace(process, stochastic_continuation=rebind_adaptive_continuation(
+                physics.network, model, state.species_amounts, species, continuation,
+            ).continuation)
         return state.replace(
             species_amounts=species,
             phases=phases,

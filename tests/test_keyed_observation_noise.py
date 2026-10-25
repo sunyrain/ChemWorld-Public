@@ -58,3 +58,4 @@ def test_invalid_operation_does_not_advance_keyed_semantic_coordinate() -> None:
     assert direct_noise["sequential_rng_position_used"] is False
     direct.close()
     interrupted.close()
+

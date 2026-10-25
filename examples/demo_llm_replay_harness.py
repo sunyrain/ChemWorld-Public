@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from chemworld.agents.llm import LLMReplayAgent, ToolUsingLLMStubAgent
 from chemworld.data.logging import load_jsonl
 from chemworld.data.records import trajectory_value
 from chemworld.eval.runner import run_agent
+from chemworld.legacy.agents.llm import LLMReplayAgent, ToolUsingLLMStubAgent
 
 
 def main() -> None:

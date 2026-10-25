@@ -93,7 +93,9 @@ def test_unsupported_kinetics_fail_explicitly(mutation):
     elif mutation == "activity":
         reaction["rate_law"]["uses_activities"] = True
     elif mutation == "orders":
-        reaction["forward_orders"] = {"A": 2}
+        # 2 A => A + B is now admitted as elementary partial regeneration.
+        # Retain an explicit unsupported-order check above molecularity three.
+        reaction["forward_orders"] = {"A": 4}
     elif mutation == "arrhenius":
         reaction["rate_law"].update(equation_id="arrhenius", parameters={"A": 1, "Ea_J_per_mol": 0})
     else:

@@ -7,9 +7,9 @@ import pytest
 import chemworld  # noqa: F401
 from chemworld.action_codec import ActionCodec
 from chemworld.agents.base import HistoryRecord
-from chemworld.agents.event import ScriptedChemistryAgent
 from chemworld.envs.spaces import NullableScalarBox, to_observation
 from chemworld.foundation import upsert_equipment_record
+from chemworld.legacy.agents.event import ScriptedChemistryAgent
 from chemworld.operation_validator import OperationValidator
 from chemworld.runtime import TaskRuntimeProfile, make_chemworld_constitution
 from chemworld.tasks import (
@@ -81,7 +81,7 @@ def test_builtin_tasks_are_instantiable() -> None:
     assert assay_task.termination_policy == "final-assay-or-budget"
 
 
-def test_core_task_contracts_are_explicit() -> None:
+def test_core_task_contracts_are_frozen() -> None:
     tasks = {task.task_id: task for task in list_core_tasks()}
     assert tuple(tasks) == CORE_TASK_IDS
 
@@ -91,7 +91,7 @@ def test_core_task_contracts_are_explicit() -> None:
     assert assay.seeds == (0,)
     assert assay.episode_mode == "single_experiment"
     assert assay.allowed_operations == REACTION_OPERATIONS
-    assert assay.allowed_instruments == ("hplc", "gc", "uvvis", "final_assay", "nmr", "ir", "ms")
+    assert assay.allowed_instruments == ("hplc", "gc", "uvvis", "final_assay")
     assert assay.success_metrics == ("final_assay_score", "trajectory_validity")
     assert assay.safety_limit == 0.65
 
@@ -971,7 +971,7 @@ def test_process_preconditions_are_stateful() -> None:
         assert "filter_crystals" in info["valid_operations"]
         assert "heat" in info["valid_operations"]
         _, _, _, _, info = env.step({"operation": "filter_crystals"})
-        assert set(info["valid_operations"]) == {"measure", "terminate", "create_container"}
+        assert set(info["valid_operations"]) == {"measure", "terminate"}
         blocked = env.unwrapped.operation_validator.validate(
             {"operation": "wait", "duration_s": 60.0},
             env.unwrapped._state,

@@ -19,6 +19,7 @@ from chemworld.physchem.battery_half_cell import (
     METAL_UNITS,
     BatteryHalfCellSPMSpec,
     F,
+    HalfCellReadout,
     LithiumMetalCounterElectrodeSpec,
     R,
     advance_half_cell,
@@ -92,6 +93,37 @@ def test_metal_geometry_source_codec_and_single_material_ownership():
         spec.metal.native_parameters["area_m2"] = 99
     read = asdict(half_cell_readout(spec, spec.initial_state(), 0))
     assert "negative_surface_fraction" not in read
+
+
+def test_half_cell_readout_codec_roundtrips_derived_diagnostics():
+    spec = model()
+    reading = half_cell_readout(spec, spec.initial_state(), 0.0)
+    payload = json.loads(json.dumps(reading.to_dict(), allow_nan=False))
+    restored = HalfCellReadout.from_dict(payload)
+    assert restored == reading
+    with pytest.raises(ValueError, match="family"):
+        HalfCellReadout.from_dict({**payload, "model_family": "other"})
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf")])
+def test_half_cell_readout_codec_rejects_nonfinite_values(invalid):
+    spec = model()
+    reading = half_cell_readout(spec, spec.initial_state(), 0.0)
+    payload = {**reading.to_dict(), "voltage_V": invalid}
+    with pytest.raises(ValueError, match="must be finite"):
+        HalfCellReadout.from_dict(payload)
+    with pytest.raises(ValueError, match="must be finite"):
+        HalfCellReadout(
+            invalid,
+            reading.current_A,
+            reading.working_surface_fraction,
+            reading.working_average_fraction,
+            reading.metal_amount_mol,
+            reading.metal_overpotential_V,
+            reading.working_overpotential_V,
+            reading.metal_ohmic_V,
+            reading.metal_resistance_ohm,
+        )
 
 
 @pytest.mark.parametrize("current", [-0.2, 0.0, 0.2])

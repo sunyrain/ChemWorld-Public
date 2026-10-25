@@ -24,6 +24,15 @@ INVENTORY_PATH = (
     REPOSITORY_ROOT / "configs" / "benchmark" / "work_i_world_fork_component_inventory_v0.1.json"
 )
 SUITE_PATH = REPOSITORY_ROOT / "configs" / "benchmark" / "work_i_world_fork_divergence_v0.1.json"
+REPORT_PATH = (
+    REPOSITORY_ROOT
+    / "workstreams"
+    / "arxiv_v1"
+    / "reports"
+    / "work-i-world-fork-divergence-v0.1.json"
+)
+
+
 def _inventory() -> WorldComponentInventory:
     return load_world_component_inventory(INVENTORY_PATH)
 
@@ -153,10 +162,7 @@ def test_qualification_fixtures_pass_and_match_frozen_report() -> None:
     assert report["case_count"] == 2
     assert report["physical_expectation_pass_count"] == 2
     assert report["observation_expectation_pass_count"] == 2
-    assert report["passed"] is True
-    assert report["case_count"] == 2
-    assert report["physical_expectation_count"] == 2
-    assert report["observation_expectation_count"] == 2
+    assert json.loads(REPORT_PATH.read_text(encoding="utf-8")) == report
 
 
 def test_oracle_rejects_missing_channel_and_zero_tolerances() -> None:

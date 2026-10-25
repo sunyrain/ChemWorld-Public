@@ -93,6 +93,20 @@ def integral_centres(face_values, widths, coefficients):
 def linear_electrical(geometry, keys, series_resistance_ohm, values):
     current, voltage = (values[key] for key in ELECTRICAL_KEYS)
     q = reaction_currents(geometry, keys, values)
+    return electrical_from_cell_currents(
+        geometry, q, current, voltage, values[PHI_E], series_resistance_ohm
+    )
+
+
+def electrical_from_cell_currents(
+    geometry, q, current, voltage, electrolyte_offset_V, series_resistance_ohm
+):
+    """Integrate the same charge equations from complete electrode cell currents.
+
+    ``q`` contains negative then positive cell-integrated reaction currents (A).
+    Callers enforce electrode totals; multiple materials are summed before this
+    geometry-only map. The legacy wrapper retains its original reconstruction.
+    """
     nn, ns, _ = geometry.cells
     source = np.r_[q[:nn], np.zeros(ns), q[nn:]]
     ionic_faces = np.r_[0.0, np.cumsum(source)] / geometry.area_m2
@@ -102,7 +116,7 @@ def linear_electrical(geometry, keys, series_resistance_ohm, values):
         geometry.cells,
     )
     resistance, _ = integral_centres(ionic_faces, widths, conductivity)
-    phi_e = values[PHI_E] - resistance
+    phi_e = electrolyte_offset_V - resistance
     solid, solid_faces = [], []
     for name, region, start in (("negative", 0, 0), ("positive", 2, nn + ns)):
         size = geometry.cells[region]

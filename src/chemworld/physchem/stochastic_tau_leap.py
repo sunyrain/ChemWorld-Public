@@ -67,9 +67,30 @@ class TauLeapPolicy:
 
 def _critical(channels: tuple[EventChannel, ...], counts: dict[str, int],
               propensities: list[float], policy: TauLeapPolicy) -> list[bool]:
-    return [a > 0 and min((counts[k] // -v for k, v in channel.changes if v < 0),
-                         default=MAX_COUNT) < policy.critical_threshold
-            for channel, a in zip(channels, propensities, strict=True)]
+    result = []
+    for channel, a in zip(channels, propensities, strict=True):
+        if channel.has_regenerated_reactants:
+            limit = channel.firing_limit(counts)
+            # Protect the last feasible firing even at critical_threshold=1.
+            result.append(a > 0 and (limit <= 1 or limit < policy.critical_threshold))
+        else:
+            # Preserve every original channel's classification and draw order.
+            result.append(a > 0 and min(
+                (counts[k] // -v for k, v in channel.changes if v < 0),
+                default=MAX_COUNT) < policy.critical_threshold)
+    return result
+
+
+def _full_reactant_batch_available(channels: tuple[EventChannel, ...],
+                                   counts: dict[str, int], firings: list[int]) -> bool:
+    """Conservative extra guard only for newly admitted full-reactant channels.
+
+    Same-leap production is not credited toward these per-channel limits.
+    This is still the declared rejection-biased Poisson approximation.
+    """
+    return all(not n or not channel.has_regenerated_reactants
+               or n <= channel.firing_limit(counts)
+               for channel, n in zip(channels, firings, strict=True))
 
 
 def _species_factors(channels: tuple[EventChannel, ...], counts: dict[str, int]
@@ -160,6 +181,8 @@ def _validate_packet(packet: Any, channels: tuple[EventChannel, ...],
     propensities = [c.propensity(counts) for c in channels]
     if any(n and a <= 0 for n, a in zip(numbers, propensities, strict=True)):
         raise ValueError("tau pending firing has zero initial propensity")
+    if not _full_reactant_batch_available(channels, counts, numbers):
+        raise ValueError("tau pending exceeds full-reactant availability")
     critical = _critical(channels, counts, propensities, policy)
     if packet["mode"] == "leap":
         if sum(n for n, flag in zip(numbers, critical, strict=True) if flag) > 1:
@@ -173,7 +196,8 @@ def _validate_packet(packet: Any, channels: tuple[EventChannel, ...],
 
 def advance_tau_leap(channels: tuple[EventChannel, ...], counts: dict[str, int],
                      state: dict[str, Any], spec: StochasticSpec, rng: np.random.Generator,
-                     duration_s: float, signature: str) -> StochasticAdvance:
+                     duration_s: float, signature: str, *,
+                     stop_after_boundary: bool = False) -> StochasticAdvance:
     """Work only on the caller's copied candidate and its original process RNG."""
     policy = spec.tau_policy
     if not isinstance(policy, TauLeapPolicy):
@@ -249,7 +273,8 @@ def advance_tau_leap(channels: tuple[EventChannel, ...], counts: dict[str, int],
                         numbers[index] = int(rng.poisson(mean))
                         work["poisson_draws"] += 1
             candidate = _updated(counts, channels, numbers)
-            if any(n < 0 for n in candidate.values()):
+            if (any(n < 0 for n in candidate.values())
+                    or not _full_reactant_batch_available(channels, counts, numbers)):
                 work["rejected_leaps"] += 1
                 rejections += 1
                 if rejections >= policy.max_rejections_per_leap:
@@ -287,6 +312,9 @@ def advance_tau_leap(channels: tuple[EventChannel, ...], counts: dict[str, int],
             work["accepted_leaps"] += 1
             work["leap_firings"] += firing_count
         packet = None
+        if stop_after_boundary:
+            end = time
+            break
     state.update(time_s=end, pending=packet, rng_state=deepcopy(rng.bit_generator.state),
                  signature=_signature(counts, channels, spec),
                  events_committed=state["events_committed"] + work["firings_committed"])
@@ -299,4 +327,5 @@ def advance_tau_leap(channels: tuple[EventChannel, ...], counts: dict[str, int],
         "rejection_unbiased": False,
         "min_tau_s": min((b.end_time_s - b.start_time_s for b in batches), default=None),
         "max_tau_s": max((b.end_time_s - b.start_time_s for b in batches), default=None)}
-    return StochasticAdvance(counts, state, tuple(events), duration_s, diagnostics, tuple(batches))
+    return StochasticAdvance(counts, state, tuple(events),
+        end-start if stop_after_boundary else duration_s, diagnostics, tuple(batches))

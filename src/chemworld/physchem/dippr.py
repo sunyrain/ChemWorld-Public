@@ -51,6 +51,8 @@ class DIPPRTemperatureResponse:
 
 
 def dippr_temperature_response(correlation, *, temperature_K, order=3, validity_policy="raise"):
+    if isinstance(order, bool) or not isinstance(order, int) or not 0 <= order <= 3:
+        raise ValueError("DIPPR derivative order must be an integer from zero through three")
     equation, result = _point(correlation, temperature_K, validity_policy)
     values = derivative_values(
         lambda t: dippr_expression(equation, t, correlation.coefficients),

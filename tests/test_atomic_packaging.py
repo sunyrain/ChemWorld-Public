@@ -8,12 +8,8 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-import pytest
 
-
-@pytest.fixture(scope="module")
-def installed_atomic_resources(tmp_path_factory):
-    tmp_path = tmp_path_factory.mktemp("atomic-install")
+def test_atomic_resources_survive_sdist_wheel_and_isolated_import(tmp_path):
     root = Path(__file__).resolve().parents[1]
     # uv builds the wheel from the sdist, exercising the generated source index.
     subprocess.run(
@@ -671,6 +667,15 @@ assert packed_experiment.reports['report'][0]['data']['shape'] == [2,3]
 assert all(record.info['operation_outcome']=='success' for record in packed_experiment.history)
 assert ChemWorldRuntime.from_snapshot(packed_experiment.snapshots['scan']['derived']).lab_status()[
     'time_s']==.4
+from chemworld.eval.sedml_continuation import SEDMLExperimentSession
+packed_cursor = SEDMLExperimentSession(packed_plan,seed=5)
+packed_cursor.advance(max_courses=1)
+packed_cursor_copy = SEDMLExperimentSession.from_dict(json.loads(json.dumps(
+    packed_cursor.to_dict(),allow_nan=False)))
+packed_cursor.advance()
+packed_cursor_copy.advance()
+assert packed_cursor_copy.to_dict() == packed_cursor.to_dict()
+assert packed_cursor_copy.result().reports == packed_experiment.reports
 assert all(name not in sys.modules for name in ('COPASI', 'libsbml', 'mpmath'))
 assert 'pycalphad' not in sys.modules
 from chemworld.physchem.battery_models import BatterySPMSpec, ParticleSpec
@@ -826,6 +831,21 @@ assert all(isinstance(phase, ActiveMaterialPhaseSpec) for phase in packed_compos
 assert not hasattr(packed_composite, 'negative')
 assert run_composite(sys.argv[1]+'.composite.jsonl',
     spec=packed_composite)['replay_steps'] == 11
+from chemworld.physchem import BatteryCompositeDFNSpec, composite_dfn_fields
+from chemworld.examples.battery_dfn_composite import (
+    default_spec as composite_dfn_spec, run as run_composite_dfn)
+packed_composite_dfn = composite_dfn_spec(radial_cells=4,cells=(3,3,3))
+assert isinstance(packed_composite_dfn, BatteryCompositeDFNSpec)
+assert not hasattr(packed_composite_dfn, 'negative')
+assert len(packed_composite_dfn.inventory_keys) == 45
+assert len(packed_composite_dfn.particle_bins) == 9
+assert battery_spec_from_dict(packed_composite_dfn.to_dict()) == packed_composite_dfn
+packed_composite_dfn_fields = composite_dfn_fields(packed_composite_dfn,
+    packed_composite_dfn.initial_state(),current_A=.1)
+assert abs(sum(packed_composite_dfn_fields['cell_reaction_current_A'][:3])-.1) < 1e-10
+assert len(packed_composite_dfn_fields['reaction_current_A']) == 9
+assert run_composite_dfn(sys.argv[1]+'.composite-dfn.jsonl',
+    spec=packed_composite_dfn)['replay_steps'] == 11
 from chemworld.physchem.battery_impedance import BatteryImpedance, battery_impedance_system
 from chemworld.examples.battery_composite_impedance import (
     default_spec as composite_eis_spec, run as run_composite_eis)
@@ -1367,6 +1387,59 @@ print('packaged atomic resources OK')
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "packaged atomic resources OK" in result.stdout
+    multifluid_probe = tmp_path / "installed_multifluid27_probe.py"
+    multifluid_probe.write_text(
+        "import sys\nsys.path.insert(0, sys.argv[1])\n"
+        "import chemworld\nassert sys.argv[1] in chemworld.__file__\n"
+        + (root / "tests/reference/probe_multifluid27_install.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    multifluid_result = subprocess.run(
+        [sys.executable, "-I", str(multifluid_probe), str(target)],
+        cwd=tmp_path, check=False, capture_output=True, text=True,
+    )
+    assert multifluid_result.returncode == 0, multifluid_result.stdout + multifluid_result.stderr
+    assert json.loads(multifluid_result.stdout)["finite_inventory_advances"] == 6
+    source_probe = tmp_path / "installed_mechanism_source34_probe.py"
+    source_probe.write_text(
+        "import sys\nsys.path.insert(0, sys.argv[1])\n"
+        "import chemworld\nassert sys.argv[1] in chemworld.__file__\n"
+        + (root / "tests/reference/probe_mechanism_source34_install.py").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+    source_result = subprocess.run(
+        [sys.executable, "-I", str(source_probe), str(target)],
+        cwd=tmp_path, check=False, capture_output=True, text=True,
+    )
+    assert source_result.returncode == 0, source_result.stdout + source_result.stderr
+    assert json.loads(source_result.stdout)["exact_continuation"]
+    # The parent prepares caller-owned reference parameters. The installed
+    # process imports only ChemWorld and solves its own actual two-phase state.
+    from tests.reference.run_multifluid_catalog import source_catalog
+
+    catalog_path = tmp_path / "caller_multifluid_catalog.json"
+    catalog_path.write_text(json.dumps(source_catalog().to_dict()), encoding="utf-8")
+    phase_source_probe = tmp_path / "installed_multifluid_phase_probe.py"
+    phase_source_probe.write_text(
+        "import sys, json, runpy\nfrom pathlib import Path\n"
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import chemworld\nassert sys.argv[1] in chemworld.__file__\n"
+        "probe = runpy.run_path(sys.argv[2])\n"
+        "result = probe['run'](Path(sys.argv[3]))\n"
+        "assert 'teqp' not in sys.modules\nprint(json.dumps(result))\n",
+        encoding="utf-8",
+    )
+    phase_source_result = subprocess.run(
+        [sys.executable, "-I", str(phase_source_probe), str(target),
+         str(root / "tests/reference/probe_multifluid_phase_consumers.py"), str(catalog_path)],
+        cwd=tmp_path, check=False, capture_output=True, text=True,
+    )
+    assert phase_source_result.returncode == 0, (
+        phase_source_result.stdout + phase_source_result.stderr
+    )
+    assert json.loads(phase_source_result.stdout)["passed"] == 2
     phase_probe = tmp_path / "installed_phase_probe.py"
     phase_probe.write_text(
         "import sys\nsys.path.insert(0, sys.argv[1])\n"
@@ -1379,30 +1452,6 @@ print('packaged atomic resources OK')
         cwd=tmp_path, check=False, capture_output=True, text=True,
     )
     assert phase_result.returncode == 0, phase_result.stdout + phase_result.stderr
-    engineering_probe = tmp_path / "installed_engineering_probe.py"
-    engineering_probe.write_text(
-        "import sys\nsys.path.insert(0, sys.argv[1])\n"
-        "import chemworld\nassert sys.argv[1] in chemworld.__file__\n"
-        + (root / "tests/reference/probe_conv30_install.py").read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
-    return root, tmp_path, target, engineering_probe
-
-
-def test_atomic_resources_survive_sdist_wheel_and_isolated_import(installed_atomic_resources):
-    _root, tmp_path, target, engineering_probe = installed_atomic_resources
-    engineering_result = subprocess.run(
-        [sys.executable, "-I", str(engineering_probe), str(target)],
-        cwd=tmp_path, check=False, capture_output=True, text=True,
-    )
-    assert engineering_result.returncode == 0, engineering_result.stdout + engineering_result.stderr
-    print(engineering_result.stdout)
-
-
-@pytest.mark.reference
-def test_reference_environment_arrays_in_installed_wheel(installed_atomic_resources):
-    pytest.importorskip("fluids", reason="optional empirical MSIS/SPA reference arrays")
-    root, tmp_path, target, engineering_probe = installed_atomic_resources
     # Reference parameter arrays are caller data generated before isolation;
     # the installed child evaluates its own model without importing references.
     engineering_data = {}
@@ -1414,6 +1463,13 @@ def test_reference_environment_arrays_in_installed_wheel(installed_atomic_resour
         engineering_data[family] = module.source_parameters().to_dict()
     parameter_path = tmp_path / "caller_environment_parameters.json"
     parameter_path.write_text(json.dumps(engineering_data), encoding="utf-8")
+    engineering_probe = tmp_path / "installed_engineering_probe.py"
+    engineering_probe.write_text(
+        "import sys\nsys.path.insert(0, sys.argv[1])\n"
+        "import chemworld\nassert sys.argv[1] in chemworld.__file__\n"
+        + (root / "tests/reference/probe_conv30_install.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     engineering_result = subprocess.run(
         [sys.executable, "-I", str(engineering_probe), str(target), str(parameter_path)],
         cwd=tmp_path, check=False, capture_output=True, text=True,
