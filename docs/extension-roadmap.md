@@ -22,10 +22,12 @@ demonstrations; others carry sourced parameters. A delivered equation does not v
 every material. Battery and molecular parent programmes remain active even where
 individual submodels have passed their fixed comparisons.
 
-Arbitrary-topology flowsheets, general freely propagating flames, unrestricted global
-phase envelopes, complete upstream databases and universal long-term aging remain outside
-the delivered scope. CPU-01 establishes the Python baseline; compiled execution and SIMD
-remain future work. See [shared time](native_shared_lab.md) for supported couplings.
+The public package retains bounded serial and single-recycle process consumers.
+General finite process graphs and their inventory/control integrations have advanced
+in main development; see [latest progress](current-foundation.md#development-progress).
+General freely propagating flames, unrestricted global phase envelopes, complete upstream
+databases and universal long-term aging remain outside the delivered scope. The optional
+C++ build skeleton is available; scientific kernels and SIMD migration remain in progress. See [shared time](native_shared_lab.md) for supported couplings.
 
 ## Reference and reuse practice
 

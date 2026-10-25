@@ -5,8 +5,8 @@ window.CHEMWORLD_CAPABILITIES = {
   "registry": {
     "modules": 31,
     "components": 38,
-    "operations": 51,
-    "measurements": 27
+    "operations": 52,
+    "measurements": 30
   },
   "tree": [
     {

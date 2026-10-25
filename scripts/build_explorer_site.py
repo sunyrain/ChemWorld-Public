@@ -8,6 +8,8 @@ import math
 import shutil
 from pathlib import Path
 
+from chemworld.examples.native_capabilities import capability_rows
+
 ROOT = Path(__file__).resolve().parents[1]
 GUIDES = (
     "native_foundation",
@@ -51,6 +53,19 @@ def build(output: Path) -> None:
     for source in web.iterdir():
         if source.is_file() and source.suffix in {".html", ".js", ".css"}:
             shutil.copyfile(source, output / source.name)
+    rows = capability_rows()
+    registry = {
+        "modules": len(rows),
+        "components": len({name for row in rows for name in row["components"]}),
+        "operations": len({name for row in rows for name in row["operations"]}),
+        "measurements": len({name for row in rows for name in row["instruments"]}),
+    }
+    for name in ("chemworld-capabilities.js", "chemworld-capabilities.en.js"):
+        path = output / name
+        prefix, payload = path.read_text(encoding="utf-8").split(" = ", 1)
+        catalog = json.loads(payload.strip().removesuffix(";"))
+        catalog["registry"] = registry
+        path.write_text(f"{prefix} = {encode(catalog)};\n", encoding="utf-8")
     for source in (web / "assets").rglob("*.webp"):
         destination = output / source.relative_to(web)
         destination.parent.mkdir(parents=True, exist_ok=True)
