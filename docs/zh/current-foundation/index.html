@@ -788,38 +788,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#source-synchronization" class="md-nav__link">
+  <a href="#development-progress" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2026年10月25日更新
+        最新开发进展 — 2026年10月25日
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="2026年10月25日更新">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        本次集成检查
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#source-synchronization" class="md-nav__link">
     <span class="md-ellipsis">
       
-        历史证据
+        公共源码中已提供的功能
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        验证与历史证据
       
     </span>
   </a>
@@ -996,38 +990,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#source-synchronization" class="md-nav__link">
+  <a href="#development-progress" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2026年10月25日更新
+        最新开发进展 — 2026年10月25日
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="2026年10月25日更新">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        本次集成检查
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#source-synchronization" class="md-nav__link">
     <span class="md-ellipsis">
       
-        历史证据
+        公共源码中已提供的功能
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        验证与历史证据
       
     </span>
   </a>
@@ -1055,63 +1043,94 @@
 
 
 <h1 id="_1">当前基座<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<h2 id="source-synchronization">2026年10月25日更新<a class="headerlink" href="#source-synchronization" title="Permanent link">&para;</a></h2>
-<p>公共Python基座同步至已提交的开发版本
-<a href="https://github.com/sunyrain/ChemWorld/commit/823b6b01f"><code>823b6b01f</code></a>。
-从<a href="../environment-authoring/">环境作者指南</a>选择设备、声明操作与资源边界、接入自己的Agent，
-并按需定义奖励。<a href="../environment/">三步用户奖励示例</a>已随包提供。</p>
+<h2 id="development-progress">最新开发进展 — 2026年10月25日<a class="headerlink" href="#development-progress" title="Permanent link">&para;</a></h2>
+<p>主库开发已继续向前推进。下列增量已提交到主库，尚未纳入当前公共安装包；
+公共版本可用的内容单独列在下一节。</p>
 <table>
 <thead>
 <tr>
 <th>方向</th>
-<th>当前新增内容</th>
+<th>最新开发内容</th>
+<th>当前范围</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>流程网络</td>
+<td>有限图连接显式进料、分流、混合、换热、分离和多个回路；有限库存与轨迹控制消费者沿用同一世界状态。</td>
+<td>边界与初始化修复正在核验，完整固定范围资格仍在进行。</td>
+</tr>
+<tr>
+<td>电池观测</td>
+<td>半电池 DFN 读数支持序列化与恢复，并核对模型和字段。</td>
+<td>读数仍是派生观测，不是第二份设备状态，也不代表整个半电池任务已完成。</td>
+</tr>
+<tr>
+<td>机理互操作</td>
+<td>已支持的导入 Cantera 气相网络可保留原物种、反应与单位声明进行导出。</td>
+<td>要求完整来源声明；不支持或来源缺失的网络明确拒绝。</td>
+</tr>
+<tr>
+<td>物性拟合</td>
+<td>物理灵敏度诊断要求原模型的有限差分评估实际成功。</td>
+<td>优化器惩罚值本身不能证明参数可辨识性，失败尝试继续保留。</td>
+</tr>
+</tbody>
+</table>
+<p>当前开发总表的<strong>56张父任务完成39张</strong>、5张推进中、12张待做；独立 CPU 路线
+<strong>31张任务完成4张</strong>。任务完成与软件参考比较不等于所有材料都获验证，
+完整科学模型执行仍使用 Python。</p>
+<h2 id="source-synchronization">公共源码中已提供的功能<a class="headerlink" href="#source-synchronization" title="Permanent link">&para;</a></h2>
+<p>公共 Python 运行时仍对应10月25日同步的源码快照
+<a href="https://github.com/sunyrain/ChemWorld/commit/823b6b01f"><code>823b6b01f</code></a>。
+从<a href="../environment-authoring/">环境作者指南</a>选择设备并声明操作、资源边界，
+再<a href="../environment/">接入 Agent，按需定义奖励</a>。三步用户奖励示例已随包提供。</p>
+<table>
+<thead>
+<tr>
+<th>方向</th>
+<th>公共版本可用范围</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>热力学与界面</td>
-<td>扩展分子／缔合／多流体模型、多相热量闪蒸、有限过程消费和平面界面计算</td>
+<td>分子／缔合／多流体模型、多相热量闪蒸、有限过程消费和平面界面计算</td>
 </tr>
 <tr>
 <td>反应与生化系统</td>
-<td>反应器网络、能量输运、机理约束、SBML／COPASI互操作、受控混合动力学与事件延续</td>
+<td>反应器网络、能量输运、导入机理、SBML／COPASI互操作及有界混合动力学</td>
 </tr>
 <tr>
 <td>水处理与电化学</td>
-<td>有限膜／处理流程、活性污泥、电池参数与滞后族，以及进一步的半电池和热工作流</td>
+<td>有限膜／处理流程、活性污泥、电池参数与滞后族，以及选定半电池和热工作流</td>
 </tr>
 <tr>
 <td>环境使用</td>
-<td>用户自定义目标与奖励、环境设计、显式历史应用入口、持久状态与回放</td>
+<td>用户自定义目标与奖励、持久状态、资源边界、观测和回放</td>
 </tr>
 <tr>
-<td>可选CPU开发</td>
-<td>语义声明、资源／历史基础及C++20 ABI／绑定骨架；完整科学数值执行仍使用Python</td>
+<td>可选 CPU 开发</td>
+<td>语义声明、资源／历史基础及 C++20 ABI／绑定骨架；完整数值模型迁移仍在推进</td>
 </tr>
 </tbody>
 </table>
-<p>安装注册表声明<strong>31个模块、38类部件、52个操作和30类仪器</strong>，它们是接口声明数量，
-不代表独立领域数，也不代表任意世界都能使用这些组合。各模型与组合保留各自的适用边界。
-开发总表中<strong>56张父任务已完成39张</strong>、4张认领、13张待做；独立CPU路线31张任务完成4张。
-任务完成数不是独立材料验证数量。</p>
-<p>旧Student Lab命令已退役。Research Workbench与Blender Lab仍是内部原型；公共分发通过
-Python、CLI与Agent接口使用。冻结Notebook、轨迹及证据保留原运行时版本。
-本次不发布新PyPI版本，也不重跑论文实验。</p>
-<h3 id="_2">本次集成检查<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
-<p>当前公共源码的<strong>82个可执行API示例全部通过</strong>。环境入口、运行时、观测、快照及网站定向检查通过；
-一处沿用旧README排版的断言已更新，对应8项文档检查通过。<strong>10,592项测试可正常收集</strong>，
-这不代表全套测试执行通过；独立参考测试需要另外安装相应上游库。</p>
-<p>双语文档严格构建通过；<strong>73个HTML页面、2,013个本地链接</strong>未发现缺失目标。
-本次浏览器连接不可用，因此不新增视觉或浏览器交互通过的结论。</p>
-<p>wheel与源码包均在Windows Python 3.11.15上独立安装通过。每种包覆盖15类任务初始化、
-10个原生工作流、6条文档命令、自定义奖励、设备延续及新进程回放，可选上游求解器均未安装。
-这不增加Linux或macOS的安装通过范围。</p>
-<h2 id="_3">历史证据<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>早期安装及资格结果继续对应各自的原执行版本。此前源码与验证范围见
-<a href="https://github.com/sunyrain/ChemWorld-Public/blob/096de6de32be5b016ca481dcd07a91ca0796f9c8/docs/current-foundation.zh.md">10月24日公共记录</a>。
-冻结Notebook与轨迹展示继续保留在<a href="../evidence/">证据</a>和<a href="../notebooks/">Notebook</a>入口。
-当前物理不保证与这些历史轨迹逐数值兼容。</p>
-<p>全仓类型检查、完整上游库资格、更广的平台安装覆盖及大部分CPU执行任务仍需继续推进。</p>
+<p>安装注册表声明<strong>31个模块、38类部件、52个操作和30类仪器</strong>。这些是软件声明数量，
+不代表独立科学领域数，也不代表任意世界都能使用全部组合。官网构建时直接读取
+公共注册表计数；能力图谱仍是帮助阅读的内容目录。</p>
+<p>通过 Python、CLI 或 Agent 接口使用。旧 Student Lab 命令已退役，
+Research Workbench 与 Blender Lab 仍是内部原型。</p>
+<h2 id="_2">验证与历史证据<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>公共运行时同步时，<strong>82个可执行 API 示例通过</strong>；wheel 与源码包在 Windows Python
+3.11.15 上独立安装通过，覆盖原生工作流及新进程回放。这些结果对应公共运行时，
+不替代上方最新开发增量的验证。
+<a href="https://github.com/sunyrain/ChemWorld-Public/blob/c21fe86cb739b9bed021069ba98921b868576df4/docs/current-foundation.zh.md">公共同步记录</a>
+保留具体范围和分母。</p>
+<p>官网现在统一由 <code>/</code> 展示项目，<code>/docs/</code> 提供完整文档；旧网站及指南地址保留跳转。
+本轮更新网站内容，不改变运行时、PyPI 版本或论文结果。</p>
+<p>冻结 Notebook 与轨迹演示继续对应各自的原运行时版本，见<a href="../evidence/">证据</a>与
+<a href="../notebooks/">Notebook</a>。当前物理不保证与历史轨迹逐数值兼容；完整上游资格、
+更广平台覆盖与大部分 CPU 执行任务仍在推进。</p>
 
 
 
