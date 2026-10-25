@@ -1,0 +1,493 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/action_schema/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/action_schema/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/action_schema/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/agents/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/agents/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/agents/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/community_release/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/community_release/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/community_release/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/current-foundation/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/current-foundation/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/current-foundation/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/environment-authoring/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/environment-authoring/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/environment-authoring/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/environment/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/environment/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/environment/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/evidence/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/evidence/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/evidence/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/extension-roadmap/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/extension-roadmap/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/extension-roadmap/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/getting_started/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/getting_started/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/getting_started/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/legacy/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/legacy/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/legacy/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/limitations/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/limitations/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/limitations/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/native_biochemical/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_biochemical/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_biochemical/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/native_capabilities/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_capabilities/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_capabilities/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/native_cpu/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_cpu/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_cpu/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/native_domains/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_domains/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_domains/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/native_foundation/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_foundation/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_foundation/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/native_mechanisms/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_mechanisms/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_mechanisms/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/native_shared_lab/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_shared_lab/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_shared_lab/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/native_stochastic/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_stochastic/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_stochastic/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/notebooks/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/notebooks/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/notebooks/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/one-experiment/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/one-experiment/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/one-experiment/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/operations/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/operations/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/operations/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/quickstart/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/quickstart/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/quickstart/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/reference/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/reference/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/reference/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/repository-settings/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/repository-settings/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/repository-settings/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/representative-behavior/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/representative-behavior/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/representative-behavior/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/student-lab/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/student-lab/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/student-lab/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/world-capability-map/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-capability-map/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-capability-map/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/world-composition-contract/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-composition-contract/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-contract/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/world-composition-coverage/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-composition-coverage/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-coverage/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/world-composition-examples/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-composition-examples/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-examples/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/world-foundations/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-foundations/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-foundations/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/assets/chemworld-readme-banner.prompt/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/assets/chemworld-readme-banner.prompt/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/assets/chemworld-readme-banner.prompt/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/assets/chemworld-runtime-architecture.prompt/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/assets/chemworld-runtime-architecture.prompt/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/assets/chemworld-runtime-architecture.prompt/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/action_schema/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/action_schema/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/action_schema/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/agents/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/agents/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/agents/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/community_release/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/community_release/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/community_release/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/current-foundation/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/current-foundation/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/current-foundation/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/environment-authoring/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/environment-authoring/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/environment-authoring/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/environment/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/environment/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/environment/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/evidence/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/evidence/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/evidence/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/extension-roadmap/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/extension-roadmap/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/extension-roadmap/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/getting_started/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/getting_started/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/getting_started/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/legacy/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/legacy/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/legacy/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/limitations/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/limitations/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/limitations/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_biochemical/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_biochemical/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_biochemical/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_capabilities/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_capabilities/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_capabilities/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_cpu/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_cpu/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_cpu/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_domains/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_domains/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_domains/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_foundation/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_foundation/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_foundation/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_mechanisms/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_mechanisms/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_mechanisms/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_shared_lab/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_shared_lab/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_shared_lab/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_stochastic/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_stochastic/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_stochastic/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/notebooks/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/notebooks/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/notebooks/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/one-experiment/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/one-experiment/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/one-experiment/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/operations/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/operations/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/operations/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/quickstart/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/quickstart/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/quickstart/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/reference/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/reference/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/reference/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/repository-settings/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/repository-settings/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/repository-settings/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/representative-behavior/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/representative-behavior/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/representative-behavior/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/student-lab/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/student-lab/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/student-lab/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-capability-map/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-capability-map/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-capability-map/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-contract/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-contract/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-composition-contract/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-coverage/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-coverage/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-composition-coverage/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-examples/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-examples/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-composition-examples/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-foundations/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-foundations/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/world-foundations/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/assets/chemworld-readme-banner.prompt/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/assets/chemworld-readme-banner.prompt/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/assets/chemworld-readme-banner.prompt/"/>
+    </url>
+    <url>
+        <loc>https://sunyrain.github.io/ChemWorld-Public/docs/zh/assets/chemworld-runtime-architecture.prompt/</loc>
+        <lastmod>2026-10-25</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/assets/chemworld-runtime-architecture.prompt/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://sunyrain.github.io/ChemWorld-Public/docs/assets/chemworld-runtime-architecture.prompt/"/>
+    </url>
+</urlset>

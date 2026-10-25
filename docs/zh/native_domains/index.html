@@ -1,0 +1,1104 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="用于受控、可回放 Agent 实验的可编程化学世界。">
+      
+      
+      
+        <link rel="canonical" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/native_domains/">
+      
+      
+      
+      
+        
+          <link rel="alternate" href="../../native_domains/" hreflang="en">
+        
+          <link rel="alternate" href="./" hreflang="zh">
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>运行集成后的原生示例 - ChemWorld Docs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/site.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ChemWorld">
+  <meta property="og:title" content="ChemWorld — Programmable chemical worlds">
+  <meta property="og:description" content="Controlled, replayable environments for experimental agents.">
+  <meta property="og:image" content="https://sunyrain.github.io/ChemWorld-Public/docs/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ChemWorld — Programmable chemical worlds">
+  <meta name="twitter:description" content="Controlled, replayable environments for experimental agents.">
+  <meta name="twitter:image" content="https://sunyrain.github.io/ChemWorld-Public/docs/assets/og.png">
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#_1" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+  
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../" title="ChemWorld Docs" class="md-header__button md-logo" aria-label="ChemWorld Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ChemWorld Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              运行集成后的原生示例
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+      <div class="md-header__option">
+  <div class="md-select">
+    
+    <button class="md-header__button md-icon" aria-label="选择当前语言">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m12.87 15.07-2.54-2.51.03-.03A17.5 17.5 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2zm-2.62 7 1.62-4.33L19.12 17z"/></svg>
+    </button>
+    <div class="md-select__inner">
+      <ul class="md-select__list">
+        
+          <li class="md-select__item">
+            <a href="../../native_domains/" hreflang="en" class="md-select__link">
+              English
+            </a>
+          </li>
+        
+          <li class="md-select__item">
+            <a href="./" hreflang="zh" class="md-select__link">
+              中文
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+</div>
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sunyrain/ChemWorld-Public" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sunyrain/ChemWorld-Public
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+  
+  <nav class="cw-global-nav" aria-label="ChemWorld">
+    <div class="md-grid">
+      <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=zh">官网</a>
+      <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=zh#atlas/chemworld">能力图谱</a>
+      <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=zh#experiments">实验案例</a>
+      <span aria-current="page">文档</span>
+    </div>
+  </nav>
+
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../" title="ChemWorld Docs" class="md-nav__button md-logo" aria-label="ChemWorld Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ChemWorld Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sunyrain/ChemWorld-Public" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sunyrain/ChemWorld-Public
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    文档首页
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    五分钟开始
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    接入 Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    设计实验环境
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    使用环境
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    可选CPU构建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../one-experiment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    一次完整实验
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../world-foundations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    世界基座
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    领域指南
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    领域指南
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    原生模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_mechanisms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    反应机制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_biochemical/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    生化网络
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_stochastic/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    随机反应
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_shared_lab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    共享实验室
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../current-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    当前基座
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extension-roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    扩展待办
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    证据
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook 教程
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API 参考
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    适用边界
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#device-and-time-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        设备和时间界限
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#residual-and-caloric-solver-choices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        残余值和热量计算器的选择
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#capability-and-validation-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        能力和验证范围
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="_1">运行集成后的原生示例<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>中文预览译文；技术接口与适用范围请同时核对<a href="https://sunyrain.github.io/ChemWorld-Public/docs/native_domains/">英文原文</a>。</p>
+</blockquote>
+<p>这些是固定的合成开发工作流程，而不是自主的模型运行或与真实实验室数据的拟合。它们使用与原生领域相同的 <code>ChemWorldRuntime</code>、Gym、CLI、交易系统和回放功能。不需要任何模型密钥或可选的化学后端。预装的入口点位于 wheel 和 sdist 中，不需要导入任何测试辅助工具或仅限于仓库的配置。</p>
+<p>从受保护的存储环境：</p>
+<div class="highlight"><pre><span></span><code>uv run --no-sync python -m chemworld.examples.native_domains --output /tmp/native-domains
+uv run --no-sync chemworld verify --submission /tmp/native-domains/heater.jsonl
+uv run --no-sync python -m chemworld.examples.native_capabilities --format json
+</code></pre></div>
+<p>在虚拟环境中安装了内置轮后，对应的输入是 <code>python -m chemworld.examples.native_domains --output /tmp/native-domains</code>。 使用 <code>--workflow NAME</code> 选择一个，或重复使用以选择多个。 输出结果是实际的动作/读数轨迹和终端快照，而不是虚构的分数。</p>
+<table>
+<thead>
+<tr>
+<th>工作流程</th>
+<th>它锻炼的是什么？</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>heater</code></td>
+<td>一个校准后的有限加热装置：气体表面反应 → 液相吸附 → 热能 SPM。 相同的装置移动，而不是复制。 每个容器都保留自身的材料和本地经过的时间。</td>
+</tr>
+<tr>
+<td><code>membrane</code></td>
+<td>在有限的进水/泵/RO系统/渗透水和清洗/废液物料库存中，进行三次清洗/冲洗循环；污垢仍然存在，且没有进行补水/重置。</td>
+</tr>
+<tr>
+<td><code>mineral</code></td>
+<td>碳酸盐/方解石的动力学过程，有限的酸性物质输入，相转移，采样和pH值。</td>
+</tr>
+<tr>
+<td><code>shared-clock</code></td>
+<td>独立的、低复制率的 A/B 和 SSA 型号，以及确定性的 A/B 型号，向一个离线分子计数器发出两个竞争性请求，导致结果延迟，并且持续运行 RNG。</td>
+</tr>
+<tr>
+<td><code>distillation</code></td>
+<td>有限的托盘残留，保留接收器，定时分液收集，完全回流和回流变化。</td>
+</tr>
+<tr>
+<td><code>crystal</code></td>
+<td>播种、有限冷却/生长、过滤、重新悬浮、温和溶解以及第二次冷却间隔。</td>
+</tr>
+<tr>
+<td><code>solid</code></td>
+<td>二元分离 → 加热 → 局部平衡状态下冷却，并读取原生相。</td>
+</tr>
+</tbody>
+</table>
+<h2 id="device-and-time-boundaries">设备和时间界限<a class="headerlink" href="#device-and-time-boundaries" title="Permanent link">&para;</a></h2>
+<p><code>reconnect_heater</code> 是一种在明确编写的系统中，不涉及物理时间或空间的连接动作。 <strong>本地时钟</strong> 组成部分。首先进行暂停控制；世界上必须只有一个热源设备，并且该设备必须与一个具有兼容原生温度域的目标进行匹配。该设备的身份、校准和设置必须保持不变；材料不得移动。使用 <code>select_vessel</code> 然后 <code>heat</code> 为了在新的目标位置运行。它不实现机器人的运动、空间碰撞避免或通用仪器的热插拔。如果连接被拒绝，则遵循正常的程序，但不会改变材料、设备或物理时间。</p>
+<p><code>shared-clock</code>的工作流程与众不同：所有启用的容器在第39条的有限调度器下，同时老化。它不进行<strong>和</strong>的关联。SSA以及ODE在单个容器内进行，分子捕获是零载体体积的伯努利采样，而不是液体分取。不要将使用相同种子多次重置解释为独立的实验。</p>
+<p>使用 <code>--noise-mode keyed</code> 选择现有的已标记的探测器原型。例如，使用世界/进程种子 7 和独立的观察种子 12。每个输出都包含解析后的组成和字面动作序列，保存在 <code>*-recipe.json</code> 文件中。共享时钟示例明确声明了亚秒级的等待，以便快照可以保留一个繁忙的一秒分析器和一个未执行的 SSA 事件；它不会缩短分析器的物理分析时间。</p>
+<p>一个由用户编写的共享时钟，使用 <code>LabClockSpec(vessel_capacity=4, ...)</code> 允许四个独立的闭环热/SSA容器。 默认值为两个；显式整数容量为 1–64，与有限的任务队列 <code>capacity</code> 区分。 1、2 和 4 个容器路径具有直接的功能覆盖。 所有声明的容器都会演化到相同的事件终点，包括未选择的容器。 更改声明顺序或选择另一个容器不会选择数值组装顺序。 一个物理加热器和一个离线分析仪提供持久的FIFO请求。如果切片失败，则会丢弃样本，RNG变化；现有的被拒绝操作的成本/风险惩罚已记录在案。超出已声明的有限设备、多个设备和同一容器的开放连接。ODE/SSA混合反应仍然缺乏充分的支持。</p>
+<p><code>chemworld.examples.closed_shared_labs.reactive_closed_lab()</code> 作者设计了四个独立的合成系统：一个基于热的A/B反应，热SPM电池、有限的吸附接触以及低复制SSA. <code>phase_closed_lab()</code> 结合了有限的晶体生长与独立的 Al/Cu 固体样品。 使用任何一种配方构建 <code>ChemWorldRuntime(composition=...)</code>，并使用 <code>select_vessel</code>、<code>queue_lab_heat</code>、可选的 <code>queue_lab_measure</code> 和 <code>wait</code>。 电力驱动是一种明确编写的初始程序；这些配方不添加控制器。 只有一个有限的热源在不同系统中移动，并且每个模型都保持自身的温度范围。 一种等温电池可以推进，但无法接受加热。 所有策略必须明确声明 <code>shared_clock=True</code>；单独安装模块并不能赋予这种能力。 物理上的截止点将所有系统同步到实际时间，并停止实验室。 这些组合使用现有的原生方程和合成参数；它们不建立材料的匹配。</p>
+<p><code>chemworld.examples.open_shared_labs.open_shared_lab("transport")</code> 将有限的资源（如泵/管道/换热器）与一个封闭式的热瓶结合起来。选择 <code>"membrane"</code> 对于有限的 RO 型号，保留污垢、清洗/废弃物，以及一个单独的容器。选择该装置的 <code>reactor</code>，打电话 <code>set_flow_rate</code>，然后使用 <code>wait</code> 为了全面提升实验室的水平。选择 <code>bottle</code> 以及 <code>queue_lab_measure</code> 在保持流动的同时，占据其一台离线色谱仪。现有的本地 <code>run_flow</code> 该操作无法在此引入第二个时钟。</p>
+<p>每个有限的装置都会一次性运行，包括其来源和收集容器。配置的容器容量计算物理容器的数量：对于运输示例，为三个；对于污垢膜示例，为五个。有限的来源、收集限制或清洗结束，将所有系统与实际停止状态对齐。全球材料、泵的工作和热量保持在原始记录中；连接系统的参考信息出现在结果诊断中。在编译过程中，额外的路径、共享的储水池、未建模的循环以及重叠的策略所有权将被拒绝。这些配方重复使用原始的有限流动、稀释/等温膜和热方程。</p>
+<h2 id="residual-and-caloric-solver-choices">残余值和热量计算器的选择<a class="headerlink" href="#residual-and-caloric-solver-choices" title="Permanent link">&para;</a></h2>
+<p>默认情况下，<code>BatterySPMSpec</code> 和 <code>TransientElectrodeSpec</code> 将使用 <code>numerical_form="residual"</code>。 将 <code>numerical_form="ode"</code> 设置为显式选择其原始 ODE 路径。 这种选择与物理模型一起保存，并在快照恢复后仍然有效。 即使求解失败仍然是一个数值错误，它不会选择其他算法。</p>
+<p>两条路径都使用相同的有限物料库存、运输和反应方程、能量约定、设备限制和运行时交易。对于 SPM，残余路径同时解决电流和电压的约束条件，包括恒定电流、恒定电压和有限源电流的限制。非终止事件确定限制过渡。代数值出现在求解器诊断中，并从物理状态重新计算，它们不是另一个持久的库存。平面电极保持其现有的氧化还原、扩散和双层电荷模型以及等温能量范围。</p>
+<p>常见的后端可以将常规的块索引-1 残差系统简化为：BDF或者 Radau。这并不是一个任意索引。DAE求解器。诊断功能分别识别解析和有限差分导数；常用的物理模型使用解析速率矩阵和显式数值状态/时间导数。</p>
+<p><code>FiniteTransportSpec.caloric_algorithm</code> 默认使用 <code>"residual"</code>，消耗相同的液体热焓、分析热容和仪器热容。 明确的 <code>"brentq"</code> 选择仍然可用。 <code>caloric_residual_system</code> 还可以提供针对目标能量和已声明的物理参数的原生温度响应。 如果缺少分析参数的导数，则报告为不可用。 这些数值选择均不扩大底层合成材料的适用范围。</p>
+<h2 id="capability-and-validation-scope">能力和验证范围<a class="headerlink" href="#capability-and-validation-scope" title="Permanent link">&para;</a></h2>
+<p>请看 <a href="../native_capabilities/">生成的模块表</a>。它的来源是已安装的声明和它们的范围说明，而不是重复的可用性列表。实际的数值域来自编写好的物理和设备规格，并且受到任务权限的限制。两个模块的存在并不意味着它们之间的所有耦合都得到支持。SPM，稀释 0DRO并且，有限的二元平衡状态并不完整。PyBaMM, WaterTAP或者CALPHAD替代品。</p>
+<p>导出实际的公共行动范围、材料连接以及已安装的仪器声明，用于生成一个食谱（或原始的组成文件）：</p>
+<div class="highlight"><pre><span></span><code>uv run --no-sync python -m chemworld.examples.native_capabilities --composition /tmp/native-domains/heater-recipe.json
+</code></pre></div>
+<p>本报告记录当前任务和活动容器的状态；未来的容器选择或物理状态变化可能会影响可用性。它重用运行时提供的公共合同，而不是维护一个单独的手动维护的范围表。</p>
+<p>验证命令：</p>
+<div class="highlight"><pre><span></span><code>uv run --no-sync pytest tests/test_native_domains_end_to_end.py -v
+uv run --no-sync python scripts/smoke_test_wheel.py --native-foundation-only --output /tmp/native-install.json
+</code></pre></div>
+<p>后者不仅构建了各个分布，还使用锁定默认依赖项，在仓库之外安装它们。它检查是否存在可选的上游库，运行七个示例，并在另一个进程中验证每个轨迹。这是一个本地安装测试。 <strong>不</strong> 包括 PyPI 的上传或正式发布。 接受记录中并未声称未实际测试的平台。</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      ChemWorld · 软件模型实验环境，不用于指导真实化学实验
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.top", "navigation.tracking", "search.highlight", "search.suggest", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../../assets/javascripts/experiment-explorer.js"></script>
+      
+    
+  </body>
+</html>

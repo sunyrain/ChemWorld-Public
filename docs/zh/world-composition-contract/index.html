@@ -1,0 +1,1459 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="用于受控、可回放 Agent 实验的可编程化学世界。">
+      
+      
+      
+        <link rel="canonical" href="https://sunyrain.github.io/ChemWorld-Public/docs/zh/world-composition-contract/">
+      
+      
+      
+      
+        
+          <link rel="alternate" href="../../world-composition-contract/" hreflang="en">
+        
+          <link rel="alternate" href="./" hreflang="zh">
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>ChemWorld world-composition contract - ChemWorld Docs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/site.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ChemWorld">
+  <meta property="og:title" content="ChemWorld — Programmable chemical worlds">
+  <meta property="og:description" content="Controlled, replayable environments for experimental agents.">
+  <meta property="og:image" content="https://sunyrain.github.io/ChemWorld-Public/docs/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ChemWorld — Programmable chemical worlds">
+  <meta name="twitter:description" content="Controlled, replayable environments for experimental agents.">
+  <meta name="twitter:image" content="https://sunyrain.github.io/ChemWorld-Public/docs/assets/og.png">
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#chemworld-world-composition-contract" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+  
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../" title="ChemWorld Docs" class="md-header__button md-logo" aria-label="ChemWorld Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ChemWorld Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ChemWorld world-composition contract
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+      <div class="md-header__option">
+  <div class="md-select">
+    
+    <button class="md-header__button md-icon" aria-label="选择当前语言">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m12.87 15.07-2.54-2.51.03-.03A17.5 17.5 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2zm-2.62 7 1.62-4.33L19.12 17z"/></svg>
+    </button>
+    <div class="md-select__inner">
+      <ul class="md-select__list">
+        
+          <li class="md-select__item">
+            <a href="../../world-composition-contract/" hreflang="en" class="md-select__link">
+              English
+            </a>
+          </li>
+        
+          <li class="md-select__item">
+            <a href="./" hreflang="zh" class="md-select__link">
+              中文
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+</div>
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sunyrain/ChemWorld-Public" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sunyrain/ChemWorld-Public
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+  
+  <nav class="cw-global-nav" aria-label="ChemWorld">
+    <div class="md-grid">
+      <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=zh">官网</a>
+      <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=zh#atlas/chemworld">能力图谱</a>
+      <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=zh#experiments">实验案例</a>
+      <span aria-current="page">文档</span>
+    </div>
+  </nav>
+
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../" title="ChemWorld Docs" class="md-nav__button md-logo" aria-label="ChemWorld Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ChemWorld Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sunyrain/ChemWorld-Public" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sunyrain/ChemWorld-Public
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    文档首页
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    五分钟开始
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    接入 Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    设计实验环境
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    使用环境
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    可选CPU构建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../one-experiment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    一次完整实验
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../world-foundations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    世界基座
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    领域指南
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    领域指南
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    原生模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_mechanisms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    反应机制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_biochemical/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    生化网络
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_stochastic/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    随机反应
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_shared_lab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    共享实验室
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../current-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    当前基座
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extension-roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    扩展待办
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    证据
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook 教程
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API 参考
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    适用边界
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-object-hierarchy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Object hierarchy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-component-vocabulary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Component vocabulary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-declarative-authoring-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Declarative authoring form
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Declarative authoring form">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#runtime-entry-point" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Runtime entry point
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-interface-and-parameter-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Interface and parameter rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-compatibility-and-exclusion-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Compatibility and exclusion rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-composition-versus-world-forks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Composition versus world forks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-coverage-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Coverage boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-claim-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Claim boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="chemworld-world-composition-contract">ChemWorld world-composition contract<a class="headerlink" href="#chemworld-world-composition-contract" title="Permanent link">&para;</a></h1>
+<p>This page describes the frozen public release. Current main supports component
+networks; see <a href="../current-foundation/">current foundation</a> for the updated runtime
+and compatibility-report fields. The original qualification remains historical.</p>
+<p>This document defines the reader-facing authoring boundary for the published release. It is
+a bounded composition contract, not a claim that every possible chemical workflow or every
+combination of modules has been implemented or qualified.</p>
+<p>The external claim is deliberately bounded:</p>
+<blockquote>
+<p>ChemWorld supports open construction within the declared component vocabulary and
+compatibility domain. Qualification uses coverage-guided compositions and frozen unseen
+compositions; it is not an exhaustive proof over all possible tasks.</p>
+</blockquote>
+<h2 id="1-object-hierarchy">1. Object hierarchy<a class="headerlink" href="#1-object-hierarchy" title="Permanent link">&para;</a></h2>
+<p>The authoring language keeps six objects separate.</p>
+<table>
+<thead>
+<tr>
+<th>Object</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Component</td>
+<td>A reusable physical, instrument, transactional, resource or observation module.</td>
+</tr>
+<tr>
+<td>World</td>
+<td>A compatible set of components, parameters and private laws that share one runtime state.</td>
+</tr>
+<tr>
+<td>Task contract</td>
+<td>The public goal and operating surface attached to a world.</td>
+</tr>
+<tr>
+<td>Scenario</td>
+<td>One task contract with concrete initial state, parameters, seed and intervention choice.</td>
+</tr>
+<tr>
+<td>Trajectory</td>
+<td>The committed operation--observation sequence produced by an agent in one scenario.</td>
+</tr>
+<tr>
+<td>World fork</td>
+<td>A controlled parent--child intervention that changes one declared private component while holding the public contract fixed.</td>
+</tr>
+</tbody>
+</table>
+<p>The task contract is written as</p>
+<p>[
+T = (W, S_0, A, I, O, R, \tau, E),
+]</p>
+<p>where <code>W</code> is the world, <code>S0</code> the initial state, <code>A</code> the allowed operations, <code>I</code> the
+instruments, <code>O</code> the public observations, <code>R</code> the resource ledger, <code>τ</code> the termination
+rule and <code>E</code> the evaluation surface.</p>
+<h2 id="2-component-vocabulary">2. Component vocabulary<a class="headerlink" href="#2-component-vocabulary" title="Permanent link">&para;</a></h2>
+<p>The published vocabulary is finite and named at the level a reader can understand. A concrete
+world may use a subset, provided all dependencies and interfaces are satisfied.</p>
+<table>
+<thead>
+<tr>
+<th>Component kind</th>
+<th>Main responsibility</th>
+<th>Typical public interfaces</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reaction</code></td>
+<td>Material transformation and reaction events</td>
+<td>material, temperature, time, state transition</td>
+</tr>
+<tr>
+<td><code>thermal</code></td>
+<td>Heating, cooling, residence time and energy accounting</td>
+<td>temperature, heat, time, energy</td>
+</tr>
+<tr>
+<td><code>phase</code></td>
+<td>Phase identity, equilibrium or phase-state transitions</td>
+<td>phase, volume, composition, state identity</td>
+</tr>
+<tr>
+<td><code>separation</code></td>
+<td>Mixing, settling, extraction, washing, transfer and drying</td>
+<td>material, phase, volume, sample identity</td>
+</tr>
+<tr>
+<td><code>crystallization</code></td>
+<td>Seeding, cooling crystallization and filtration</td>
+<td>temperature, phase, crystal state, sample</td>
+</tr>
+<tr>
+<td><code>distillation</code></td>
+<td>Evaporation, fractionation and collection</td>
+<td>temperature, phase, volatility, fraction</td>
+</tr>
+<tr>
+<td><code>continuous_flow</code></td>
+<td>Flow configuration and residence-time execution</td>
+<td>flow rate, residence time, material, energy</td>
+</tr>
+<tr>
+<td><code>electrochemistry</code></td>
+<td>Potential/current control and electrochemical conversion</td>
+<td>charge, potential, current, energy, material</td>
+</tr>
+<tr>
+<td><code>observation</code></td>
+<td>Public measurements, masks, noise and assay outputs</td>
+<td>observable values, masks, cost, latency</td>
+</tr>
+</tbody>
+</table>
+<p>The vocabulary is extensible by versioning the contract. Adding a new component kind or
+interface is a new contract version, not an undocumented field in an existing authoring
+file.</p>
+<h2 id="3-declarative-authoring-form">3. Declarative authoring form<a class="headerlink" href="#3-declarative-authoring-form" title="Permanent link">&para;</a></h2>
+<p>The following is the public shape of a composition request. It is intentionally readable;
+implementation-specific identities, hashes and private-law payloads are not part of the
+agent-facing contract.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">schema_version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">chemworld-world-composition-0.1</span>
+<span class="nt">composition_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">authored-reaction-purification</span>
+<span class="nt">world_split</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">public-test</span>
+<span class="nt">components</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reaction</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">transformation</span>
+<span class="w">    </span><span class="nt">parameters</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">family</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">declared-reaction-family</span>
+<span class="w">      </span><span class="nt">controls</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">reagent</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">catalyst</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">solvent</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">temperature</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">time</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">thermal</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature-and-energy</span>
+<span class="w">    </span><span class="nt">parameters</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">temperature_range_K</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">280.0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">420.0</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">phase</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">phase-state</span>
+<span class="w">    </span><span class="nt">parameters</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">phases</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">aqueous</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">organic</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">separation</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">downstream-processing</span>
+<span class="w">    </span><span class="nt">parameters</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">operations</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">add_phase</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">mix</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">settle</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">separate_phase</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">wash</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dry</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">observation</span>
+<span class="w">    </span><span class="nt">role</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">public-measurement</span>
+<span class="w">    </span><span class="nt">parameters</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">instruments</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">hplc</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">final_assay</span><span class="p p-Indicator">]</span>
+
+<span class="nt">task</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">objective</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">balanced</span>
+<span class="w">  </span><span class="nt">budget</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<span class="w">  </span><span class="nt">operations</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">add_solvent</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">add_reagent</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">heat</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">add_phase</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">mix</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">settle</span><span class="p p-Indicator">,</span>
+<span class="w">               </span><span class="nv">separate_phase</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">terminate</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">measure</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">instruments</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">hplc</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">final_assay</span><span class="p p-Indicator">]</span>
+<span class="w">  </span><span class="nt">observations</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">partial-instrument-observation</span>
+<span class="w">  </span><span class="nt">resources</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">operation_budget</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+<span class="w">    </span><span class="nt">sample_volume_L</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.001</span>
+<span class="w">    </span><span class="nt">time_s</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3600</span>
+<span class="w">    </span><span class="nt">instrument_uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="w">    </span><span class="nt">final_assays</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<span class="w">    </span><span class="c1"># Optional for generated/open-agent tasks:</span>
+<span class="w">    </span><span class="c1"># process_time_policy: required workflow envelope plus explicit repeat/implicit-time allowances</span>
+<span class="w">  </span><span class="nt">termination</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">final-assay-or-budget</span>
+<span class="w">  </span><span class="nt">evaluation</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">metrics</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">score</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">purity</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">recovery</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">process_mass_balance_error</span><span class="p p-Indicator">]</span>
+<span class="w">    </span><span class="nt">threshold</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.55</span>
+</code></pre></div>
+<p>The request is a construction description, not a trajectory. A scenario supplies concrete
+parameter values, initial-state values and a seed after the world and task contract have
+been compiled.</p>
+<p>For coverage-generated tasks, <code>resources.process_time_policy</code> is the executable explanation of
+<code>resources.time_s</code>. It decomposes the envelope into <code>timed_stage_max_s</code>, an explicit
+<code>implicit_stage_reserve_s</code> for quench/transfer/filter/separation operations, and
+<code>repeat_allowance_s</code>; it also records required and additional repeat counts for every operation.
+The runtime checks this policy before committing an action and exposes <code>used_s</code>, <code>limit_s</code>, and
+<code>remaining_s</code> on the public campaign state. A hand-set single cap without this derivation is not
+sufficient for an open agent action space.</p>
+<h3 id="runtime-entry-point">Runtime entry point<a class="headerlink" href="#runtime-entry-point" title="Permanent link">&para;</a></h3>
+<p>The same request is accepted by the public compiler and environment constructor:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">gymnasium</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">gym</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">chemworld</span>
+
+<span class="n">request</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;schema_version&quot;</span><span class="p">:</span> <span class="s2">&quot;chemworld-world-composition-0.1&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;composition_id&quot;</span><span class="p">:</span> <span class="s2">&quot;composed-reaction-assay-demo&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;world_split&quot;</span><span class="p">:</span> <span class="s2">&quot;public-dev&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;components&quot;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="p">{</span><span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;reaction&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;transformation&quot;</span><span class="p">,</span> <span class="s2">&quot;parameters&quot;</span><span class="p">:</span> <span class="p">{}},</span>
+        <span class="p">{</span><span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;thermal&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;temperature-and-energy&quot;</span><span class="p">,</span> <span class="s2">&quot;parameters&quot;</span><span class="p">:</span> <span class="p">{}},</span>
+        <span class="p">{</span><span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;observation&quot;</span><span class="p">,</span> <span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;public-measurement&quot;</span><span class="p">,</span> <span class="s2">&quot;parameters&quot;</span><span class="p">:</span> <span class="p">{}},</span>
+    <span class="p">],</span>
+    <span class="s2">&quot;task&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;budget&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span> <span class="s2">&quot;resources&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;operation_budget&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">}},</span>
+<span class="p">}</span>
+
+<span class="n">compiled</span> <span class="o">=</span> <span class="n">chemworld</span><span class="o">.</span><span class="n">compile_world_composition</span><span class="p">(</span><span class="n">request</span><span class="p">)</span>
+<span class="n">env</span> <span class="o">=</span> <span class="n">gym</span><span class="o">.</span><span class="n">make</span><span class="p">(</span><span class="s2">&quot;ChemWorld&quot;</span><span class="p">,</span> <span class="n">composition</span><span class="o">=</span><span class="n">compiled</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">observation</span><span class="p">,</span> <span class="n">info</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+</code></pre></div>
+<p><code>compiled.to_public_dict()</code> and <code>info["composition"]</code> expose the same component,
+interface, operation, instrument, resource, termination, evaluation and accepted
+compatibility surface. <code>chemworld.check_world_composition_compatibility(request)</code> returns the
+same pre-execution decision without constructing an environment. Rejected compilation raises
+<code>WorldCompositionError</code>; its diagnostics identify a stable rejection class and request path.</p>
+<p>Complete public requests for a single process module, a cross-module world and a multi-stage
+world are collected in <a href="../world-composition-examples/">Public world-authoring examples</a>. The same
+page maps all 15 registered reference tasks onto the component and task-contract hierarchy and
+keeps controlled world forks separate from general composition.</p>
+<h2 id="4-interface-and-parameter-rules">4. Interface and parameter rules<a class="headerlink" href="#4-interface-and-parameter-rules" title="Permanent link">&para;</a></h2>
+<p>Every component declares the inputs it consumes, the outputs it produces, the units of
+numeric fields, and the state/event identities it may update. Interfaces are checked before
+execution and remain visible at the public-contract level only where the task permits them.</p>
+<p>Parameters fall into four classes:</p>
+<ol>
+<li><strong>Categorical</strong> choices, such as a solvent family, phase role or instrument kind;</li>
+<li><strong>Continuous</strong> values with declared units and closed bounds, such as temperature, time,
+   volume, current or flow rate;</li>
+<li><strong>Discrete</strong> values, such as stage counts, fraction identifiers or operation limits; and</li>
+<li><strong>Seeded</strong> values controlling initial state and declared randomness, which are replay keys
+   rather than public hidden-law fields.</li>
+</ol>
+<p>The compiler must reject a request before execution when a parameter is missing, outside its
+declared domain, expressed in an incompatible unit, or attached to a component that does not
+own that field. A valid composition must expose a complete public surface for operations,
+instruments, observations, resources, termination and evaluation.</p>
+<p>The published authoring parameters are deliberately finite:</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Accepted parameter fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Reaction</td>
+<td><code>family</code>, <code>controls</code></td>
+</tr>
+<tr>
+<td>Thermal</td>
+<td><code>temperature_range_K</code>, <code>duration_range_s</code></td>
+</tr>
+<tr>
+<td>Phase</td>
+<td><code>phases</code></td>
+</tr>
+<tr>
+<td>Separation</td>
+<td><code>operations</code></td>
+</tr>
+<tr>
+<td>Crystallization</td>
+<td><code>temperature_range_K</code>, <code>seed_mass_range_g</code></td>
+</tr>
+<tr>
+<td>Distillation</td>
+<td><code>temperature_range_K</code>, <code>reflux_ratio_range</code>, <code>fraction_count</code></td>
+</tr>
+<tr>
+<td>Continuous flow</td>
+<td><code>flow_rate_range_mL_min</code>, <code>residence_time_range_s</code>, <code>temperature_range_K</code></td>
+</tr>
+<tr>
+<td>Electrochemistry</td>
+<td><code>potential_range_V</code>, <code>current_range_mA</code>, <code>duration_range_s</code></td>
+</tr>
+<tr>
+<td>Observation</td>
+<td><code>instruments</code></td>
+</tr>
+</tbody>
+</table>
+<p>Plain numeric values use the unit named by the field. A unit-bearing value uses
+<code>{value: [...], unit: degC}</code> or the corresponding scalar form; compatible units are converted
+before bounds are checked. Accepted authored ranges narrow the runtime operation validator,
+so a value outside the declared range is not merely documented—it is rejected before state
+mutation.</p>
+<h2 id="5-compatibility-and-exclusion-rules">5. Compatibility and exclusion rules<a class="headerlink" href="#5-compatibility-and-exclusion-rules" title="Permanent link">&para;</a></h2>
+<p>Compatibility is defined by interfaces and state ownership, not by a task name.</p>
+<ul>
+<li>A state-changing component must have a typed material or process-state input and a declared
+  output event.</li>
+<li>A downstream component may consume an upstream output only when material identity, quantity,
+  units and phase/state meaning are compatible.</li>
+<li>Components that require a phase, thermal, electrical or flow interface cannot be used without
+  the corresponding provider or an explicit adapter in the contract.</li>
+<li>Every committed transition must remain inside the shared constitution: non-negative amounts,
+  applicable mass/charge/energy checks, safety limits, resource debits and lifecycle rules.</li>
+<li>Public observations may expose only fields declared by the task contract. Private world laws,
+  component identities and lineage are evaluator-visible but not agent-visible.</li>
+<li>A final evaluation must have a reachable termination path and a valid terminal observation;
+  a composition that can never close its lifecycle is rejected before qualification.</li>
+</ul>
+<p>The following are representative rejection classes, not a promise that the list is exhaustive:</p>
+<table>
+<thead>
+<tr>
+<th>Rejection</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Missing dependency</td>
+<td>crystallization requested without a phase or thermal path</td>
+</tr>
+<tr>
+<td>Interface mismatch</td>
+<td>a volume-valued output wired to a temperature input</td>
+</tr>
+<tr>
+<td>Conflicting ownership</td>
+<td>two modules both claim authority over the same phase transition</td>
+</tr>
+<tr>
+<td>Invalid parameter</td>
+<td>negative volume, out-of-range potential or unsupported instrument</td>
+</tr>
+<tr>
+<td>Lifecycle hole</td>
+<td>no reachable termination or final-assay path</td>
+</tr>
+<tr>
+<td>Resource impossibility</td>
+<td>required operation path exceeds the declared sample, time or attempt budget</td>
+</tr>
+</tbody>
+</table>
+<h2 id="6-composition-versus-world-forks">6. Composition versus world forks<a class="headerlink" href="#6-composition-versus-world-forks" title="Permanent link">&para;</a></h2>
+<p>General composition selects multiple compatible components. A world fork is narrower: it is
+an attribution experiment derived from a valid parent world and changes exactly one declared
+private component while preserving the public action, observation, instrument, resource,
+failure, scoring and task contract. Fork syntax must not be used to imply arbitrary
+multi-component authoring.</p>
+<h2 id="7-coverage-boundary">7. Coverage boundary<a class="headerlink" href="#7-coverage-boundary" title="Permanent link">&para;</a></h2>
+<p>The composition space is open within the declared vocabulary, but qualification is finite and
+coverage-guided. Discrete axes are sampled with covering-array logic; continuous axes use
+space-filling samples; ordered operation paths cover declared interactions such as
+reaction-to-separation or reaction-to-crystallization. The sample count is determined by the
+coverage target and declared depth, not by a claim of enumeration.</p>
+<p>The 15 registered tasks are reference points in this space. A frozen unseen composition must
+not occur in that reference set, must be generated after the constructor and compatibility
+rules are frozen, and must run through the same construction, execution, termination and
+replay path without a core-runtime patch.</p>
+<h2 id="8-claim-boundary">8. Claim boundary<a class="headerlink" href="#8-claim-boundary" title="Permanent link">&para;</a></h2>
+<p>This contract supports claims about:</p>
+<ul>
+<li>declared components and their public interfaces;</li>
+<li>fail-closed construction and compatibility checking;</li>
+<li>coverage-guided composition and finite unseen-composition qualification;</li>
+<li>transactional, resource, observation-boundary and exact-replay semantics; and</li>
+<li>agent use of a newly generated world as an instrument demonstration.</li>
+</ul>
+<p>It does not support claims about exhaustive task coverage, arbitrary third-party worlds,
+universal agent intelligence, causal model rankings, physical-laboratory transfer or the
+validity of every possible chemical law outside the declared model-card domains.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      ChemWorld · 软件模型实验环境，不用于指导真实化学实验
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.top", "navigation.tracking", "search.highlight", "search.suggest", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../../assets/javascripts/experiment-explorer.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1450 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Programmable chemical worlds for controlled, replayable agent experimentation.">
+      
+      
+      
+        <link rel="canonical" href="https://sunyrain.github.io/ChemWorld-Public/docs/native_biochemical/">
+      
+      
+        <link rel="prev" href="../native_mechanisms/">
+      
+      
+        <link rel="next" href="../native_stochastic/">
+      
+      
+        
+          <link rel="alternate" href="./" hreflang="en">
+        
+          <link rel="alternate" href="../zh/native_biochemical/" hreflang="zh">
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Biochemical networks - ChemWorld Docs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/site.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ChemWorld">
+  <meta property="og:title" content="ChemWorld — Programmable chemical worlds">
+  <meta property="og:description" content="Controlled, replayable environments for experimental agents.">
+  <meta property="og:image" content="https://sunyrain.github.io/ChemWorld-Public/docs/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ChemWorld — Programmable chemical worlds">
+  <meta name="twitter:description" content="Controlled, replayable environments for experimental agents.">
+  <meta name="twitter:image" content="https://sunyrain.github.io/ChemWorld-Public/docs/assets/og.png">
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#finite-low-copy-worlds" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+  
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="ChemWorld Docs" class="md-header__button md-logo" aria-label="ChemWorld Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ChemWorld Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Biochemical networks
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="cyan"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+      <div class="md-header__option">
+  <div class="md-select">
+    
+    <button class="md-header__button md-icon" aria-label="Select language">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m12.87 15.07-2.54-2.51.03-.03A17.5 17.5 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2zm-2.62 7 1.62-4.33L19.12 17z"/></svg>
+    </button>
+    <div class="md-select__inner">
+      <ul class="md-select__list">
+        
+          <li class="md-select__item">
+            <a href="./" hreflang="en" class="md-select__link">
+              English
+            </a>
+          </li>
+        
+          <li class="md-select__item">
+            <a href="../zh/native_biochemical/" hreflang="zh" class="md-select__link">
+              中文
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+</div>
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/sunyrain/ChemWorld-Public" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sunyrain/ChemWorld-Public
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+  
+  <nav class="cw-global-nav" aria-label="ChemWorld">
+    <div class="md-grid">
+      <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=en">Website</a>
+      <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=en#atlas/chemworld">Capability atlas</a>
+      <a href="https://sunyrain.github.io/ChemWorld-Public/?lang=en#experiments">Experiments</a>
+      <span aria-current="page">Documentation</span>
+    </div>
+  </nav>
+
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ChemWorld Docs" class="md-nav__button md-logo" aria-label="ChemWorld Docs" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ChemWorld Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/sunyrain/ChemWorld-Public" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sunyrain/ChemWorld-Public
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5-minute quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect an agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design an environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use the environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_cpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Optional CPU build
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../one-experiment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    One experiment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../world-foundations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    World foundations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Domain guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Domain guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_mechanisms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reaction mechanisms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Biochemical networks
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Biochemical networks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#controlled-fixed-partition-ode-stochastic-chemistry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Controlled fixed-partition ODE / stochastic chemistry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#continuous-reaction-sde-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous reaction SDE (development)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adaptive-stochastic-deterministic-partition-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adaptive stochastic / deterministic partition (development)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_stochastic/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Stochastic reactions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native_shared_lab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Shared laboratory
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../current-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Current foundation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extension-roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../evidence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#controlled-fixed-partition-ode-stochastic-chemistry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Controlled fixed-partition ODE / stochastic chemistry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#continuous-reaction-sde-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Continuous reaction SDE (development)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adaptive-stochastic-deterministic-partition-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adaptive stochastic / deterministic partition (development)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="finite-low-copy-worlds">Finite low-copy worlds<a class="headerlink" href="#finite-low-copy-worlds" title="Permanent link">&para;</a></h1>
+<p>Original SBML inputs can use the same integer kernels through <code>sbml_world</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.world.sbml_world</span><span class="w"> </span><span class="kn">import</span> <span class="n">sbml_world</span>
+
+<span class="c1"># model is an SBMLModel with original XML, provenance and explicit source units.</span>
+<span class="n">world</span> <span class="o">=</span> <span class="n">sbml_world</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">numerical_form</span><span class="o">=</span><span class="s2">&quot;stochastic&quot;</span><span class="p">,</span>
+                   <span class="n">solver_method</span><span class="o">=</span><span class="s2">&quot;gibson-bruck-next-reaction-v1&quot;</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">17</span><span class="p">,</span>
+                   <span class="n">maximum_events</span><span class="o">=</span><span class="mi">100000</span><span class="p">,</span> <span class="n">controlled_parameters</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;k&quot;</span><span class="p">,))</span>
+</code></pre></div>
+<p>The other choices are <code>gillespie-direct-v1</code> and
+<code>adaptive-explicit-tau-leap-v1</code>; tau requires an explicit <code>TauLeapPolicy</code> through
+<code>tau_policy</code>. The builder seed selects the process stream. Session reset seeds
+select observation noise independently. The existing <code>wait</code>,
+<code>set_model_parameters</code> and <code>formal_quantity_meter</code> operations use the original
+formal equipment coordinates and shared laboratory clock. Pending reaction
+clocks or tau packets survive full JSON and new-process continuation.</p>
+<p>This mode admits explicitly compiled nonnegative elementary source monomials
+of total molecular order at most three, including full regenerated reactants,
+declared modifiers and held boundary pools. Original substance, extent, volume,
+time, local-parameter and conversion-factor semantics determine each molecular
+quantum. Amounts must resolve to integer molecules; absent chemical formulas,
+temperature dependence and reaction energies are not invented. The
+<code>reaction_rate</code> readout retains the source deterministic law in mol/s; it is
+not a discrete propensity in events/s.</p>
+<p>Signed net laws, saturation or fractional species powers, reversible single
+channels and continuously changing geometry remain outside this integer adapter.
+Existing deterministic SBML modes retain their source event/rule support and old
+v1/v2 JSON. Integer declarations use v3.
+Independent distribution, source-SDK and installed-package qualification of
+this adapter are recorded separately from its functional checks and from the
+authored chemical-network results below.</p>
+<p>The existing <code>SEDMLProtocol</code> and <code>SEDMLExperimentSession</code> also accept these
+integer processes in finite SED-ML experiments and COMBINE archives. Declare
+KiSAO <code>0000029</code> for direct, <code>0000027</code> for Gibson–Bruck, or <code>0000084</code> for the
+implemented nonnegative Poisson tau strategy. Basic Poisson <code>0000040</code> is a
+different variant and is rejected. Algorithm parameter <code>0000488</code> supplies the
+process seed (default 0); <code>0000415</code> supplies the internal-step budget. Tau also
+accepts <code>0000467</code> (maximum step in source time units), <code>0000228</code> (epsilon),
+<code>0000230</code> (SSA fallback threshold) and <code>0000249</code> (critical threshold).</p>
+<p>These declarations use the existing task graph, controls, measurements, reports
+and full experiment JSON cursor. <code>resetModel="false"</code> continues the same process;
+<code>resetModel="true"</code> restarts its declared process seed and initial inputs. Equal
+fixed seeds across resets do not create independent replicates. The experiment
+caller's seed controls the separate detector stream. Item-based archive models
+still need an explicit <code>items_per_mole</code> policy when using <code>from_archive</code>.</p>
+<p>The developing integer source-event profile also consumes piecewise constant
+global parameter assignment rules, state-only constraints and the existing SBML
+event queue. State guards are checked after each actual reaction or tau batch;
+affine source-time guards and delayed queue deadlines split the advance. Event
+capture, cancellation, priorities, cascades and source concentration/volume
+assignments use the existing formal coordinates and unit conversion. The new
+queue continuation survives complete runtime and experiment JSON. Tau observes
+whole batches; this does not locate source events inside an approximate leap.</p>
+<p>Continuous rate rules, non-affine time guards, time equality pulses, assignment
+rules for species/geometry and time-dependent constraints are rejected explicitly.
+The event profile is in development: functional and compatibility checks are
+available, while independent scientific/source and installed-package acceptance
+remain open. See the <a href="https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51K/README.md">51K evidence and scope</a>.</p>
+<p>Two synthetic worlds run on the native session and task-36 direct SSA strategy:
+<code>biochemical_world("reversible")</code> (A↔B) and <code>biochemical_world("enzyme")</code>
+(E+S→ES, ES→E+S, ES→E+P). These are numerical examples, not fitted biological
+systems. Synthetic E is N2 and ES is CH2N2O so binding preserves atoms.
+There is no Michaelis–Menten reduction and no implicit ODE/SSA switch.</p>
+<p>Authored integer networks can explicitly supply full <code>forward_orders</code> for
+elementary autocatalysis (<code>A+B → 2A</code>), partial regeneration (<code>2A → A+B</code>) and
+catalysts with zero net change. Direct, next-reaction and tau-leap share these
+integer reactants, with total molecularity at most three and unchanged
+falling-factorial rates. Supply the full orders explicitly; an existing net-only
+declaration keeps its original meaning. In tau-leap, newly admitted channels also
+use a conservative initial-stock firing bound without crediting other channels'
+same-leap production. Invalid proposals are rejected, never clipped; this remains
+a biased Poisson approximation. See the
+<a href="https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51H/README.md">implementation and qualification boundaries</a>.
+The fixed fourteen-model development block completed 98,312 trajectories across
+the exact and two approximate strategies against independent finite-CME laws.
+The tau acceptance tests include declared approximation allowances; they do not
+establish exact-law equivalence. Kernel timing in this block found both tau
+policies slower than direct SSA. Actual source-SDK qualification is separate.</p>
+<p>Run without a model key or COPASI:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>python<span class="w"> </span>examples/native_biochemical.py
+uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>pytest<span class="w"> </span>tests/test_biochemical_worlds.py<span class="w"> </span>tests/test_stochastic_kinetics.py<span class="w"> </span>-q
+</code></pre></div>
+<p>The ordinary <code>add_component</code> action accepts mol units, but every dose must
+represent an exact integer number of molecules (within floating-point conversion
+roundoff). Feed index 0/1 is A for reversible, E/S for enzyme. No fractional
+rounding, carrier addition, thermal control or flow is supported in this slice.
+Elemental transitions are checked in exact integer atoms, not a macroscopic mol
+tolerance. The mol ledger remains the sole inventory; counts are a derived view.</p>
+<p><code>molecule_counter</code> reports independent Gaussian-noisy, signed calibrated counts
+(standard deviation 1 count, unit response per molecule), never event truth.
+<code>molecule_capture</code> independently selects each solute molecule with probability
+0.1, exports selected molecules to instrument waste, and measures them with the
+same detector noise. It is an <strong>idealized molecular capture</strong>, not a withdrawn
+liquid aliquot: carrier volume stays constant. Analysis effort is 1 s on the
+offline instrument clock, with no reactor evolution. Both reads cost 0.01.
+Captured truth and sampling RNG remain private. Empty/noisy channels are not
+silently replaced by latent values. No saturation or unknown-species identification
+is claimed.</p>
+<p>Process seed is declared in the world, detector seed at session reset, and capture
+uses a separate persisted stream derived from the world seed. Reads do not change
+the next reaction or capture; actual dosing/capture invalidates a pending event.
+Snapshots retain all continuations, and material/batch/vessel initialization
+restores the declared discrete state (including its initial process/capture seeds).
+Thus repeated resets are deterministic reinitializations, not independent
+replicates: author a world with a new seed for an independent process replicate.
+Stationary instrument usage survives material resets. Snapshots contain evaluator
+truth and are not agent observations.</p>
+<p>Optional external-reference block (no default dependency, choose a fresh output):</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>--no-sync<span class="w"> </span>--with<span class="w"> </span>python-copasi<span class="o">==</span><span class="m">4</span>.48.309<span class="w"> </span>python<span class="w"> </span>scripts/validate_native_biochemical.py<span class="w"> </span>--output<span class="w"> </span>/tmp/biochemical-attempt.json
+</code></pre></div>
+<p>The fixed development design and complete 8,288 endpoints are in
+<code>workstreams/world_foundation/archive/20261020-native-extension/evidence/NATIVE_BIOCHEMICAL_ACCEPTANCE.md</code> and
+<code>NATIVE_BIOCHEMICAL_RESULTS.json</code>. It compares transient/effectively equilibrated
+binomial moments, finite COPASI endpoint distributions and volume/count-scaled
+ODE convergence. Finite distribution agreement is not proof of all kinetic
+regimes or wet-lab predictive validity. A generic molecule counter and synthetic
+capture are explicit simplifications, not models of a named physical assay.</p>
+<h2 id="controlled-fixed-partition-ode-stochastic-chemistry">Controlled fixed-partition ODE / stochastic chemistry<a class="headerlink" href="#controlled-fixed-partition-ode-stochastic-chemistry" title="Permanent link">&para;</a></h2>
+<p><code>StochasticHybridSpec</code> and <code>CrossPartitionHybridSpec</code> accept <code>ode_method="RK45"</code>
+when authoring a world with <code>stochastic_hybrid_world</code>. This selects the shared
+solver backend's RK45 policy for the continuous state and integrated Poisson
+hazards. The historical default is DOP853; default JSON declarations keep their
+original field set and execution signature. The selected method is bound to the
+numerical continuation and retained across full JSON restoration.</p>
+<p>Both methods use the original network, phase inventory, transaction manager and
+shared clock. The fixed partition keeps its integer and continuous closed stocks;
+the cross-partition variant additionally records real stoichiometric molecular
+transfers and enforces whole-jump availability. Existing isothermal, fixed-volume
+and unsupported-operation boundaries still apply. See the
+<a href="https://github.com/sunyrain/ChemWorld-Public/blob/main/examples/native_cross_partition.py">cross-partition example</a>; pass
+<code>ode_method="RK45"</code> when constructing its physical specification.</p>
+<p>Full checkpoints with the same future actions reproduce the complete state and
+diagnostics exactly. Arbitrary wait splits retain numerical agreement rather
+than a bitwise trajectory guarantee. A fixed ten-model RK45 development block
+completed 12,289 native and 81,921 independent analytic trajectories with its
+physical, marginal/joint distribution and moment checks passing. Separate paired
+kernel measurements against DOP853 found RK45 slower on most tested models;
+explicit selection does not imply acceleration. Actual COPASI method-31 output
+has retained negative-stock and last-bit repeat discrepancies, so full source
+qualification remains open in task 51G. See the
+<a href="https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51G/README.md">complete results and limits</a>.</p>
+<h2 id="continuous-reaction-sde-development">Continuous reaction SDE (development)<a class="headerlink" href="#continuous-reaction-sde-development" title="Permanent link">&para;</a></h2>
+<p><code>stochastic_sde_world</code> installs continuous Itô reaction noise on the same native
+session and mol inventory. This is a continuous population approximation. It
+does not quantize populations or doses into integer molecules.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">replace</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.foundation.discrete_inventory</span><span class="w"> </span><span class="kn">import</span> <span class="n">AVOGADRO</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem</span><span class="w"> </span><span class="kn">import</span> <span class="n">StochasticSDESpec</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.runtime</span><span class="w"> </span><span class="kn">import</span> <span class="n">ChemWorldRuntime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.world.biochemical_worlds</span><span class="w"> </span><span class="kn">import</span> <span class="n">biochemical_network</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.world.stochastic_sde_world</span><span class="w"> </span><span class="kn">import</span> <span class="n">stochastic_sde_world</span>
+
+<span class="n">network</span> <span class="o">=</span> <span class="n">replace</span><span class="p">(</span><span class="n">biochemical_network</span><span class="p">(</span><span class="s2">&quot;reversible&quot;</span><span class="p">),</span> <span class="n">stochastic</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="n">spec</span> <span class="o">=</span> <span class="n">StochasticSDESpec</span><span class="p">(</span><span class="n">volume_L</span><span class="o">=</span><span class="mf">1e-15</span><span class="p">,</span> <span class="n">step_s</span><span class="o">=</span><span class="mf">0.125</span><span class="p">)</span>
+<span class="n">world</span> <span class="o">=</span> <span class="n">stochastic_sde_world</span><span class="p">(</span>
+    <span class="n">network</span><span class="p">,</span> <span class="n">spec</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;A&quot;</span><span class="p">:</span> <span class="mf">100.5</span> <span class="o">/</span> <span class="n">AVOGADRO</span><span class="p">,</span> <span class="s2">&quot;B&quot;</span><span class="p">:</span> <span class="mf">20.25</span> <span class="o">/</span> <span class="n">AVOGADRO</span><span class="p">},</span> <span class="n">seed</span><span class="o">=</span><span class="mi">123</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">session</span> <span class="o">=</span> <span class="n">ChemWorldRuntime</span><span class="p">(</span><span class="n">composition</span><span class="o">=</span><span class="n">world</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">({</span><span class="s2">&quot;operation&quot;</span><span class="p">:</span> <span class="s2">&quot;wait&quot;</span><span class="p">,</span> <span class="s2">&quot;duration_s&quot;</span><span class="p">:</span> <span class="mf">0.0625</span><span class="p">})</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">({</span><span class="s2">&quot;operation&quot;</span><span class="p">:</span> <span class="s2">&quot;measure&quot;</span><span class="p">,</span> <span class="s2">&quot;instrument&quot;</span><span class="p">:</span> <span class="s2">&quot;sde_amount_meter&quot;</span><span class="p">})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">observation</span><span class="o">.</span><span class="n">to_dict</span><span class="p">())</span>
+<span class="k">finally</span><span class="p">:</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+<p>The default drift uses the original elementary mass-action concentration law;
+each reaction gets independent noise with amplitude <code>sqrt(abs(particle_flux))</code>.
+<code>ReactionFlux</code> and <code>ReactionNoise</code> can bind safe MathML with typed <code>SDEParameter</code>
+values in coherent SI. Flux outputs require particle/s and noise outputs require
+particle/sqrt(s). Populations <code>n0...</code> are dimensionless, amounts <code>a0...</code> are mol,
+concentrations <code>c0...</code> are mol/m³, and <code>volume_m3</code> is m³. Default native kinetic
+constants retain their original mol/L concentration basis. Unknown symbols,
+incompatible branch units and cyclic flux dependencies are rejected.</p>
+<p>RI5 defaults to fixed mesh endpoints and linear output within each accepted interval.
+Snapshots retain the already drawn weak variables, numerical endpoints and mesh
+anchor. Splitting waits retains the same numerical trajectory. The weak-order
+claim concerns smooth interior mesh endpoints; the linear output is not a
+Brownian bridge. <code>boundary_policy="physical"</code> uses bounded feasible-side step
+reduction and redraws; <code>"reject"</code> fails on a negative candidate. Neither policy
+clips negative stock. Work limits fail the original transaction without consuming
+its process stream. Boundary reduction/redrawing can bias distributions and has
+no boundary weak-order or exact chemical-master-equation guarantee.</p>
+<p>Set <code>output_policy="ri5_fractional"</code> explicitly to evaluate the RI5 map at the
+requested elapsed time from the saved left endpoint and weak variables. This
+avoids the variance loss caused by linear interpolation between mesh endpoints.
+It consumes no additional process draw. Actual callbacks, including saved-output
+and endpoint verification, count toward the evaluation budget. This remains a
+weak numerical output, with no strong-path or Brownian-bridge claim. A negative
+fractional output fails the whole transaction; a feasible full endpoint does not
+certify every intermediate time. The solver does not clip that output or replace
+it with linear interpolation. Historical declarations without an output policy
+retain their original linear codec and saved numerical path.</p>
+<p>Set <code>output_policy="ri5_truncated"</code> to make each requested output time an
+accepted RI5 endpoint. Before drawing a numerical candidate, the step is capped
+at the requested time; physical acceptance therefore checks the endpoint that
+will actually be committed. This policy carries no pending dense output. A
+final interval shorter than <code>min_step_s</code> is attempted as a whole; if it is
+infeasible, the bounded redraw rule applies without further sub-minimum
+backtracking. Stock is never clipped or replaced with another output strategy.</p>
+<p>With this policy, splitting a wait can change its numerical grid and weak
+trajectory. The same complete checkpoint and same subsequent actions still
+reproduce the full state exactly. Instantaneous nonconsuming measurement does
+not split time or consume the process stream. The linear and fractional options
+keep their existing fixed-mesh rules and historical snapshot bindings.</p>
+<p>Continuous solute dosing uses <code>add_component</code> and the existing feed index (0 is
+A in the example). It discards numerical lookahead and retains the consumed RNG.
+The fixed-temperature declaration excludes thermal evolution and carrier addition.
+Each numerical interval has fixed volume. <code>sde_amount_meter</code> has independent signed Gaussian detector
+noise with SD <code>1/AVOGADRO</code> mol and no sampling or reactor time. Integer molecular
+instruments and unbound consuming samplers are rejected.</p>
+<p>For bounded chemical inputs, declare <code>SDEControl</code> entries in <code>spec.controls</code>.
+Targets are <code>rate_multiplier</code> (dimensionless), <code>flux_parameter</code>, or
+<code>noise_parameter</code> (the named parameter's coherent SI units). For example:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem</span><span class="w"> </span><span class="kn">import</span> <span class="n">SDEControl</span>
+
+<span class="n">spec</span> <span class="o">=</span> <span class="n">StochasticSDESpec</span><span class="p">(</span>
+    <span class="n">volume_L</span><span class="o">=</span><span class="mf">1e-15</span><span class="p">,</span> <span class="n">step_s</span><span class="o">=</span><span class="mf">0.125</span><span class="p">,</span> <span class="n">minimum_volume_L</span><span class="o">=</span><span class="mf">0.75e-15</span><span class="p">,</span>
+    <span class="n">controls</span><span class="o">=</span><span class="p">(</span><span class="n">SDEControl</span><span class="p">(</span><span class="s2">&quot;forward_scale&quot;</span><span class="p">,</span> <span class="s2">&quot;forward&quot;</span><span class="p">,</span> <span class="s2">&quot;rate_multiplier&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">4</span><span class="p">),),</span>
+<span class="p">)</span>
+</code></pre></div>
+<p>Build the world with this spec, then call
+<code>session.execute({"operation": "set_sde_parameters", "values": {"forward_scale": 0.5}})</code>.
+The action schema exposes each declared input's bounds, dimensions and current
+value. A multi-input update is atomic. Unknown names, invalid dimensions,
+out-of-range values or a currently undefined flux/noise expression are rejected.
+Changes discard numerical lookahead while retaining the consumed process stream.</p>
+<p>An explicit <code>minimum_volume_L</code> enables <code>sde_aliquot_meter</code> when its fixed
+<code>1e-16 L</code> withdrawal fits. It uses the original representative liquid sampling
+and material receipts: actual mol and volume leave the reactor, with no rounding
+to molecular counts. It measures <code>sample_amount_*</code> in mol, with independent
+Gaussian SD <code>1/AVOGADRO</code> mol, and charges 1 s of offline instrument time and 0.01.
+The reactor clock does not advance during this offline analysis. The sampler
+has deterministic volume; capture and pipetting noise are not modelled. The
+volume floor and numerical representability are enforced. Subsequent chemistry
+uses the remaining real volume and a freshly bound numerical interval.</p>
+<p>Material/vessel initialization replaces the declared stocks and volume, retains
+the world clock, current inputs and process RNG, and invalidates lookahead.
+Batch initialization reinstalls the declared initial process seed and inputs,
+so it is deterministic reinitialization rather than an independent replicate.
+Instrument replacement retains reaction state and pending work. Snapshots and
+ordinary replay preserve these boundaries. Advance work reports count actual
+drift/diffusion callbacks, including numerical verification of a saved packet;
+snapshot restoration retains full numerical endpoint checks.</p>
+<p>Native wait/feed/read, shared clocks, rollback, JSON and new-process continuation
+have functional checks. A wheel rebuilt from the sdist and genuinely installed
+outside the checkout passes all four native/Gym and detector-noise protocol
+combinations, exact replay and fresh-process continuation without COPASI. Its
+dependencies come from the locked caller environment. Independent SDE
+distributions, moment and step convergence, and boundary statistics remain open
+in task 51E. Separate sdist-built and genuinely installed wheels also pass all
+four protocols for each explicit fractional and truncated output policy,
+including exact replay, material initialization and fresh-process continuation.
+These results do not close parent task 51.</p>
+<h2 id="adaptive-stochastic-deterministic-partition-development">Adaptive stochastic / deterministic partition (development)<a class="headerlink" href="#adaptive-stochastic-deterministic-partition-development" title="Permanent link">&para;</a></h2>
+<p><code>stochastic_adaptive_world</code> uses the existing chemical world, phase inventory,
+transaction manager and shared clock. <code>AdaptiveHybridSpec</code> selects lower and
+upper particle thresholds, the classification interval, and RK4 or LSODA for
+the deterministic subnet. Classification retains its previous value inside
+the hysteresis band. A reaction belongs to the stochastic subnet if any of its
+participants is low, including products and catalysts. Its persistent
+next-reaction target survives deactivation and reactivation.</p>
+<p>Full integer <code>forward_orders</code> may include regenerated reactants. For
+<code>A + B =&gt; 2 A</code>, declare <code>forward_orders={"A": 1, "B": 1}</code>: rates use both
+reactants and material changes use the net stoichiometry once. The adaptive
+variant admits elementary molecularity up to three, including partial
+regeneration, and rejects missing consumed reactants or fractional orders.</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">replace</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.physchem</span><span class="w"> </span><span class="kn">import</span> <span class="n">AdaptiveHybridSpec</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.runtime</span><span class="w"> </span><span class="kn">import</span> <span class="n">ChemWorldRuntime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.world.biochemical_worlds</span><span class="w"> </span><span class="kn">import</span> <span class="n">biochemical_network</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">chemworld.world.stochastic_adaptive_world</span><span class="w"> </span><span class="kn">import</span> <span class="n">stochastic_adaptive_world</span>
+
+<span class="n">network</span> <span class="o">=</span> <span class="n">replace</span><span class="p">(</span><span class="n">biochemical_network</span><span class="p">(</span><span class="s2">&quot;reversible&quot;</span><span class="p">),</span> <span class="n">stochastic</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="n">quantum</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">/</span> <span class="mf">6.02214076e23</span>
+<span class="n">spec</span> <span class="o">=</span> <span class="n">AdaptiveHybridSpec</span><span class="p">(</span>
+    <span class="n">volume_L</span><span class="o">=</span><span class="mf">1e-15</span><span class="p">,</span> <span class="n">lower_limit</span><span class="o">=</span><span class="mi">45</span><span class="p">,</span> <span class="n">upper_limit</span><span class="o">=</span><span class="mi">55</span><span class="p">,</span> <span class="n">step_s</span><span class="o">=</span><span class="mf">0.125</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s2">&quot;LSODA&quot;</span>
+<span class="p">)</span>
+<span class="n">world</span> <span class="o">=</span> <span class="n">stochastic_adaptive_world</span><span class="p">(</span>
+    <span class="n">network</span><span class="p">,</span> <span class="n">spec</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;A&quot;</span><span class="p">:</span> <span class="mf">50.25</span> <span class="o">*</span> <span class="n">quantum</span><span class="p">,</span> <span class="s2">&quot;B&quot;</span><span class="p">:</span> <span class="mf">50.75</span> <span class="o">*</span> <span class="n">quantum</span><span class="p">},</span> <span class="n">seed</span><span class="o">=</span><span class="mi">17</span>
+<span class="p">)</span>
+<span class="n">session</span> <span class="o">=</span> <span class="n">ChemWorldRuntime</span><span class="p">(</span><span class="n">composition</span><span class="o">=</span><span class="n">world</span><span class="p">)</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">reset</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">7</span><span class="p">)</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">({</span><span class="s2">&quot;operation&quot;</span><span class="p">:</span> <span class="s2">&quot;wait&quot;</span><span class="p">,</span> <span class="s2">&quot;duration_s&quot;</span><span class="p">:</span> <span class="mf">0.375</span><span class="p">})</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">({</span><span class="s2">&quot;operation&quot;</span><span class="p">:</span> <span class="s2">&quot;add_component&quot;</span><span class="p">,</span> <span class="s2">&quot;component&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;amount_mol&quot;</span><span class="p">:</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">quantum</span><span class="p">})</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">execute</span><span class="p">({</span><span class="s2">&quot;operation&quot;</span><span class="p">:</span> <span class="s2">&quot;measure&quot;</span><span class="p">,</span> <span class="s2">&quot;instrument&quot;</span><span class="p">:</span> <span class="s2">&quot;sde_amount_meter&quot;</span><span class="p">})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">observation</span><span class="o">.</span><span class="n">to_dict</span><span class="p">())</span>
+<span class="k">finally</span><span class="p">:</span>
+    <span class="n">session</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+<p>All material remains real mol in the original phase ledger; classification
+never rounds stocks to molecules. The stochastic rates use generalized
+falling factorials and require an available whole reaction jump. Fractional
+low populations therefore retain an explicit hybrid approximation. Rates are
+frozen within numerical slabs and refreshed at events, grid boundaries and
+material interventions. This is distinct from continuously integrated hazards.</p>
+<p>This world currently fixes temperature and volume, supports instantaneous
+solute additions and nonconsuming mol measurements, and rejects consuming
+meters or other unbound couplings. Material and vessel initialization preserve
+the process stream and world time while rebinding channel targets; batch
+initialization reinstates the declared initial state. A numerical failure rolls
+back physical changes and keeps the existing failed-attempt accounting.</p>
+<p>Complete JSON restoration and the same future actions reproduce the full
+state exactly, including in a new process. Arbitrary observation-time splits
+can change the deterministic numerical integration. An sdist-built wheel,
+genuinely installed outside the checkout, passes eight protocols across both
+ODE methods, native/Gym entry points and detector noise modes: 80 committed
+steps, exact replay and eight fresh-process continuations. Dependencies come
+from the locked caller environment. Independent finite-grid qualification covers
+11 families across both methods and two step sizes: 44 units, 40,964 native and
+163,844 reference trajectories. These tests cover linear ODE subnets and elementary
+SSA, including fractional stocks, switching and channel reactivation.</p>
+<p>Measured resource comparisons show gains and regressions: RK4 is faster on the
+tested mixed networks, while low-copy and small ODE cases are slower. Replacing
+high-copy stochastic channels with ODE preserves their tested mean and removes
+their stochastic variance. Actual COPASI methods 29/30 discard material in the
+tested switching cases; native stocks remain unrounded.</p>
+<p>Nonlinear fixed-grid qualification adds dimerization, trimerization,
+autocatalytic growth, feedback catalysis and mild/stiff enzyme reactions. All
+36 native units pass against independent closed flows: 24,588 native and
+98,316 reference trajectories, including two-step-size checks for pure ODEs.
+The 20,488 previously successful recorded endpoints, event counts, partitions,
+work and RNG states remain exact after expanding reactant admission. Both the
+original and autocatalytic installed profiles pass eight protocols each,
+including real stochastic events, ODE work, replay and fresh-process restoration.</p>
+<p>The actual source comparison remains incomplete: 19/36 units pass; 270 SDK
+calls stop before their requested endpoint and other cases lose material.
+All failures and partial outputs are retained. Continuous-hazard convergence
+and full source equivalence remain unproven; this adaptive extension does not
+expand the separate integer SSA or fixed-partition model admission rules.
+See the <a href="https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51F/README.md">complete qualification and limitations</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      ChemWorld · Software-model experiments, not instructions for physical laboratory work
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.top", "navigation.tracking", "search.highlight", "search.suggest", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../assets/javascripts/experiment-explorer.js"></script>
+      
+    
+  </body>
+</html>
