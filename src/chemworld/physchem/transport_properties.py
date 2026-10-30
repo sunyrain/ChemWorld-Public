@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import exp, isfinite, log, sqrt
+from typing import TYPE_CHECKING, cast
 
 from chemworld.physchem.property_cards import _TRANSPORT_REFERENCE_READING
 from chemworld.physchem.property_equations import (
@@ -12,6 +13,7 @@ from chemworld.physchem.property_equations import (
     evaluate_correlation,
 )
 from chemworld.physchem.property_reports import (
+    CaloricReference,
     PropertyEvaluation,
     ValidityPolicy,
     _require_same_keys,
@@ -20,8 +22,18 @@ from chemworld.physchem.property_reports import (
 )
 from chemworld.physchem.specs import MixtureSpec, PropertyCorrelation
 
+if TYPE_CHECKING:
+    from chemworld.physchem.equilibrium import ActivityModelSpec
+    from chemworld.physchem.incompressible_properties import IncompressibleMaterialModel
+    from chemworld.physchem.property_packages import ComponentPropertyPackage
+    from chemworld.physchem.transport import FluidState
 
-def ideal_gas_transport_state(packages, amounts, temperature_K, pressure_Pa, references):
+
+def ideal_gas_transport_state(
+    packages: Sequence[ComponentPropertyPackage], amounts: Mapping[str, float],
+    temperature_K: float, pressure_Pa: float,
+    references: Mapping[str, CaloricReference] | None,
+) -> tuple[FluidState, float, float]:
     """Explicit ideal-gas volume, Wilke viscosity and WHZ conductivity closure.
 
     Return the existing FluidState, molar enthalpy and total volume, as for
@@ -48,7 +60,7 @@ def ideal_gas_transport_state(packages, amounts, temperature_K, pressure_Pa, ref
     )
     total = sum(amounts.values())
     fractions = tuple(amounts[k] / total for k in ids)
-    weights = tuple(p.component.molecular_weight_g_mol for p in packages)
+    weights = cast(tuple[float, ...], tuple(p.component.molecular_weight_g_mol for p in packages))
     pure = [p.evaluate_state(
         temperature_K=temperature_K, pressure_Pa=pressure_Pa, phase="gas",
         quantities=("viscosity", "thermal_conductivity"),
@@ -67,11 +79,16 @@ def ideal_gas_transport_state(packages, amounts, temperature_K, pressure_Pa, ref
 
 
 def liquid_transport_state(
-    packages, amounts, temperature_K, pressure_Pa, references, *,
-    viscosity_pressure_parameters=None, volume_mixing_method=None,
-    volume_mixing_parameters=None, volume_pressure_parameters=None,
-    activity_model=None, incompressible_model=None,
-):
+    packages: Sequence[ComponentPropertyPackage], amounts: Mapping[str, float],
+    temperature_K: float, pressure_Pa: float,
+    references: Mapping[str, CaloricReference] | None, *,
+    viscosity_pressure_parameters: Mapping[str, Mapping[str, float | str]] | None = None,
+    volume_mixing_method: str | None = None,
+    volume_mixing_parameters: Mapping[str, Mapping[str, float]] | None = None,
+    volume_pressure_parameters: Mapping[str, float | str] | None = None,
+    activity_model: ActivityModelSpec | None = None,
+    incompressible_model: IncompressibleMaterialModel | None = None,
+) -> tuple[FluidState, float, float]:
     """Declared volume, log-viscosity and DIPPR9H mixture closure.
 
     Caloric and pure transport values come from the common property evaluator;
@@ -96,7 +113,7 @@ def liquid_transport_state(
                                        "viscosity", "thermal_conductivity"),
             incompressible_model=incompressible_model)
         values = {key: value.value for key, value in report.properties.items()}
-        mass_per_mole = report.model_details["molar_mass_kg_mol"]
+        mass_per_mole = cast(float, report.model_details["molar_mass_kg_mol"])
         return (FluidState(values["density"], values["viscosity"], values["cp"]/mass_per_mole,
                            values["thermal_conductivity"]), values["enthalpy"],
                 sum(report.component_amounts_mol.values())*values["molar_volume"])
@@ -112,7 +129,7 @@ def liquid_transport_state(
         activity_model=activity_model,
     )
     ids = tuple(p.component.identifier for p in packages)
-    weights = tuple(p.component.molecular_weight_g_mol for p in packages)
+    weights = cast(tuple[float, ...], tuple(p.component.molecular_weight_g_mol for p in packages))
     total, mass = (
         sum(amounts.values()),
         sum(amounts[k] * mw for k, mw in zip(ids, weights, strict=True)),
@@ -142,14 +159,14 @@ def liquid_transport_state(
         if set(viscosity_pressure_parameters) - set(ids):
             raise ValueError("pressure correction names an undeclared liquid component")
         for i, package in enumerate(packages):
-            parameters = viscosity_pressure_parameters.get(ids[i])
-            if parameters is not None:
+            viscosity_parameters = viscosity_pressure_parameters.get(ids[i])
+            if viscosity_parameters is not None:
                 psat = package.evaluate(
                     "vapor_pressure", temperature_K=temperature_K, validity_policy="raise",
                 ).to("Pa").value
                 viscosities[i] = lucas_liquid_viscosity(
                     temperature_K, pressure_Pa, saturation_pressure_Pa=psat,
-                    saturation_viscosity_Pa_s=viscosities[i], **parameters,
+                    saturation_viscosity_Pa_s=viscosities[i], **viscosity_parameters,
                 )
     mu = mixture_viscosity_log_rule(mixture, tuple(viscosities))
     conductivity = liquid_mixture_thermal_conductivity_dippr9h_ledger(

@@ -185,8 +185,8 @@ def _validated_fraction_mapping(
 
 
 def _require_same_keys(
-    reference: Mapping[str, float],
-    values: Mapping[str, float],
+    reference: Mapping[str, object],
+    values: Mapping[str, object],
     value_name: str,
 ) -> None:
     missing = sorted(set(reference) - set(values))
