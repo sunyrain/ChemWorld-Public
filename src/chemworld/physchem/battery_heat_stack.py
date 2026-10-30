@@ -5,16 +5,25 @@ conducting collectors are single finite-capacity nodes, adjacent to electrode
 surface Dirichlet temperatures. Collector half-thickness is not a resistance.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from math import isfinite
+from typing import Any, Self
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 from chemworld.data.scientific_inputs import InputSource
 
 
-def _numbers(obj, positive=(), nonnegative=()):
+def _numbers(
+    obj: HeatStackLayer | HeatStackCollector | BatteryHeatStackSpec,
+    positive: tuple[str, ...] = (),
+    nonnegative: tuple[str, ...] = (),
+) -> None:
     for name in (*positive, *nonnegative):
         value = getattr(obj, name)
         if (
@@ -30,7 +39,7 @@ def _numbers(obj, positive=(), nonnegative=()):
         raise ValueError("heat geometry and properties require an explicit InputSource")
 
 
-def _array(values):
+def _array(values: ArrayLike) -> NDArray[np.float64]:
     result = np.array(values, dtype=float)
     result.setflags(write=False)
     return result
@@ -49,7 +58,7 @@ class HeatStackLayer:
         if type(self.cells) is not int or not 1 <= self.cells <= 256:
             raise ValueError("thermal layer requires 1 to 256 finite-volume cells")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             **{
                 k: getattr(self, k)
@@ -59,7 +68,7 @@ class HeatStackLayer:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         return cls(**{**value, "source": InputSource.from_dict(value["source"])})
 
 
@@ -79,7 +88,7 @@ class HeatStackCollector:
             ("face_heat_transfer_W_m2_K", "tab_heat_transfer_W_m2_K", "tab_width_m"),
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             **{
                 k: getattr(self, k)
@@ -95,7 +104,7 @@ class HeatStackCollector:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         return cls(**{**value, "source": InputSource.from_dict(value["source"])})
 
 
@@ -157,15 +166,15 @@ class BatteryHeatStackSpec:
             raise ValueError("derived thermal scale overflow")
 
     @property
-    def area_m2(self):
+    def area_m2(self) -> float:
         return self.width_m * self.height_m
 
     @property
-    def layers(self):
+    def layers(self) -> tuple[HeatStackLayer, HeatStackLayer, HeatStackLayer]:
         return (self.negative, self.separator, self.positive)
 
     @cached_property
-    def node_ids(self):
+    def node_ids(self) -> tuple[str, ...]:
         return (
             "negative-collector",
             *(
@@ -179,11 +188,11 @@ class BatteryHeatStackSpec:
         )
 
     @property
-    def coordinate_keys(self):
+    def coordinate_keys(self) -> tuple[str, ...]:
         return tuple(f"battery:thermal:delta:{i}_K" for i in range(len(self.node_ids) - 1))
 
     @cached_property
-    def volumes_m3(self):
+    def volumes_m3(self) -> NDArray[np.float64]:
         return _array(
             [
                 self.negative_collector.length_m * self.area_m2,
@@ -197,7 +206,7 @@ class BatteryHeatStackSpec:
         )
 
     @cached_property
-    def heat_capacities_J_K(self):  # noqa: N802 - explicit physical units in public API
+    def heat_capacities_J_K(self) -> NDArray[np.float64]:  # noqa: N802 - physical units
         density = [
             self.negative_collector.heat_capacity_J_m3_K,
             *(layer.heat_capacity_J_m3_K for layer in self.layers for _ in range(layer.cells)),
@@ -206,11 +215,11 @@ class BatteryHeatStackSpec:
         return _array(self.volumes_m3 * density)
 
     @property
-    def total_heat_capacity_J_K(self):  # noqa: N802 - explicit physical units in public API
+    def total_heat_capacity_J_K(self) -> float:  # noqa: N802 - physical units
         return float(np.sum(self.heat_capacities_J_K))
 
     @cached_property
-    def conductance_W_K(self):  # noqa: N802 - explicit physical units in public API
+    def conductance_W_K(self) -> NDArray[np.float64]:  # noqa: N802 - physical units
         half = np.array(
             [
                 layer.length_m / (2 * layer.cells * layer.conductivity_W_m_K * self.area_m2)
@@ -221,7 +230,7 @@ class BatteryHeatStackSpec:
         return _array(1 / np.r_[half[0], half[:-1] + half[1:], half[-1]])
 
     @cached_property
-    def loss_conductance_W_K(self):  # noqa: N802 - explicit physical units in public API
+    def loss_conductance_W_K(self) -> NDArray[np.float64]:  # noqa: N802 - physical units
         perimeter = 2 * (self.width_m + self.height_m)
         result = [
             0.0,
@@ -242,7 +251,7 @@ class BatteryHeatStackSpec:
         return _array(result)
 
     @cached_property
-    def conduction_matrix_W_K(self):  # noqa: N802 - explicit physical units in public API
+    def conduction_matrix_W_K(self) -> NDArray[np.float64]:  # noqa: N802 - physical units
         n = len(self.node_ids)
         result = np.zeros((n, n))
         for i, value in enumerate(self.conductance_W_K):
@@ -253,7 +262,7 @@ class BatteryHeatStackSpec:
         return _array(result)
 
     @cached_property
-    def temperature_matrix(self):
+    def temperature_matrix(self) -> NDArray[np.float64]:
         # Columns: C-weighted mean followed by the independent temperature differences.
         n = len(self.node_ids)
         result = np.zeros((n, n))
@@ -262,12 +271,14 @@ class BatteryHeatStackSpec:
         result[-1, 1:] = -self.heat_capacities_J_K[:-1] / self.heat_capacities_J_K[-1]
         return _array(result)
 
-    def temperatures(self, mean_temperature_K, coordinates):
+    def temperatures(
+        self, mean_temperature_K: float, coordinates: Mapping[str, float],
+    ) -> NDArray[np.float64]:
         if not isfinite(mean_temperature_K):
             raise ValueError("thermal coordinates must remain finite")
         return mean_temperature_K + self.temperature_deviations(coordinates)
 
-    def temperature_deviations(self, coordinates):
+    def temperature_deviations(self, coordinates: Mapping[str, float]) -> NDArray[np.float64]:
         """Reconstruct relative temperatures without introducing the absolute mean."""
         first = np.array([coordinates[k] for k in self.coordinate_keys])
         if not np.all(np.isfinite(first)):
@@ -275,7 +286,9 @@ class BatteryHeatStackSpec:
         last = -float(self.heat_capacities_J_K[:-1] @ first) / self.heat_capacities_J_K[-1]
         return np.r_[first, last]
 
-    def conductive_heat_W(self, coordinates):  # noqa: N802 - explicit physical units
+    def conductive_heat_W(  # noqa: N802 - explicit physical units
+        self, coordinates: Mapping[str, float],
+    ) -> NDArray[np.float64]:
         """Same FV operator, evaluated as paired fluxes of mean-free differences."""
         relative = self.temperature_deviations(coordinates)
         flux = self.conductance_W_K * np.diff(relative)
@@ -284,7 +297,7 @@ class BatteryHeatStackSpec:
         power[1:] -= flux
         return power
 
-    def pack_temperatures(self, temperatures_K):
+    def pack_temperatures(self, temperatures_K: ArrayLike) -> tuple[float, dict[str, float]]:
         values = np.asarray(temperatures_K, dtype=float)
         if values.shape != (len(self.node_ids),) or not np.all(np.isfinite(values)):
             raise ValueError("initial temperatures must declare every finite thermal node")
@@ -296,7 +309,7 @@ class BatteryHeatStackSpec:
         )
         return mean, dict(zip(self.coordinate_keys, values[:-1] - mean, strict=True))
 
-    def electrode_slice(self, electrode):
+    def electrode_slice(self, electrode: str) -> slice:
         if electrode == "negative":
             return slice(1, 1 + self.negative.cells)
         if electrode == "positive":
@@ -304,7 +317,7 @@ class BatteryHeatStackSpec:
             return slice(start, start + self.positive.cells)
         raise ValueError("unknown heat-stack electrode")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema": "pouch-thickness-heat-stack-v1",
             **{
@@ -332,7 +345,7 @@ class BatteryHeatStackSpec:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         data = dict(value)
         if data.pop("schema") != "pouch-thickness-heat-stack-v1":
             raise ValueError("unknown heat-stack schema")
