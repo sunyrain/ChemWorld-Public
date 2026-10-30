@@ -4,15 +4,29 @@ Capacities use C, voltages V, energy J. Nonlinear OCV branches are isolated on
 their declared domains. Incomplete search is never reported as uniqueness.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from math import isfinite
 from numbers import Real
-from typing import cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    NotRequired,
+    Self,
+    TypeAlias,
+    TypedDict,
+    TypeVar,
+    cast,
+)
 
 import numpy as np
+from numpy.typing import NDArray
 
-from chemworld.data.scientific_inputs import InputSource, InputValue
+from chemworld.data.scientific_inputs import InputSource, InputValue, ScientificTable
 from chemworld.physchem.battery_materials import ElectrodeOCV
 from chemworld.physchem.caloric_math import Interval
 from chemworld.physchem.residual_system import (
@@ -25,20 +39,45 @@ from chemworld.physchem.residual_system import (
 from chemworld.physchem.root_isolation import (
     DEFAULT_ISOLATION_POLICY,
     IsolatedRoot,
+    IsolatedRoots,
     IsolationPolicy,
     isolate_roots,
 )
 
+if TYPE_CHECKING:
+    from chemworld.physchem.battery_models import BatterySPMSpec
+    from chemworld.physchem.battery_split_ocvr import BatterySplitOCVRSpec
+    from chemworld.physchem.coupled_system import CoupledState
+
 SOH_VERSION = "equilibrium-electrode-soh-v1"
+ScalarFunction: TypeAlias = Callable[[float], float]
+ScalarEnclosure: TypeAlias = Callable[[float, float], tuple[Interval, Interval]]
+BoxEnclosure: TypeAlias = tuple[tuple[Interval, ...], tuple[tuple[Interval, ...], ...]]
+Vector: TypeAlias = Sequence[float] | NDArray[np.float64]
+SOHCoordinate: TypeAlias = Literal["x_0", "x_100", "y_0", "y_100"]
+_SOHSpecT = TypeVar("_SOHSpecT", bound="ElectrodeSOHSpec | HalfCellSOHSpec")
+_BatterySpecT = TypeVar("_BatterySpecT", bound="BatterySPMSpec | BatterySplitOCVRSpec")
 
 
-def _finite(value):
+class SOHSolution(TypedDict):
+    y_0: float
+    y_100: float
+    cell_capacity_C: float
+    path_check: str
+    x_0: NotRequired[float]
+    x_100: NotRequired[float]
+    cyclable_lithium_C: NotRequired[float]
+    reference: NotRequired[str]
+    local_parameter_response: NotRequired[dict[str, Any]]
+
+
+def _finite(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
         raise ValueError("SOH inputs must be finite real numbers")
     return float(value)
 
 
-def _validate(spec, capacity_names):
+def _validate(spec: ElectrodeSOHSpec | HalfCellSOHSpec, capacity_names: Sequence[str]) -> None:
     for name in (*capacity_names, "minimum_voltage_V", "maximum_voltage_V"):
         object.__setattr__(spec, name, _finite(getattr(spec, name)))
     if any(getattr(spec, name) <= 0 for name in capacity_names):
@@ -57,7 +96,10 @@ def _validate(spec, capacity_names):
     object.__setattr__(spec, "parameter_inputs", inputs)
 
 
-def _parameter_row(cls, table, row_id, bindings, **kwargs):
+def _parameter_row(
+    cls: type[_SOHSpecT], table: ScientificTable, row_id: str,
+    bindings: Mapping[str, str], **kwargs: Any,
+) -> _SOHSpecT:
     names = (
         {"negative_capacity_C", "positive_capacity_C", "known_capacity_C"}
         if cls is ElectrodeSOHSpec
@@ -77,7 +119,7 @@ def _parameter_row(cls, table, row_id, bindings, **kwargs):
             raise ValueError("SOH requires valid input parameters")
         values[name] = cell.to("V" if name.endswith("_V") else "C").value
         inputs.append((name, cell))
-    return cls(
+    return cast(Callable[..., _SOHSpecT], cls)(
         **kwargs,
         **values,
         source_row_id=row_id,
@@ -86,11 +128,11 @@ def _parameter_row(cls, table, row_id, bindings, **kwargs):
     )
 
 
-def _to_dict(spec):
+def _to_dict(spec: ElectrodeSOHSpec | HalfCellSOHSpec) -> dict[str, Any]:
     curve_names = (
         ("negative_ocv", "positive_ocv") if isinstance(spec, ElectrodeSOHSpec) else ("working_ocv",)
     )
-    result = {
+    result: dict[str, Any] = {
         "model_version": SOH_VERSION,
         "kind": "full" if isinstance(spec, ElectrodeSOHSpec) else "positive-working-half",
     }
@@ -106,11 +148,14 @@ def _to_dict(spec):
     return result
 
 
-def soh_spec_from_dict(value):
+def soh_spec_from_dict(value: Mapping[str, Any]) -> ElectrodeSOHSpec | HalfCellSOHSpec:
     if value.get("model_version") != SOH_VERSION:
         raise ValueError("unsupported SOH version")
     kind = value.get("kind")
-    cls = {"full": ElectrodeSOHSpec, "positive-working-half": HalfCellSOHSpec}.get(kind)
+    classes: dict[object, type[ElectrodeSOHSpec] | type[HalfCellSOHSpec]] = {
+        "full": ElectrodeSOHSpec, "positive-working-half": HalfCellSOHSpec,
+    }
+    cls = classes.get(kind)
     if cls is None or set(value) != set(cls.__dataclass_fields__) | {"kind", "model_version"}:
         raise ValueError("unsupported SOH kind or fields")
     kwargs = {k: v for k, v in value.items() if k in cls.__dataclass_fields__}
@@ -147,11 +192,13 @@ class ElectrodeSOHSpec:
                 "SOH requires two explicit single-valued equilibrium electrode OCV curves"
             )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return _to_dict(self)
 
     @classmethod
-    def from_parameter_row(cls, table, row_id, *, bindings, **kwargs):
+    def from_parameter_row(
+        cls, table: ScientificTable, row_id: str, *, bindings: Mapping[str, str], **kwargs: Any,
+    ) -> Self:
         return _parameter_row(cls, table, row_id, bindings, **kwargs)
 
 
@@ -173,24 +220,26 @@ class HalfCellSOHSpec:
                 "versus Li/Li+"
             )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return _to_dict(self)
 
     @classmethod
-    def from_parameter_row(cls, table, row_id, *, bindings, **kwargs):
+    def from_parameter_row(
+        cls, table: ScientificTable, row_id: str, *, bindings: Mapping[str, str], **kwargs: Any,
+    ) -> Self:
         return _parameter_row(cls, table, row_id, bindings, **kwargs)
 
 
 @dataclass(frozen=True)
 class SOHResult:
     spec: ElectrodeSOHSpec | HalfCellSOHSpec
-    solutions: tuple[dict, ...]
-    searches: tuple[dict, ...]
-    unresolved: tuple[dict, ...] = ()
+    solutions: tuple[SOHSolution, ...]
+    searches: tuple[dict[str, Any], ...]
+    unresolved: tuple[Mapping[str, object], ...] = ()
     infeasible_reason: str | None = None
 
     @property
-    def status(self):
+    def status(self) -> Literal["infeasible", "unresolved", "no_solution", "unique", "multiple"]:
         return (
             "infeasible"
             if self.infeasible_reason
@@ -203,16 +252,16 @@ class SOHResult:
             else "multiple"
         )
 
-    def branch(self, index=None):
+    def branch(self, index: int | None = None) -> SOHSolution:
         if index is None:
             if self.status != "unique":
                 raise ValueError("SOH requires a unique result or an explicit branch index")
             index = 0
         if type(index) is not int or not 0 <= index < len(self.solutions):
             raise ValueError("SOH branch index is outside the available solutions")
-        return dict(self.solutions[index])
+        return cast(SOHSolution, dict(self.solutions[index]))
 
-    def at_soc(self, soc, *, branch=None):
+    def at_soc(self, soc: float, *, branch: int | None = None) -> dict[str, float]:
         soc = _finite(soc)
         if not 0 <= soc <= 1:
             raise ValueError("SOC must be inside [0, 1]")
@@ -228,7 +277,10 @@ class SOHResult:
             "voltage_V": self.spec.positive_ocv.value(y) - self.spec.negative_ocv.value(x),
         }
 
-    def soc_at_voltage(self, voltage_V, *, branch=None, policy=DEFAULT_ISOLATION_POLICY):
+    def soc_at_voltage(
+        self, voltage_V: float, *, branch: int | None = None,
+        policy: IsolationPolicy = DEFAULT_ISOLATION_POLICY,
+    ) -> IsolatedRoots:
         voltage_V = _finite(voltage_V)
         s = self.branch(branch)
         dy = s["y_100"] - s["y_0"]
@@ -239,7 +291,7 @@ class SOHResult:
             else self.spec.positive_ocv
         )
 
-        def enclosure(a, b):
+        def enclosure(a: NDArray[np.float64], b: NDArray[np.float64]) -> BoxEnclosure:
             y = s["y_0"] + dy * Interval(a[0], b[0])
             f = positive.enclosure(y.lower, y.upper, trial=True) - voltage_V
             j = dy * positive.enclosure(y.lower, y.upper, derivative=True, trial=True)
@@ -251,7 +303,7 @@ class SOHResult:
                 )
             return (f,), ((j,),)
 
-        def derivative(z):
+        def derivative(z: float) -> float:
             y = s["y_0"] + dy * z
             d = dy * positive.derivatives(y, trial=True)[1]
             if isinstance(self.spec, ElectrodeSOHSpec):
@@ -267,7 +319,9 @@ class SOHResult:
             policy=policy,
         )
 
-    def theoretical_energy_j(self, initial_soc=1.0, final_soc=0.0, *, branch=None):
+    def theoretical_energy_j(
+        self, initial_soc: float = 1.0, final_soc: float = 0.0, *, branch: int | None = None,
+    ) -> float:
         """Positive for discharge. Reversible OCV energy, not loaded delivered work."""
         a, b = self.at_soc(initial_soc, branch=branch), self.at_soc(final_soc, branch=branch)
         if isinstance(self.spec, HalfCellSOHSpec):
@@ -276,7 +330,7 @@ class SOHResult:
             a["y"], b["y"]
         ) - self.spec.negative_capacity_C * self.spec.negative_ocv.integral(b["x"], a["x"])
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "inputs": self.spec.to_dict(),
@@ -288,12 +342,15 @@ class SOHResult:
         }
 
 
-def _variable(name, lower, upper):
+def _variable(name: str, lower: float, upper: float) -> ResidualVariable:
     return ResidualVariable(name, "dimensionless", role="algebraic", lower=lower, upper=upper)
 
 
-def _cutoff_search(value, slope, enclosure, domain, target, policy):
-    def bounds(a, b):
+def _cutoff_search(
+    value: ScalarFunction, slope: ScalarFunction, enclosure: ScalarEnclosure,
+    domain: tuple[float, float], target: float, policy: IsolationPolicy,
+) -> IsolatedRoots:
+    def bounds(a: NDArray[np.float64], b: NDArray[np.float64]) -> BoxEnclosure:
         f, d = enclosure(a[0], b[0])
         return (f - target,), ((d,),)
 
@@ -307,24 +364,26 @@ def _cutoff_search(value, slope, enclosure, domain, target, policy):
     )
 
 
-def _lithium_geometry(spec):
+def _lithium_geometry(
+    spec: ElectrodeSOHSpec,
+) -> tuple[tuple[float, float], ScalarFunction, ScalarFunction, ScalarFunction, ScalarEnclosure]:
     qn, qp, li = spec.negative_capacity_C, spec.positive_capacity_C, spec.known_capacity_C
     n, p = spec.negative_ocv, spec.positive_ocv
     low = max(n.stoichiometry_domain[0], (li - qp * p.stoichiometry_domain[1]) / qn)
     high = min(n.stoichiometry_domain[1], (li - qp * p.stoichiometry_domain[0]) / qn)
 
-    def positive(x):
+    def positive(x: float) -> float:
         return (li - qn * x) / qp
 
-    def voltage(x):
+    def voltage(x: float) -> float:
         return p.value(positive(x), trial=True) - n.value(x, trial=True)
 
-    def slope(x):
+    def slope(x: float) -> float:
         return (
             -qn / qp * p.derivatives(positive(x), trial=True)[1] - n.derivatives(x, trial=True)[1]
         )
 
-    def enclosure(a, b):
+    def enclosure(a: float, b: float) -> tuple[Interval, Interval]:
         y = (li - qn * Interval(a, b)) / qp
         return (
             p.enclosure(y.lower, y.upper, trial=True) - n.enclosure(a, b, trial=True),
@@ -335,7 +394,10 @@ def _lithium_geometry(spec):
     return (low, high), positive, voltage, slope, enclosure
 
 
-def _window_pairs(low_search, high_search, slope, *, increasing):
+def _window_pairs(
+    low_search: IsolatedRoots, high_search: IsolatedRoots,
+    slope: ScalarFunction, *, increasing: bool,
+) -> list[tuple[float, float]]:
     """Adjacent cutoff roots delimit the entire window, not merely its endpoints."""
     roots = sorted(
         [
@@ -356,7 +418,7 @@ def _window_pairs(low_search, high_search, slope, *, increasing):
     return pairs
 
 
-def _known_lithium(spec, policy):
+def _known_lithium(spec: ElectrodeSOHSpec, policy: IsolationPolicy) -> SOHResult:
     domain, positive, voltage, slope, enclosure = _lithium_geometry(spec)
     if domain[0] >= domain[1]:
         return SOHResult(
@@ -370,7 +432,7 @@ def _known_lithium(spec, policy):
         for label, search in (("minimum", low), ("maximum", high))
         for box in search.unresolved
     )
-    solutions = []
+    solutions: list[SOHSolution] = []
     if not unresolved:
         for x0, x100 in _window_pairs(low, high, slope, increasing=True):
             solutions.append(
@@ -387,7 +449,9 @@ def _known_lithium(spec, policy):
     return SOHResult(spec, tuple(solutions), searches, unresolved)
 
 
-def _capacity_equations(spec, values, parameters=None):
+def _capacity_equations(
+    spec: ElectrodeSOHSpec, values: Vector, parameters: Vector | None = None,
+) -> NDArray[np.float64]:
     qn, qp, q, vmin, vmax = _parameters(spec)[1] if parameters is None else parameters
     xh, yh = values
     x0, y0 = xh - q / qn, yh + q / qp
@@ -400,7 +464,9 @@ def _capacity_equations(spec, values, parameters=None):
     )
 
 
-def _capacity_jacobian(spec, values, parameters=None):
+def _capacity_jacobian(
+    spec: ElectrodeSOHSpec, values: Vector, parameters: Vector | None = None,
+) -> NDArray[np.float64]:
     qn, qp, q, _, _ = _parameters(spec)[1] if parameters is None else parameters
     xh, yh = values
     n, p = spec.negative_ocv, spec.positive_ocv
@@ -412,7 +478,7 @@ def _capacity_jacobian(spec, values, parameters=None):
     )
 
 
-def _known_cell_capacity(spec, policy):
+def _known_cell_capacity(spec: ElectrodeSOHSpec, policy: IsolationPolicy) -> SOHResult:
     n, p = spec.negative_ocv, spec.positive_ocv
     qn, qp, q = spec.negative_capacity_C, spec.positive_capacity_C, spec.known_capacity_C
     a = (n.stoichiometry_domain[0] + q / qn, p.stoichiometry_domain[0])
@@ -420,11 +486,11 @@ def _known_cell_capacity(spec, policy):
     if any(low > high for low, high in zip(a, b, strict=True)):
         return SOHResult(spec, (), (), infeasible_reason="cell capacity leaves no working interval")
 
-    def enclosure(lower, upper):
+    def enclosure(lower: Vector, upper: Vector) -> BoxEnclosure:
         xh, yh = (Interval(low, high) for low, high in zip(lower, upper, strict=True))
         x0, y0 = xh - q / qn, yh + q / qp
 
-        def u(curve, theta, derivative=False):
+        def u(curve: ElectrodeOCV, theta: Interval, derivative: bool = False) -> Interval:
             return curve.enclosure(theta.lower, theta.upper, derivative=derivative, trial=True)
 
         return (
@@ -436,6 +502,8 @@ def _known_cell_capacity(spec, policy):
         )
 
     candidates: tuple[IsolatedRoot | dict[str, list[float]], ...]
+    searches: list[dict[str, Any]]
+    unresolved: list[Mapping[str, object]]
     if any(low == high for low, high in zip(a, b, strict=True)):
         # A known capacity can use exactly an electrode's complete declared
         # domain. Eliminate fixed coordinates rather than widening/nudging it.
@@ -456,12 +524,12 @@ def _known_cell_capacity(spec, policy):
         else:
             coordinate = free[0]
 
-            def expand(z):
+            def expand(z: float) -> list[float]:
                 point = list(a)
                 point[coordinate] = z
                 return point
 
-            def reduced_enclosure(low, high):
+            def reduced_enclosure(low: float, high: float) -> tuple[Interval, Interval]:
                 f, j = enclosure(expand(low), expand(high))
                 return f[0], j[0][coordinate]
 
@@ -494,7 +562,7 @@ def _known_cell_capacity(spec, policy):
         )
         candidates = roots.roots
         searches, unresolved = [roots.to_dict()], list(roots.unresolved)
-    solutions = []
+    solutions: list[SOHSolution] = []
     for root in candidates:
         xh, yh = root["value"]
         li = qn * xh + qp * yh
@@ -512,14 +580,17 @@ def _known_cell_capacity(spec, policy):
     return SOHResult(spec, tuple(solutions), tuple(searches), tuple(unresolved))
 
 
-def solve_electrode_soh(spec, *, policy=DEFAULT_ISOLATION_POLICY, sensitivity=True):
+def solve_electrode_soh(
+    spec: ElectrodeSOHSpec | HalfCellSOHSpec, *,
+    policy: IsolationPolicy = DEFAULT_ISOLATION_POLICY, sensitivity: bool = True,
+) -> SOHResult:
     """All resolved equilibrium working intervals; never selects the first branch."""
     if not isinstance(policy, IsolationPolicy):
         raise ValueError("SOH requires the common isolation policy")
     if isinstance(spec, HalfCellSOHSpec):
         c = spec.working_ocv
 
-        def enclosure(a, b):
+        def enclosure(a: float, b: float) -> tuple[Interval, Interval]:
             return c.enclosure(a, b), c.enclosure(a, b, derivative=True)
 
         low = _cutoff_search(
@@ -543,7 +614,7 @@ def solve_electrode_soh(spec, *, policy=DEFAULT_ISOLATION_POLICY, sensitivity=Tr
             for label, search in (("minimum", low), ("maximum", high))
             for box in search.unresolved
         )
-        solutions = []
+        solutions: list[SOHSolution] = []
         if not unresolved:
             for yh, y0 in _window_pairs(low, high, lambda x: c.derivatives(x)[1], increasing=False):
                 solutions.append(
@@ -570,7 +641,7 @@ def solve_electrode_soh(spec, *, policy=DEFAULT_ISOLATION_POLICY, sensitivity=Tr
     else:
         raise ValueError("SOH requires an explicit full or positive-working half-cell spec")
     if sensitivity and result.solutions:
-        enriched = tuple(
+        enriched: tuple[SOHSolution, ...] = tuple(
             {**s, "local_parameter_response": soh_parameter_response(spec, s, policy=policy)}
             for s in result.solutions
         )
@@ -578,8 +649,10 @@ def solve_electrode_soh(spec, *, policy=DEFAULT_ISOLATION_POLICY, sensitivity=Tr
     return result
 
 
-def _parameters(spec):
-    names = (
+def _parameters(
+    spec: ElectrodeSOHSpec | HalfCellSOHSpec,
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    names: tuple[str, ...] = (
         ("working_capacity_C",)
         if isinstance(spec, HalfCellSOHSpec)
         else ("negative_capacity_C", "positive_capacity_C", "known_capacity_C")
@@ -588,20 +661,23 @@ def _parameters(spec):
     return names, tuple(getattr(spec, name) for name in names)
 
 
-def soh_parameter_response(spec, solution, *, policy=DEFAULT_ISOLATION_POLICY):
+def soh_parameter_response(
+    spec: ElectrodeSOHSpec | HalfCellSOHSpec, solution: SOHSolution, *,
+    policy: IsolationPolicy = DEFAULT_ISOLATION_POLICY,
+) -> dict[str, Any]:
     """Local implicit derivatives via the shared residual solver, not an estimator."""
     names, values = _parameters(spec)
     half = isinstance(spec, HalfCellSOHSpec)
-    capacity_mode = not half and spec.known == "cell_capacity"
-    coordinates = (
+    capacity_mode = isinstance(spec, ElectrodeSOHSpec) and spec.known == "cell_capacity"
+    coordinates: tuple[SOHCoordinate, ...] = (
         ("y_0", "y_100") if half else ("x_100", "y_100") if capacity_mode else ("x_0", "x_100")
     )
     initial = np.array([solution[name] for name in coordinates])
 
-    def residual(z, params):
+    def residual(z: Vector, params: Vector) -> NDArray[np.float64]:
         if capacity_mode:
-            return _capacity_equations(spec, z, params)
-        if half:
+            return _capacity_equations(cast(ElectrodeSOHSpec, spec), z, params)
+        if isinstance(spec, HalfCellSOHSpec):
             return np.array(
                 [
                     spec.working_ocv.value(z[0], trial=True) - params[1],
@@ -618,10 +694,10 @@ def soh_parameter_response(spec, solution, *, policy=DEFAULT_ISOLATION_POLICY):
             ]
         )
 
-    def state(z, params):
+    def state(z: Vector, params: Vector) -> NDArray[np.float64]:
         if capacity_mode:
-            return _capacity_jacobian(spec, z, params)
-        if half:
+            return _capacity_jacobian(cast(ElectrodeSOHSpec, spec), z, params)
+        if isinstance(spec, HalfCellSOHSpec):
             return np.diag([spec.working_ocv.derivatives(y, trial=True)[1] for y in z])
         qn, qp, li, _, _ = params
         return np.diag(
@@ -632,8 +708,8 @@ def soh_parameter_response(spec, solution, *, policy=DEFAULT_ISOLATION_POLICY):
             ]
         )
 
-    def parameter(z, params):
-        if half:
+    def parameter(z: Vector, params: Vector) -> NDArray[np.float64]:
+        if isinstance(spec, HalfCellSOHSpec):
             return np.array([[0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
         qn, qp, q, _, _ = params
         if capacity_mode:
@@ -659,7 +735,7 @@ def soh_parameter_response(spec, solution, *, policy=DEFAULT_ISOLATION_POLICY):
         if name in solution:
             curve = (
                 spec.working_ocv
-                if half
+                if isinstance(spec, HalfCellSOHSpec)
                 else spec.negative_ocv
                 if name.startswith("x")
                 else spec.positive_ocv
@@ -701,7 +777,7 @@ def soh_parameter_response(spec, solution, *, policy=DEFAULT_ISOLATION_POLICY):
         }
     # Successful sensitivity=True solves retain the implicit response matrix.
     derivatives = cast(np.ndarray, response.parameter_response)
-    if half:
+    if isinstance(spec, HalfCellSOHSpec):
         dq = spec.working_capacity_C * (derivatives[0] - derivatives[1])
         dq[0] += solution["y_0"] - solution["y_100"]
         output = {"cell_capacity_C": dq.tolist()}
@@ -726,13 +802,16 @@ def soh_parameter_response(spec, solution, *, policy=DEFAULT_ISOLATION_POLICY):
     }
 
 
-def _battery_soh_inputs(spec, state=None):
+def _battery_soh_inputs(
+    spec: BatterySPMSpec | BatterySplitOCVRSpec, state: CoupledState | None = None,
+) -> ElectrodeSOHSpec:
     from chemworld.physchem.battery_models import F, _energy_bins
     from chemworld.physchem.data_conflicts import DataSourceProvenance
 
     if getattr(spec, "plating", None) is not None:
         raise ValueError("lithium plating automatic equilibrium-SOH/SOC mapping is unsupported")
     if getattr(spec, "model_family", None) == "split-ocvr-isothermal-v1":
+        split_spec = cast("BatterySplitOCVRSpec", spec)
         state = spec.initial_state() if state is None else state
         curves = []
         lithium_C = 0.0
@@ -758,9 +837,9 @@ def _battery_soh_inputs(spec, state=None):
                 )
             )
         return ElectrodeSOHSpec(
-            *curves,
-            spec.negative_capacity_C,
-            spec.positive_capacity_C,
+            curves[0], curves[1],
+            split_spec.negative_capacity_C,
+            split_spec.positive_capacity_C,
             spec.minimum_voltage_V,
             spec.maximum_voltage_V,
             lithium_C,
@@ -803,7 +882,9 @@ def _battery_soh_inputs(spec, state=None):
         "synthetic",
     )
 
-    def curve(name):
+    native_spec = cast("BatterySPMSpec", spec)
+
+    def curve(name: str) -> ElectrodeOCV:
         existing = getattr(spec, name + "_ocv")
         return (
             existing
@@ -812,22 +893,25 @@ def _battery_soh_inputs(spec, state=None):
                 "native-" + name,
                 source,
                 (getattr(spec, name + "_ocv_intercept_V"), getattr(spec, name + "_ocv_slope_V")),
-                stoichiometry_domain=(spec.surface_margin, 1 - spec.surface_margin),
+                stoichiometry_domain=(native_spec.surface_margin, 1 - native_spec.surface_margin),
             )
         )
 
     return ElectrodeSOHSpec(
         curve("negative"),
         curve("positive"),
-        F * spec.negative.capacity_mol,
-        F * spec.positive.capacity_mol,
+        F * native_spec.negative.capacity_mol,
+        F * native_spec.positive.capacity_mol,
         spec.minimum_voltage_V,
         spec.maximum_voltage_V,
         li,
     )
 
 
-def soh_from_battery(spec, state=None, *, policy=DEFAULT_ISOLATION_POLICY, sensitivity=True):
+def soh_from_battery(
+    spec: BatterySPMSpec | BatterySplitOCVRSpec, state: CoupledState | None = None, *,
+    policy: IsolationPolicy = DEFAULT_ISOLATION_POLICY, sensitivity: bool = True,
+) -> SOHResult:
     """Read active Li totals for a single-valued equilibrium battery declaration.
 
     Operational OCP branches are not implicitly replaced by their midpoint or a
@@ -839,7 +923,9 @@ def soh_from_battery(spec, state=None, *, policy=DEFAULT_ISOLATION_POLICY, sensi
     )
 
 
-def battery_spec_at_soc(spec, result, soc, *, branch=None):
+def battery_spec_at_soc(
+    spec: _BatterySpecT, result: SOHResult, soc: float, *, branch: int | None = None,
+) -> _BatterySpecT:
     """Prepare a NEW initial config. Never resets a live inventory, clock or device."""
     from chemworld.physchem.battery_models import F
 
@@ -862,8 +948,14 @@ def battery_spec_at_soc(spec, result, soc, *, branch=None):
     if getattr(spec, "model_family", None) == "half-cell-spm-isothermal-v1":
         raise ValueError("finite half-cell dynamics have no automatic SOC configuration mapping")
     split = getattr(spec, "model_family", None) == "split-ocvr-isothermal-v1"
-    negative_capacity = spec.negative_capacity_C if split else F * spec.negative.capacity_mol
-    positive_capacity = spec.positive_capacity_C if split else F * spec.positive.capacity_mol
+    if split:
+        split_spec = cast("BatterySplitOCVRSpec", spec)
+        negative_capacity = split_spec.negative_capacity_C
+        positive_capacity = split_spec.positive_capacity_C
+    else:
+        native_spec = cast("BatterySPMSpec", spec)
+        negative_capacity = F * native_spec.negative.capacity_mol
+        positive_capacity = F * native_spec.positive.capacity_mol
     if (
         not isinstance(result.spec, ElectrodeSOHSpec)
         or not np.isclose(
