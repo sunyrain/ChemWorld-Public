@@ -13,6 +13,19 @@ These settings describe the current development website. Package releases remain
 - Add topics: `ai4science`, `chemistry`, `agent-evaluation`, `gymnasium`, `world-model`, `reinforcement-learning`.
 - Create releases by pushing a version-matching tag only after CI and Documentation both pass.
 
+The complete test suite includes optional scientific comparisons. Install their locked
+dependencies before running it:
+
+```bash
+uv sync --locked --extra dev --extra docs --extra physchem-ref
+uv run --no-sync pytest -q
+```
+
+CI uses the same comparison extra; ordinary package use does not require it. Release
+tags are checked against the installed package version, which Hatch reads from
+`src/chemworld/__init__.py`. The tests preserve the v0.4.0 evidence and its original
+manifest; that historical manifest does not bind current product source files.
+
 Local website publication after validation:
 
 ```bash

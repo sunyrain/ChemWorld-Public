@@ -19,8 +19,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - uses: astral-sh/setup-uv@v6
-      - name: Install locked development dependencies
-        run: uv sync --locked --extra dev
+      - name: Install locked development and comparison dependencies
+        run: uv sync --locked --extra dev --extra physchem-ref
       - name: Lint
         run: uv run --no-sync ruff check src tests scripts examples
       - name: Type check
