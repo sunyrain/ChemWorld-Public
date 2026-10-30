@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from math import exp, isfinite, log, pi
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 if TYPE_CHECKING:
     from chemworld.physchem.catalysis_thermochemistry import CatalyticThermodynamics
+    from chemworld.physchem.coupled_system import CoupledState
     from chemworld.physchem.gas_mechanism_batch import NASA7GasThermodynamics
     from chemworld.physchem.helmholtz_equilibrium_thermal import (
         HelmholtzEquilibriumIsochoricThermodynamics,
@@ -79,7 +81,7 @@ class ThermalDeviceSpec:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, payload) -> ThermalDeviceSpec:
+    def from_dict(cls, payload: Mapping[str, Any]) -> ThermalDeviceSpec:
         return cls(**payload)
 
 
@@ -241,7 +243,7 @@ class ThermalSystemSpec:
         }
 
     @classmethod
-    def from_dict(cls, payload) -> ThermalSystemSpec:
+    def from_dict(cls, payload: Mapping[str, Any]) -> ThermalSystemSpec:
         values = dict(payload)
         if values.get("condensed_background") is not None:
             values["condensed_background"] = CondensedBackgroundSpec(
@@ -498,7 +500,7 @@ def equipment_heat_transfer(
     fouling: FoulingEvolutionSpec | None = None,
     phase_change: PhaseChangeBoundarySpec | None = None,
     caloric_model: PropertyPackageThermodynamics | ConstantCvThermodynamics | None = None,
-    caloric_state=None,
+    caloric_state: CoupledState | None = None,
 ) -> EquipmentHeatTransferResult:
     """Integrate lumped equipment heat transfer with optional phase plateau."""
 
@@ -551,7 +553,7 @@ def equipment_heat_transfer(
         final_temperature, sensible, latent, phase_changed = _boiling_path(
             initial_temperature_K=process_temperature_K,
             utility_temperature_K=utility_temperature_K,
-            heat_capacity_J_K=process_heat_capacity_J_K,
+            heat_capacity_J_K=cast(float, process_heat_capacity_J_K),
             conductance_W_K=conductance,
             duration_s=duration_s,
             boundary=boundary,
@@ -561,7 +563,7 @@ def equipment_heat_transfer(
         final_temperature, sensible, latent, phase_changed = _condensation_path(
             initial_temperature_K=process_temperature_K,
             utility_temperature_K=utility_temperature_K,
-            heat_capacity_J_K=process_heat_capacity_J_K,
+            heat_capacity_J_K=cast(float, process_heat_capacity_J_K),
             conductance_W_K=conductance,
             duration_s=duration_s,
             boundary=boundary,
@@ -571,11 +573,12 @@ def equipment_heat_transfer(
         final_temperature = _lumped_sensible_temperature(
             initial_temperature_K=process_temperature_K,
             utility_temperature_K=utility_temperature_K,
-            heat_capacity_J_K=process_heat_capacity_J_K,
+            heat_capacity_J_K=cast(float, process_heat_capacity_J_K),
             conductance_W_K=conductance,
             duration_s=duration_s,
         )
-        sensible = process_heat_capacity_J_K * (final_temperature - process_temperature_K)
+        sensible = cast(float, process_heat_capacity_J_K) * (
+            final_temperature - process_temperature_K)
         latent = 0.0
         phase_changed = 0.0
         saturation = boundary.saturation_temperature_K
@@ -592,7 +595,8 @@ def equipment_heat_transfer(
     heat_energy = (
         sensible + latent
         if caloric_result is None
-        else caloric_result.final_state.boundary_heat_J - caloric_state.boundary_heat_J
+        else caloric_result.final_state.boundary_heat_J
+        - cast(CoupledState, caloric_state).boundary_heat_J
     )
     phase_fraction = (
         0.0

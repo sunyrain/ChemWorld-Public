@@ -8,11 +8,11 @@ This module owns formula metadata as well as evaluation and mathematical domains
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from math import exp, isfinite, tanh
 from types import MappingProxyType
-from typing import cast
+from typing import NoReturn, cast
 
 import numpy as np
 from scipy.optimize import brentq
@@ -57,12 +57,12 @@ class CorrelationFamily:
     virial_method: str = ""
 
     @property
-    def input_units(self):
+    def input_units(self) -> dict[str, str]:
         return {"temperature": "K", **({"pressure": "Pa"}
                 if self.volume_method and VOLUME_METHODS[self.volume_method].uses_pressure else {})}
 
     @property
-    def input_dimensions(self):
+    def input_dimensions(self) -> dict[str, str]:
         return {key: key for key in self.input_units}
 
     @property
@@ -87,7 +87,7 @@ class CorrelationFamily:
             "dippr." + self.equation_id.replace("dippr", "EQ")))
 
     def to_dict(self) -> dict[str, object]:
-        result = {
+        result: dict[str, object] = {
             "equation_id": self.equation_id,
             "required_coefficients": list(self.required),
             "optional_coefficients": list(self.optional),
@@ -140,12 +140,18 @@ _LATENT = dict.fromkeys(("heat_of_vaporization", "heat_of_fusion", "heat_of_subl
                         "molar_enthalpy")
 
 
-def _family(number, required, optional, properties, domain=_POSITIVE_T):
+def _family(
+    number: int | str, required: Iterable[str], optional: Iterable[str],
+    properties: Mapping[str, str], domain: str = _POSITIVE_T,
+) -> CorrelationFamily:
     return CorrelationFamily("dippr" + str(number), tuple(required), tuple(optional),
                              MappingProxyType(dict(properties)), domain)
 
 
-def _caloric(equation, method, required, optional, phase, domain=_POSITIVE_T, *, prefix=None):
+def _caloric(
+    equation: str, method: str, required: str, optional: str, phase: str,
+    domain: str = _POSITIVE_T, *, prefix: str | None = None,
+) -> CorrelationFamily:
     phases = ("ideal_gas", "liquid", "solid") if phase == "all" else (phase,)
     return CorrelationFamily(
         equation, tuple(required.split()), tuple(optional.split()),
@@ -154,8 +160,10 @@ def _caloric(equation, method, required, optional, phase, domain=_POSITIVE_T, *,
         domain, "heat_capacity." + method, "J/(mol*K)", prefix)
 
 
-def _pressure(equation, method, required, optional="", *, fixed_unit=None,
-              sublimation=False, domain=_POSITIVE_T):
+def _pressure(
+    equation: str, method: str, required: str, optional: str = "", *,
+    fixed_unit: str | None = None, sublimation: bool = False, domain: str = _POSITIVE_T,
+) -> CorrelationFamily:
     return CorrelationFamily(equation, tuple(required.split()), tuple(optional.split()),
         MappingProxyType({"sublimation_pressure" if sublimation else "vapor_pressure": "pressure",
                           **({"sublimation_pressure": "pressure"} if equation in
@@ -163,7 +171,10 @@ def _pressure(equation, method, required, optional="", *, fixed_unit=None,
         domain, fixed_output_unit=fixed_unit, pressure_method=method)
 
 
-def _latent(equation, method, required, domain="0 < T <= Tc; no supercritical extension"):
+def _latent(
+    equation: str, method: str, required: str,
+    domain: str = "0 < T <= Tc; no supercritical extension",
+) -> CorrelationFamily:
     return CorrelationFamily(equation, tuple(required.split()), (),
         MappingProxyType({"heat_of_vaporization": "molar_enthalpy"}), domain,
         fixed_output_unit="J/mol", phase_change_method=method)
@@ -289,7 +300,7 @@ _FAMILIES = (
              _POSITIVE_T + "; explicit linear=0/1 and positive theta_i K; polyatomic rigid rotor",
              prefix="theta_"),
 )
-def _volume_families():
+def _volume_families() -> Iterator[CorrelationFamily]:
     for method, spec in VOLUME_METHODS.items():
         for output in ("density", "molar_volume"):
             required = list(spec.required.split())
@@ -416,7 +427,7 @@ def family_value_and_slope(
         )
     if CORRELATION_FAMILIES[equation_id].volume_method:
         family = CORRELATION_FAMILIES[equation_id]
-        parameters = dict(coefficients)
+        parameters: dict[str, float | None] = dict(coefficients)
         if VOLUME_METHODS[family.volume_method].uses_pressure:
             parameters["P"] = pressure_Pa
         return volume_derivatives(family.volume_method, T, parameters,
@@ -443,7 +454,10 @@ def family_value_and_slope(
     return value, slope
 
 
-def validate_family_interval(equation_id, coefficients, lower_K, upper_K, *, pressure_Pa=None):
+def validate_family_interval(
+    equation_id: str, coefficients: Mapping[str, float], lower_K: float, upper_K: float,
+    *, pressure_Pa: float | None = None,
+) -> None:
     """Reject poles throughout a closed interval, including non-endpoint zeros."""
     family_value_and_slope(equation_id, lower_K, coefficients, pressure_Pa=pressure_Pa)
     family_value_and_slope(equation_id, upper_K, coefficients, pressure_Pa=pressure_Pa)
@@ -456,15 +470,16 @@ def validate_family_interval(equation_id, coefficients, lower_K, upper_K, *, pre
     elif equation_id == "dippr102":
         polynomial = [coefficients.get("D", 0.0), coefficients.get("C", 0.0), 1.0]
     if polynomial is not None:
-        roots = np.polynomial.Polynomial(polynomial).roots()
+        roots = cast(Iterable[complex], np.polynomial.Polynomial(polynomial).roots())
         if any(abs(root.imag) <= 1e-8 * max(1, abs(root.real))
                and lower_K <= root.real <= upper_K for root in roots):
             raise ValueError(f"{equation_id} integration interval crosses a pole")
 
 
 def validate_heat_capacity_interval(
-    equation_id, coefficients, lower_K, upper_K, *, allow_zero=False, minimum=0.0,
-):
+    equation_id: str, coefficients: Mapping[str, float], lower_K: float, upper_K: float,
+    *, allow_zero: bool = False, minimum: float = 0.0,
+) -> None:
     """Establish the capacity sign on an interval before integrating it.
 
     Polynomial extrema handle 100 and tau*114. For oscillator sums, monotone
@@ -477,20 +492,21 @@ def validate_heat_capacity_interval(
                                   minimum=minimum, allow_zero=allow_zero)
         return
 
-    def valid(value):
+    def valid(value: float) -> bool:
         return isfinite(value) and (value >= minimum if allow_zero else value > minimum)
 
-    def reject() -> None:
+    def reject() -> NoReturn:
         raise ValueError("heat capacity is nonpositive or cannot be bounded over the interval")
 
     for T in (lower_K, upper_K):
         if not valid(family_value_and_slope(equation_id, T, c)[0]):
             reject()
+    polynomial: list[float] | None
     if equation_id == "chemsep16":
         # exp is monotone, so every capacity extremum comes from the cubic
         # numerator of d(B/T+C+D*T+E*T²)/dT. This also bounds Cp-R for gas U.
         polynomial = [-c["B"], 0.0, c["D"], 2*c["E"]]
-        for root in np.polynomial.Polynomial(polynomial).roots():
+        for root in cast(Iterable[complex], np.polynomial.Polynomial(polynomial).roots()):
             if (abs(root.imag) < 1e-8 and lower_K < root.real < upper_K
                     and not valid(family_value_and_slope(equation_id, root.real, c)[0])):
                 reject()
@@ -506,8 +522,9 @@ def validate_heat_capacity_interval(
         lower, upper = 1 - upper_K / c["Tc"], 1 - lower_K / c["Tc"]
     if polynomial is not None:
         poly = np.polynomial.Polynomial(polynomial)
-        points = (lower, upper, *(root.real for root in poly.deriv().roots()
-                                  if abs(root.imag) < 1e-8 and lower < root.real < upper))
+        points = (lower, upper, *(
+            root.real for root in cast(Iterable[complex], poly.deriv().roots())
+            if abs(root.imag) < 1e-8 and lower < root.real < upper))
         if not all(isfinite(poly(point)) and (poly(point) >= 0 if allow_zero else poly(point) > 0)
                    for point in points):
             reject()
@@ -517,7 +534,8 @@ def validate_heat_capacity_interval(
         # every stationary point of A*T**(B+2)/(T²+C*T+D).
         if minimum:
             B, C, D = c["B"], c.get("C", 0), c.get("D", 0)
-            roots = np.polynomial.Polynomial([(B+2)*D, (B+1)*C, B]).roots()
+            roots = cast(Iterable[complex],
+                         np.polynomial.Polynomial([(B+2)*D, (B+1)*C, B]).roots())
             for root in roots:
                 if (abs(root.imag) < 1e-8 and lower_K < root.real < upper_K
                         and not valid(family_value_and_slope(equation_id, root.real, c)[0])):

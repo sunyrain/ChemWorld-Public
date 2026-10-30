@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite, log, nextafter
+from typing import cast
 
 from chemworld.foundation.units import convert_value
 from chemworld.physchem.property_reports import (
@@ -392,7 +393,8 @@ def _temperature_bounds_k(
     source_bounds = correlation.validity_ranges.get("temperature")
     if source_bounds is not None:
         unit = correlation.input_units.get("temperature", "K")
-        source_bounds = tuple(convert_value(v, unit, "K") for v in source_bounds)
+        source_bounds = cast(tuple[float, float],
+                             tuple(convert_value(v, unit, "K") for v in source_bounds))
     if temperature_bounds_K is None:
         if source_bounds is None:
             raise ValueError(

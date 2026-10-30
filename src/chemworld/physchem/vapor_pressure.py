@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import isfinite, log
+from typing import Any
 
-from chemworld.physchem.caloric_math import derivative_values, exponential
+from chemworld.physchem.caloric_math import FirstDerivative, derivative_values, exponential
 from chemworld.physchem.correlation_families import CORRELATION_FAMILIES
 from chemworld.physchem.property_equations import (
     _convert_input,
@@ -152,7 +154,7 @@ def vapor_pressure_temperature_derivative(
     )
 
 
-def _pressure_kernel(correlation, temperature_K):
+def _pressure_kernel(correlation: PropertyCorrelation, temperature_K: float) -> tuple[str, float]:
     if correlation.property_id not in {"vapor_pressure", "sublimation_pressure"}:
         raise ValueError("a vapor or sublimation pressure correlation is required")
     equation = correlation.equation_id
@@ -177,15 +179,17 @@ class VaporPressureJacobian:
     pressure_unit: str
     warnings: tuple[tuple[str, ...], ...]
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {"temperatures_K": list(self.temperatures_K), "parameters": list(self.parameters),
                 "values": [list(row) for row in self.values], "pressure_unit": self.pressure_unit,
                 "parameter_basis": "declared source-coefficient coordinates, no normalization",
                 "warnings": [list(row) for row in self.warnings]}
 
 
-def vapor_pressure_parameter_jacobian(correlation, temperatures_K, *, parameters=None,
-                                      validity_policy="raise"):
+def vapor_pressure_parameter_jacobian(
+    correlation: PropertyCorrelation, temperatures_K: Iterable[float], *,
+    parameters: Iterable[str] | None = None, validity_policy: ValidityPolicy = "raise",
+) -> VaporPressureJacobian:
     """Analytic Jacobian of the actual pressure, including source log/unit conventions."""
     names = tuple(correlation.coefficients) if parameters is None else tuple(parameters)
     if len(set(names)) != len(names) or any(name not in correlation.coefficients for name in names):
@@ -203,7 +207,10 @@ def vapor_pressure_parameter_jacobian(correlation, temperatures_K, *, parameters
                     and correlation.coefficients["to"]+273.15 == T
                     and correlation.coefficients["n"] <= 1):
                 raise ValueError("TRC parameter derivative does not exist at the branch")
-            def function(value, name=name, equation=equation, T=T):
+            def function(
+                value: FirstDerivative[Any, Any], name: str = name,
+                equation: str = equation, T: float = T,
+            ) -> float | FirstDerivative[Any, Any]:
                 return exponential(pressure_logarithm(equation, T,
                     {**correlation.coefficients, name: value}))
             row.append(derivative_values(function, correlation.coefficients[name], order=1)[1])
@@ -213,7 +220,9 @@ def vapor_pressure_parameter_jacobian(correlation, temperatures_K, *, parameters
                                  tuple(warnings))
 
 
-def _local_pressure_point(temperature_K, pressure_Pa, first_derivative_Pa_K):
+def _local_pressure_point(
+    temperature_K: float, pressure_Pa: float, first_derivative_Pa_K: float,
+) -> tuple[float, float]:
     if any(isinstance(v, bool) or not isfinite(v) for v in
            (temperature_K, pressure_Pa, first_derivative_Pa_K)):
         raise ValueError("local pressure data must be finite numbers")
@@ -222,8 +231,10 @@ def _local_pressure_point(temperature_K, pressure_Pa, first_derivative_Pa_K):
     return log(pressure_Pa), first_derivative_Pa_K/pressure_Pa
 
 
-def antoine_coefficients_from_point(*, temperature_K, pressure_Pa, first_derivative_Pa_K,
-                                    second_derivative_Pa_K2=None, base=10.0):
+def antoine_coefficients_from_point(
+    *, temperature_K: float, pressure_Pa: float, first_derivative_Pa_K: float,
+    second_derivative_Pa_K2: float | None = None, base: float = 10.0,
+) -> dict[str, float]:
     """Local A/B (C=0) or A/B/C matching; this is not a global data regression."""
     L, slope = _local_pressure_point(temperature_K, pressure_Pa, first_derivative_Pa_K)
     if isinstance(base, bool) or not isfinite(base) or base <= 0 or base == 1:
@@ -242,8 +253,10 @@ def antoine_coefficients_from_point(*, temperature_K, pressure_Pa, first_derivat
             "B": slope*denominator**2/log(base), "C": denominator-temperature_K, "base": base}
 
 
-def dippr101_coefficients_from_point(*, temperature_K, pressure_Pa, first_derivative_Pa_K,
-                                     second_derivative_Pa_K2):
+def dippr101_coefficients_from_point(
+    *, temperature_K: float, pressure_Pa: float, first_derivative_Pa_K: float,
+    second_derivative_Pa_K2: float,
+) -> dict[str, float]:
     """Local A/B/C matching; infinite second derivative explicitly selects the A/C limit.
 
     For an infinite target curvature, B=0 and only value and first derivative
@@ -262,7 +275,10 @@ def dippr101_coefficients_from_point(*, temperature_K, pressure_Pa, first_deriva
     return {"A": L-B/T-C*log(T), "B": B, "C": C, "D": 0.0, "E": 0.0}
 
 
-def arrhenius_pressure_extrapolation(correlation, *, anchor_temperature_K, temperature_bounds_K):
+def arrhenius_pressure_extrapolation(
+    correlation: PropertyCorrelation, *, anchor_temperature_K: float,
+    temperature_bounds_K: tuple[float, float],
+) -> PropertyCorrelation:
     """Explicit tangent in ln(P) versus 1/T; never a failed-method fallback."""
     pressure = vapor_pressure_report(correlation, temperature_K=anchor_temperature_K,
                                      validity_policy="raise")
