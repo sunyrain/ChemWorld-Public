@@ -23,6 +23,7 @@ from chemworld.physchem.residual_system import (
 )
 from chemworld.physchem.root_isolation import (
     DEFAULT_ISOLATION_POLICY,
+    IsolatedRoot,
     IsolationPolicy,
     isolate_roots,
 )
@@ -433,6 +434,7 @@ def _known_cell_capacity(spec, policy):
             ((-u(n, xh, True), u(p, yh, True)), (-u(n, x0, True), u(p, y0, True))),
         )
 
+    candidates: tuple[IsolatedRoot | dict[str, list[float]], ...]
     if any(low == high for low, high in zip(a, b, strict=True)):
         # A known capacity can use exactly an electrode's complete declared
         # domain. Eliminate fixed coordinates rather than widening/nudging it.

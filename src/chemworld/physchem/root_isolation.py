@@ -6,14 +6,18 @@ an exhausted or singular region is retained, never reclassified as no solution.
 These numerical enclosures are not a formal exact-real proof system.
 """
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from math import inf, isfinite, nextafter
+from typing import Any, Literal, TypedDict
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 from chemworld.physchem.caloric_math import Interval
 from chemworld.physchem.residual_system import (
     ResidualNumericalError,
+    ResidualVariable,
     RootPolicy,
     linear_solve,
     solve_root,
@@ -41,18 +45,33 @@ class IsolationPolicy:
 DEFAULT_ISOLATION_POLICY = IsolationPolicy()
 
 
+class IsolatedRoot(TypedDict):
+    value: list[float]
+    lower: list[float]
+    upper: list[float]
+    certificate: str
+    coordinate_error_bound: list[float]
+    root_diagnostics: dict[str, Any]
+
+
+class UnresolvedBox(TypedDict):
+    lower: list[float]
+    upper: list[float]
+    reason: str
+
+
 @dataclass(frozen=True)
 class IsolatedRoots:
-    roots: tuple[dict, ...]
-    unresolved: tuple[dict, ...]
-    diagnostics: dict
+    roots: tuple[IsolatedRoot, ...]
+    unresolved: tuple[UnresolvedBox, ...]
+    diagnostics: dict[str, Any]
 
     @property
-    def complete(self):
+    def complete(self) -> bool:
         return not self.unresolved
 
     @property
-    def status(self):
+    def status(self) -> Literal["unresolved", "no_solution", "unique", "multiple"]:
         return (
             "unresolved"
             if not self.complete
@@ -63,7 +82,7 @@ class IsolatedRoots:
             else "multiple"
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
             "complete": self.complete,
@@ -74,8 +93,17 @@ class IsolatedRoots:
 
 
 def isolate_roots(
-    function, jacobian, enclosure, *, variables, residual_scales, policy=DEFAULT_ISOLATION_POLICY
-):
+    function: Callable[[NDArray[np.float64]], ArrayLike],
+    jacobian: Callable[[NDArray[np.float64]], ArrayLike],
+    enclosure: Callable[
+        [NDArray[np.float64], NDArray[np.float64]],
+        tuple[tuple[Interval, ...], tuple[tuple[Interval, ...], ...]],
+    ],
+    *,
+    variables: Iterable[ResidualVariable],
+    residual_scales: ArrayLike,
+    policy: IsolationPolicy = DEFAULT_ISOLATION_POLICY,
+) -> IsolatedRoots:
     """Enclose every possible root or explicitly retain an unresolved sub-box.
 
     enclosure(lower, upper) returns (tuple[Interval], tuple[tuple[Interval]]).
@@ -100,21 +128,28 @@ def isolate_roots(
         raise ValueError("root isolation requires finite coordinate bounds")
     if np.any(lo >= hi):
         raise ValueError("root isolation coordinate scaling collapsed the declared domain")
-    pending, roots, unresolved = [(lo, hi, 0)], [], []
+    pending = [(lo, hi, 0)]
+    roots: list[IsolatedRoot] = []
+    unresolved: list[UnresolvedBox] = []
     count, excluded, contractions = 0, 0, 0
 
-    def remaining(a, b, reason):
+    def remaining(a: NDArray[np.float64], b: NDArray[np.float64], reason: str) -> None:
         unresolved.append(
             {"lower": (a * scales).tolist(), "upper": (b * scales).tolist(), "reason": reason}
         )
 
-    def value(u):
+    def value(u: NDArray[np.float64]) -> NDArray[np.float64]:
         result = np.asarray(function(u * scales), dtype=float) / rows
         if result.shape != (n,) or not np.all(np.isfinite(result)):
             raise ValueError("root callback returned a nonfinite/wrong-shaped vector")
         return result
 
-    def accept(a, b, certificate, error_bound):
+    def accept(
+        a: NDArray[np.float64],
+        b: NDArray[np.float64],
+        certificate: str,
+        error_bound: Callable[[NDArray[np.float64]], float],
+    ) -> None:
         bounded = tuple(
             replace(v, lower=float(low), upper=float(high))
             for v, low, high in zip(variables, a * scales, b * scales, strict=True)
@@ -135,7 +170,7 @@ def isolate_roots(
         if not np.isfinite(bound) or bound > policy.coordinate_tolerance:
             remaining(a, b, "point_root_coordinate_precision")
             return
-        record = {
+        record: IsolatedRoot = {
             "value": answer.value.tolist(),
             "lower": (a * scales).tolist(),
             "upper": (b * scales).tolist(),
@@ -177,8 +212,12 @@ def isolate_roots(
                 continue
             if fa * fb <= 0 or min(abs(fa), abs(fb)) <= policy.root.tolerance:
                 slope = min(abs(jbox[0][0].lower), abs(jbox[0][0].upper))
+
+                def scalar_error(u: NDArray[np.float64], slope: float = slope) -> float:
+                    return float(abs(value(u)[0]) / slope)
+
                 accept(
-                    a, b, "monotone_scalar_branch", lambda u, slope=slope: abs(value(u)[0]) / slope
+                    a, b, "monotone_scalar_branch", scalar_error
                 )
                 continue
         middle = (a + b) / 2
@@ -219,13 +258,19 @@ def isolate_roots(
                 continue
             inside = all(a[i] < k.lower and k.upper < b[i] for i, k in enumerate(kbox))
             if inside and contraction < 1:
+
+                def contraction_error(
+                    u: NDArray[np.float64],
+                    c: NDArray[np.float64] = inverse,
+                    q: float = contraction,
+                ) -> float:
+                    return float(np.linalg.norm(c @ value(u), np.inf) / (1 - q))
+
                 accept(
                     a,
                     b,
                     "krawczyk_interior_contraction",
-                    lambda u, c=inverse, q=contraction: (
-                        np.linalg.norm(c @ value(u), np.inf) / (1 - q)
-                    ),
+                    contraction_error,
                 )
                 continue
             if (
