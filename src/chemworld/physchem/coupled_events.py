@@ -1,9 +1,16 @@
 """Choose the feasible side of a rounded event root without changing inventories."""
 
+from collections.abc import Callable
+
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 
-def feasible_terminal_point(time, vector, interpolant, feasible):
+def feasible_terminal_point(
+    time: float, vector: NDArray[np.float64],
+    interpolant: Callable[[float], ArrayLike] | None,
+    feasible: Callable[[float, NDArray[np.float64]], bool | np.bool_],
+) -> tuple[float, NDArray[np.float64]]:
     """Return one complete interpolated state within root-location roundoff.
 
     SciPy's event Brent solve has absolute and relative tolerances of four

@@ -6,22 +6,27 @@ source's prescribed-current model. Every trajectory uses the common coupled
 residual; a closed algebraic current expression supplies its consistent guess.
 """
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from math import isclose, isfinite
 from numbers import Real
+from typing import Any, Literal, Self, TypeAlias, TypedDict, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import sparse
 
 from chemworld.data.scientific_inputs import InputSource, _text
 from chemworld.physchem.battery_materials import ElectrodeOCV
 from chemworld.physchem.battery_models import BATTERY_ALGEBRAIC, BATTERY_COORDINATES, F
 from chemworld.physchem.coupled_system import (
+    CoupledAdvanceResult,
     CoupledAlgebraic,
     CoupledCoordinate,
     CoupledEvent,
     CoupledProcess,
     CoupledState,
+    CoupledStateView,
     CoupledSystem,
     ProcessContribution,
 )
@@ -32,9 +37,26 @@ from chemworld.physchem.residual_system import ResidualEquation, ResidualVariabl
 SPLIT_OCVR_FAMILY = "split-ocvr-isothermal-v1"
 SPLIT_OCVR_KEYS = ("negative:Li", "positive:Li")
 _ELECTRODES = ("negative", "positive")
+ControlMode: TypeAlias = Literal[
+    "constant_current", "constant_voltage", "positive_current_limit", "negative_current_limit",
+]
 
 
-def _default_ocv(electrode):
+class SplitOCVRFields(TypedDict):
+    negative_average_fraction: float
+    positive_average_fraction: float
+    negative_ocv_V: float
+    positive_ocv_V: float
+    open_circuit_voltage_V: float
+    current_A: float
+    voltage_V: float
+    ohmic_drop_V: float
+    control_mode: ControlMode | Literal["specified_current"]
+    discharged_charge_C: float
+    delivered_work_J: float
+
+
+def _default_ocv(electrode: str) -> ElectrodeOCV:
     source = InputSource(
         DataSourceProvenance(
             "chemworld:synthetic-split-ocvr",
@@ -54,7 +76,7 @@ def _default_ocv(electrode):
     )
 
 
-def _finite(value, name):
+def _finite(value: object, name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
         raise ValueError(f"SplitOCVR {name} must be finite")
 
@@ -124,11 +146,11 @@ class BatterySplitOCVRSpec:
         _text(self.provenance, "SplitOCVR provenance")
 
     @property
-    def model_family(self):
+    def model_family(self) -> str:
         return SPLIT_OCVR_FAMILY
 
     @property
-    def model_id(self):
+    def model_id(self) -> str:
         return SPLIT_OCVR_FAMILY
 
     @property
@@ -148,35 +170,35 @@ class BatterySplitOCVRSpec:
         return False
 
     @property
-    def hysteresis_keys(self):
+    def hysteresis_keys(self) -> tuple[()]:
         return ()
 
     @property
-    def coordinate_keys(self):
+    def coordinate_keys(self) -> tuple[str, ...]:
         return BATTERY_COORDINATES
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str, ...]:
         return SPLIT_OCVR_KEYS
 
     @property
-    def inventory_species(self):
+    def inventory_species(self) -> dict[str, str]:
         return dict.fromkeys(self.inventory_keys, "Li")
 
     @property
-    def volume_l(self):
+    def volume_l(self) -> float:
         return self.housing_volume_L
 
     @property
-    def series_resistance_ohm(self):
+    def series_resistance_ohm(self) -> float:
         return self.resistance_ohm
 
     @property
-    def supported_control_units(self):
+    def supported_control_units(self) -> tuple[str, ...]:
         return ("A",) if self.resistance_ohm == 0 else ("A", "V")
 
     @property
-    def usable_charge_c(self):
+    def usable_charge_c(self) -> float:
         """Nominal common working-window capacity, independent of current SOC."""
         return min(
             getattr(self, e + "_capacity_C")
@@ -184,7 +206,7 @@ class BatterySplitOCVRSpec:
             for e in _ELECTRODES
         )
 
-    def fraction_bounds(self, electrode):
+    def fraction_bounds(self, electrode: str) -> tuple[float, float]:
         if electrode not in _ELECTRODES:
             raise ValueError("unknown SplitOCVR electrode")
         return (
@@ -192,16 +214,16 @@ class BatterySplitOCVRSpec:
             getattr(self, electrode + "_maximum_fraction"),
         )
 
-    def current_at_c_rate(self, rate):
+    def current_at_c_rate(self, rate: float) -> float:
         _finite(rate, "C rate")
         current = rate * self.usable_charge_c / 3600
         _finite(current, "C-rate current")
         return current
 
-    def initial_coordinates(self):
+    def initial_coordinates(self) -> dict[str, float]:
         return dict.fromkeys(self.coordinate_keys, 0.0)
 
-    def initial_state(self):
+    def initial_state(self) -> CoupledState:
         return CoupledState(
             {
                 e + ":Li": getattr(self, e + "_capacity_C")
@@ -214,7 +236,7 @@ class BatterySplitOCVRSpec:
             coordinates=self.initial_coordinates(),
         )
 
-    def ocv(self, electrode, theta, *, derivative=False):
+    def ocv(self, electrode: str, theta: float, *, derivative: bool = False) -> float:
         if electrode not in _ELECTRODES:
             raise ValueError("unknown SplitOCVR electrode")
         curve = getattr(self, electrode + "_ocv")
@@ -225,7 +247,7 @@ class BatterySplitOCVRSpec:
             else curve.value(theta, trial=True)
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model_family": self.model_family,
             **{
@@ -235,14 +257,14 @@ class BatterySplitOCVRSpec:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         value = dict(value)
         if value.pop("model_family", None) != SPLIT_OCVR_FAMILY:
             raise ValueError("unsupported SplitOCVR family")
         return cls(**value)
 
 
-def _material_fields(spec, state):
+def _material_fields(spec: BatterySplitOCVRSpec, state: CoupledStateView) -> dict[str, float]:
     result = {}
     for e in _ELECTRODES:
         theta = state.amounts_mol[e + ":Li"] * F / getattr(spec, e + "_capacity_C")
@@ -252,7 +274,7 @@ def _material_fields(spec, state):
     return result
 
 
-def validate_split_ocvr_state(spec, state):
+def validate_split_ocvr_state(spec: BatterySplitOCVRSpec, state: CoupledStateView) -> None:
     if set(state.amounts_mol) != set(spec.inventory_keys) or set(state.coordinates) != set(
         spec.coordinate_keys
     ):
@@ -280,7 +302,7 @@ def validate_split_ocvr_state(spec, state):
             raise ValueError("SplitOCVR true Li and Q violate Faraday balance")
 
 
-def _check_program(spec, program):
+def _check_program(spec: BatterySplitOCVRSpec, program: ScalarControlProgram) -> None:
     if (
         not isinstance(program, ScalarControlProgram)
         or program.unit not in {"A", "V"}
@@ -296,7 +318,9 @@ def _check_program(spec, program):
         raise ValueError("SplitOCVR R=0 CV is unreachable or has nonunique current")
 
 
-def split_ocvr_control_mode(spec, state, program):
+def split_ocvr_control_mode(
+    spec: BatterySplitOCVRSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> tuple[ControlMode, float]:
     _check_program(spec, program)
     target = program.value_at(state.time_s)
     if program.unit == "A":
@@ -310,7 +334,9 @@ def split_ocvr_control_mode(spec, state, program):
     return "constant_voltage", target
 
 
-def _controlled_current(spec, state, program):
+def _controlled_current(
+    spec: BatterySplitOCVRSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> float:
     mode, target = split_ocvr_control_mode(spec, state, program)
     return (
         (_material_fields(spec, state)["open_circuit_voltage_V"] - target) / spec.resistance_ohm
@@ -319,16 +345,18 @@ def _controlled_current(spec, state, program):
     )
 
 
-def split_ocvr_algebraic(spec, program):
+def split_ocvr_algebraic(
+    spec: BatterySplitOCVRSpec, program: ScalarControlProgram,
+) -> CoupledAlgebraic:
     _check_program(spec, program)
     ik, vk = BATTERY_ALGEBRAIC
 
-    def initial(state):
+    def initial(state: CoupledStateView) -> dict[str, float]:
         current = _controlled_current(spec, state, program)
         u = _material_fields(spec, state)["open_circuit_voltage_V"]
         return {ik: current, vk: u - spec.resistance_ohm * current}
 
-    def residual(state):
+    def residual(state: CoupledStateView) -> NDArray[np.float64]:
         current, voltage = (state.algebraic_values[k] for k in BATTERY_ALGEBRAIC)
         u = _material_fields(spec, state)["open_circuit_voltage_V"]
         mode, target = split_ocvr_control_mode(spec, state, program)
@@ -355,7 +383,10 @@ def split_ocvr_algebraic(spec, program):
     )
 
 
-def _closure_jacobian(spec, state, program, identities):
+def _closure_jacobian(
+    spec: BatterySplitOCVRSpec, state: CoupledStateView, program: ScalarControlProgram,
+    identities: Sequence[str],
+) -> sparse.csc_matrix:
     index = {k: i for i, k in enumerate(identities)}
     ik, vk = BATTERY_ALGEBRAIC
     jac = np.zeros((2, len(identities)))
@@ -377,12 +408,16 @@ def _closure_jacobian(spec, state, program, identities):
     return sparse.csc_matrix(jac)
 
 
-def split_ocvr_fields(spec, state, *, current_A=None, program=None):
+def split_ocvr_fields(
+    spec: BatterySplitOCVRSpec, state: CoupledStateView, *, current_A: float | None = None,
+    program: ScalarControlProgram | None = None,
+) -> SplitOCVRFields:
     if (current_A is None) == (program is None):
         raise ValueError("supply exactly one SplitOCVR current or control program")
     if isinstance(state, CoupledState):
         validate_split_ocvr_state(spec, state)
     f = _material_fields(spec, state)
+    mode: ControlMode | Literal["specified_current"]
     if current_A is not None:
         _finite(current_A, "current")
         if abs(current_A) > spec.maximum_current_A:
@@ -390,6 +425,7 @@ def split_ocvr_fields(spec, state, *, current_A=None, program=None):
         current, mode = current_A, "specified_current"
         voltage = f["open_circuit_voltage_V"] - spec.resistance_ohm * current
     else:
+        program = cast(ScalarControlProgram, program)
         mode, _ = split_ocvr_control_mode(spec, state, program)
         # A saved CoupledState may carry a prior stage's algebraic solution.
         # Only live residual views consume their trial algebraic values.
@@ -400,14 +436,14 @@ def split_ocvr_fields(spec, state, *, current_A=None, program=None):
         else:
             current = _controlled_current(spec, state, program)
             voltage = f["open_circuit_voltage_V"] - spec.resistance_ohm * current
-    return {
+    return cast(SplitOCVRFields, {
         **f,
         "current_A": current,
         "voltage_V": voltage,
         "ohmic_drop_V": spec.resistance_ohm * current,
         "control_mode": mode,
         **{k: state.coordinates[k] for k in BATTERY_COORDINATES},
-    }
+    })
 
 
 @dataclass(frozen=True)
@@ -423,29 +459,43 @@ class SplitOCVRReadout:
     delivered_work_J: float
 
 
-def split_ocvr_readout(spec, state, current_A):
+def split_ocvr_readout(
+    spec: BatterySplitOCVRSpec, state: CoupledStateView, current_A: float,
+) -> SplitOCVRReadout:
     f = split_ocvr_fields(spec, state, current_A=current_A)
-    return SplitOCVRReadout(**{k: f[k] for k in SplitOCVRReadout.__dataclass_fields__})
+    return SplitOCVRReadout(
+        voltage_V=f["voltage_V"], current_A=f["current_A"],
+        negative_average_fraction=f["negative_average_fraction"],
+        positive_average_fraction=f["positive_average_fraction"],
+        negative_ocv_V=f["negative_ocv_V"], positive_ocv_V=f["positive_ocv_V"],
+        ohmic_drop_V=f["ohmic_drop_V"], discharged_charge_C=f["discharged_charge_C"],
+        delivered_work_J=f["delivered_work_J"],
+    )
 
 
-def split_ocvr_control_current(spec, state, program):
+def split_ocvr_control_current(
+    spec: BatterySplitOCVRSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> float:
     return split_ocvr_fields(spec, state, program=program)["current_A"]
 
 
 class _SplitOCVRThermodynamics:
     inventory_keys = SPLIT_OCVR_KEYS
 
-    def heat_capacity_j_k(self, state):
+    def heat_capacity_j_k(self, state: CoupledStateView) -> float:
         return 1.0
 
-    def internal_energy_j(self, state):
+    def internal_energy_j(self, state: CoupledStateView) -> None:
         return None
 
-    def chemical_energy_rate_w(self, state, rates, contributions):
+    def chemical_energy_rate_w(
+        self, state: CoupledStateView, rates: Mapping[str, float],
+        contributions: Sequence[ProcessContribution],
+    ) -> float:
         return 0.0
 
 
-def _program_slope(program, time):
+def _program_slope(program: ScalarControlProgram, time: float) -> float:
     if program.mode == "linear":
         for (t0, v0), (t1, v1) in zip(program.setpoints[:-1], program.setpoints[1:], strict=True):
             if t0 <= time < t1:
@@ -453,15 +503,18 @@ def _program_slope(program, time):
     return 0.0
 
 
-def split_ocvr_system(spec, program, *, thermal_device=None, control_events=()):
+def split_ocvr_system(
+    spec: BatterySplitOCVRSpec, program: ScalarControlProgram, *,
+    thermal_device: object | None = None, control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     if thermal_device is not None:
         raise ValueError("SplitOCVR is isothermal; external thermal coupling is unsupported")
     closure = split_ocvr_algebraic(spec, program)
 
-    def fields(state):
+    def fields(state: CoupledStateView) -> SplitOCVRFields:
         return split_ocvr_fields(spec, state, program=program)
 
-    def evaluate(state):
+    def evaluate(state: CoupledStateView) -> ProcessContribution:
         f = fields(state)
         current, voltage = f["current_A"], f["voltage_V"]
         return ProcessContribution(
@@ -470,6 +523,22 @@ def split_ocvr_system(spec, program, *, thermal_device=None, control_events=()):
                 zip(BATTERY_COORDINATES, (current, current * voltage), strict=True)
             ),
         )
+
+    def fraction_event(
+        electrode: str, sign: int, bound: float, direction: int,
+    ) -> Callable[[CoupledStateView], float]:
+        def event(state: CoupledStateView) -> float:
+            return (
+                direction * (
+                    cast(float, cast(Mapping[str, object], fields(state))[
+                        electrode + "_average_fraction"]
+                    ) - bound
+                )
+                if direction * sign * fields(state)["current_A"] < 0
+                else 1.0
+            )
+
+        return event
 
     events = []
     for e, sign in zip(_ELECTRODES, (-1, 1), strict=True):
@@ -480,23 +549,20 @@ def split_ocvr_system(spec, program, *, thermal_device=None, control_events=()):
             events.append(
                 CoupledEvent(
                     f"split-ocvr:{e}:{name}-fraction",
-                    lambda s, electrode=e, v=sign, b=bound, d=direction: (
-                        d * (fields(s)[electrode + "_average_fraction"] - b)
-                        if d * v * fields(s)["current_A"] < 0
-                        else 1.0
-                    ),
+                    fraction_event(e, sign, bound, direction),
                 )
             )
 
-    def voltage_event(state, bound, direction):
+    def voltage_event(state: CoupledStateView, bound: float, direction: int) -> float:
         f = fields(state)
+        numeric_fields: Mapping[str, object] = f
         mode, _ = split_ocvr_control_mode(spec, state, program)
         derivative = (
             _program_slope(program, state.time_s)
             if mode == "constant_voltage"
             else f["current_A"]
             * sum(
-                spec.ocv(e, f[e + "_average_fraction"], derivative=True)
+                spec.ocv(e, cast(float, numeric_fields[e + "_average_fraction"]), derivative=True)
                 / getattr(spec, e + "_capacity_C")
                 for e in _ELECTRODES
             )
@@ -523,7 +589,7 @@ def split_ocvr_system(spec, program, *, thermal_device=None, control_events=()):
         )
     )
 
-    def jacobian(state, identities):
+    def jacobian(state: CoupledStateView, identities: Sequence[str]) -> sparse.csc_matrix:
         index = {k: i for i, k in enumerate(identities)}
         ik, vk = BATTERY_ALGEBRAIC
         jac = np.zeros((len(identities), len(identities)))
@@ -565,15 +631,15 @@ def split_ocvr_system(spec, program, *, thermal_device=None, control_events=()):
 
 
 def advance_split_ocvr(
-    spec,
-    state,
-    program,
-    duration_s,
+    spec: BatterySplitOCVRSpec,
+    state: CoupledState,
+    program: ScalarControlProgram,
+    duration_s: float,
     *,
-    evaluation_times_s=None,
-    thermal_device=None,
-    control_events=(),
-):
+    evaluation_times_s: Sequence[float] | None = None,
+    thermal_device: object | None = None,
+    control_events: Sequence[CoupledEvent] = (),
+) -> CoupledAdvanceResult:
     result = split_ocvr_system(
         spec, program, thermal_device=thermal_device, control_events=control_events
     ).advance(state, duration_s, evaluation_times_s=evaluation_times_s)

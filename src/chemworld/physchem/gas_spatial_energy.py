@@ -661,10 +661,10 @@ def gas_spatial_energy_system(
             }
             for e in {e for s in network.species for e in s.composition}
         },
-        **(
-            {"trial_state_extension": model.extend_source_boundary_trial}
+        trial_state_extension=(
+            model.extend_source_boundary_trial
             if model.fit_temperature_domains
-            else {}
+            else None
         ),
     )
 

@@ -13,12 +13,27 @@ from functools import cached_property
 from itertools import pairwise
 from math import isfinite
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, NoReturn, Protocol, cast
 
 import numpy as np
-from scipy.sparse import lil_matrix
+from numpy.typing import NDArray
+from scipy.sparse import csr_matrix, lil_matrix
 
 from chemworld.physchem.solver_backend import ODESolverPolicy, solve_ode
+
+if TYPE_CHECKING:
+    from chemworld.physchem.property_packages import PropertyPackageThermodynamics
+    from chemworld.physchem.residual_system import Matrix, ResidualEquation, ResidualVariable
+
+
+class _EventCallback(Protocol):
+    terminal: bool
+    direction: int
+
+    def __call__(
+        self, time: float, scaled: np.ndarray,
+        algebraic_values: Mapping[str, float] | None = None,
+    ) -> float: ...
 
 
 def _finite_mapping(values: Mapping[str, float]) -> Mapping[str, float]:
@@ -275,13 +290,13 @@ class KineticOnlyThermodynamics:
         if self.inventory_keys:
             raise ValueError("formal kinetics cannot replace a chemical inventory's thermodynamics")
 
-    def internal_energy_j(self, _state):
+    def internal_energy_j(self, _state: CoupledStateView) -> None:
         return None
 
-    def heat_capacity_j_k(self, _state):
+    def heat_capacity_j_k(self, _state: CoupledStateView) -> NoReturn:
         raise ValueError("formal kinetic model has no declared heat capacity")
 
-    def chemical_energy_rate_w(self, *_args):
+    def chemical_energy_rate_w(self, *_args: object) -> NoReturn:
         raise ValueError("formal kinetic model has no declared chemical energy")
 
 
@@ -317,7 +332,7 @@ class ConstantCvThermodynamics:
         return tuple(self.species)
 
     @cached_property
-    def _property_model(self):
+    def _property_model(self) -> PropertyPackageThermodynamics:
         from chemworld.physchem.property_packages import (
             PropertyPackageThermodynamics,
             SpeciesCaloricModel,
@@ -400,7 +415,7 @@ def assemble_coupled_rates(
     coordinate_rates = dict.fromkeys(state.coordinates, 0.0)
     port_map = {port.port_id: port for port in ports}
     energy_map = {port.port_id: port for port in energy_ports}
-    all_ports = (*ports, *energy_ports)
+    all_ports: tuple[MaterialPort | EnergyPort, ...] = (*ports, *energy_ports)
     if len({port.port_id for port in all_ports}) != len(all_ports):
         raise ValueError("boundary port identities must be unique")
     port_rates = dict.fromkeys(port_map, 0.0)
@@ -536,6 +551,7 @@ class CoupledAdvanceResult:
     def actual_exchanges(self) -> tuple[dict[str, Any], ...]:
         """Actual nonzero port executions, never receipts inferred from a deficit."""
         result = []
+        port: MaterialPort | EnergyPort
         for port in self.ports:
             amount = self.final_state.exchanged_mol.get(port.port_id, 0.0) - (
                 self.initial_state.exchanged_mol.get(port.port_id, 0.0)
@@ -590,7 +606,7 @@ class CoupledCoordinate:
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("coordinate bounds are reversed")
 
-    def validate(self, value):
+    def validate(self, value: float) -> None:
         if (not isfinite(value)
                 or (self.minimum is not None and value < self.minimum)
                 or (self.maximum is not None and value > self.maximum)):
@@ -605,10 +621,10 @@ class CoupledAlgebraic:
     are a numerical guess; every process/event gets the consistent solution.
     """
 
-    variables: tuple
-    equations: tuple
+    variables: tuple[ResidualVariable, ...]
+    equations: tuple[ResidualEquation, ...]
     initial_values: Callable[[CoupledStateView], Mapping[str, float]]
-    residual: Callable[[CoupledStateView], Sequence[float]]
+    residual: Callable[[CoupledStateView], Sequence[float] | NDArray[np.float64]]
 
     def __post_init__(self) -> None:
         from chemworld.physchem.residual_system import ResidualEquation, ResidualVariable
@@ -645,7 +661,7 @@ class CoupledSystem:
     # Optional derivative of the complete packed physical RHS, followed by
     # NEGATIVE algebraic constraints. Arguments are the current view and exact
     # packed identities. Units are physical (not normalized solver coordinates).
-    residual_rhs_jacobian: Callable | None = None
+    residual_rhs_jacobian: Callable[[CoupledStateView, tuple[str, ...]], Matrix] | None = None
     # Explicit independence only; omitted coordinates retain conservative feedback.
     rate_independent_coordinates: tuple[str, ...] = ()
     # A declared numerical RHS extension, never an accepted-state projection.
@@ -686,7 +702,8 @@ class CoupledSystem:
             raise ValueError("duplicate thermal inventory keys")
         if len({p.process_id for p in self.processes}) != len(self.processes):
             raise ValueError("duplicate process owner")
-        if len({p.port_id for p in (*self.ports, *self.energy_ports)}) != (
+        all_ports: tuple[MaterialPort | EnergyPort, ...] = (*self.ports, *self.energy_ports)
+        if len({p.port_id for p in all_ports}) != (
             len(self.ports) + len(self.energy_ports)
         ):
             raise ValueError("duplicate boundary port identity")
@@ -729,7 +746,7 @@ class CoupledSystem:
     def all_events(self) -> tuple[CoupledEvent, ...]:
         return self.events + tuple(event for process in self.processes for event in process.events)
 
-    def jacobian_sparsity(self):
+    def jacobian_sparsity(self) -> csr_matrix | None:
         """Assemble inventory stencils plus conservative thermal/receipt dependencies.
 
         Cumulative receipts do not feed back into rates. Unknown process
@@ -765,7 +782,7 @@ class CoupledSystem:
                 pattern[:, base_size + index] = False
         return pattern.tocsr()
 
-    def validate_state(self, state):
+    def validate_state(self, state: CoupledStateView) -> None:
         """Validate an accepted candidate, including an atomic coordinate jump."""
         if set(state.amounts_mol) != set(self.thermodynamics.inventory_keys):
             raise ValueError("initial state does not match the compiled inventory")
@@ -794,7 +811,7 @@ class CoupledSystem:
         self.validate_state(state)
         port_ids = {port.port_id for port in self.ports}
         energy_ids = port_ids | {port.port_id for port in self.energy_ports}
-        energy_boundaries = (*self.ports, *self.energy_ports)
+        energy_boundaries: tuple[MaterialPort | EnergyPort, ...] = (*self.ports, *self.energy_ports)
         if set(state.exchanged_mol) - port_ids or set(state.exchange_energy_J) - energy_ids:
             raise ValueError("initial exchange ledger contains undeclared material ports")
         count = len(keys)
@@ -862,14 +879,18 @@ class CoupledSystem:
             # scale round trip must not perturb it in rates, events or output.
             return state.temperature_K if self.isothermal else float(vector[count])
 
-        def view(time: float, vector: np.ndarray, algebraic_values=None) -> CoupledStateView:
+        def view(
+            time: float, vector: np.ndarray, algebraic_values: Mapping[str, float] | None = None,
+        ) -> CoupledStateView:
             return CoupledStateView(
                 amounts(vector), temperature(vector), state.volume_L, state.time_s + time,
                 coordinates=dict(zip(coordinate_keys, vector[coordinate_offset:], strict=True)),
                 algebraic_values={} if algebraic_values is None else algebraic_values,
             )
 
-        def rhs(time: float, scaled: np.ndarray, algebraic_values=None) -> np.ndarray:
+        def rhs(
+            time: float, scaled: np.ndarray, algebraic_values: Mapping[str, float] | None = None,
+        ) -> np.ndarray:
             nonlocal extended_rhs_calls, maximum_temperature_extension_K
             candidate = view(time, scaled * scales, algebraic_values)
             if self.trial_state_extension is not None:
@@ -980,6 +1001,7 @@ class CoupledSystem:
                 ):
                     stopping_event = event.event_id
                     break
+        trajectory: tuple[CoupledState, ...]
         if self.numerical_form == "ode" and (duration_s == 0.0 or stopping_event is not None):
             trajectory = (state,)
             diagnostic: dict[str, Any] = {"solver_calls": 0}
@@ -987,7 +1009,8 @@ class CoupledSystem:
             callbacks = []
             for event in self.all_events:
 
-                def callback(time: float, scaled: np.ndarray, algebraic_values=None,
+                def callback(time: float, scaled: np.ndarray,
+                             algebraic_values: Mapping[str, float] | None = None,
                              spec: CoupledEvent = event) -> float:
                     raw = scaled * scales
                     trial = CoupledStateView(
@@ -1004,9 +1027,10 @@ class CoupledSystem:
                         raise RuntimeError(f"nonfinite stopping event: {spec.event_id}")
                     return value
 
-                callback.terminal = event.terminal  # type: ignore[attr-defined]
-                callback.direction = event.direction  # type: ignore[attr-defined]
-                callbacks.append(callback)
+                event_callback = cast(_EventCallback, callback)
+                event_callback.terminal = event.terminal
+                event_callback.direction = event.direction
+                callbacks.append(event_callback)
             policy = replace(self.policy, event_names=tuple(e.event_id for e in self.all_events))
             if any(event.feasible_side for event in self.all_events):
                 policy = replace(policy, dense_output=True)
@@ -1077,7 +1101,7 @@ class CoupledSystem:
                     if event.feasible_side:
                         from chemworld.physchem.coupled_events import feasible_terminal_point
 
-                        def feasible(time, scaled):
+                        def feasible(time: float, scaled: np.ndarray) -> bool | np.bool_:
                             raw = scaled * scales
                             return (
                                 np.all(np.isfinite(raw))
