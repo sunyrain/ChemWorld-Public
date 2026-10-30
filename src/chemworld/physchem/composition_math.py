@@ -5,11 +5,14 @@ use g/mol. These pure functions never modify an inventory or regularize one
 implicitly. Formulae are derived from normalization and extensive n*F.
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Iterable, Mapping, Sized
 from math import exp, expm1, fsum, isclose, isfinite, log, log1p
+from typing import cast
 
 
-def _finite(value, name, *, positive=False, nonnegative=False):
+def _finite(
+    value: float, name: str, *, positive: bool = False, nonnegative: bool = False
+) -> float:
     if isinstance(value, bool) or not isfinite(value):
         raise ValueError(f"{name} must be finite and real")
     if (positive and value <= 0) or (nonnegative and value < 0):
@@ -17,19 +20,19 @@ def _finite(value, name, *, positive=False, nonnegative=False):
     return float(value)
 
 
-def _vector(values, name, **kwargs):
+def _vector(values: Iterable[float], name: str, **kwargs: bool) -> tuple[float, ...]:
     result = tuple(_finite(v, name, **kwargs) for v in values)
     if not result:
         raise ValueError(f"{name} must not be empty")
     return result
 
 
-def _aligned(*vectors):
+def _aligned(*vectors: Sized) -> None:
     if len({len(v) for v in vectors}) != 1:
         raise ValueError("component vectors must have identical lengths")
 
 
-def normalized_fractions(values):
+def normalized_fractions(values: Iterable[float]) -> tuple[float, ...]:
     """Normalize nonnegative amounts; zero total has no defined composition."""
     values = _vector(values, "amount", nonnegative=True)
     total = sum(values)
@@ -45,7 +48,9 @@ def normalized_fractions(values):
     return tuple(v / total for v in scaled)
 
 
-def regularized_fractions(values, replacement=1e-6):
+def regularized_fractions(
+    values: Iterable[float], replacement: float = 1e-6
+) -> tuple[float, ...]:
     """Explicit preprocessing of zeros, never an automatic inventory operation.
 
     With no zero present, preserve the input values. Otherwise replace zeros
@@ -56,7 +61,9 @@ def regularized_fractions(values, replacement=1e-6):
     return normalized_fractions(tuple(v or replacement for v in values)) if 0 in values else values
 
 
-def fraction_basis(values, component_factors, *, inverse=False):
+def fraction_basis(
+    values: Iterable[float], component_factors: Iterable[float], *, inverse: bool = False
+) -> tuple[float, ...]:
     """Rebase fractions with positive per-component factors.
 
     Mole to mass uses MW; mole to reference-volume uses Vm. Inverse=True
@@ -71,8 +78,13 @@ def fraction_basis(values, component_factors, *, inverse=False):
 
 
 def convert_component_flows(
-    values, *, source, target, molecular_weights=None, reference_molar_volumes=None
-):
+    values: Iterable[float],
+    *,
+    source: str,
+    target: str,
+    molecular_weights: Iterable[float] | None = None,
+    reference_molar_volumes: Iterable[float] | None = None,
+) -> tuple[float, ...]:
     """Convert component flows; reference-volume is not the actual mixture volume."""
     values = _vector(values, "flow", nonnegative=True)
     units = {"molar", "mass", "reference_volume"}
@@ -91,14 +103,20 @@ def convert_component_flows(
     return tuple(v * b / a for v, a, b in zip(values, scales[source], scales[target], strict=True))
 
 
-def _fractions(values):
+def _fractions(values: Iterable[float]) -> tuple[float, ...]:
     values = _vector(values, "fraction", nonnegative=True)
     if not isclose(fsum(values), 1.0, abs_tol=1e-12, rel_tol=1e-12):
         raise ValueError("fractions must sum to one; normalize explicitly first")
     return values
 
 
-def weighted_property(fractions, properties, *, rule="linear", exponent=None):
+def weighted_property(
+    fractions: Iterable[float],
+    properties: Iterable[float],
+    *,
+    rule: str = "linear",
+    exponent: float | None = None,
+) -> float:
     """Linear, geometric or real power mean of aligned component properties."""
     xs = _fractions(fractions)
     props = _vector(properties, "property")
@@ -109,7 +127,7 @@ def weighted_property(fractions, properties, *, rule="linear", exponent=None):
         raise ValueError("unknown property mixing rule")
     if any(p <= 0 for p in props):
         raise ValueError("logarithmic and real power means require positive properties")
-    r = 0.0 if rule == "logarithmic" else _finite(exponent, "power exponent")
+    r = 0.0 if rule == "logarithmic" else _finite(cast(float, exponent), "power exponent")
     pairs = [(x, log(p)) for x, p in zip(xs, props, strict=True) if x > 0]
     mean = fsum(x * p for x, p in pairs)
     if r == 0:
@@ -123,7 +141,13 @@ def weighted_property(fractions, properties, *, rule="linear", exponent=None):
     return exp((shift + log(fsum(x * exp(r * p - shift) for x, p in pairs))) / r)
 
 
-def combine_component_flows(component_ids, *, partial_flows=None, totals=None, fractions=None):
+def combine_component_flows(
+    component_ids: Iterable[Iterable[str]],
+    *,
+    partial_flows: Collection[Iterable[float] | None] | None = None,
+    totals: Collection[float] | None = None,
+    fractions: Collection[Iterable[float]] | None = None,
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
     """Merge any number of streams, preserving IDs and component amount balances.
 
     Unknown partial streams are explicitly treated as zero contributions,
@@ -168,7 +192,12 @@ def combine_component_flows(component_ids, *, partial_flows=None, totals=None, f
     return order, tuple(fsum(stream.get(i, 0.0) for stream in streams) for i in order)
 
 
-def solve_stream_composition(molar_flows, mole_fractions, mass_fractions, molecular_weights):
+def solve_stream_composition(
+    molar_flows: Iterable[float | None],
+    mole_fractions: Iterable[float | None],
+    mass_fractions: Iterable[float | None],
+    molecular_weights: Iterable[float],
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
     """Solve mixed per-component specifications via the two total balances.
 
     Exactly one spec per component and an absolute molar-flow scale are
@@ -186,7 +215,7 @@ def solve_stream_composition(molar_flows, mole_fractions, mass_fractions, molecu
         if (z is not None and z > 1) or (w is not None and w > 1):
             raise ValueError("specified fraction exceeds one")
     known = [i for i, f in enumerate(fs) if f is not None]
-    if not known or fsum(fs[i] for i in known) <= 0:
+    if not known or fsum(cast(float, fs[i]) for i in known) <= 0:
         raise ValueError("a positive absolute flow scale is required")
     # N = sum(Fknown) + N*sum(z) + M*sum(w/MW).
     # M = sum(Fknown*MW) + N*sum(z*MW) + M*sum(w).
@@ -194,13 +223,16 @@ def solve_stream_composition(molar_flows, mole_fractions, mass_fractions, molecu
     b = -fsum(w / m for w, m in zip(ws, mw, strict=True) if w is not None)
     c = -fsum(z * m for z, m in zip(zs, mw, strict=True) if z is not None)
     d = 1 - fsum(w for w in ws if w is not None)
-    fn, fm = fsum(fs[i] for i in known), fsum(fs[i] * mw[i] for i in known)
+    fn, fm = (
+        fsum(cast(float, fs[i]) for i in known),
+        fsum(cast(float, fs[i]) * mw[i] for i in known),
+    )
     det = a * d - b * c
     if det <= 0 or not isfinite(det):
         raise ValueError("stream specifications have no unique positive solution")
     total_n, total_m = (fn * d - b * fm) / det, (a * fm - c * fn) / det
     flows = tuple(
-        f if f is not None else z * total_n if z is not None else w * total_m / m
+        f if f is not None else z * total_n if z is not None else cast(float, w) * total_m / m
         for f, z, w, m in zip(fs, zs, ws, mw, strict=True)
     )
     if any(not isfinite(f) or f < 0 for f in flows):
@@ -209,20 +241,22 @@ def solve_stream_composition(molar_flows, mole_fractions, mass_fractions, molecu
     return flows, mole, fraction_basis(mole, mw)
 
 
-def _matrix(values):
+def _matrix(values: Iterable[Iterable[float]]) -> tuple[tuple[float, ...], ...]:
     rows = tuple(_vector(row, "derivative") for row in values)
     if not rows or any(len(row) != len(rows) for row in rows):
         raise ValueError("derivative matrix must be nonempty and square")
     return rows
 
 
-def constrained_composition_gradient(gradient):
+def constrained_composition_gradient(gradient: Iterable[float]) -> tuple[float, ...]:
     """n-1 gradient with x_last = 1-sum(x_independent)."""
     g = _vector(gradient, "gradient")
     return tuple(v - g[-1] for v in g[:-1])
 
 
-def constrained_composition_hessian(hessian):
+def constrained_composition_hessian(
+    hessian: Iterable[Iterable[float]],
+) -> tuple[tuple[float, ...], ...]:
     """Project both derivative axes onto the composition simplex."""
     h = _matrix(hessian)
     return tuple(
@@ -231,7 +265,9 @@ def constrained_composition_hessian(hessian):
     )
 
 
-def composition_gradient_to_moles(gradient, fractions, *, total_moles=1.0):
+def composition_gradient_to_moles(
+    gradient: Iterable[float], fractions: Iterable[float], *, total_moles: float = 1.0
+) -> tuple[float, ...]:
     """dF/dn_i from unconstrained dF/dx_i, holding every other n fixed."""
     g, xs = _vector(gradient, "gradient"), _fractions(fractions)
     _aligned(g, xs)
@@ -240,20 +276,26 @@ def composition_gradient_to_moles(gradient, fractions, *, total_moles=1.0):
     return tuple((v - center) / total for v in g)
 
 
-def partial_molar_from_mole_gradient(value, mole_gradient, *, total_moles=1.0):
+def partial_molar_from_mole_gradient(
+    value: float, mole_gradient: Iterable[float], *, total_moles: float = 1.0
+) -> tuple[float, ...]:
     """d(nF)/dn_i = F + n*dF/dn_i, in the original molar property units."""
     value = _finite(value, "molar property")
     total = _finite(total_moles, "total moles", positive=True)
     return tuple(value + total * v for v in _vector(mole_gradient, "mole gradient"))
 
 
-def partial_molar_properties(value, gradient, fractions):
+def partial_molar_properties(
+    value: float, gradient: Iterable[float], fractions: Iterable[float]
+) -> tuple[float, ...]:
     return partial_molar_from_mole_gradient(
         value, composition_gradient_to_moles(gradient, fractions)
     )
 
 
-def partial_molar_composition_jacobian(hessian, fractions):
+def partial_molar_composition_jacobian(
+    hessian: Iterable[Iterable[float]], fractions: Iterable[float]
+) -> tuple[tuple[float, ...], ...]:
     """Rows are partial molar species i; columns are unconstrained fraction j."""
     h, xs = _matrix(hessian), _fractions(fractions)
     _aligned(h, xs)
@@ -261,7 +303,12 @@ def partial_molar_composition_jacobian(hessian, fractions):
     return tuple(tuple(v - c for v, c in zip(row, center, strict=True)) for row in h)
 
 
-def extensive_hessian_from_moles(mole_hessian, mole_gradient, *, total_moles=1.0):
+def extensive_hessian_from_moles(
+    mole_hessian: Iterable[Iterable[float]],
+    mole_gradient: Iterable[float],
+    *,
+    total_moles: float = 1.0,
+) -> tuple[tuple[float, ...], ...]:
     """d2(nF)/dni dnj from derivatives of the molar quantity F."""
     h, g = _matrix(mole_hessian), _vector(mole_gradient, "mole gradient")
     _aligned(h, g)
