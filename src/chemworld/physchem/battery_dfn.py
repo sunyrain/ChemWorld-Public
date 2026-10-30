@@ -7,11 +7,16 @@ algebraic unknowns; neither a prescribed reaction profile nor a private solver i
 used. This module owns no persistent physical or numerical state.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cached_property, lru_cache
 from math import isfinite
+from typing import Any, NotRequired, TypedDict, cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scipy import sparse
 
 from chemworld.physchem import battery_porous_electrical as porous_electrical
@@ -53,6 +58,29 @@ PHI_E = "battery:electrolyte-offset_V"
 DFN_ID = "dfn-isothermal-v1"
 
 
+class DFNFields(TypedDict):
+    """Derived porous-electrode fields at one shared electrical solution."""
+
+    current_A: float
+    voltage_V: float
+    reaction_current_A: NDArray[np.float64]
+    interfacial_current_A_m2: NDArray[np.float64]
+    electrolyte_concentration_mol_m3: NDArray[np.float64]
+    electrolyte_potential_V: NDArray[np.float64]
+    electrolyte_face_current_A_m2: NDArray[np.float64]
+    negative_solid_face_current_A_m2: NDArray[np.float64]
+    positive_solid_face_current_A_m2: NDArray[np.float64]
+    solid_potential_V: NDArray[np.float64]
+    surface_fraction: NDArray[np.float64]
+    average_fraction: NDArray[np.float64]
+    kinetic_overpotential_V: NDArray[np.float64]
+    electrolyte_ohmic_V: float
+    concentration_overpotential_V: float
+    solid_ohmic_V: float
+    bv_residual_V: NDArray[np.float64]
+    closure_diagnostic: NotRequired[dict[str, Any]]
+
+
 @dataclass(frozen=True)
 class BatteryDFNSpec(BatterySPMSpec):
     """Planar porous electrodes; mesh defaults match the synthetic 17-unit block.
@@ -76,11 +104,11 @@ class BatteryDFNSpec(BatterySPMSpec):
             raise ValueError("DFN requires the common coupled residual formulation")
 
     @property
-    def model_id(self):
+    def model_id(self) -> str:
         return DFN_ID
 
     @cached_property
-    def particle_bins(self):
+    def particle_bins(self) -> tuple[tuple[str, int, ParticleSpec, tuple[str, ...], str], ...]:
         bins = []
         for name, region in (("negative", 0), ("positive", 2)):
             original = getattr(self, name)
@@ -92,14 +120,14 @@ class BatteryDFNSpec(BatterySPMSpec):
         return tuple(bins)
 
     @cached_property
-    def inventory_species(self):
+    def inventory_species(self) -> dict[str, str]:
         return {
             **{key: "Li" for _, _, _, keys, _ in self.particle_bins for key in keys},
             **dict.fromkeys(self.electrolyte.keys, ELECTROLYTE_SPECIES),
         }
 
     @cached_property
-    def reaction_keys(self):
+    def reaction_keys(self) -> tuple[str, ...]:
         # Last cell in each electrode is eliminated with sum(q_n)=I, sum(q_p)=-I.
         # This enforces exact charge conservation even at numerical trial points.
         return tuple(f"battery:{name}:reaction:{i}_A"
@@ -107,18 +135,18 @@ class BatteryDFNSpec(BatterySPMSpec):
                      for i in range(self.electrolyte.cells[region] - 1))
 
     @cached_property
-    def algebraic_names(self):
+    def algebraic_names(self) -> tuple[str, ...]:
         return (*self.reaction_keys, PHI_E, *BATTERY_ALGEBRAIC)
 
     @cached_property
-    def electrical_maps(self):
+    def electrical_maps(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         # Unit columns of an exactly linear constitutive map, not differencing
         # nonlinear physics. They depend on declared geometry only, not state.
         return porous_electrical.electrical_maps(
             self.electrolyte, self.reaction_keys, self.series_resistance_ohm,
             self.algebraic_names)
 
-    def initial_state(self):
+    def initial_state(self) -> CoupledState:
         amounts = self.electrolyte.initial_amounts()
         for name, _, particle, keys, _ in self.particle_bins:
             values = (particle.mesh.cell_volumes_m3 * particle.maximum_concentration_mol_m3
@@ -128,21 +156,30 @@ class BatteryDFNSpec(BatterySPMSpec):
                             coordinates=dict.fromkeys(BATTERY_COORDINATES, 0.0))
 
 
-def _reaction_currents(spec, values):
+def _reaction_currents(
+    spec: BatteryDFNSpec, values: Mapping[str, float],
+) -> NDArray[np.float64]:
     return porous_electrical.reaction_currents(spec.electrolyte, spec.reaction_keys, values)
 
 
-def _integral_centres(face_values, widths, coefficients):
+def _integral_centres(
+    face_values: NDArray[np.float64], widths: NDArray[np.float64],
+    coefficients: float | NDArray[np.float64],
+) -> tuple[NDArray[np.float64], float]:
     """Integral of a linear face field, from the left boundary to each centre."""
     return porous_electrical.integral_centres(face_values, widths, coefficients)
 
 
-def _linear_electrical(spec, values):
+def _linear_electrical(
+    spec: BatteryDFNSpec, values: Mapping[str, float],
+) -> porous_electrical.ElectricalFields:
     return porous_electrical.linear_electrical(
         spec.electrolyte, spec.reaction_keys, spec.series_resistance_ohm, values)
 
 
-def _fields(spec, state, values):
+def _fields(
+    spec: BatteryDFNSpec, state: CoupledStateView, values: Mapping[str, float],
+) -> DFNFields:
     e = spec.electrolyte
     current, voltage = (values[key] for key in BATTERY_ALGEBRAIC)
     nn, _, np_ = e.cells
@@ -186,7 +223,7 @@ def _fields(spec, state, values):
     }
 
 
-def dfn_algebraic(spec, program):
+def dfn_algebraic(spec: BatteryDFNSpec, program: ScalarControlProgram) -> CoupledAlgebraic:
     """All local inverse-BV equations plus one finite-source CC/CV constraint."""
     if program.unit not in {"A", "V"} or any(
         abs(v) > spec.maximum_current_A if program.unit == "A" else
@@ -209,7 +246,7 @@ def dfn_algebraic(spec, program):
                    for name, i, _, _, _ in spec.particle_bins),
         ResidualEquation("battery:control", "1"),)
 
-    def initial_values(state):
+    def initial_values(state: CoupledStateView) -> dict[str, float]:
         current = program.value_at(state.time_s) if program.unit == "A" else 0.0
         nn, _, np_ = spec.electrolyte.cells
         q = np.r_[np.full(nn - 1, current / nn), np.full(np_ - 1, -current / np_)]
@@ -222,9 +259,9 @@ def dfn_algebraic(spec, program):
         return dict(zip(names, [*q, -mean["negative"], current,
                                 mean["positive"] - mean["negative"]], strict=True))
 
-    def residual(state):
+    def residual(state: CoupledStateView) -> NDArray[np.float64]:
         fields = _fields(spec, state, state.algebraic_values)
-        current, voltage = (fields[key] for key in ("current_A", "voltage_V"))
+        current, voltage = fields["current_A"], fields["voltage_V"]
         target = program.value_at(state.time_s)
         if program.unit == "A":
             control = (current - target) / spec.maximum_current_A
@@ -239,7 +276,10 @@ def dfn_algebraic(spec, program):
     return CoupledAlgebraic(variables, equations, initial_values, residual)
 
 
-def _closure_jacobian(spec, state, program, identities):
+def _closure_jacobian(
+    spec: BatteryDFNSpec, state: CoupledStateView, program: ScalarControlProgram,
+    identities: Sequence[str],
+) -> sparse.csc_matrix:
     """Analytic local inverse-BV/circuit derivatives in physical coordinates."""
     index = {key: i for i, key in enumerate(identities)}
     e = spec.electrolyte
@@ -284,7 +324,7 @@ def _closure_jacobian(spec, state, program, identities):
                 * np.log(trial_c / e.initial_concentration_mol_m3)
                 - f["kinetic_overpotential_V"][row]
             ) / state.temperature_K
-    current, voltage = (f[key] for key in ("current_A", "voltage_V"))
+    current, voltage = f["current_A"], f["voltage_V"]
     requested = current + spec.maximum_current_A * (voltage - program.value_at(state.time_s))
     if program.unit == "A" or abs(requested) >= spec.maximum_current_A:
         jac[-1, index[BATTERY_ALGEBRAIC[0]]] = 1 / spec.maximum_current_A
@@ -293,7 +333,10 @@ def _closure_jacobian(spec, state, program, identities):
     return sparse.csc_matrix(jac)
 
 
-def dfn_fields(spec, state, *, current_A=None, program=None):
+def dfn_fields(
+    spec: BatteryDFNSpec, state: CoupledStateView, *, current_A: float | None = None,
+    program: ScalarControlProgram | None = None,
+) -> DFNFields:
     """Derived private fields; restart a shared algebraic solve from inventory."""
     if (current_A is None) == (program is None):
         raise ValueError("supply either a current or a control programme")
@@ -301,6 +344,8 @@ def dfn_fields(spec, state, *, current_A=None, program=None):
         if not isfinite(current_A) or abs(current_A) > spec.maximum_current_A:
             raise ValueError("current is outside battery capability")
         program = ScalarControlProgram(((0, current_A),), "A")
+    # The exclusive-input check ensures a program exists after current conversion.
+    program = cast(ScalarControlProgram, program)
     closure = dfn_algebraic(spec, program)
     names = tuple(v.name for v in closure.variables)
     if all(key in state.algebraic_values for key in names) and (
@@ -308,13 +353,17 @@ def dfn_fields(spec, state, *, current_A=None, program=None):
     ):
         return _fields(spec, state, state.algebraic_values)
 
-    def residual(t, y, rate, p):
+    def residual(
+        t: float, y: NDArray[np.float64], rate: NDArray[np.float64], p: NDArray[np.float64],
+    ) -> Sequence[float] | NDArray[np.float64]:
         candidate = CoupledStateView(
             state.amounts_mol, state.temperature_K, state.volume_L, state.time_s,
             coordinates=state.coordinates, algebraic_values=dict(zip(names, y, strict=True)))
         return closure.residual(candidate)
 
-    def jacobian(t, y, rate, p):
+    def jacobian(
+        t: float, y: NDArray[np.float64], rate: NDArray[np.float64], p: NDArray[np.float64],
+    ) -> sparse.csc_matrix:
         candidate = CoupledStateView(
             state.amounts_mol, state.temperature_K, state.volume_L, state.time_s,
             coordinates=state.coordinates, algebraic_values=dict(zip(names, y, strict=True)))
@@ -333,7 +382,9 @@ def dfn_fields(spec, state, *, current_A=None, program=None):
     return {**fields, "closure_diagnostic": answer.root.diagnostics}
 
 
-def dfn_readout(spec, state, current_A):
+def dfn_readout(
+    spec: BatteryDFNSpec, state: CoupledStateView, current_A: float,
+) -> BatteryReadout:
     fields = dfn_fields(spec, state, current_A=current_A)
     nn = spec.electrolyte.cells[0]
     return BatteryReadout(
@@ -350,7 +401,10 @@ def dfn_readout(spec, state, current_A):
     )
 
 
-def dfn_system(spec, program, *, thermal_device=None, control_events=()):
+def dfn_system(
+    spec: BatteryDFNSpec, program: ScalarControlProgram, *,
+    thermal_device: object | None = None, control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     if thermal_device is not None:
         raise ValueError("DFN-v1 is isothermal; thermal coupling is a separate model")
     closure = dfn_algebraic(spec, program)
@@ -361,10 +415,10 @@ def dfn_system(spec, program, *, thermal_device=None, control_events=()):
     processes.append(e.diffusion.couple(e.keys, process_id="battery:electrolyte-diffusion",
                                         owner_id="battery").process)
 
-    def fields(state):
+    def fields(state: CoupledStateView) -> DFNFields:
         return dfn_fields(spec, state, program=program)
 
-    def source(state):
+    def source(state: CoupledStateView) -> ProcessContribution:
         f = fields(state)
         q = f["reaction_current_A"]
         amounts = {keys[-1]: -value / F
@@ -377,7 +431,7 @@ def dfn_system(spec, program, *, thermal_device=None, control_events=()):
             "delivered_work_J": f["current_A"] * f["voltage_V"],
         })
 
-    def validate(state):
+    def validate(state: CoupledStateView) -> None:
         if abs(state.temperature_K - spec.temperature_K) > 1e-8 or abs(
             state.volume_L - spec.volume_l
         ) > 1e-12:
@@ -393,14 +447,21 @@ def dfn_system(spec, program, *, thermal_device=None, control_events=()):
     processes.append(CoupledProcess("battery:dfn-intercalation", source, validate_state=validate))
     events = [CoupledEvent("battery:electrolyte:depleted", lambda s:
                            e.minimum_resolved_concentration(s) - e.minimum_concentration_mol_m3)]
+
+    def surface_event(selection: slice, saturated: bool) -> Callable[[CoupledStateView], float]:
+        def event(state: CoupledStateView) -> float:
+            surfaces = fields(state)["surface_fraction"][selection]
+            if saturated:
+                return 1 - spec.surface_margin - float(np.max(surfaces))
+            return float(np.min(surfaces)) - spec.surface_margin
+
+        return event
+
     for name, region in (("negative", 0), ("positive", 2)):
         selection = slice(0, e.cells[0]) if region == 0 else slice(e.cells[0], None)
         events.extend((
-            CoupledEvent(f"battery:{name}:depleted", lambda s, sel=selection:
-                         float(np.min(fields(s)["surface_fraction"][sel])) - spec.surface_margin),
-            CoupledEvent(f"battery:{name}:saturated", lambda s, sel=selection:
-                         1 - spec.surface_margin
-                         - float(np.max(fields(s)["surface_fraction"][sel]))),
+            CoupledEvent(f"battery:{name}:depleted", surface_event(selection, False)),
+            CoupledEvent(f"battery:{name}:saturated", surface_event(selection, True)),
         ))
     events.extend((
         CoupledEvent("battery:minimum-voltage", lambda s:
@@ -414,12 +475,14 @@ def dfn_system(spec, program, *, thermal_device=None, control_events=()):
     scales.update(e.initial_amounts())
 
     @lru_cache(maxsize=8)
-    def linear_jacobian(identities):
+    def linear_jacobian(identities: tuple[str, ...]) -> sparse.csc_matrix:
         """Geometry/ordering only; never cache physical state or a solved field."""
         index = {key: i for i, key in enumerate(identities)}
         rows, columns, data = [], [], []
 
-        def add(row_ids, column_ids, matrix):
+        def add(
+            row_ids: Sequence[int], column_ids: Sequence[int], matrix: ArrayLike | sparse.spmatrix,
+        ) -> None:
             coo = sparse.coo_matrix(matrix)
             rows.extend(np.asarray(row_ids)[coo.row])
             columns.extend(np.asarray(column_ids)[coo.col])
@@ -441,7 +504,7 @@ def dfn_system(spec, program, *, thermal_device=None, control_events=()):
         return sparse.csc_matrix((data, (rows, columns)),
                                  shape=(len(identities), len(identities)))
 
-    def jacobian(state, identities):
+    def jacobian(state: CoupledStateView, identities: Sequence[str]) -> sparse.csc_matrix:
         index = {key: i for i, key in enumerate(identities)}
         algebraic_rows = np.array([index[key] for key in spec.algebraic_names])
         closure_coo = -_closure_jacobian(spec, state, program, identities).tocoo()
