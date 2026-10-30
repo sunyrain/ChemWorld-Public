@@ -13,23 +13,32 @@ implementation. No inventory is clipped, seeded, or otherwise repaired.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from math import isfinite
 from numbers import Integral
+from typing import cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scipy.sparse import csc_matrix
 
-from chemworld.physchem.residual_system import ResidualDomainError, finite_jacobian
+from chemworld.physchem.residual_system import (
+    ResidualDomainError,
+    RootFunction,
+    VectorInput,
+    finite_jacobian,
+)
 
 DERIVATIVE_MODE = "finite_difference"
 
 
-def _integer(value) -> bool:
+def _integer(value: object) -> bool:
     return isinstance(value, Integral) and not isinstance(value, (bool, np.bool_))
 
 
-def validate_column_sparsity(sparsity, columns: int, rows: int | None = None):
+def validate_column_sparsity(
+    sparsity: Sequence[tuple[int | np.integer, ...]], columns: int, rows: int | None = None,
+) -> tuple[tuple[int, ...], ...]:
     """Validate explicit row-index tuples; return canonical ascending row tuples."""
     if not _integer(columns) or columns < 0:
         raise ValueError("column count must be a nonnegative integer")
@@ -52,7 +61,9 @@ def validate_column_sparsity(sparsity, columns: int, rows: int | None = None):
     return tuple(result)
 
 
-def _column_indices(indices, size):
+def _column_indices(
+    indices: Sequence[int | np.integer] | np.ndarray | None, size: int,
+) -> tuple[int, ...]:
     if indices is None:
         return tuple(range(size))
     if isinstance(indices, np.ndarray):
@@ -68,7 +79,9 @@ def _column_indices(indices, size):
     return converted
 
 
-def _numeric_vector(value, size, name, *, infinite=False):
+def _numeric_vector(
+    value: ArrayLike, size: int | None, name: str, *, infinite: bool = False,
+) -> NDArray[np.float64]:
     raw = np.asarray(value)
     if raw.ndim != 1 or raw.dtype.kind not in "fiu" or (size is not None and raw.size != size):
         raise ValueError(f"{name} must be a one-dimensional numeric vector of the correct size")
@@ -78,7 +91,7 @@ def _numeric_vector(value, size, name, *, infinite=False):
     return result
 
 
-def _evaluate(function: Callable, point):
+def _evaluate(function: RootFunction, point: VectorInput) -> NDArray[np.float64]:
     argument = np.asarray(point, dtype=float).copy()
     argument.setflags(write=False)
     result = np.asarray(function(argument), dtype=float)
@@ -89,8 +102,11 @@ def _evaluate(function: Callable, point):
     return result.copy()
 
 
-def _greedy_colors(pattern, selected):
-    colors, occupied = [], []
+def _greedy_colors(
+    pattern: Sequence[Sequence[int]], selected: Sequence[int],
+) -> tuple[tuple[int, ...], ...]:
+    colors: list[list[int]] = []
+    occupied: list[set[int]] = []
     for column in selected:
         rows = set(pattern[column])
         for group, used in zip(colors, occupied, strict=True):
@@ -104,13 +120,16 @@ def _greedy_colors(pattern, selected):
     return tuple(tuple(group) for group in colors)
 
 
-def _sample_plan(point, scales, lower, upper, relative_step, column):
+def _sample_plan(
+    point: NDArray[np.float64], scales: NDArray[np.float64], lower: NDArray[np.float64],
+    upper: NDArray[np.float64], relative_step: float, column: int,
+) -> list[tuple[int, float, float]]:
     """Use exactly the existing dense routine's step, room and sign choices."""
     value = point[column]
     step = relative_step * max(abs(value), scales[column])
     room = {-1: max(0.0, value - lower[column]), 1: max(0.0, upper[column] - value)}
     central = min(room.values()) >= step
-    signs = (-1, 1) if central else tuple(sorted(room, key=room.get, reverse=True))
+    signs = (-1, 1) if central else tuple(sorted(room, key=room.__getitem__, reverse=True))
     samples = []
     for sign in signs:
         offset = min(step, room[sign])
@@ -129,16 +148,16 @@ def _sample_plan(point, scales, lower, upper, relative_step, column):
 
 
 def sparse_finite_jacobian(
-    function,
-    point,
-    scales,
+    function: RootFunction,
+    point: VectorInput,
+    scales: VectorInput,
     *,
-    sparsity,
-    lower=None,
-    upper=None,
-    relative_step=6e-6,
-    indices=None,
-):
+    sparsity: Sequence[tuple[int | np.integer, ...]],
+    lower: VectorInput | None = None,
+    upper: VectorInput | None = None,
+    relative_step: float = 6e-6,
+    indices: Sequence[int | np.integer] | np.ndarray | None = None,
+) -> csc_matrix:
     """Return m-by-len(indices) CSC numerical Jacobian in requested column order.
 
     ``sparsity[j]`` is a tuple of possible residual rows for original column j,
@@ -176,7 +195,7 @@ def sparse_finite_jacobian(
     pattern = validate_column_sparsity(pattern, point.size, baseline.size)
     answers = {}
 
-    def sample(trial):
+    def sample(trial: NDArray[np.float64]) -> NDArray[np.float64]:
         value = _evaluate(function, trial)
         if value.shape != baseline.shape:
             raise ValueError("function changed its residual dimension")
@@ -205,7 +224,9 @@ def sparse_finite_jacobian(
                     _, _, negative_hb = plans[column][0]
                     _, _, hf = plans[column][1]
                     hb = -negative_hb
-                    answers[column] = (hb / (hf + hb)) * ((second[rows] - baseline[rows]) / hf) + (
+                    # A two-sample plan puts this column in central_columns above.
+                    answers[column] = (hb / (hf + hb)) * ((
+                        cast(NDArray[np.float64], second)[rows] - baseline[rows]) / hf) + (
                         hf / (hf + hb)
                     ) * ((baseline[rows] - negative_or_single) / hb)
                 else:
@@ -225,7 +246,9 @@ def sparse_finite_jacobian(
             for position, column in enumerate(group):
                 answers[column] = dense[np.asarray(pattern[column], dtype=int), position]
 
-    data, row_indices, pointers = [], [], [0]
+    data: list[float] = []
+    row_indices: list[int] = []
+    pointers = [0]
     for column in selected:
         data.extend(answers[column])
         row_indices.extend(pattern[column])
