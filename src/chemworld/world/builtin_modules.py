@@ -163,7 +163,9 @@ BUILTIN_MODULES = (
                           "declared_mineral_surface_reference"),
             outputs=("aqueous", "calcite"), input_ports=("aqueous", "calcite"),
         )),),
-        advance_strategies=(("finite-calcite-kinetics", factories.mineral_kinetics),),
+        advance_strategies=(AdvanceStrategySpec(
+            "finite-calcite-kinetics", factories.mineral_kinetics,
+        ),),
         dependencies=("aqueous_mineral",),
     ),
     DomainModuleSpec(
@@ -428,7 +430,9 @@ BUILTIN_MODULES = (
             operations=("add_component", "wait", "sample"),
             interfaces=("material", "aqueous_equilibrium"), state_owners=("phases",),
         )),),
-        advance_strategies=(("finite-carbonate-calcite-equilibrium", factories.aqueous_mineral),),
+        advance_strategies=(AdvanceStrategySpec(
+            "finite-carbonate-calcite-equilibrium", factories.aqueous_mineral,
+        ),),
         dependencies=("thermal", "core"),
     ),
     DomainModuleSpec(
@@ -563,7 +567,9 @@ BUILTIN_MODULES = (
                 ),
             ),
         ),
-        advance_strategies=(("finite-transient-electrode", factories.transient_electrode),),
+        advance_strategies=(AdvanceStrategySpec(
+            "finite-transient-electrode", factories.transient_electrode,
+        ),),
         dependencies=("thermal",),
     ),
     DomainModuleSpec(
