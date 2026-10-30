@@ -6,13 +6,18 @@ flux. No zero-thickness negative porous electrode, moving foil, private solver,
 thermal closure, or side-reaction model is introduced.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from functools import cached_property, lru_cache
 from itertools import pairwise
 from math import isclose, isfinite
 from numbers import Integral, Real
+from typing import Any, NotRequired, Self, TypedDict, cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scipy import sparse
 
 from chemworld.data.scientific_inputs import ScientificTable, _keys, _text
@@ -36,6 +41,7 @@ from chemworld.physchem.battery_models import (
 )
 from chemworld.physchem.battery_porous_electrical import integral_centres
 from chemworld.physchem.coupled_system import (
+    CoupledAdvanceResult,
     CoupledAlgebraic,
     CoupledCoordinate,
     CoupledEvent,
@@ -65,13 +71,46 @@ PHI_E = "half-cell-dfn:metal-electrolyte-potential_V"
 ELECTRICAL_CLOSURE_TOLERANCE = 1e-12
 
 
-def _finite(value, name):
+class HalfCellDFNFields(TypedDict):
+    """Derived electrical and salt fields; no additional persistent state."""
+
+    current_A: float
+    voltage_V: float
+    reaction_current_A: NDArray[np.float64]
+    interfacial_current_A_m2: NDArray[np.float64]
+    electrolyte_concentration_mol_m3: NDArray[np.float64]
+    electrolyte_boundary_concentration_mol_m3: NDArray[np.float64]
+    metal_boundary_concentration_mol_m3: float
+    electrolyte_potential_V: NDArray[np.float64]
+    metal_electrolyte_potential_V: float
+    electrolyte_face_current_A_m2: NDArray[np.float64]
+    positive_solid_face_current_A_m2: NDArray[np.float64]
+    solid_potential_V: NDArray[np.float64]
+    surface_fraction: NDArray[np.float64]
+    average_fraction: NDArray[np.float64]
+    kinetic_overpotential_V: NDArray[np.float64]
+    exchange_current_density_A_m2: NDArray[np.float64]
+    open_circuit_potential_V: NDArray[np.float64]
+    metal_exchange_current_density_A_m2: float
+    metal_amount_mol: float
+    metal_concentration_mol_m3: float
+    metal_overpotential_V: float
+    metal_ohmic_V: float
+    metal_boundary_residual_V: float
+    bv_residual_V: NDArray[np.float64]
+    concentration_overpotential_V: float
+    electrolyte_ohmic_V: float
+    solid_ohmic_V: float
+    closure_diagnostic: NotRequired[dict[str, Any]]
+
+
+def _finite(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
         raise ValueError(f"{name} must be a finite real number")
     return float(value)
 
 
-def _ocv_trial_monotone_certified(curve):
+def _ocv_trial_monotone_certified(curve: ElectrodeOCV) -> bool:
     """Analytic sufficient proof on every real FV surface trial, not sampled slopes.
 
     An affine polynomial with nonpositive slope and individually nonincreasing
@@ -83,7 +122,7 @@ def _ocv_trial_monotone_certified(curve):
     """
     polynomial = curve.polynomial_V
 
-    def nonpositive_product(a, k):
+    def nonpositive_product(a: float, k: float) -> bool:
         # Sign tests avoid certifying a tiny positive a*k rounded down to zero.
         return a == 0 or k == 0 or (a < 0) != (k < 0)
 
@@ -138,7 +177,8 @@ class BatteryHalfCellElectrolyteSpec:
             ):
                 raise ValueError(f"{name} needs two positive finite entries")
             object.__setattr__(self, name, values)
-        if any(not isinstance(v, Integral) or v < 2 for v in self.cells):
+        cell_counts: Sequence[object] = self.cells
+        if any(not isinstance(v, Integral) or v < 2 for v in cell_counts):
             raise ValueError("each half-cell salt domain needs at least two integer cells")
         if any(v >= 1 for v in self.porosities):
             raise ValueError("half-cell porosities must be strictly inside (0,1)")
@@ -169,42 +209,42 @@ class BatteryHalfCellElectrolyteSpec:
             raise ValueError("effective half-cell transport must be positive and representable")
 
     @cached_property
-    def transport_efficiencies(self):
+    def transport_efficiencies(self) -> NDArray[np.float64]:
         values = np.power(self.porosities, self.bruggeman)
         values.flags.writeable = False
         return values
 
     @cached_property
-    def mesh(self):
+    def mesh(self) -> DiffusionMesh:
         faces = [0.0]
         for length, count in zip(self.lengths_m, self.cells, strict=True):
             faces.extend(faces[-1] + np.linspace(0, length, count + 1)[1:])
         return DiffusionMesh("planar", tuple(faces), area_m2=self.area_m2)
 
     @cached_property
-    def region_slices(self):
+    def region_slices(self) -> dict[str, slice]:
         ns, np_ = self.cells
         return {"separator": slice(0, ns), "positive": slice(ns, ns + np_)}
 
     @cached_property
-    def keys(self):
+    def keys(self) -> tuple[str, ...]:
         return tuple(f"electrolyte:salt:{i}" for i in range(sum(self.cells)))
 
     @cached_property
-    def diffusion(self):
+    def diffusion(self) -> ConservativeDiffusion:
         return ConservativeDiffusion(
             self.mesh,
             tuple(np.repeat(self.transport_efficiencies * self.diffusivity_m2_s, self.cells)),
             storage_fractions=tuple(np.repeat(self.porosities, self.cells)),
         )
 
-    def concentrations(self, state):
+    def concentrations(self, state: CoupledStateView) -> NDArray[np.float64]:
         return np.array([state.amounts_mol[k] for k in self.keys]) / (
             self.diffusion.storage_volumes_m3
         )
 
     @cached_property
-    def boundary_maps(self):
+    def boundary_maps(self) -> tuple[NDArray[np.float64], float]:
         """Exact quadratic cell-average reconstruction with prescribed gradients."""
         size = len(self.keys)
         matrix = np.zeros((2, size))
@@ -225,14 +265,16 @@ class BatteryHalfCellElectrolyteSpec:
         matrix.flags.writeable = False
         return matrix, float(current_coefficient)
 
-    def boundary_concentrations(self, state, current_A):
+    def boundary_concentrations(
+        self, state: CoupledStateView, current_A: float,
+    ) -> NDArray[np.float64]:
         current = _finite(current_A, "boundary current")
         matrix, coefficient = self.boundary_maps
         values = matrix @ self.concentrations(state)
         values[0] += coefficient * current
         return values
 
-    def minimum_resolved_concentration(self, state, current_A):
+    def minimum_resolved_concentration(self, state: CoupledStateView, current_A: float) -> float:
         return float(
             min(
                 np.min(self.concentrations(state)),
@@ -240,7 +282,7 @@ class BatteryHalfCellElectrolyteSpec:
             )
         )
 
-    def initial_amounts(self):
+    def initial_amounts(self) -> dict[str, float]:
         return dict(
             zip(
                 self.keys,
@@ -249,14 +291,14 @@ class BatteryHalfCellElectrolyteSpec:
             )
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             key: list(value) if isinstance(value, tuple) else value
             for key, value in asdict(self).items()
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         if set(value) != set(cls.__dataclass_fields__):
             raise ValueError("unknown or missing half-cell electrolyte fields")
         return cls(**value)
@@ -288,12 +330,12 @@ class LithiumMetalSaltKineticsSpec:
             raise ValueError("metal salt exponent must be finite and nonnegative")
 
     @cached_property
-    def salt_exponent(self):
+    def salt_exponent(self) -> float:
         row = next(row for row in self.parameters.rows if row.row_id == self.parameter_row_id)
         value = row.values["salt_exponent"]
-        return convert_value(value.value, value.unit, "dimensionless")
+        return convert_value(cast(float, value.value), value.unit, "dimensionless")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "parameters": self.parameters.to_dict(),
             "parameter_row_id": self.parameter_row_id,
@@ -301,7 +343,7 @@ class LithiumMetalSaltKineticsSpec:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         _keys(value, ("parameters", "parameter_row_id", "model_version"))
         return cls(
             ScientificTable.from_dict(value["parameters"]),
@@ -329,7 +371,7 @@ class BatteryHalfCellDFNSpec:
     provenance: str = "declared-fixed-geometry-half-cell-DFN-v1"
 
     def __post_init__(self) -> None:
-        constructors = {
+        constructors: dict[str, Callable[[Mapping[str, Any]], object]] = {
             "metal": LithiumMetalCounterElectrodeSpec.from_dict,
             "positive": lambda value: ParticleSpec(**value),
             "positive_ocv": ElectrodeOCV.from_dict,
@@ -398,7 +440,7 @@ class BatteryHalfCellDFNSpec:
             raise ValueError("derived DFN half-cell scales must be positive and finite")
 
     @property
-    def model_family(self):
+    def model_family(self) -> str:
         return HALF_CELL_DFN_FAMILY
 
     model_id = model_family
@@ -422,15 +464,15 @@ class BatteryHalfCellDFNSpec:
         return False
 
     @property
-    def hysteresis_keys(self):
+    def hysteresis_keys(self) -> tuple[()]:
         return ()
 
     @property
-    def coordinate_keys(self):
+    def coordinate_keys(self) -> tuple[str, ...]:
         return BATTERY_COORDINATES
 
     @property
-    def volume_l(self):
+    def volume_l(self) -> float:
         return (
             1000
             * self.electrolyte.area_m2
@@ -438,23 +480,23 @@ class BatteryHalfCellDFNSpec:
         )
 
     @property
-    def initial_stoichiometric_discharge_bound_c(self):
+    def initial_stoichiometric_discharge_bound_c(self) -> float:
         return F * min(
             self.metal.initial_amount_mol,
             self.positive.capacity_mol * (1 - self.surface_margin - self.initial_positive_fraction),
         )
 
     @property
-    def usable_charge_c(self):
+    def usable_charge_c(self) -> float:
         """Initial positive-direction stoichiometric bound, used as a solver scale."""
         return self.initial_stoichiometric_discharge_bound_c
 
-    def current_at_c_rate(self, rate):
+    def current_at_c_rate(self, rate: float) -> float:
         """Explicit initial-bound C rate, not an empirical nominal capacity rating."""
         return _finite(rate, "initial-bound C-rate") * self.usable_charge_c / 3600
 
     @cached_property
-    def cv_monotone_certified(self):
+    def cv_monotone_certified(self) -> bool:
         """Conservative full-trial passivity proof; CC retains general beta >= 0.
 
         For cb=cbase+kI with cbase>0 and 0<=beta<=1, the metal BV derivative
@@ -469,7 +511,7 @@ class BatteryHalfCellDFNSpec:
         )
 
     @cached_property
-    def particle_bins(self):
+    def particle_bins(self) -> tuple[tuple[str, int, ParticleSpec, tuple[str, ...], str], ...]:
         widths = np.diff(self.electrolyte.mesh.faces_m)[self.electrolyte.region_slices["positive"]]
         bins = []
         for i, width in enumerate(widths):
@@ -484,7 +526,7 @@ class BatteryHalfCellDFNSpec:
         return tuple(bins)
 
     @cached_property
-    def inventory_species(self):
+    def inventory_species(self) -> dict[str, str]:
         return {
             METAL_KEY: "Li",
             **{key: "Li" for _, _, _, keys, _ in self.particle_bins for key in keys},
@@ -492,21 +534,21 @@ class BatteryHalfCellDFNSpec:
         }
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str, ...]:
         return tuple(self.inventory_species)
 
     @cached_property
-    def reaction_keys(self):
+    def reaction_keys(self) -> tuple[str, ...]:
         return tuple(
             f"half-cell-dfn:positive:reaction:{i}_A" for i in range(self.electrolyte.cells[1] - 1)
         )
 
     @cached_property
-    def algebraic_names(self):
+    def algebraic_names(self) -> tuple[str, ...]:
         return (*self.reaction_keys, PHI_E, *BATTERY_ALGEBRAIC)
 
     @cached_property
-    def reaction_map(self):
+    def reaction_map(self) -> NDArray[np.float64]:
         matrix = np.zeros((self.electrolyte.cells[1], len(self.algebraic_names)))
         for i in range(len(self.reaction_keys)):
             matrix[i, i], matrix[-1, i] = 1, -1
@@ -515,7 +557,7 @@ class BatteryHalfCellDFNSpec:
         return matrix
 
     @cached_property
-    def electrical_maps(self):
+    def electrical_maps(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         columns = []
         for column in np.eye(len(self.algebraic_names)).T:
             _, _, phi_e, phi_s, _, _ = _linear_electrical(self, column)
@@ -524,10 +566,10 @@ class BatteryHalfCellDFNSpec:
         result.flags.writeable = False
         return self.reaction_map, result
 
-    def initial_coordinates(self):
+    def initial_coordinates(self) -> dict[str, float]:
         return dict.fromkeys(self.coordinate_keys, 0.0)
 
-    def initial_state(self):
+    def initial_state(self) -> CoupledState:
         amounts = {METAL_KEY: self.metal.initial_amount_mol, **self.electrolyte.initial_amounts()}
         for _, _, particle, keys, _ in self.particle_bins:
             amounts.update(
@@ -543,7 +585,7 @@ class BatteryHalfCellDFNSpec:
             amounts, self.temperature_K, self.volume_l, coordinates=self.initial_coordinates()
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model_family": self.model_family,
             "metal": self.metal.to_dict(),
@@ -567,7 +609,7 @@ class BatteryHalfCellDFNSpec:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         if set(value) != {"model_family", *cls.__dataclass_fields__}:
             raise ValueError("unknown or missing DFN half-cell fields")
         data = dict(value)
@@ -616,7 +658,7 @@ class HalfCellDFNReadout:
             if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
                 raise ValueError(f"DFN half-cell readout {name} must be finite")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         """Return the stable JSON measurement contract for this model."""
         return {
             "model_family": HALF_CELL_DFN_FAMILY,
@@ -640,7 +682,7 @@ class HalfCellDFNReadout:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         """Restore a readout while rejecting another model or stray fields."""
         if not isinstance(value, dict):
             raise ValueError("DFN half-cell readout must be an object")
@@ -666,7 +708,12 @@ class HalfCellDFNReadout:
         return cls(**payload)
 
 
-def _linear_electrical(spec, vector):
+def _linear_electrical(
+    spec: BatteryHalfCellDFNSpec, vector: NDArray[np.float64],
+) -> tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64],
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64],
+]:
     """Two-domain geometry map using the original exact linear-field integral."""
     e = spec.electrolyte
     current, voltage, offset = vector[-2], vector[-1], vector[-3]
@@ -683,7 +730,9 @@ def _linear_electrical(spec, vector):
     return q, ionic, phi_e, voltage + full - integral, solid_faces, resistance
 
 
-def _fields(spec, state, values):
+def _fields(
+    spec: BatteryHalfCellDFNSpec, state: CoupledStateView, values: Mapping[str, float],
+) -> HalfCellDFNFields:
     e = spec.electrolyte
     vector = np.array([values[key] for key in spec.algebraic_names])
     current, voltage, offset = vector[-2], vector[-1], vector[-3]
@@ -754,7 +803,7 @@ def _fields(spec, state, values):
     }
 
 
-def _validate_program(spec, program):
+def _validate_program(spec: BatteryHalfCellDFNSpec, program: ScalarControlProgram) -> None:
     if not isinstance(spec, BatteryHalfCellDFNSpec):
         raise ValueError("DFN half cell requires its explicit specification")
     if (
@@ -772,7 +821,9 @@ def _validate_program(spec, program):
         raise ValueError("DFN half-cell CV requires an analytic monotonicity certificate")
 
 
-def _validate_cv_state(spec, state, program):
+def _validate_cv_state(
+    spec: BatteryHalfCellDFNSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> None:
     if program.unit != "V":
         return
     base = spec.electrolyte.boundary_concentrations(state, 0.0)[0]
@@ -791,7 +842,9 @@ def _validate_cv_state(spec, state, program):
     # including opposed local currents and unrestricted Newton surface trials.
 
 
-def half_cell_dfn_algebraic(spec, program):
+def half_cell_dfn_algebraic(
+    spec: BatteryHalfCellDFNSpec, program: ScalarControlProgram,
+) -> CoupledAlgebraic:
     _validate_program(spec, program)
     variables = (
         *(
@@ -811,7 +864,7 @@ def half_cell_dfn_algebraic(spec, program):
         ResidualEquation("half-cell-dfn:control", "1"),
     )
 
-    def initial(state):
+    def initial(state: CoupledStateView) -> dict[str, float]:
         _validate_cv_state(spec, state, program)
         current = program.value_at(state.time_s) if program.unit == "A" else 0.0
         q = np.full(len(spec.reaction_keys), -current / spec.electrolyte.cells[1])
@@ -835,7 +888,7 @@ def half_cell_dfn_algebraic(spec, program):
         guess[PHI_E] -= fields["metal_overpotential_V"]
         return guess
 
-    def residual(state):
+    def residual(state: CoupledStateView) -> NDArray[np.float64]:
         _validate_cv_state(spec, state, program)
         fields = _fields(spec, state, state.algebraic_values)
         current, voltage = fields["current_A"], fields["voltage_V"]
@@ -852,7 +905,10 @@ def half_cell_dfn_algebraic(spec, program):
     return CoupledAlgebraic(variables, equations, initial, residual)
 
 
-def _closure_jacobian(spec, state, program, identities):
+def _closure_jacobian(
+    spec: BatteryHalfCellDFNSpec, state: CoupledStateView, program: ScalarControlProgram,
+    identities: Sequence[str],
+) -> sparse.csc_matrix:
     index = {key: i for i, key in enumerate(identities)}
     e = spec.electrolyte
     na = len(spec.algebraic_names)
@@ -928,7 +984,10 @@ def _closure_jacobian(spec, state, program, identities):
     return sparse.csc_matrix(jac)
 
 
-def half_cell_dfn_fields(spec, state, *, current_A=None, program=None):
+def half_cell_dfn_fields(
+    spec: BatteryHalfCellDFNSpec, state: CoupledStateView, *, current_A: float | None = None,
+    program: ScalarControlProgram | None = None,
+) -> HalfCellDFNFields:
     if isinstance(state, CoupledState):
         # Persistent device state must obey the physical declaration before a
         # public readout. Newton views retain their mathematical trial freedom.
@@ -940,6 +999,8 @@ def half_cell_dfn_fields(spec, state, *, current_A=None, program=None):
         if abs(current_A) > spec.maximum_current_A:
             raise ValueError("current is outside the DFN half-cell source capability")
         program = ScalarControlProgram(((0, current_A),), "A")
+    # The exclusive-input check above ensures a program is now available.
+    program = cast(ScalarControlProgram, program)
     closure = half_cell_dfn_algebraic(spec, program)
     _validate_cv_state(spec, state, program)
     names = spec.algebraic_names
@@ -948,7 +1009,7 @@ def half_cell_dfn_fields(spec, state, *, current_A=None, program=None):
     ):
         return _fields(spec, state, state.algebraic_values)
 
-    def view(y):
+    def view(y: NDArray[np.float64]) -> CoupledStateView:
         return CoupledStateView(
             state.amounts_mol,
             state.temperature_K,
@@ -984,7 +1045,9 @@ def half_cell_dfn_fields(spec, state, *, current_A=None, program=None):
     return {**fields, "closure_diagnostic": answer.root.diagnostics}
 
 
-def half_cell_dfn_readout(spec, state, current_A):
+def half_cell_dfn_readout(
+    spec: BatteryHalfCellDFNSpec, state: CoupledStateView, current_A: float,
+) -> HalfCellDFNReadout:
     fields = half_cell_dfn_fields(spec, state, current_A=current_A)
     weights = np.array([p.active_volume_m3 for _, _, p, _, _ in spec.particle_bins])
     return HalfCellDFNReadout(
@@ -1003,11 +1066,15 @@ def half_cell_dfn_readout(spec, state, current_A):
     )
 
 
-def half_cell_dfn_control_current(spec, state, program):
+def half_cell_dfn_control_current(
+    spec: BatteryHalfCellDFNSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> float:
     return float(half_cell_dfn_fields(spec, state, program=program)["current_A"])
 
 
-def half_cell_dfn_control_mode(spec, state, program):
+def half_cell_dfn_control_mode(
+    spec: BatteryHalfCellDFNSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> tuple[str, float]:
     _validate_program(spec, program)
     if program.unit == "A":
         return "constant_current", program.value_at(state.time_s)
@@ -1020,7 +1087,7 @@ def half_cell_dfn_control_mode(spec, state, program):
     return "constant_voltage", target
 
 
-def validate_half_cell_dfn_state(spec, state):
+def validate_half_cell_dfn_state(spec: BatteryHalfCellDFNSpec, state: CoupledStateView) -> None:
     if set(state.amounts_mol) != set(spec.inventory_keys) or set(state.coordinates) != set(
         spec.coordinate_keys
     ):
@@ -1064,7 +1131,10 @@ def validate_half_cell_dfn_state(spec, state):
         raise ValueError("DFN half-cell salt inventory violates its closed balance")
 
 
-def half_cell_dfn_system(spec, program, *, thermal_device=None, control_events=()):
+def half_cell_dfn_system(
+    spec: BatteryHalfCellDFNSpec, program: ScalarControlProgram, *,
+    thermal_device: object | None = None, control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     _validate_program(spec, program)
     if thermal_device is not None:
         raise ValueError("DFN half-cell thermal and chemical-energy closure is unsupported")
@@ -1081,10 +1151,10 @@ def half_cell_dfn_system(spec, program, *, thermal_device=None, control_events=(
         ).process
     )
 
-    def fields(state):
+    def fields(state: CoupledStateView) -> HalfCellDFNFields:
         return half_cell_dfn_fields(spec, state, program=program)
 
-    def source(state):
+    def source(state: CoupledStateView) -> ProcessContribution:
         f = fields(state)
         current, q = f["current_A"], f["reaction_current_A"]
         amounts = {
@@ -1105,7 +1175,7 @@ def half_cell_dfn_system(spec, program, *, thermal_device=None, control_events=(
             },
         )
 
-    def validate(state):
+    def validate(state: CoupledStateView) -> None:
         validate_half_cell_dfn_state(spec, state)
         current = fields(state)["current_A"]
         if e.minimum_resolved_concentration(state, current) < e.minimum_concentration_mol_m3 * (
@@ -1113,7 +1183,7 @@ def half_cell_dfn_system(spec, program, *, thermal_device=None, control_events=(
         ):
             raise ValueError("DFN half-cell salt boundary/profile is outside its positive domain")
 
-    def metal_distance(state):
+    def metal_distance(state: CoupledStateView) -> float:
         # CC has an exact specified direction. A roundoff-positive Newton
         # residual at declared I=0 must not turn a legal empty-metal rest
         # into stripping. Only the direction of the stopping test changes;
@@ -1175,11 +1245,13 @@ def half_cell_dfn_system(spec, program, *, thermal_device=None, control_events=(
     }
 
     @lru_cache(maxsize=8)
-    def linear_jacobian(identities):
+    def linear_jacobian(identities: tuple[str, ...]) -> sparse.csc_matrix:
         index = {key: i for i, key in enumerate(identities)}
         rows, columns, data = [], [], []
 
-        def add(row_ids, column_ids, matrix):
+        def add(
+            row_ids: Sequence[int], column_ids: Sequence[int], matrix: ArrayLike | sparse.spmatrix,
+        ) -> None:
             coo = sparse.coo_matrix(matrix)
             rows.extend(np.asarray(row_ids)[coo.row])
             columns.extend(np.asarray(column_ids)[coo.col])
@@ -1205,7 +1277,7 @@ def half_cell_dfn_system(spec, program, *, thermal_device=None, control_events=(
         add([index["discharged_charge_C"]], [index[BATTERY_ALGEBRAIC[0]]], [[1]])
         return sparse.csc_matrix((data, (rows, columns)), shape=(len(identities), len(identities)))
 
-    def jacobian(state, identities):
+    def jacobian(state: CoupledStateView, identities: Sequence[str]) -> sparse.csc_matrix:
         index = {key: i for i, key in enumerate(identities)}
         arows = np.array([index[key] for key in spec.algebraic_names])
         closure = -_closure_jacobian(spec, state, program, identities).tocoo()
@@ -1248,15 +1320,15 @@ def half_cell_dfn_system(spec, program, *, thermal_device=None, control_events=(
 
 
 def advance_half_cell_dfn(
-    spec,
-    state,
-    program,
-    duration_s,
+    spec: BatteryHalfCellDFNSpec,
+    state: CoupledState,
+    program: ScalarControlProgram,
+    duration_s: float,
     *,
-    evaluation_times_s=None,
-    thermal_device=None,
-    control_events=(),
-):
+    evaluation_times_s: Sequence[float] | None = None,
+    thermal_device: object | None = None,
+    control_events: Sequence[CoupledEvent] = (),
+) -> CoupledAdvanceResult:
     result = half_cell_dfn_system(
         spec, program, thermal_device=thermal_device, control_events=control_events
     ).advance(state, duration_s, evaluation_times_s=evaluation_times_s)
