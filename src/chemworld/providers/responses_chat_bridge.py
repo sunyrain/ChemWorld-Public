@@ -20,11 +20,23 @@ from contextlib import suppress
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired, TypedDict
+
+
+class _StreamMetadata(TypedDict):
+    usage: dict | None
+    finish_reason: str | None
+    model: NotRequired[str]
+
+
+class _StreamResult(_StreamMetadata):
+    content: str
+    reasoning_content: str
+    tool_calls: list[dict[str, str]]
 
 
 class BridgeError(ValueError):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str) -> None:
         self.code = code
         super().__init__(message)
 
@@ -74,7 +86,7 @@ class ResponsesChatBridge:
         timeout_s: float = 120,
         schema_mode: str = "json_schema",
         port: int = 0,
-    ):
+    ) -> None:
         if schema_mode not in {"json_schema", "json_object", "prompt_schema"}:
             raise ValueError("Unknown schema transport mode")
         self.api_key, self.local_token = api_key, secrets.token_hex(32)
@@ -96,11 +108,11 @@ class ResponsesChatBridge:
     def base_url(self) -> str:
         return f"http://127.0.0.1:{self.server.server_port}/v1"
 
-    def __enter__(self):
+    def __enter__(self) -> ResponsesChatBridge:
         self.thread.start()
         return self
 
-    def __exit__(self, *_args):
+    def __exit__(self, *_args: object) -> None:
         self.cancel_pending()
         self.server.shutdown()
         self.server.server_close()
@@ -145,7 +157,8 @@ class ResponsesChatBridge:
         previous = request.get("previous_response_id")
         if previous and previous not in self.responses:
             raise BridgeError("unknown_previous_response", "Previous response is not retained")
-        inputs = deepcopy(self.responses.get(previous, [])) + deepcopy(supplied)
+        retained = self.responses.get(previous, []) if previous is not None else []
+        inputs = deepcopy(retained) + deepcopy(supplied)
         messages = []
         if request.get("instructions"):
             messages.append({"role": "system", "content": request["instructions"]})
@@ -288,14 +301,17 @@ class ResponsesChatBridge:
             messages[0]["content"] += "\n\n" + messages.pop(1)["content"]
         return body, names, inputs
 
-    def _upstream(self, body: dict, record: dict) -> dict:
+    def _upstream(self, body: dict, record: dict) -> _StreamResult:
         req = urllib.request.Request(
             self.upstream_url,
             data=json.dumps(body).encode(),
             headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"},
         )
-        text, reasoning, calls, chunks = [], [], {}, []
-        result = {"usage": None, "finish_reason": None}
+        text: list[str] = []
+        reasoning: list[str] = []
+        calls: dict[int, dict[str, str]] = {}
+        chunks: list[dict] = []
+        metadata: _StreamMetadata = {"usage": None, "finish_reason": None}
         expired, cancelled, done = threading.Event(), threading.Event(), threading.Event()
         holder: list[Any] = []
         request_id = str(record.get("response_id", record["request"]))
@@ -347,10 +363,10 @@ class ResponsesChatBridge:
                     if chunk.get("error"):
                         raise BridgeError("upstream_error", json.dumps(chunk["error"]))
                     if chunk.get("model"):
-                        result["model"] = chunk["model"]
+                        metadata["model"] = chunk["model"]
                         record["model_returned"] = chunk["model"]
                     if chunk.get("usage"):
-                        result["usage"] = chunk["usage"]
+                        metadata["usage"] = chunk["usage"]
                         record["usage"] = chunk["usage"]
                     for choice in chunk.get("choices", []):
                         delta = choice.get("delta", {})
@@ -367,7 +383,7 @@ class ResponsesChatBridge:
                             for key in ("name", "arguments"):
                                 target[key] += call.get("function", {}).get(key, "") or ""
                         if choice.get("finish_reason"):
-                            result["finish_reason"] = choice["finish_reason"]
+                            metadata["finish_reason"] = choice["finish_reason"]
                 check_cancelled()
         except urllib.error.HTTPError as error:
             record["http_status"] = error.code
@@ -387,11 +403,12 @@ class ResponsesChatBridge:
             with self.lock:
                 self.inflight.pop(request_id, None)
             done.set()
-        result.update(
-            content="".join(text),
-            reasoning_content="".join(reasoning),
-            tool_calls=list(calls.values()),
-        )
+        result: _StreamResult = {
+            **metadata,
+            "content": "".join(text),
+            "reasoning_content": "".join(reasoning),
+            "tool_calls": list(calls.values()),
+        }
         record.update(
             usage=result["usage"],
             finish_reason=result["finish_reason"],
@@ -430,7 +447,7 @@ class ResponsesChatBridge:
                 effective_reasoning="provider_default_not_effort_mapped",
             )
             result = self._upstream(body, record)
-            outputs = []
+            outputs: list[dict] = []
             if result["content"]:
                 item_id = "msg_" + secrets.token_hex(12)
                 outputs.append(
@@ -499,11 +516,11 @@ class ResponsesChatBridge:
             record["wall_seconds"] = round(time.monotonic() - start, 3)
             self._save("ledger.json", self.records)
 
-    def _handler(self):
+    def _handler(self) -> type[BaseHTTPRequestHandler]:
         bridge = self
 
         class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *_args):
+            def log_message(self, *_args: object) -> None:
                 pass
 
             def do_POST(self) -> None:
@@ -540,7 +557,7 @@ class ResponsesChatBridge:
                 streaming = request.get("stream", False)
                 sequence, lock, stop = 0, threading.Lock(), threading.Event()
 
-                def event(kind: str, **values) -> None:
+                def event(kind: str, **values: object) -> None:
                     nonlocal sequence
                     with lock:
                         payload = {"type": kind, "sequence_number": sequence, **values}

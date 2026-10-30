@@ -8,23 +8,27 @@ import socket
 import ssl
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit
 
 
 @contextmanager
-def standard_headers_transport(base_url: str, audit: Path, timeout: float):
+def standard_headers_transport(base_url: str, audit: Path, timeout: float) -> Iterator[str]:
     target = urlsplit(base_url)
-    if target.scheme not in {"http", "https"} or not target.hostname:
+    hostname = target.hostname
+    if target.scheme not in {"http", "https"} or not hostname:
         raise ValueError("invalid Responses upstream")
+    host: str = hostname
     lock = threading.Lock()
-    active = {}
+    active: dict[http.client.HTTPConnection, socket.socket | None] = {}
     stopping = threading.Event()
     sequence = 0
 
-    def record(row):
+    def record(row: dict[str, object]) -> None:
         with lock, audit.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
@@ -51,15 +55,16 @@ def standard_headers_transport(base_url: str, audit: Path, timeout: float):
                 if key in self.headers
             }
             headers["User-Agent"] = "ChemWorld/0.2"
-            connection_type = (
-                http.client.HTTPSConnection
-                if target.scheme == "https"
-                else http.client.HTTPConnection
-            )
-            options = {"context": ssl.create_default_context()} if target.scheme == "https" else {}
-            connection = connection_type(
-                target.hostname, target.port, timeout=min(timeout, 10), **options
-            )
+            connection: http.client.HTTPConnection
+            if target.scheme == "https":
+                connection = http.client.HTTPSConnection(
+                    host, target.port, timeout=min(timeout, 10),
+                    context=ssl.create_default_context(),
+                )
+            else:
+                connection = http.client.HTTPConnection(
+                    host, target.port, timeout=min(timeout, 10)
+                )
             status = None
             failure = None
             response = None
@@ -69,7 +74,7 @@ def standard_headers_transport(base_url: str, audit: Path, timeout: float):
                     active[connection] = connection.sock
                 if stopping.is_set():
                     return
-                connection.sock.settimeout(timeout)
+                cast(socket.socket, connection.sock).settimeout(timeout)
                 path = target.path.rstrip("/") + "/responses"
                 connection.request("POST", path, body=body, headers=headers)
                 response = connection.getresponse()
@@ -106,7 +111,7 @@ def standard_headers_transport(base_url: str, audit: Path, timeout: float):
                     }
                 )
 
-        def log_message(self, *_args):
+        def log_message(self, *_args: object) -> None:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
