@@ -7,6 +7,7 @@ import pytest
 from examples.suspension_treatment49 import example_feed, example_spec
 
 from chemworld.foundation.state_ledgers import PhaseLedger
+from chemworld.physchem.coupled_system import DEFAULT_COUPLED_ODE_POLICY
 from chemworld.physchem.suspension_treatment import (
     advance_suspension_treatment,
     suspension_treatment_inventory,
@@ -205,7 +206,16 @@ def test_no_conversion_never_fabricates_floc_or_heat():
         spec, suspension_treatment_inventory(spec, example_feed(spec)), 10 / 6e7, 1000
     )
     assert result.stopping_event == "feed_pickup_exhausted"
-    assert all(row["floc"] == 0 for row in result.final_state.amounts_mol)
+    for endpoint in ("initial_operating_point", "final_operating_point"):
+        assert diagnostic[endpoint]["converted_particle_mol_s"] == 0
+        assert diagnostic[endpoint]["conditioned_mol_s"]["floc"] == 0
+    # The physical law has exact zero conversion; BDF inventories retain their
+    # unmodified floating-point result, judged on the declared scaled accuracy.
+    scales = result.solver_diagnostic["inventory_scales_mol"]
+    for state in result.trajectory:
+        for index, row in enumerate(state.amounts_mol):
+            tolerance = DEFAULT_COUPLED_ODE_POLICY.atol * scales[f"{index}:floc"]
+            assert abs(row["floc"]) <= tolerance
     assert diagnostic["enthalpy_change_J"] == pytest.approx(0, abs=1e-10)
     assert diagnostic["bath_cooling_J"] == pytest.approx(
         diagnostic["hydraulic_work_J"] + diagnostic["mixing_work_J"], abs=1e-10

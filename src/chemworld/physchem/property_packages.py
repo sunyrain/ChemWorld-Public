@@ -6,9 +6,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from math import isfinite, log
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from chemworld.physchem.coupled_system import CoupledStateView, ProcessContribution
     from chemworld.physchem.eos import CubicEOSSpec
     from chemworld.physchem.equilibrium import ActivityModelSpec
     from chemworld.physchem.helmholtz_solvers import HelmholtzPhaseModel
@@ -37,12 +38,14 @@ from chemworld.physchem.property_reports import (
     R_J_PER_MOL_K,
     STANDARD_PRESSURE_PA,
     CaloricReference,
+    PhaseLabel,
     PropertyEvaluation,
     StatePropertyReport,
     ValidityPolicy,
 )
 from chemworld.physchem.property_selection import (
     PropertySelectionPolicy,
+    PropertySelectionReport,
     inspect_property_selection,
     select_property_correlation,
 )
@@ -55,13 +58,14 @@ from chemworld.physchem.saturation import (
 from chemworld.physchem.specs import (
     ComponentSpec,
     PropertyCorrelation,
+    _mw,
     resolve_component_identifier,
 )
 from chemworld.physchem.vapor_pressure import VaporPressureReport, vapor_pressure_report
 
 
 def evaluate_caloric_correlation(
-    correlation: PropertyCorrelation, *, reference: CaloricReference,
+    correlation: PropertyCorrelation | PiecewiseHeatCapacity, *, reference: CaloricReference,
     temperature_K: float, quantities: Sequence[str], pressure_Pa: float | None = None,
     validity_policy: ValidityPolicy = "raise",
 ) -> dict[str, PropertyEvaluation]:
@@ -133,19 +137,21 @@ def evaluate_caloric_correlation(
                 correlation, initial_temperature_K=reference.temperature_K,
                 final_temperature_K=temperature_K, over_temperature=True,
                 validity_policy=evaluation_policy)
-            change = convert_value(integral.value, correlation.output_unit, "J/(mol*K)")
-            change += R_J_PER_MOL_K * log(temperature_K / reference.temperature_K)
+            entropy_increment = convert_value(
+                integral.value, correlation.output_unit, "J/(mol*K)")
+            entropy_increment += R_J_PER_MOL_K * log(temperature_K / reference.temperature_K)
             entropy_change = PropertyEvaluation(
                 "entropy_change", correlation.correlation_id, "ideal_gas_Cv_over_T_quadrature",
-                change, "J/(mol*K)", {"temperature": temperature_K}, integral.warnings)
+                entropy_increment, "J/(mol*K)", {"temperature": temperature_K}, integral.warnings)
         else:
             if basis == "internal_energy":
                 # Preserve the existing polynomial's analytic path and semantics.
+                polynomial = cast(PropertyCorrelation, correlation)
                 factor = convert_value(1, correlation.output_unit, "J/(mol*K)")
                 coefficients = {key: value * factor
-                                for key, value in correlation.coefficients.items()}
+                                for key, value in polynomial.coefficients.items()}
                 coefficients["a"] = coefficients.get("a", 0.0) + R_J_PER_MOL_K
-                cp_correlation = replace(correlation, property_id="ideal_gas_heat_capacity",
+                cp_correlation = replace(polynomial, property_id="ideal_gas_heat_capacity",
                                          coefficients=coefficients, output_unit="J/(mol*K)")
             entropy_change = caloric_correlation_change(
                 cp_correlation, initial_temperature_K=reference.temperature_K,
@@ -157,16 +163,18 @@ def evaluate_caloric_correlation(
             entropy -= R_J_PER_MOL_K * log(pressure / reference.pressure_Pa)
         values["entropy"] = entropy
         if "chemical_potential" in requested:
-            values["chemical_potential"] = values["enthalpy"] - temperature_K * entropy
+            # A validated entropy request above supplies Cp and an enthalpy basis.
+            values["chemical_potential"] = cast(float, values["enthalpy"]) - temperature_K * entropy
             warning_groups["chemical_potential"] = tuple(dict.fromkeys(
                 (*warning_groups["enthalpy"], *warning_groups["entropy"])))
     result = {}
     for quantity in quantities:
-        if values.get(quantity) is None:
+        value = values.get(quantity)
+        if value is None:
             raise ValueError(f"{quantity} requires a declared phase/EOS closure for {basis}")
         result[quantity] = PropertyEvaluation(
             quantity, correlation.correlation_id, f"caloric_{basis}:{correlation.equation_id}",
-            values[quantity],
+            value,
             "J/(mol*K)" if quantity in {"cp", "cv", "dH_dT_P", "dU_dT_V", "entropy"}
             else "J/mol",
             {"temperature": temperature_K, "pressure": pressure}, warning_groups[quantity],
@@ -193,35 +201,38 @@ class SpeciesCaloricModel:
             raise ValueError("native caloric inventory requires a T-only Kelvin capacity")
         self.evaluate(self.reference.temperature_K, ("cv", "internal_energy"))
 
-    def evaluate(self, temperature_K, quantities, *, strict=True):
+    def evaluate(
+        self, temperature_K: float, quantities: Sequence[str], *, strict: bool = True,
+    ) -> dict[str, PropertyEvaluation]:
         return evaluate_caloric_correlation(
             self.heat_capacity, reference=self.reference, temperature_K=temperature_K,
             quantities=quantities, validity_policy="raise" if strict else "warn")
 
-    def validate_interval(self, lower_K, upper_K):
+    def validate_interval(self, lower_K: float, upper_K: float) -> None:
         if self.heat_capacity.equation_id != "cp_polynomial":
             for temperature in (lower_K, upper_K):
                 self.evaluate(temperature, ("cv", "internal_energy"))
             validate_capacity_curve(self.heat_capacity, lower_K, upper_K, allow_zero=True,
                 minimum=R_J_PER_MOL_K if self.reference.energy_basis == "enthalpy" else 0)
             return
+        polynomial = cast(PropertyCorrelation, self.heat_capacity)
         factor = convert_value(1, self.heat_capacity.output_unit, "J/(mol*K)")
         coefficients = {key: value * factor
-                        for key, value in self.heat_capacity.coefficients.items()}
+                        for key, value in polynomial.coefficients.items()}
         if self.reference.energy_basis == "enthalpy":
             # Constructor validation already required the gas PV closure for U/Cv.
             coefficients["a"] = coefficients.get("a", 0.0) - R_J_PER_MOL_K
-        cv = replace(self.heat_capacity, property_id="isochoric_heat_capacity",
+        cv = replace(polynomial, property_id="isochoric_heat_capacity",
                      coefficients=coefficients, output_unit="J/(mol*K)")
         caloric_polynomial_change(cv, initial_temperature_K=lower_K,
                                   final_temperature_K=upper_K)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {"heat_capacity": self.heat_capacity.to_dict(),
                 "reference": self.reference.to_dict()}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> SpeciesCaloricModel:
         return cls(heat_capacity_from_dict(payload["heat_capacity"]),
                    CaloricReference(**payload["reference"]))
 
@@ -251,16 +262,18 @@ class PropertyPackageThermodynamics:
         object.__setattr__(self, "species", MappingProxyType(dict(self.species)))
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str, ...]:
         return tuple(self.species)
 
-    def _at(self, key, temperature, quantities, *, strict):
+    def _at(
+        self, key: str, temperature: float, quantities: Sequence[str], *, strict: bool,
+    ) -> dict[str, PropertyEvaluation]:
         try:
             return self.species[key].evaluate(temperature, quantities, strict=strict)
         except ValueError as exc:
             raise RuntimeError(f"caloric state outside the declared model: {key}: {exc}") from exc
 
-    def heat_capacity_j_k(self, state):
+    def heat_capacity_j_k(self, state: CoupledStateView) -> float:
         from chemworld.physchem.coupled_system import CoupledState
 
         return self.support_heat_capacity_J_K + sum(
@@ -268,43 +281,46 @@ class PropertyPackageThermodynamics:
                 key, state.temperature_K, ("cv",), strict=isinstance(state, CoupledState)
             )["cv"].value for key in self.species if state.amounts_mol[key])
 
-    def species_energy_j_mol(self, key, temperature_K):
+    def species_energy_j_mol(self, key: str, temperature_K: float) -> float:
         values = self._at(key, temperature_K, ("internal_energy",), strict=True)
         return values["internal_energy"].value
 
-    def internal_energy_j(self, state):
+    def internal_energy_j(self, state: CoupledStateView) -> float:
         return (self.support_heat_capacity_J_K
                 * (state.temperature_K - self.reference_temperature_K)
                 + sum(state.amounts_mol[key] * self.species_energy_j_mol(key, state.temperature_K)
                       for key in self.species if state.amounts_mol[key]))
 
-    def chemical_energy_rate_w(self, state, derivatives, contributions):
+    def chemical_energy_rate_w(
+        self, state: CoupledStateView, derivatives: Mapping[str, float],
+        contributions: Sequence[ProcessContribution],
+    ) -> float:
         if any(item.legacy_reaction_energy_W is not None for item in contributions):
             raise ValueError("native caloric U cannot also consume a separate reaction heat")
         return sum(self._at(key, state.temperature_K, ("internal_energy",), strict=False)[
             "internal_energy"].value * rate for key, rate in derivatives.items() if rate)
 
-    def validate_state(self, state):
+    def validate_state(self, state: CoupledStateView) -> None:
         for key in self.species:
             self._at(key, state.temperature_K, ("cv", "internal_energy"), strict=True)
 
-    def validate_temperature_interval(self, lower_K, upper_K):
+    def validate_temperature_interval(self, lower_K: float, upper_K: float) -> None:
         for value in self.species.values():
             value.validate_interval(lower_K, upper_K)
 
-    def validity_warnings(self, state):
+    def validity_warnings(self, state: CoupledStateView) -> tuple[str, ...]:
         return tuple(dict.fromkeys(warning for value in self.species.values()
                                    for warning in _validity_warnings(
                                        value.heat_capacity, {"temperature": state.temperature_K})))
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {"model": "property-package-caloric-v1",
                 "species": {key: value.to_dict() for key, value in self.species.items()},
                 "support_heat_capacity_J_K": self.support_heat_capacity_J_K,
                 "reference_temperature_K": self.reference_temperature_K}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> PropertyPackageThermodynamics:
         values = dict(payload)
         if values.pop("model") != "property-package-caloric-v1":
             raise ValueError("unsupported caloric model version")
@@ -316,7 +332,9 @@ class PropertyPackageThermodynamics:
 def evaluate_property_state(
     packages: Sequence[ComponentPropertyPackage], component_amounts_mol: Mapping[str, float], *,
     temperature_K: float, pressure_Pa: float, phase: str, quantities: Sequence[str],
-    references: Mapping[str, CaloricReference] | None = None, eos=None, activity_model=None,
+    references: Mapping[str, CaloricReference] | None = None,
+    eos: CubicEOSSpec | MolecularEOSSpec | None = None,
+    activity_model: ActivityModelSpec | None = None,
     validity_policy: ValidityPolicy = "raise", volume_model: PropertyCorrelation | None = None,
     incompressible_model: IncompressibleMaterialModel | None = None,
 ) -> StatePropertyReport:
@@ -362,7 +380,7 @@ def evaluate_property_state(
     if not by_id or len(by_id) != len(packages):
         raise ValueError("property packages require unique existing component identities")
     components = tuple(package.component for package in packages)
-    amounts = {}
+    amounts: dict[str, float] = {}
     for alias, amount in component_amounts_mol.items():
         if not isfinite(amount) or amount < 0:
             raise ValueError("component inventory must be finite and nonnegative")
@@ -407,7 +425,7 @@ def evaluate_property_state(
             temperature_K=temperature_K)
         model_details["activity"] = excess.to_dict()
     state = None
-    derivatives = {}
+    derivatives: Mapping[str, float | str] = {}
     if eos is not None:
         from chemworld.physchem.molecular_properties import MolecularEOSSpec
 
@@ -434,14 +452,14 @@ def evaluate_property_state(
         model_details.update(eos_id=state.eos_id, model=state.model,
                              root_selection_policy=state.root_selection_policy,
                              roots=list(state.roots), derivatives=derivatives)
-    reference_map = {}
+    reference_map: dict[str, CaloricReference] = {}
     for alias, reference in (references or {}).items():
         canonical = resolve_component_identifier(components, alias)
         if canonical in reference_map and reference_map[canonical] != reference:
             raise ValueError("component aliases specify inconsistent caloric references")
         reference_map[canonical] = reference
-    pure = {}
-    warnings_by_property = {}
+    pure: dict[str, dict[str, PropertyEvaluation]] = {}
+    warnings_by_property: dict[str, tuple[str, ...]] = {}
     cp_needed = requested & {"cp", "cv", "dH_dT_P", "dU_dT_V"}
     energy_needed = requested & {"enthalpy", "internal_energy", "chemical_potential"}
     entropy_needed = requested & {"entropy", "chemical_potential"}
@@ -465,7 +483,7 @@ def evaluate_property_state(
             )
         model_details["caloric_basis"] = "internal_energy"
     if requested & caloric:
-        base_phase = "gas" if eos is not None else phase
+        base_phase: PhaseLabel = "gas" if eos is not None else cast(PhaseLabel, phase)
         for key in active:
             package = by_id[key]
             reference = reference_map.setdefault(key, CaloricReference(phase=base_phase))
@@ -492,7 +510,7 @@ def evaluate_property_state(
             pure[key] = evaluate_caloric_correlation(
                 correlation, reference=reference, temperature_K=temperature_K,
                 pressure_Pa=pressure_Pa, quantities=needs, validity_policy=policy)
-    values = {}
+    values: dict[str, float] = {}
     units = {"cp": "J/(mol*K)", "cv": "J/(mol*K)", "enthalpy": "J/mol",
              "internal_energy": "J/mol", "entropy": "J/(mol*K)",
              "dH_dT_P": "J/(mol*K)", "dU_dT_V": "J/(mol*K)",
@@ -502,10 +520,10 @@ def evaluate_property_state(
     source_ids = tuple(dict.fromkeys(value.correlation_id
                                     for component in pure.values() for value in component.values()))
 
-    def weighted(quantity):
+    def weighted(quantity: str) -> float:
         return sum(fraction * pure[key][quantity].value for key, fraction in active.items())
 
-    def warnings_for(quantity):
+    def warnings_for(quantity: str) -> tuple[str, ...]:
         return tuple(dict.fromkeys(warning for values in pure.values()
                                    for warning in values[quantity].warnings))
 
@@ -518,7 +536,7 @@ def evaluate_property_state(
             values["internal_energy"] = weighted("internal_energy")
             warnings_by_property["internal_energy"] = warnings_for("internal_energy")
     if cp_needed and not direct_internal:
-        cp = weighted("cp") + derivatives.get("cp_departure_J_mol_K", 0.0)
+        cp = weighted("cp") + cast(float, derivatives.get("cp_departure_J_mol_K", 0.0))
         if excess is not None:
             cp += excess.heat_capacity_excess_J_mol_K
             if not isfinite(cp) or cp <= 0:
@@ -529,7 +547,7 @@ def evaluate_property_state(
         if requested & {"cv", "dU_dT_V"}:
             if state is None:
                 raise ValueError("Cv requires a declared EOS/volume closure")
-            cv = cp - derivatives["cp_minus_cv_J_mol_K"]
+            cv = cp - cast(float, derivatives["cp_minus_cv_J_mol_K"])
             if cv < 0 or cp <= 0:
                 raise ValueError("state heat capacity is outside the stable caloric domain")
             values.update(cv=cv, dU_dT_V=cv)
@@ -578,7 +596,7 @@ def evaluate_property_state(
             mixture = MixtureSpec.from_dict(declared)
             if set(mixture.component_ids) != set(by_id) or any(
                 abs(fractions.get(key, 0) - x) > 1e-9 or
-                abs(by_id[key].component.molecular_weight_g_mol - mw) > 1e-9 * mw
+                abs(_mw(by_id[key].component) - mw) > 1e-9 * mw
                 for key, x, mw in zip(mixture.component_ids, mixture.mole_fractions,
                                      mixture.molecular_weights_g_mol, strict=True)
             ):
@@ -587,7 +605,7 @@ def evaluate_property_state(
             expected = mixture_volume_evaluation(
                 current, method=volume_model.metadata["mixture_method"],
                 component_parameters=volume_model.metadata["component_parameters"],
-                **volume_model.metadata["pressure_parameters"])
+                **cast(Mapping[str, Any], volume_model.metadata["pressure_parameters"]))
             evaluated = evaluate_correlation(volume_model, temperature_K=temperature_K,
                                             pressure_Pa=pressure_Pa, validity_policy=policy)
             molar_mass = mixture.average_molecular_weight_g_mol / 1000
@@ -607,14 +625,14 @@ def evaluate_property_state(
             key = next(iter(active))
             density = by_id[key].evaluate(f"{phase}_density", temperature_K=temperature_K,
                                       pressure_Pa=pressure_Pa, validity_policy=policy).to("kg/m^3")
-            molar_volume = by_id[key].component.molecular_weight_g_mol / 1000 / density.value
+            molar_volume = _mw(by_id[key].component) / 1000 / density.value
             for quantity in ("molar_volume", "density", "internal_energy"):
                 warnings_by_property[quantity] = tuple(dict.fromkeys(
                     (*warnings_by_property.get(quantity, ()), *density.warnings)))
             source_ids = (*source_ids, density.correlation_id)
     if molar_volume is not None:
         values["molar_volume"] = molar_volume
-        molar_mass = sum(x * by_id[key].component.molecular_weight_g_mol / 1000
+        molar_mass = sum(x * _mw(by_id[key].component) / 1000
                          for key, x in fractions.items())
         values["density"] = molar_mass / molar_volume
         if "internal_energy" in requested and not direct_internal:
@@ -624,7 +642,7 @@ def evaluate_property_state(
         if quantity in requested:
             if derivative not in derivatives:
                 raise ValueError("requested volume derivative requires a supported EOS")
-            values[quantity] = derivatives[derivative]
+            values[quantity] = cast(float, derivatives[derivative])
     component_properties = {}
     if "activity_coefficient" in requested and excess is not None:
         component_properties["activity_coefficient"] = {
@@ -671,14 +689,15 @@ def evaluate_property_state(
     properties = {key: properties[key] for key in quantities if key in properties}
     component_properties = {key: component_properties[key] for key in quantities
                             if key in component_properties}
-    return StatePropertyReport(model_id, phase, temperature_K, pressure_Pa, amounts, properties,
+    return StatePropertyReport(model_id, cast(PhaseLabel, phase),
+                                temperature_K, pressure_Pa, amounts, properties,
                                 reference_map, component_properties, model_details)
 
 
 @dataclass(frozen=True)
 class ComponentPropertyPackage:
     component: ComponentSpec
-    correlations: tuple[PropertyCorrelation, ...]
+    correlations: tuple[PropertyCorrelation | PiecewiseHeatCapacity, ...]
     selection_policies: Mapping[str, PropertySelectionPolicy] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -707,26 +726,36 @@ class ComponentPropertyPackage:
                     f"{disallowed}"
                 )
 
-    def by_property(self, property_id: str) -> tuple[PropertyCorrelation, ...]:
+    def by_property(
+        self, property_id: str,
+    ) -> tuple[PropertyCorrelation | PiecewiseHeatCapacity, ...]:
         return tuple(
             correlation
             for correlation in self.correlations
             if correlation.property_id == property_id
         )
 
-    def selection_report(self, property_id, *, temperature_K, pressure_Pa=None, policy=None):
+    def selection_report(
+        self, property_id: str, *, temperature_K: float, pressure_Pa: float | None = None,
+        policy: PropertySelectionPolicy | None = None,
+    ) -> PropertySelectionReport:
         """Inspect all alternatives; this does not evaluate or fit their formulas."""
         return inspect_property_selection(self.by_property(property_id), property_id=property_id,
             temperature_K=temperature_K, pressure_Pa=pressure_Pa,
             policy=policy or self.selection_policies.get(property_id))
 
-    def select_correlation(self, property_id, *, temperature_K, pressure_Pa=None, candidates=None):
+    def select_correlation(
+        self, property_id: str, *, temperature_K: float, pressure_Pa: float | None = None,
+        candidates: Sequence[PropertyCorrelation | PiecewiseHeatCapacity] | None = None,
+    ) -> PropertyCorrelation | PiecewiseHeatCapacity:
         return select_property_correlation(
             self.by_property(property_id) if candidates is None else candidates,
             property_id=property_id, temperature_K=temperature_K, pressure_Pa=pressure_Pa,
             policy=self.selection_policies.get(property_id))
 
-    def with_selection(self, policies):
+    def with_selection(
+        self, policies: Mapping[str, PropertySelectionPolicy],
+    ) -> ComponentPropertyPackage:
         """Declare choices for future states and preserve them in the original package."""
         return replace(self, selection_policies={**self.selection_policies, **policies})
 
@@ -835,7 +864,7 @@ class ComponentPropertyPackage:
                     if value <= 0:
                         raise ValueError("volume/density conversion requires positive source value")
                     return replace(original, property_id=property_id,
-                        value=self.component.molecular_weight_g_mol / 1000 / value,
+                        value=_mw(self.component) / 1000 / value,
                         unit="kg/m^3" if property_id == density_id else "m^3/mol")
             raise ValueError(
                 f"No correlation for property {property_id!r} on component "
@@ -873,7 +902,8 @@ class ComponentPropertyPackage:
             pressure_Pa=None,
         )
         return vapor_pressure_report(
-            chosen,
+            # The report's property-ID guard excludes heat-capacity curves.
+            cast(PropertyCorrelation, chosen),
             temperature_K=temperature_K,
             validity_policy=validity_policy,
         )
@@ -899,7 +929,7 @@ class ComponentPropertyPackage:
             pressure_Pa=None,
         )
         return pure_saturation_pressure_report(
-            chosen,
+            cast(PropertyCorrelation, chosen),
             temperature_K=temperature_K,
             critical_temperature_K=critical_temperature_K,
             critical_pressure_Pa=critical_pressure_Pa,
@@ -928,7 +958,7 @@ class ComponentPropertyPackage:
             pressure_Pa=None,
         )
         return pure_saturation_temperature_report(
-            chosen,
+            cast(PropertyCorrelation, chosen),
             pressure_Pa=pressure_Pa,
             temperature_bounds_K=temperature_bounds_K,
             critical_temperature_K=critical_temperature_K,
@@ -958,7 +988,7 @@ class ComponentPropertyPackage:
             pressure_Pa=None,
         )
         return normal_boiling_point_report(
-            chosen,
+            cast(PropertyCorrelation, chosen),
             pressure_Pa=pressure_Pa,
             temperature_bounds_K=temperature_bounds_K,
             critical_temperature_K=critical_temperature_K,
@@ -975,7 +1005,7 @@ class ComponentPropertyPackage:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> ComponentPropertyPackage:
         if set(payload) - {"component", "correlations", "selection_policies"}:
             raise ValueError("unknown property package fields")
         return cls(ComponentSpec.from_dict(payload["component"]),

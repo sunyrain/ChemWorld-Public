@@ -1,10 +1,17 @@
 """Explicit policies over existing correlations; no property cache or source ranking."""
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from math import isfinite
+from typing import Any, TypeVar, cast
 
 from chemworld.foundation.units import convert_value
+from chemworld.physchem.heat_capacity import PiecewiseHeatCapacity
+from chemworld.physchem.specs import PropertyCorrelation
+
+_Correlation = TypeVar("_Correlation", bound=PropertyCorrelation | PiecewiseHeatCapacity)
 
 
 @dataclass(frozen=True)
@@ -14,7 +21,7 @@ class PropertySelectionPolicy:
     source_priority: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if isinstance(self.source_priority, str):
+        if isinstance(cast(object, self.source_priority), str):
             raise TypeError("source_priority must be a sequence of source IDs, not a string")
         priorities = tuple(self.source_priority)
         if self.mode not in {"declared_order", "correlation", "source_priority"}:
@@ -32,7 +39,7 @@ class PropertySelectionPolicy:
             raise ValueError("source_priority mode requires an explicit nonempty priority list")
         object.__setattr__(self, "source_priority", priorities)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {
             "mode": self.mode,
             "correlation_id": self.correlation_id,
@@ -40,7 +47,7 @@ class PropertySelectionPolicy:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> PropertySelectionPolicy:
         if set(payload) - {"mode", "correlation_id", "source_priority"}:
             raise ValueError("unknown property selection fields")
         return cls(**payload)
@@ -54,13 +61,13 @@ class CorrelationCandidate:
     source_id: str | None
     source_note: str
     output_unit: str
-    validity_ranges: dict
+    validity_ranges: dict[str, tuple[float, float]]
     matches_policy: bool
     status: str
     diagnostics: tuple[str, ...]
     selected: bool = False
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
 
@@ -74,7 +81,7 @@ class PropertySelectionReport:
     selected_id: str | None
     reason: str
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {
             "property_id": self.property_id,
             "policy": self.policy.to_dict(),
@@ -88,7 +95,7 @@ class PropertySelectionReport:
 
 
 class PropertySelectionError(ValueError):
-    def __init__(self, report):
+    def __init__(self, report: PropertySelectionReport) -> None:
         self.report = report
         diagnostics = "; ".join(d for c in report.candidates for d in c.diagnostics)
         super().__init__(
@@ -97,15 +104,17 @@ class PropertySelectionError(ValueError):
         )
 
 
-def correlation_source_id(correlation):
+def correlation_source_id(correlation: PropertyCorrelation | PiecewiseHeatCapacity) -> str | None:
     source = correlation.metadata.get("source", {})
     value = source.get("source_id") if isinstance(source, Mapping) else None
     return value if isinstance(value, str) and value else None
 
 
 def inspect_property_selection(
-    correlations, *, property_id, temperature_K, pressure_Pa=None, policy=None
-):
+    correlations: Sequence[PropertyCorrelation | PiecewiseHeatCapacity], *, property_id: str,
+    temperature_K: float, pressure_Pa: float | None = None,
+    policy: PropertySelectionPolicy | None = None,
+) -> PropertySelectionReport:
     """Explain selection without trying formulas and concealing failed alternatives.
 
     Among candidates allowed by the policy, prefer the first declared-domain
@@ -178,7 +187,7 @@ def inspect_property_selection(
         if row.matches_policy and row.status != "missing_input"
     ]
     if policy.mode == "source_priority":
-        allowed.sort(key=lambda i: policy.source_priority.index(candidates[i].source_id))
+        allowed.sort(key=lambda i: policy.source_priority.index(cast(str, candidates[i].source_id)))
     within = [i for i in allowed if candidates[i].status == "within_declared_range"]
     chosen = next(iter(within or allowed), None)
     if chosen is not None:
@@ -201,8 +210,9 @@ def inspect_property_selection(
 
 
 def select_property_correlation(
-    correlations, *, property_id, temperature_K, pressure_Pa=None, policy=None
-):
+    correlations: Sequence[_Correlation], *, property_id: str, temperature_K: float,
+    pressure_Pa: float | None = None, policy: PropertySelectionPolicy | None = None,
+) -> _Correlation:
     report = inspect_property_selection(
         correlations,
         property_id=property_id,

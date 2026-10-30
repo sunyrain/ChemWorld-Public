@@ -1,8 +1,12 @@
 """Same-phase piecewise heat capacity using the existing correlation contract."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import fsum, isfinite
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from scipy.optimize import brentq
 
@@ -14,13 +18,16 @@ from chemworld.physchem.correlation_families import (
 )
 from chemworld.physchem.specs import PropertyCorrelation
 
+if TYPE_CHECKING:
+    from chemworld.physchem.property_equations import CorrelationIntegral
+
 _CAPACITIES = {
     "heat_capacity", "ideal_gas_heat_capacity", "liquid_heat_capacity",
     "solid_heat_capacity", "isochoric_heat_capacity",
 }
 
 
-def capacity_phases(curve):
+def capacity_phases(curve: PropertyCorrelation | PiecewiseHeatCapacity) -> set[str]:
     """Intersect declared phase tags with the existing formula registry."""
     if isinstance(curve, PiecewiseHeatCapacity):
         return set.intersection(*(capacity_phases(segment) for segment in curve.segments))
@@ -33,11 +40,14 @@ def capacity_phases(curve):
                    if key in family.property_dimensions}
     for phase in (phase_properties.get(curve.property_id), curve.metadata.get("phase")):
         if phase is not None:
-            phases &= {phase}
+            phases &= {cast(str, phase)}
     return phases
 
 
-def validate_capacity_curve(curve, lower, upper, *, minimum=0, allow_zero=False):
+def validate_capacity_curve(
+    curve: PropertyCorrelation | PiecewiseHeatCapacity, lower: float, upper: float,
+    *, minimum: float = 0, allow_zero: bool = False,
+) -> None:
     """Validate a T-only curve and bound its molar capacity over the whole interval."""
     if isinstance(curve, PiecewiseHeatCapacity):
         for segment, low, high in curve.intervals(lower, upper):
@@ -97,15 +107,15 @@ class PiecewiseHeatCapacity:
         object.__setattr__(self, "segments", segments)
 
     @property
-    def equation_id(self) -> str:
+    def equation_id(self) -> Literal["piecewise_heat_capacity"]:
         return "piecewise_heat_capacity"
 
     @property
-    def property_id(self):
+    def property_id(self) -> str:
         return self.segments[0].property_id
 
     @property
-    def input_units(self):
+    def input_units(self) -> dict[str, str]:
         return {"temperature": "K"}
 
     @property
@@ -113,15 +123,15 @@ class PiecewiseHeatCapacity:
         return "J/(mol*K)"
 
     @property
-    def metadata(self):
+    def metadata(self) -> Mapping[str, object]:
         return MappingProxyType(dict(self.segments[0].metadata))
 
     @property
-    def validity_ranges(self):
+    def validity_ranges(self) -> dict[str, tuple[float, float]]:
         return {"temperature": (self.segments[0].validity_ranges["temperature"][0],
                                 self.segments[-1].validity_ranges["temperature"][1])}
 
-    def segment_at(self, temperature):
+    def segment_at(self, temperature: float) -> PropertyCorrelation:
         low, high = self.validity_ranges["temperature"]
         if (isinstance(temperature, bool) or not isfinite(temperature)
                 or not low <= temperature <= high):
@@ -131,7 +141,9 @@ class PiecewiseHeatCapacity:
                 return segment
         return self.segments[-1]
 
-    def intervals(self, lower, upper):
+    def intervals(
+        self, lower: float, upper: float,
+    ) -> tuple[tuple[PropertyCorrelation, float, float], ...]:
         self.segment_at(lower)
         self.segment_at(upper)
         if lower > upper:
@@ -143,7 +155,10 @@ class PiecewiseHeatCapacity:
                      for low, high in (segment.validity_ranges["temperature"],)
                      if min(upper, high) > max(lower, low))
 
-    def integral(self, initial, final, *, over_temperature=False, epsabs=1e-10, epsrel=1e-10):
+    def integral(
+        self, initial: float, final: float, *, over_temperature: bool = False,
+        epsabs: float = 1e-10, epsrel: float = 1e-10,
+    ) -> CorrelationIntegral:
         from chemworld.physchem.enthalpy import caloric_polynomial_change
         from chemworld.physchem.property_equations import CorrelationIntegral, integrate_correlation
 
@@ -165,13 +180,13 @@ class PiecewiseHeatCapacity:
                     errors.append(0.0)
                     continue
             if segment.equation_id != "cp_polynomial":
-                result = integrate_correlation(segment, initial_temperature_K=lower,
+                integral = integrate_correlation(segment, initial_temperature_K=lower,
                     final_temperature_K=upper, over_temperature=over_temperature,
                     epsabs=epsabs / len(intervals), epsrel=epsrel)
                 factor = convert_value(1, segment.output_unit, self.output_unit)
-                values.append(result.value * factor)
-                errors.append(result.absolute_error_estimate * factor)
-                evaluations += result.evaluations
+                values.append(integral.value * factor)
+                errors.append(integral.absolute_error_estimate * factor)
+                evaluations += integral.evaluations
         value = fsum(values) * (1 if final >= initial else -1)
         if not isfinite(value):
             raise ValueError("nonfinite piecewise caloric integral")
@@ -179,12 +194,12 @@ class PiecewiseHeatCapacity:
             self.output_unit if over_temperature else "J/mol", initial, final, over_temperature,
             fsum(errors), evaluations, (), method="piecewise_declared_correlation_integrals")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {"model": "piecewise-heat-capacity-v1", "correlation_id": self.correlation_id,
                 "source_note": self.source_note, "segments": [c.to_dict() for c in self.segments]}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> PiecewiseHeatCapacity:
         if (set(payload) != {"model", "correlation_id", "source_note", "segments"}
                 or payload["model"] != "piecewise-heat-capacity-v1"):
             raise ValueError("unsupported piecewise heat-capacity record")
@@ -193,13 +208,18 @@ class PiecewiseHeatCapacity:
                    payload["source_note"])
 
 
-def heat_capacity_from_dict(payload):
+def heat_capacity_from_dict(
+    payload: Mapping[str, Any],
+) -> PropertyCorrelation | PiecewiseHeatCapacity:
     return (PiecewiseHeatCapacity.from_dict(payload) if "model" in payload
             else PropertyCorrelation(**payload))
 
 
-def temperature_from_caloric_change(curve, change, *, reference_temperature_K,
-                                    temperature_bounds_K=None, entropy=False):
+def temperature_from_caloric_change(
+    curve: PropertyCorrelation | PiecewiseHeatCapacity, change: float, *,
+    reference_temperature_K: float,
+    temperature_bounds_K: tuple[float, float] | None = None, entropy: bool = False,
+) -> float:
     """Invert same-phase delta-H/delta-U or delta-S on an explicitly bounded curve.
 
     This reuses scipy's bracketed scalar root implementation, as do the existing
@@ -218,7 +238,7 @@ def temperature_from_caloric_change(curve, change, *, reference_temperature_K,
         raise ValueError("entropy inversion requires Cp or an explicit gas/EOS conversion")
     validate_capacity_curve(curve, lower, upper)
 
-    def residual(T):
+    def residual(T: float) -> float:
         return caloric_correlation_change(curve, initial_temperature_K=reference_temperature_K,
             final_temperature_K=T, entropy=entropy, validity_policy="raise").value - change
 

@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from functools import cached_property
 from math import isclose, isfinite
-from typing import Any
+from typing import Any, cast
 
 from chemworld.physchem.coupled_system import (
     DEFAULT_COUPLED_ODE_POLICY,
@@ -26,6 +26,7 @@ from chemworld.physchem.coupled_system import (
 )
 from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
+from chemworld.physchem.specs import PropertyCorrelation
 from chemworld.physchem.transport import (
     PipeSpec,
     PumpSpec,
@@ -108,7 +109,7 @@ class ReactiveWaterTreatmentSpec:
             if (
                 len(correlations) != 1
                 or correlations[0].equation_id != "linear_liquid_density"
-                or correlations[0].coefficients.get("alpha") != 0
+                or cast(PropertyCorrelation, correlations[0]).coefficients.get("alpha") != 0
             ):
                 raise ValueError(
                     "reactive treatment requires explicit constant pure liquid volumes"

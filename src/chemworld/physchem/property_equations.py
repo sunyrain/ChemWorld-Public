@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from math import exp, isfinite
+from typing import cast
 
 from scipy.integrate import quad
 
@@ -27,7 +28,7 @@ from chemworld.physchem.vapor_pressure_kernels import pressure_derivatives
 
 
 def evaluate_correlation(
-    correlation: PropertyCorrelation,
+    correlation: PropertyCorrelation | PiecewiseHeatCapacity,
     *,
     temperature_K: float,
     pressure_Pa: float | None = None,
@@ -135,7 +136,7 @@ def _evaluate_equation(
                     > 1e-9 * molecular_weight_g_mol):
                 raise ValueError("volume correlation MW must match its component molecular weight")
             if "pressure" in family.input_units:
-                parameters["P"] = pressure_Pa
+                parameters["P"] = cast(float, pressure_Pa)
             return volume_derivatives(family.volume_method, T, parameters,
                                       order=0, output=family.volume_output)[0]
         return family_value_and_slope(equation, T, coeffs)[0]
@@ -220,7 +221,7 @@ def _cp_polynomial(T: float, coeffs: dict[str, float]) -> float:
 
 
 def correlation_temperature_derivative(
-    correlation: PropertyCorrelation, *, temperature_K: float,
+    correlation: PropertyCorrelation | PiecewiseHeatCapacity, *, temperature_K: float,
     pressure_Pa: float | None = None,
     validity_policy: ValidityPolicy = "raise",
 ) -> PropertyEvaluation:
@@ -282,7 +283,7 @@ class CorrelationIntegral:
 
 
 def integrate_correlation(
-    correlation: PropertyCorrelation, *, initial_temperature_K: float,
+    correlation: PropertyCorrelation | PiecewiseHeatCapacity, *, initial_temperature_K: float,
     final_temperature_K: float, over_temperature: bool = False,
     validity_policy: ValidityPolicy = "raise", epsabs: float = 1e-10,
     epsrel: float = 1e-10,
@@ -315,7 +316,7 @@ def integrate_correlation(
             correlation.equation_id, correlation.coefficients, lower, upper,
             allow_zero=correlation.property_id == "isochoric_heat_capacity")
 
-    def integrand(temperature):
+    def integrand(temperature: float) -> float:
         result = evaluate_correlation(correlation, temperature_K=temperature,
                                       pressure_Pa=pressure_Pa,
                                       validity_policy=validity_policy)
@@ -357,7 +358,7 @@ def _convert_input(
 
 
 def _validity_warnings(
-    correlation: PropertyCorrelation,
+    correlation: PropertyCorrelation | PiecewiseHeatCapacity,
     inputs: dict[str, float],
 ) -> tuple[str, ...]:
     warnings = []

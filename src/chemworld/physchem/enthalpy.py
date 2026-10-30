@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
+from typing import cast
 
 import numpy as np
 from scipy.optimize import brentq
 
 from chemworld.physchem.correlation_families import CORRELATION_FAMILIES
+from chemworld.physchem.heat_capacity import PiecewiseHeatCapacity
 from chemworld.physchem.property_cards import _HEAT_ENTHALPY_REFERENCE_READING
 from chemworld.physchem.property_equations import (
     _convert_input,
@@ -630,14 +632,14 @@ def _cp_polynomial_integral(T: float, coeffs: dict[str, float]) -> float:
 
 
 def caloric_correlation_change(
-    correlation: PropertyCorrelation, *, initial_temperature_K: float,
+    correlation: PropertyCorrelation | PiecewiseHeatCapacity, *, initial_temperature_K: float,
     final_temperature_K: float, entropy: bool = False,
     validity_policy: ValidityPolicy = "raise",
 ) -> PropertyEvaluation:
     """Integrate the declared caloric model; retain polynomial analytic behavior."""
     if correlation.equation_id == "cp_polynomial":
         return caloric_polynomial_change(
-            correlation, initial_temperature_K=initial_temperature_K,
+            cast(PropertyCorrelation, correlation), initial_temperature_K=initial_temperature_K,
             final_temperature_K=final_temperature_K, entropy=entropy,
             validity_policy=validity_policy)
     from chemworld.foundation.units import convert_value
@@ -720,7 +722,9 @@ def caloric_polynomial_change(
     )
 
 
-def _validate_heat_capacity_correlation(correlation: PropertyCorrelation) -> None:
+def _validate_heat_capacity_correlation(
+    correlation: PropertyCorrelation | PiecewiseHeatCapacity,
+) -> None:
     if correlation.equation_id not in {
         "cp_polynomial", "piecewise_heat_capacity", *CORRELATION_FAMILIES,
     }:
@@ -738,7 +742,9 @@ def _validate_heat_capacity_correlation(correlation: PropertyCorrelation) -> Non
         )
 
 
-def _validate_correlation_phase(correlation: PropertyCorrelation, phase: str) -> None:
+def _validate_correlation_phase(
+    correlation: PropertyCorrelation | PiecewiseHeatCapacity, phase: str | None,
+) -> None:
     from chemworld.physchem.heat_capacity import capacity_phases
 
     declared_phase = correlation.metadata.get("phase")

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 from functools import cached_property
 from math import isfinite, log, ulp
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from scipy.optimize import brentq
 
@@ -20,6 +20,10 @@ from chemworld.physchem.equilibrium import (
 from chemworld.physchem.property_packages import ComponentPropertyPackage, evaluate_property_state
 from chemworld.physchem.property_reports import R_J_PER_MOL_K, CaloricReference
 from chemworld.physchem.specs import resolve_component_identifier
+
+if TYPE_CHECKING:
+    from chemworld.physchem.eos import CubicEOSSpec
+    from chemworld.physchem.molecular_properties import MolecularEOSSpec
 
 
 def phase_advection_rate(amounts_mol, enthalpy_J, rate_mol_s):
@@ -137,7 +141,7 @@ class VLEPropertyPackage:
     gas_references: Mapping[str, CaloricReference]
     temperature_bounds_K: tuple[float, float]
     activity_model: ActivityModelSpec | None = None
-    vapor_eos: object = None
+    vapor_eos: CubicEOSSpec | MolecularEOSSpec | None = None
     nonvolatile_references: Mapping[str, CaloricReference] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

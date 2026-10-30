@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import warnings
 from math import exp, expm1, isclose, log1p
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from scipy.integrate import IntegrationWarning, quad
@@ -18,6 +18,7 @@ from chemworld.physchem.residual_system import (
     RootPolicy,
     solve_root,
 )
+from chemworld.physchem.specs import PropertyCorrelation
 from chemworld.physchem.transport import (
     counterflow_effectiveness,
     pipe_pressure_drop,
@@ -76,8 +77,9 @@ def _counterflow(spec: FiniteHeatRecoverySpec, sides: list[dict]) -> dict:
     constant_cp = all(
         len(rows) == 1
         and rows[0].equation_id == "cp_polynomial"
-        and set(rows[0].coefficients) <= {"a", "b", "c", "d", "e"}
-        and all(value == 0 for key, value in rows[0].coefficients.items() if key != "a")
+        and set(cast(PropertyCorrelation, rows[0]).coefficients) <= {"a", "b", "c", "d", "e"}
+        and all(value == 0 for key, value in cast(PropertyCorrelation, rows[0]).coefficients.items()
+                if key != "a")
         for rows in correlations
     )
     if constant_cp:

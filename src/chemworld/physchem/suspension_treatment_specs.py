@@ -5,10 +5,10 @@ from dataclasses import asdict, dataclass, field
 from functools import cached_property
 from math import isfinite
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
-from chemworld.physchem.specs import ComponentSpec
+from chemworld.physchem.specs import ComponentSpec, PropertyCorrelation
 from chemworld.physchem.transport import PipeSpec, PumpSpec
 from chemworld.physchem.transport_devices import LiquidTransportProperties
 
@@ -164,7 +164,7 @@ class SuspensionMaterialSpec:
                 or component.default_phase not in {"liquid", "aqueous"}
                 or len(density) != 1
                 or density[0].equation_id != "linear_liquid_density"
-                or density[0].coefficients.get("alpha") != 0
+                or cast(PropertyCorrelation, density[0]).coefficients.get("alpha") != 0
             ):
                 raise ValueError(
                     "first suspension slice requires neutral constant-volume carrier properties"
