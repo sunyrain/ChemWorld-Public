@@ -83,12 +83,13 @@ def _state(function: Any, temperature_K: float, pressure_Pa: float) -> AqueousGi
     value = function(SecondOrderPair(temperature_K, dx=1), SecondOrderPair(pressure_Pa, dy=1))
     if not isinstance(value, SecondOrderPair):
         value = SecondOrderPair(value)
+    # This evaluation seeds floats; decimal coefficients are a separate opt-in path.
     result = AqueousGibbsState(
-        -temperature_K * value.dxx,
-        value.value - temperature_K * value.dx,
-        -value.dx,
-        value.value,
-        value.dy,
+        cast(float, -temperature_K * value.dxx),
+        cast(float, value.value - temperature_K * value.dx),
+        cast(float, -value.dx),
+        cast(float, value.value),
+        cast(float, value.dy),
     )
     if not all(isfinite(v) for v in asdict(result).values()):
         raise ValueError("aqueous Gibbs response is nonfinite")
