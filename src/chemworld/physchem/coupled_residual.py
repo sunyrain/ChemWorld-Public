@@ -5,15 +5,23 @@ The known rate matrix is analytic; physical state/time derivatives are explicitl
 numerical until a domain supplies them. No solver state survives the interval.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, cast
+
 import numpy as np
+from numpy.typing import NDArray
 from scipy import sparse
 
 from chemworld.physchem.residual_solver import (
     ResidualEvent,
+    ResidualPoint,
     ResidualSolvePolicy,
     mass_matrix_system,
 )
 from chemworld.physchem.residual_system import (
+    Matrix,
     ResidualDomainError,
     ResidualEquation,
     ResidualNumericalError,
@@ -22,8 +30,18 @@ from chemworld.physchem.residual_system import (
 )
 from chemworld.physchem.solver_backend import solve_residual
 
+if TYPE_CHECKING:
+    from chemworld.physchem.coupled_system import CoupledState, CoupledStateView, CoupledSystem
 
-def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks, duration, grid):
+
+def solve_coupled_residual(
+    system: CoupledSystem, state: CoupledState, initial: NDArray[np.float64],
+    scales: NDArray[np.float64],
+    rhs: Callable[[float, NDArray[np.float64], Mapping[str, float]], NDArray[np.float64]],
+    view: Callable[[float, NDArray[np.float64], Mapping[str, float]], CoupledStateView],
+    callbacks: Sequence[Callable[[float, NDArray[np.float64], Mapping[str, float]], float]],
+    duration: float, grid: Sequence[float] | None,
+) -> tuple[list[tuple[float, np.ndarray]], str | None, dict[str, Any]]:
     count = len(initial)
     material = system.thermodynamics.inventory_keys
     identities = (
@@ -34,7 +52,8 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
         "heat_loss",
         "work",
         *(f"amount:{p.port_id}" for p in system.ports),
-        *(f"energy:{p.port_id}" for p in (*system.ports, *system.energy_ports)),
+        *(f"energy:{p.port_id}" for p in system.ports),
+        *(f"energy:{p.port_id}" for p in system.energy_ports),
         *(item.name for item in system.coordinates),
     )
     units = (
@@ -58,7 +77,7 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
     algebraic = system.algebraic
     names = () if algebraic is None else tuple(v.name for v in algebraic.variables)
 
-    def values(y):
+    def values(y: NDArray[np.float64]) -> dict[str, float]:
         return {key: float(value) for key, value in zip(names, y[count:], strict=True)}
 
     if algebraic is None:
@@ -71,7 +90,9 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
         variables += algebraic.variables
         equations += algebraic.equations
 
-    def physical_rhs(t, y, p):
+    def physical_rhs(
+        t: float, y: NDArray[np.float64], p: NDArray[np.float64],
+    ) -> NDArray[np.float64]:
         if state.time_s + t < 0:
             raise ResidualDomainError("coupled physical time precedes zero")
         algebraic_values = values(y)
@@ -85,8 +106,10 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
         )
         return np.r_[rates, -constraint]
 
-    def physical_jacobian(t, y, p):
-        jacobian = system.residual_rhs_jacobian(
+    def physical_jacobian(t: float, y: NDArray[np.float64], p: NDArray[np.float64]) -> Matrix:
+        # This callback is supplied only when the system declares a Jacobian.
+        jacobian = cast(Callable[[CoupledStateView, tuple[str, ...]], Matrix],
+                        system.residual_rhs_jacobian)(
             view(t, y[:count], values(y)), (*identities, *names)
         )
         if not system.isothermal:
@@ -98,7 +121,7 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
         if sparse.issparse(jacobian):
             projection = np.ones(len(variables))
             projection[temperature] = 0
-            return jacobian.multiply(projection)
+            return cast(sparse.spmatrix, jacobian).multiply(projection)
         projected = np.array(jacobian, copy=True)
         projected[:, temperature] = 0
         return projected
@@ -112,10 +135,18 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
         derivatives="hybrid",
         rhs_jacobian=None if system.residual_rhs_jacobian is None else physical_jacobian,
     )
+    def event_function(
+        callback: Callable[[float, NDArray[np.float64], Mapping[str, float]], float],
+    ) -> Callable[[float, NDArray[np.float64], NDArray[np.float64]], float]:
+        def event_value(t: float, y: NDArray[np.float64], p: NDArray[np.float64]) -> float:
+            return callback(t, y[:count] / scales, values(y))
+
+        return event_value
+
     events = tuple(
         ResidualEvent(
             spec.event_id,
-            lambda t, y, p, callback=callback: callback(t, y[:count] / scales, values(y)),
+            event_function(callback),
             spec.direction,
             terminal=spec.terminal,
             initial_violation_stops=True,
@@ -135,7 +166,7 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
     diagnostics = {
         **report.diagnostics["ode"],
         "residual": report.diagnostics,
-        "algebraic_values": values(report.final_point.state),
+        "algebraic_values": values(cast(ResidualPoint, report.final_point).state),
         "numerical_form": "residual",
         "solver_calls": int(bool(report.diagnostics["ode"])),
         "events": [

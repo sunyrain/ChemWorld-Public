@@ -7,16 +7,21 @@ regularity contract requires nonsingular differential mass and algebraic blocks.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from math import isfinite
+from typing import Any, Protocol, cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scipy import sparse
 
 from chemworld.physchem.residual_system import (
+    Matrix,
+    MatrixInput,
     ResidualDerivatives,
     ResidualDomainError,
+    ResidualEquation,
     ResidualEvaluator,
     ResidualNumericalError,
     ResidualSystem,
@@ -30,6 +35,16 @@ from chemworld.physchem.residual_system import (
     vector,
 )
 from chemworld.physchem.solver_backend import ODESolverPolicy, solve_ode
+
+RHSFunction = Callable[[float, NDArray[np.float64], NDArray[np.float64]], ArrayLike]
+RHSJacobian = Callable[[float, NDArray[np.float64], NDArray[np.float64]], MatrixInput]
+
+
+class _ODEEvent(Protocol):
+    direction: int
+    terminal: bool
+
+    def __call__(self, t: float, x: np.ndarray) -> float: ...
 
 
 @dataclass(frozen=True)
@@ -75,7 +90,7 @@ class ConsistentInitialResult:
 @dataclass(frozen=True)
 class ResidualEvent:
     name: str
-    value: Callable
+    value: Callable[[float, NDArray[np.float64], NDArray[np.float64]], float]
     direction: int = 0
     terminal: bool = True
     initial_violation_stops: bool = False
@@ -99,29 +114,31 @@ class ResidualSolveReport:
     stopping_event: str | None = None
 
     @property
-    def final_point(self):
+    def final_point(self) -> ResidualPoint | None:
         return self.points[-1] if self.success and self.points else None
 
 
-def _sub(value, rows, columns):
+def _sub(
+    value: Matrix, rows: NDArray[np.int_], columns: NDArray[np.int_],
+) -> Matrix:
     return value[rows][:, columns] if sparse.issparse(value) else value[np.ix_(rows, columns)]
 
 
-def _maximum(value):
+def _maximum(value: Matrix) -> float:
     entries = value.data if sparse.issparse(value) else value
     return float(np.max(np.abs(entries), initial=0))
 
 
 class _Reduction:
-    def __init__(self, system, policy):
+    def __init__(self, system: ResidualSystem, policy: ResidualSolvePolicy) -> None:
         self.system, self.policy = system, policy
         self.evaluator = ResidualEvaluator(system)
         self.d, self.a = system.differential, system.algebraic
         self.n = len(system.variables)
         self.root_calls, self.root_iterations, self.maximum_residual = 0, 0, 0.0
-        self.last_root = None
+        self.last_root: dict[str, Any] | None = None
 
-    def diagnostics(self):
+    def diagnostics(self) -> dict[str, Any]:
         return {
             **self.evaluator.diagnostics(),
             "root_calls": self.root_calls,
@@ -131,7 +148,10 @@ class _Reduction:
             "algorithm": "index1_residual_reduction",
         }
 
-    def blocks(self, t, y, rate, *, linearize=False):
+    def blocks(
+        self, t: float, y: NDArray[np.float64], rate: NDArray[np.float64], *,
+        linearize: bool = False,
+    ) -> tuple[Matrix, Matrix]:
         fy = self.evaluator.derivative("state", t, y, rate, columns=None if linearize else self.a)
         fya = fy[:, self.a] if linearize else fy
         fv = self.evaluator.derivative("rate", t, y, rate)
@@ -157,16 +177,19 @@ class _Reduction:
         )
         return fy, g
 
-    def resolve(self, t, x, guess, rate_guess, *, full_rate=False, linearize=False):
+    def resolve(
+        self, t: float, x: NDArray[np.float64], guess: NDArray[np.float64],
+        rate_guess: NDArray[np.float64], *, full_rate: bool = False, linearize: bool = False,
+    ) -> tuple[ResidualPoint, Matrix, Matrix]:
         y = np.asarray(guess, dtype=float).copy()
         y[self.d] = x
 
-        def unpack(u):
+        def unpack(u: NDArray[np.float64]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
             state, rate = y.copy(), np.zeros(self.n)
             rate[self.d], state[self.a] = u[: len(self.d)], u[len(self.d) :]
             return state, rate
 
-        def jacobian(u):
+        def jacobian(u: NDArray[np.float64]) -> Matrix:
             state, rate = unpack(u)
             fya = self.evaluator.derivative("state", t, state, rate, columns=self.a)
             fv = self.evaluator.derivative("rate", t, state, rate)
@@ -221,8 +244,9 @@ class _Reduction:
 
 
 def consistent_initial_conditions(
-    system, state, *, time_s=0.0, rate_guess=None, policy=DEFAULT_RESIDUAL_POLICY
-):
+    system: ResidualSystem, state: ArrayLike, *, time_s: float = 0.0,
+    rate_guess: ArrayLike | None = None, policy: ResidualSolvePolicy = DEFAULT_RESIDUAL_POLICY,
+) -> ConsistentInitialResult:
     if not isfinite(time_s):
         raise ValueError("initial time must be finite")
     initial = vector(state, len(system.variables), "initial state")
@@ -244,15 +268,15 @@ def consistent_initial_conditions(
 
 
 def solve_residual(
-    system,
-    initial,
+    system: ResidualSystem,
+    initial: ArrayLike,
     *,
-    time_span_s,
-    evaluation_times_s=None,
-    policy=DEFAULT_RESIDUAL_POLICY,
-    events=(),
-    initial_rate=None,
-):
+    time_span_s: tuple[float, float],
+    evaluation_times_s: Sequence[float] | np.ndarray | None = None,
+    policy: ResidualSolvePolicy = DEFAULT_RESIDUAL_POLICY,
+    events: Sequence[ResidualEvent] = (),
+    initial_rate: ArrayLike | None = None,
+) -> ResidualSolveReport:
     """Return consistent candidates only; never commit a partial/failed interval."""
     start, end = map(float, time_span_s)
     if not isfinite(start) or not isfinite(end) or end < start:
@@ -275,10 +299,10 @@ def solve_residual(
     if len({e.name for e in events}) != len(events):
         raise ValueError("event identities must be unique")
     reduction = _Reduction(system, policy)
-    ode_diagnostic = {}
+    ode_diagnostic: dict[str, Any] = {}
     point_cache_hits = 0
 
-    def diagnostics():
+    def diagnostics() -> dict[str, Any]:
         return {
             **reduction.diagnostics(),
             "ode": ode_diagnostic,
@@ -292,9 +316,12 @@ def solve_residual(
         first, _, _ = reduction.resolve(start, y0[reduction.d], y0, v0, full_rate=True)
         guess, rate_guess = first.state, first.rate
         scale = system.scales[reduction.d]
-        cached_point_key, cached_resolutions = None, {}
+        cached_point_key: tuple[float, bytes] | None = None
+        cached_resolutions: dict[tuple[bool, bool], tuple[ResidualPoint, Matrix, Matrix]] = {}
 
-        def point(t, x, *, full_rate=False, linearize=False):
+        def point(
+            t: float, x: NDArray[np.float64], *, full_rate: bool = False, linearize: bool = False,
+        ) -> tuple[ResidualPoint, Matrix, Matrix]:
             nonlocal cached_point_key, cached_resolutions, point_cache_hits
             # A solver/event batch often requests the exact same point many
             # times. Cache one immutable candidate inside this solve only;
@@ -312,13 +339,13 @@ def solve_residual(
             cached_resolutions[flags] = result
             return result
 
-        def event_value(spec, candidate):
+        def event_value(spec: ResidualEvent, candidate: ResidualPoint) -> float:
             value = float(spec.value(candidate.time_s, candidate.state, reduction.evaluator.p))
             if not isfinite(value):
                 raise ResidualDomainError("nonfinite_event:" + spec.name)
             return value
 
-        def initial_trigger(e):
+        def initial_trigger(e: ResidualEvent) -> bool:
             value = event_value(e, first)
             return value == 0 or (
                 e.terminal
@@ -341,11 +368,11 @@ def solve_residual(
                 (first,), True, "", diagnostics(), initial_events, initial_stop
             )
 
-        def rhs(t, x):
+        def rhs(t: float, x: NDArray[np.float64]) -> NDArray[np.float64]:
             candidate, _, _ = point(t, x)
             return candidate.rate[reduction.d] / scale
 
-        def jacobian(t, x):
+        def jacobian(t: float, x: NDArray[np.float64]) -> sparse.csc_matrix:
             _, fy, g = point(t, x, linearize=True)
             reduced = linear_solve(g, -fy[:, reduction.d])[: len(reduction.d)]
             # Elimination may introduce fill even when the original blocks are sparse.
@@ -358,13 +385,15 @@ def solve_residual(
         callbacks = []
         for spec in events:
 
-            def callback(t, x, spec=spec):
+            def callback(t: float, x: NDArray[np.float64], spec: ResidualEvent = spec) -> float:
                 candidate, _, _ = point(t, x)
                 return event_value(spec, candidate)
 
-            callback.direction = spec.direction
-            callback.terminal = spec.terminal
-            callbacks.append(callback)
+            # SciPy reads these runtime attributes on the event function.
+            event_callback = cast(_ODEEvent, callback)
+            event_callback.direction = spec.direction
+            event_callback.terminal = spec.terminal
+            callbacks.append(event_callback)
         ode_policy = replace(policy.ode, event_names=tuple(e.name for e in events))
         report = solve_ode(
             rhs,
@@ -416,20 +445,20 @@ def solve_residual(
 
 
 def mass_matrix_system(
-    system_id,
-    variables,
-    equations,
-    mass,
-    rhs,
+    system_id: str,
+    variables: Sequence[ResidualVariable],
+    equations: Sequence[ResidualEquation],
+    mass: MatrixInput,
+    rhs: RHSFunction,
     *,
-    derivatives="analytic",
-    rhs_jacobian=None,
-    rhs_parameter_jacobian=None,
-    rhs_time_derivative=None,
-    parameters=(),
-    parameter_values=(),
-    time_scale_s=1.0,
-):
+    derivatives: str = "analytic",
+    rhs_jacobian: RHSJacobian | None = None,
+    rhs_parameter_jacobian: RHSJacobian | None = None,
+    rhs_time_derivative: RHSFunction | None = None,
+    parameters: Sequence[ResidualVariable] = (),
+    parameter_values: Sequence[float] = (),
+    time_scale_s: float = 1.0,
+) -> ResidualSystem:
     """Constant M ydot = f(t,y,p), including exact zero algebraic rows."""
     n = len(variables)
     owned = matrix(mass, (n, n), "mass matrix")
