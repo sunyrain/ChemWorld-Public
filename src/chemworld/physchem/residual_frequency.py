@@ -8,14 +8,18 @@ represented by algebraic rows, exactly as in the time-domain residual.
 
 from dataclasses import dataclass
 from math import isfinite
+from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 from scipy import sparse
 
 from chemworld.physchem.residual_system import (
     ResidualDomainError,
     ResidualEvaluator,
     ResidualNumericalError,
+    ResidualSystem,
+    ResidualVariable,
     in_bounds,
     linear_solve,
     vector,
@@ -36,10 +40,10 @@ class FrequencyPoint:
             object.__setattr__(self, "response", owned)
 
     @property
-    def success(self):
+    def success(self) -> bool:
         return self.response is not None and self.failure_reason is None
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "frequency_Hz": self.frequency_Hz,
             "success": self.success,
@@ -53,16 +57,16 @@ class FrequencyPoint:
 @dataclass(frozen=True)
 class FrequencyResponse:
     system_id: str
-    variables: tuple
-    parameters: tuple
+    variables: tuple[ResidualVariable, ...]
+    parameters: tuple[ResidualVariable, ...]
     points: tuple[FrequencyPoint, ...]
-    diagnostics: dict
+    diagnostics: dict[str, Any]
 
     @property
-    def success(self):
+    def success(self) -> bool:
         return all(point.success for point in self.points)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "system_id": self.system_id,
             "success": self.success,
@@ -76,14 +80,14 @@ class FrequencyResponse:
 
 
 def residual_frequency_response(
-    system,
-    state,
-    frequencies_Hz,
+    system: ResidualSystem,
+    state: ArrayLike,
+    frequencies_Hz: ArrayLike,
     *,
-    time_s=0.0,
-    stationary_tolerance=1e-9,
-    linear_tolerance=1e-10,
-):
+    time_s: float = 0.0,
+    stationary_tolerance: float = 1e-9,
+    linear_tolerance: float = 1e-10,
+) -> FrequencyResponse:
     """Solve (F_y + i omega F_ydot) dy/dp = -F_p at a stationary point.
 
     Each frequency has an independent success/failure record, in input order.

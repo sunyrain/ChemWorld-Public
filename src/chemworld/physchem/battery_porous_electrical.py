@@ -4,17 +4,29 @@ The DFN and Newman-Tobias models use the identical geometry map. Reaction
 currents are cell-integrated amperes; solid conductivities are effective values.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from functools import cached_property
 from math import isfinite
 from numbers import Integral
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import numpy as np
+from numpy.typing import NDArray
 
 from chemworld.physchem.finite_volume import DiffusionMesh
 
+if TYPE_CHECKING:
+    from chemworld.physchem.battery_electrolyte import BatteryElectrolyteSpec
+
 PHI_E = "battery:electrolyte-offset_V"
 ELECTRICAL_KEYS = ("battery:current_A", "battery:voltage_V")
+ElectricalFields: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64],
+    NDArray[np.float64], list[NDArray[np.float64]],
+]
 
 
 @dataclass(frozen=True)
@@ -41,7 +53,8 @@ class PorousElectrodeGeometrySpec:
             ):
                 raise ValueError(f"{name} needs {size} positive finite entries")
             object.__setattr__(self, name, values)
-        if any(not isinstance(n, Integral) or n < 2 for n in self.cells):
+        cells: Sequence[object] = self.cells
+        if any(not isinstance(n, Integral) or n < 2 for n in cells):
             raise ValueError("porous regions need at least two integer cells")
         if any(p >= 1 for p in self.porosities):
             raise ValueError("porosity must be inside (0, 1)")
@@ -54,20 +67,22 @@ class PorousElectrodeGeometrySpec:
             raise ValueError("effective ionic conductivities must be representable")
 
     @cached_property
-    def mesh(self):
+    def mesh(self) -> DiffusionMesh:
         faces = [0.0]
         for length, count in zip(self.lengths_m, self.cells, strict=True):
             faces.extend(faces[-1] + np.linspace(0, length, count + 1)[1:])
         return DiffusionMesh("planar", tuple(faces), area_m2=self.area_m2)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             key: list(value) if isinstance(value, tuple) else value
             for key, value in asdict(self).items()
         }
 
 
-def reaction_keys(geometry):
+def reaction_keys(
+    geometry: PorousElectrodeGeometrySpec | BatteryElectrolyteSpec,
+) -> tuple[str, ...]:
     return tuple(
         f"battery:{name}:reaction:{i}_A"
         for name, region in (("negative", 0), ("positive", 2))
@@ -75,7 +90,10 @@ def reaction_keys(geometry):
     )
 
 
-def reaction_currents(geometry, keys, values):
+def reaction_currents(
+    geometry: PorousElectrodeGeometrySpec | BatteryElectrolyteSpec,
+    keys: Sequence[str], values: Mapping[str, float],
+) -> NDArray[np.float64]:
     current = values[ELECTRICAL_KEYS[0]]
     selected = np.array([values[k] for k in keys])
     split = geometry.cells[0] - 1
@@ -83,14 +101,20 @@ def reaction_currents(geometry, keys, values):
     return np.r_[negative, current - sum(negative), positive, -current - sum(positive)]
 
 
-def integral_centres(face_values, widths, coefficients):
+def integral_centres(
+    face_values: NDArray[np.float64], widths: NDArray[np.float64],
+    coefficients: float | NDArray[np.float64],
+) -> tuple[NDArray[np.float64], float]:
     """Exact integral of a linear face field from the left boundary to centres."""
     full = (face_values[:-1] + face_values[1:]) * widths / (2 * coefficients)
     half = (3 * face_values[:-1] + face_values[1:]) * widths / (8 * coefficients)
     return np.r_[0.0, np.cumsum(full)[:-1]] + half, float(sum(full))
 
 
-def linear_electrical(geometry, keys, series_resistance_ohm, values):
+def linear_electrical(
+    geometry: PorousElectrodeGeometrySpec | BatteryElectrolyteSpec, keys: Sequence[str],
+    series_resistance_ohm: float, values: Mapping[str, float],
+) -> ElectricalFields:
     current, voltage = (values[key] for key in ELECTRICAL_KEYS)
     q = reaction_currents(geometry, keys, values)
     return electrical_from_cell_currents(
@@ -99,8 +123,10 @@ def linear_electrical(geometry, keys, series_resistance_ohm, values):
 
 
 def electrical_from_cell_currents(
-    geometry, q, current, voltage, electrolyte_offset_V, series_resistance_ohm
-):
+    geometry: PorousElectrodeGeometrySpec | BatteryElectrolyteSpec,
+    q: NDArray[np.float64], current: float,
+    voltage: float, electrolyte_offset_V: float, series_resistance_ohm: float,
+) -> ElectricalFields:
     """Integrate the same charge equations from complete electrode cell currents.
 
     ``q`` contains negative then positive cell-integrated reaction currents (A).
@@ -133,7 +159,10 @@ def electrical_from_cell_currents(
     return q, ionic_faces, phi_e, np.concatenate(solid), solid_faces
 
 
-def electrical_maps(geometry, keys, series_resistance_ohm, algebraic_names):
+def electrical_maps(
+    geometry: PorousElectrodeGeometrySpec | BatteryElectrolyteSpec, keys: Sequence[str],
+    series_resistance_ohm: float, algebraic_names: Sequence[str],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Exact linear maps from unit columns, never finite-difference nonlinear BV."""
     columns, reactions = [], []
     nn, _, np_ = geometry.cells

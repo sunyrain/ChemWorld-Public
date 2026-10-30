@@ -491,7 +491,15 @@ def test_fixed_interface_empty_metal_stops_forward_and_can_rest_or_plate_in_reve
     for value in (0.0, -0.1):
         resumed = advance_half_cell_dfn(spec, final, program(value), 0.1)
         assert resumed.outcome == "success", resumed.solver_diagnostic
-        assert resumed.final_state.amounts_mol[METAL_KEY] >= final.amounts_mol[METAL_KEY]
+        change = resumed.final_state.amounts_mol[METAL_KEY] - final.amounts_mol[METAL_KEY]
+        if value == 0.0:
+            # The stopped remainder is approximately zero; compare roundoff
+            # against the original inventory scale, not the remainder itself.
+            roundoff = 32 * np.finfo(float).eps * spec.metal.initial_amount_mol
+            assert change == pytest.approx(0.0, abs=roundoff)
+        else:
+            assert change > 0
+            assert change == pytest.approx(-value * resumed.actual_duration_s / F, rel=1e-8)
 
 
 def test_segmented_cc_rest_reverse_preserves_the_original_shared_clock():

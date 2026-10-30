@@ -432,7 +432,13 @@ def test_dfn_cutoff_is_the_same_commit_time_for_every_connected_domain(noise):
         assert runtime._state.vessel_elapsed_s == dict.fromkeys(before, elapsed)
         advancer = runtime.runtime.domain_services.reaction_thermal.advancer
         for key, local in local_states(runtime._state).items():
-            expected = advancer.batch(before[key], {"duration_s": elapsed}, heat=False)
+            # The event-limiting cell keeps the original finite prefix. Solving
+            # again with the event time as the requested endpoint changes the
+            # adaptive mesh and is not a bitwise replay of that prefix.
+            duration = 100 if key == "cell" else elapsed
+            expected = advancer.batch(before[key], {"duration_s": duration}, heat=False)
+            assert expected.actual_duration_s == elapsed
+            assert expected.outcome == ("stopped" if key == "cell" else "success")
             assert local.state_slots == expected.state.state_slots
             assert local.species_amounts == expected.state.species_amounts
         _, _, restored_spec, battery, _ = unpack_battery(local_states(runtime._state)["cell"])
