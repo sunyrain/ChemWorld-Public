@@ -4,15 +4,20 @@ The optimizer, normalized coordinates, weighted metrics and train/holdout policy
 are shared with native-session calibration. This adapter owns no runtime state.
 """
 
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
+from typing import Any, TypedDict, cast
 
 import numpy as np
 
 from chemworld.data.calibration_core import (
     BoundedParameterCoordinates,
+    FloatArray,
     ForwardEvaluationError,
+    Jacobian,
     MeasurementCalibration,
 )
+from chemworld.data.scientific_inputs import ScientificRow, ScientificTable
 from chemworld.foundation.units import convert_value
 from chemworld.physchem.correlation_families import CORRELATION_FAMILIES
 from chemworld.physchem.dippr import dippr_parameter_jacobian
@@ -50,10 +55,10 @@ class CorrelationFitParameter(BoundedParameterCoordinates):
         self._validate_coordinates()
 
     @property
-    def parameter_id(self):
+    def parameter_id(self) -> str:
         return self.name
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "coefficient": self.name,
             "bounds": list(self.bounds),
@@ -63,24 +68,29 @@ class CorrelationFitParameter(BoundedParameterCoordinates):
         }
 
 
-class CorrelationCalibration(MeasurementCalibration):
+class _Conditions(TypedDict):
+    temperature_K: float
+    pressure_Pa: float | None
+
+
+class CorrelationCalibration(MeasurementCalibration[CorrelationFitParameter]):
     schema_version = "chemworld-correlation-calibration-1"
 
     def __init__(
         self,
-        table,
-        correlation,
-        parameters,
+        table: ScientificTable,
+        correlation: PropertyCorrelation,
+        parameters: Iterable[CorrelationFitParameter],
         *,
-        fitted_correlation_id,
-        temperature_column="temperature",
-        observation_column="value",
-        pressure_column=None,
-        molecular_weight_g_mol=None,
-        derivative_mode="analytic",
-        max_forward_groups=60000,
-        progress=None,
-    ):
+        fitted_correlation_id: str,
+        temperature_column: str = "temperature",
+        observation_column: str = "value",
+        pressure_column: str | None = None,
+        molecular_weight_g_mol: float | None = None,
+        derivative_mode: str = "analytic",
+        max_forward_groups: int = 60000,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         super().__init__(
             table, parameters, max_forward_groups=max_forward_groups, progress=progress
         )
@@ -134,7 +144,7 @@ class CorrelationCalibration(MeasurementCalibration):
         self.output_scale = convert_value(1, correlation.output_unit, output) - convert_value(
             0, correlation.output_unit, output
         )
-        self.jacobian_runs = []
+        self.jacobian_runs: list[dict[str, Any]] = []
         self.analytic_family = self._analytic_family()
         if derivative_mode == "analytic" and self.analytic_family is None:
             raise ValueError(
@@ -144,7 +154,7 @@ class CorrelationCalibration(MeasurementCalibration):
         # Constructor validation does not consume held-out response values.
         self.candidate(self.initial_values)
 
-    def _analytic_family(self):
+    def _analytic_family(self) -> str | None:
         equation = self.correlation.equation_id
         family = CORRELATION_FAMILIES.get(equation)
         if equation.startswith("dippr"):
@@ -157,31 +167,33 @@ class CorrelationCalibration(MeasurementCalibration):
             return "viscosity_yaws"
         return None
 
-    def candidate(self, values):
+    def candidate(self, values: Mapping[str, float]) -> PropertyCorrelation:
         if set(values) != {p.name for p in self.parameters}:
             raise ValueError("candidate must contain exactly the fitted coefficient whitelist")
         for p in self.parameters:
             p.encode(values[p.name])
         return replace(self.correlation, coefficients={**self.correlation.coefficients, **values})
 
-    def _conditions(self, row):
+    def _conditions(self, row: ScientificRow) -> _Conditions:
         return {
-            "temperature_K": row.values[self.temperature_column].to("K").value,
+            "temperature_K": cast(float, row.values[self.temperature_column].to("K").value),
             "pressure_Pa": None
             if self.pressure_column is None
-            else row.values[self.pressure_column].to("Pa").value,
+            else cast(float, row.values[self.pressure_column].to("Pa").value),
         }
 
-    def forward(self, values, split, *, stage="prediction"):
+    def forward(
+        self, values: dict[str, float], split: str, *, stage: str = "prediction",
+    ) -> dict[tuple[str, str], float]:
         predictions = {}
-        groups = {}
+        groups: dict[str, list[ScientificRow]] = {}
         for row_id, _ in self.pairs.get(split, ()):
             row = self.rows[row_id]
             groups.setdefault(row.group_id, []).append(row)
         for group, rows in groups.items():
             if len(self.runs) >= self.max_forward_groups:
                 raise ForwardEvaluationError("declared forward group execution budget exhausted")
-            record = {
+            record: dict[str, Any] = {
                 "group_id": group,
                 "split": split,
                 "stage": stage,
@@ -193,7 +205,7 @@ class CorrelationCalibration(MeasurementCalibration):
             try:
                 card = self.candidate(values)
                 for row in rows:
-                    reading = {
+                    reading: dict[str, Any] = {
                         "row_id": row.row_id,
                         **self._conditions(row),
                         "value": None,
@@ -225,7 +237,9 @@ class CorrelationCalibration(MeasurementCalibration):
                     )
         return predictions
 
-    def _source_jacobian(self, card, conditions):
+    def _source_jacobian(
+        self, card: PropertyCorrelation, conditions: _Conditions,
+    ) -> tuple[float, ...]:
         T = conditions["temperature_K"]
         names = tuple(p.name for p in self.parameters)
         if self.analytic_family == "dippr":
@@ -246,9 +260,11 @@ class CorrelationCalibration(MeasurementCalibration):
             return tuple(row["ABCD".index(name)] for name in names)
         raise ValueError("no analytic Jacobian declared")
 
-    def training_jacobian(self, coordinates):
+    def training_jacobian(self, coordinates: FloatArray) -> FloatArray:
         values = self.values(coordinates)
-        record = {"split": "train", "parameters": values, "rows": [], "failure": None}
+        record: dict[str, Any] = {
+            "split": "train", "parameters": values, "rows": [], "failure": None,
+        }
         self.jacobian_runs.append(record)
         try:
             card = self.candidate(values)
@@ -266,7 +282,10 @@ class CorrelationCalibration(MeasurementCalibration):
                     molecular_weight_g_mol=self.molecular_weight_g_mol,
                 )
                 source = np.asarray(self._source_jacobian(card, self._conditions(row)))
-                weighted = source * self.output_scale * scales / row.values[quantity_id].uncertainty
+                weighted = (
+                    source * self.output_scale * scales
+                    / cast(float, row.values[quantity_id].uncertainty)
+                )
                 if not np.all(np.isfinite(weighted)):
                     raise ValueError("nonfinite weighted analytic Jacobian")
                 record["rows"].append({"row_id": row_id, "weighted_jacobian": weighted.tolist()})
@@ -276,10 +295,10 @@ class CorrelationCalibration(MeasurementCalibration):
             record["failure"] = f"{type(exc).__name__}: {exc}"
             raise ForwardEvaluationError(record["failure"]) from exc
 
-    def _optimizer_jacobian(self):
+    def _optimizer_jacobian(self) -> Jacobian:
         return "3-point" if self.jacobian_description == "3-point" else self.training_jacobian
 
-    def _resource_report(self):
+    def _resource_report(self) -> dict[str, int]:
         return {
             "forward_groups": len(self.runs),
             "runtime_sessions": 0,
@@ -288,7 +307,7 @@ class CorrelationCalibration(MeasurementCalibration):
             "jacobian_rows": sum(len(r["rows"]) for r in self.jacobian_runs),
         }
 
-    def fit(self, **options):
+    def fit(self, **options: Any) -> dict[str, Any]:
         result = super().fit(**options)
         result.update(
             input_correlation=self.correlation.to_dict(),

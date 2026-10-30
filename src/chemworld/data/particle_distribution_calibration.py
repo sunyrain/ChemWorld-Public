@@ -7,12 +7,18 @@ from typing import Any, cast
 
 import numpy as np
 
-from chemworld.data.calibration_core import ForwardEvaluationError, MeasurementCalibration
+from chemworld.data.calibration_core import (
+    FitParameter,
+    FloatArray,
+    ForwardEvaluationError,
+    Jacobian,
+    MeasurementCalibration,
+)
 from chemworld.data.scientific_inputs import ScientificRow, ScientificTable
 from chemworld.physchem.particle_distributions import AnalyticDiameterDistribution
 
 
-class DiameterDistributionCalibration(MeasurementCalibration):
+class DiameterDistributionCalibration(MeasurementCalibration[FitParameter]):
     """Use existing bounded fit parameters named scale_m and/or shape.
 
     Input ScientificTable supplies diameter conditions and CDF observations,
@@ -25,7 +31,7 @@ class DiameterDistributionCalibration(MeasurementCalibration):
         self,
         table: ScientificTable,
         distribution: AnalyticDiameterDistribution,
-        parameters: Sequence[Any],
+        parameters: Sequence[FitParameter],
         *,
         diameter_column: str = "diameter",
         cdf_column: str = "cdf",
@@ -67,10 +73,10 @@ class DiameterDistributionCalibration(MeasurementCalibration):
         if self.analytic_ggs:
             self.jacobian_description = "analytic GGS CDF with saturated branch derivative zero"
 
-    def _optimizer_jacobian(self) -> Any:
+    def _optimizer_jacobian(self) -> Jacobian:
         return self.training_jacobian if self.analytic_ggs else "3-point"
 
-    def training_jacobian(self, coordinates: Any) -> Any:
+    def training_jacobian(self, coordinates: FloatArray) -> FloatArray:
         values = self.values(coordinates)
         distribution = self.candidate(values)
         matrix = []
@@ -88,7 +94,7 @@ class DiameterDistributionCalibration(MeasurementCalibration):
                 [
                     derivatives[p.parameter_id]
                     * p.decode_derivative(x)
-                    / row.values[quantity].uncertainty
+                    / cast(float, row.values[quantity].uncertainty)
                     for p, x in zip(self.parameters, coordinates, strict=True)
                 ]
             )

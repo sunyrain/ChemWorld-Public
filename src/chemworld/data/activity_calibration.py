@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, replace
 from math import isfinite
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -54,7 +54,7 @@ class ActivityFitParameter(BoundedParameterCoordinates):
         }
 
 
-class ActivityCalibration(MeasurementCalibration):
+class ActivityCalibration(MeasurementCalibration[ActivityFitParameter]):
     """Fit explicit existing parameters; holdout responses never enter the optimizer.
 
     Conditions are exactly ``temperature`` and ``x:<component>`` for every
@@ -194,7 +194,9 @@ class ActivityCalibration(MeasurementCalibration):
 
     def training_jacobian(self, coordinates: Any) -> Any:
         values = self.values(coordinates)
-        record = {"split": "train", "parameters": values, "rows": [], "failure": None}
+        record: dict[str, Any] = {
+            "split": "train", "parameters": values, "rows": [], "failure": None,
+        }
         self.jacobian_runs.append(record)
         try:
             model = self.candidate(values)
@@ -214,7 +216,8 @@ class ActivityCalibration(MeasurementCalibration):
                     parameters=names,
                 )[quantity]
                 weighted = [
-                    source[name] * scale * self.scales[quantity] / row.values[quantity].uncertainty
+                    source[name] * scale * self.scales[quantity]
+                    / cast(float, row.values[quantity].uncertainty)
                     for name, scale in zip(names, scales, strict=True)
                 ]
                 if not all(isfinite(v) for v in weighted):

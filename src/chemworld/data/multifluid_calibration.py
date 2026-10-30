@@ -134,7 +134,7 @@ class MultifluidFitParameter(BoundedParameterCoordinates):
         return cls(**data)
 
 
-class MultifluidCalibration(MeasurementCalibration):
+class MultifluidCalibration(MeasurementCalibration[MultifluidFitParameter]):
     """Fit homogeneous T/rho/composition measurements; return the native model.
 
     Default conditions are ``temperature``, ``molar_density`` and ``x:<component>``.

@@ -3,20 +3,52 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping
 from math import exp, isfinite, log
-from typing import Any
+from typing import Any, Generic, Literal, Protocol, TypeVar, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.optimize import least_squares
 
 from chemworld.data.scientific_inputs import ScientificTable
 
 
+class _CoordinateState(Protocol):
+    @property
+    def bounds(self) -> tuple[float, float]: ...
+
+    @property
+    def coordinate(self) -> str: ...
+
+    @property
+    def initial(self) -> float: ...
+
+    def decode(self, coordinate: float) -> float: ...
+
+
+class FitParameter(_CoordinateState, Protocol):
+    """The shared optimizer needs coordinates and identity, not domain bindings."""
+
+    @property
+    def parameter_id(self) -> str: ...
+
+    def encode(self, value: float) -> float: ...
+
+    def decode_derivative(self, coordinate: float) -> float: ...
+
+    def to_dict(self) -> dict[str, Any]: ...
+
+
+ParameterT = TypeVar("ParameterT", bound=FitParameter)
+FloatArray = NDArray[np.float64]
+Jacobian = Literal["2-point", "3-point", "cs"] | Callable[[FloatArray], FloatArray]
+
+
 class BoundedParameterCoordinates:
     """Shared linear/log normalization; concrete parameters own units and identity."""
 
-    def _validate_coordinates(self) -> None:
+    def _validate_coordinates(self: _CoordinateState) -> None:
         lower, upper = self.bounds
         if (
             self.coordinate not in {"linear", "log"}
@@ -31,7 +63,7 @@ class BoundedParameterCoordinates:
         if self.coordinate == "log" and lower <= 0:
             raise ValueError("log parameters require strictly positive bounds")
 
-    def encode(self, value):
+    def encode(self: _CoordinateState, value: float) -> float:
         lower, upper = self.bounds
         if not isfinite(value) or not lower <= value <= upper:
             raise ValueError("parameter is outside its finite declared domain")
@@ -39,7 +71,7 @@ class BoundedParameterCoordinates:
             value, lower, upper = log(value), log(lower), log(upper)
         return (value - lower) / (upper - lower)
 
-    def decode(self, coordinate):
+    def decode(self: _CoordinateState, coordinate: float) -> float:
         if not isfinite(coordinate) or not 0 <= coordinate <= 1:
             raise ValueError("normalized parameter coordinate must be finite and inside [0, 1]")
         lower, upper = self.bounds
@@ -50,7 +82,7 @@ class BoundedParameterCoordinates:
         # Floating-point endpoint reconstruction must not extend the domain.
         return min(upper, max(lower, value))
 
-    def decode_derivative(self, coordinate):
+    def decode_derivative(self: _CoordinateState, coordinate: float) -> float:
         value = self.decode(coordinate)
         lower, upper = self.bounds
         return value * (log(upper) - log(lower)) if self.coordinate == "log" else upper - lower
@@ -60,13 +92,17 @@ class ForwardEvaluationError(ValueError):
     """An executed candidate could not provide the declared measurements."""
 
 
-class MeasurementCalibration:
+class MeasurementCalibration(Generic[ParameterT]):
     """Shared boundary calibration; forward consumers own their execution and resources."""
 
     schema_version = "chemworld-native-calibration-1"
     jacobian_description = "3-point"
 
-    def __init__(self, table, parameters, *, max_forward_groups=300, progress=None):
+    def __init__(
+        self, table: ScientificTable, parameters: Iterable[ParameterT], *,
+        max_forward_groups: int = 300,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         if not isinstance(table, ScientificTable) or table.kind != "measurements":
             raise ValueError("calibration requires a scientific measurement table")
         self.table = table
@@ -83,12 +119,12 @@ class MeasurementCalibration:
             raise ValueError("forward execution limit must be a positive integer")
         self.max_forward_groups = max_forward_groups
         self.progress = progress
-        self.runs = []
+        self.runs: list[dict[str, Any]] = []
         self._fit_started = False
         self.columns = {c.quantity_id: c for c in table.columns}
         self.rows = {row.row_id: row for row in table.rows}
-        self.excluded = []
-        self.pairs = {}
+        self.excluded: list[dict[str, str]] = []
+        self.pairs: dict[str, list[tuple[str, str]]] = {}
         for row in table.rows:
             for column in table.columns:
                 if column.role != "observation":
@@ -113,10 +149,10 @@ class MeasurementCalibration:
             raise ValueError("at least one valid training measurement is required")
 
     @property
-    def initial_values(self):
+    def initial_values(self) -> dict[str, float]:
         return {p.parameter_id: p.initial for p in self.parameters}
 
-    def values(self, coordinates):
+    def values(self, coordinates: Iterable[float]) -> dict[str, float]:
         return {
             p.parameter_id: p.decode(x)
             for p, x in zip(
@@ -126,19 +162,30 @@ class MeasurementCalibration:
             )
         }
 
-    def _optimizer_jacobian(self):
+    def forward(
+        self, values: dict[str, float], split: str, *, stage: str,
+    ) -> dict[tuple[str, str], float]:
+        """Evaluate the declared measurements using the domain-specific executor."""
+        raise NotImplementedError("calibration adapters must implement forward evaluation")
+
+    def _optimizer_jacobian(self) -> Jacobian:
         return "3-point"
 
-    def residuals(self, predictions, split):
+    def residuals(
+        self, predictions: Mapping[tuple[str, str], float], split: str,
+    ) -> FloatArray:
+        # pairs contains only valid observations with positive declared uncertainty.
         return np.asarray(
             [
-                (predictions[key] - self.rows[key[0]].values[key[1]].value)
-                / self.rows[key[0]].values[key[1]].uncertainty
+                (predictions[key] - cast(float, self.rows[key[0]].values[key[1]].value))
+                / cast(float, self.rows[key[0]].values[key[1]].uncertainty)
                 for key in self.pairs.get(split, ())
             ]
         )
 
-    def metrics(self, predictions, split):
+    def metrics(
+        self, predictions: Mapping[tuple[str, str], float], split: str,
+    ) -> dict[str, Any]:
         residuals = self.residuals(predictions, split)
         details = []
         for key in self.pairs.get(split, ()):
@@ -150,7 +197,7 @@ class MeasurementCalibration:
                     "unit": measured.unit,
                     "measured": measured.value,
                     "predicted": predictions[key],
-                    "error": predictions[key] - measured.value,
+                    "error": predictions[key] - cast(float, measured.value),
                     "uncertainty": measured.uncertainty,
                 }
             )
@@ -165,13 +212,13 @@ class MeasurementCalibration:
     def fit(
         self,
         *,
-        max_nfev=30,
-        diff_step=1e-3,
-        rank_rtol=1e-5,
-        rank_atol=1e-8,
-        fixed_parameters=None,
-        evaluate_validation=True,
-    ):
+        max_nfev: int = 30,
+        diff_step: float = 1e-3,
+        rank_rtol: float = 1e-5,
+        rank_atol: float = 1e-8,
+        fixed_parameters: Mapping[str, float] | None = None,
+        evaluate_validation: bool = True,
+    ) -> dict[str, Any]:
         if self._fit_started or self.runs:
             raise ValueError("use a fresh calibration object for each fixed fitting block")
         if isinstance(max_nfev, bool) or not isinstance(max_nfev, int) or max_nfev <= 0:
@@ -195,12 +242,12 @@ class MeasurementCalibration:
             [p.encode(fixed.get(p.parameter_id, p.initial)) for p in self.parameters]
         )
 
-        def full_coordinates(x):
+        def full_coordinates(x: Iterable[float]) -> FloatArray:
             coordinates = initial.copy()
             coordinates[free] = x
             return coordinates
 
-        def candidate_values(x):
+        def candidate_values(x: Iterable[float]) -> dict[str, float]:
             # Exact declared physical fixed values survive log coordinate round trips.
             return {**self.values(full_coordinates(x)), **fixed}
 
@@ -236,7 +283,7 @@ class MeasurementCalibration:
             report["validation_evaluation"] = "not_requested"
         try:
 
-            def training_residual(x):
+            def training_residual(x: FloatArray) -> FloatArray:
                 return self.residuals(
                     self.forward(candidate_values(x), "train", stage="fit"), "train"
                 )
@@ -274,7 +321,7 @@ class MeasurementCalibration:
             jacobian = original_jacobian
             if callable(original_jacobian) and fixed:
 
-                def jacobian(x):
+                def jacobian(x: FloatArray) -> FloatArray:
                     return original_jacobian(full_coordinates(x))[:, free]
 
             result = least_squares(
@@ -339,7 +386,7 @@ class MeasurementCalibration:
         json.dumps(report, allow_nan=False)
         return report
 
-    def _resource_report(self):
+    def _resource_report(self) -> dict[str, Any]:
         steps = [step for run in self.runs for step in run["steps"]]
         return {
             "forward_groups": len(self.runs),

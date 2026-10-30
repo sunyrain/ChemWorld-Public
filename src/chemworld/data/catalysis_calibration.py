@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -58,7 +58,7 @@ class CatalyticEnergyFitParameter(BoundedParameterCoordinates):
         }
 
 
-class CatalyticEnergyCalibration(MeasurementCalibration):
+class CatalyticEnergyCalibration(MeasurementCalibration[CatalyticEnergyFitParameter]):
     """Fit only declared coefficients; energies remain the original native laws.
 
     Electronic-energy data bind to LinearEnergyScaling. BEP data are activation
@@ -268,7 +268,8 @@ class CatalyticEnergyCalibration(MeasurementCalibration):
                 row = self.rows[row_id]
                 _, basis = self._evaluate(model, row)
                 weighted = [
-                    basis[p.name] * scale * self.output_scale / row.values[quantity].uncertainty
+                    basis[p.name] * scale * self.output_scale
+                    / cast(float, row.values[quantity].uncertainty)
                     for p, scale in zip(self.parameters, derivatives, strict=True)
                 ]
                 record["rows"].append({"row_id": row_id, "weighted_jacobian": weighted})
