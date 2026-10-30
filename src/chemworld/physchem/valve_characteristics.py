@@ -174,7 +174,7 @@ class ValveOpeningCurve:
         ):
             raise ValueError("opening and normalized coefficient must be dimensionless")
         if (
-            curve.domain["opening"] != (0, 1)
+            curve.domain["opening"] != (0.0, 1.0)
             or not 0 <= curve.value_range[0] <= curve.value_range[1] <= 1
         ):
             raise ValueError("opening curve must cover [0, 1] with normalized coefficients")

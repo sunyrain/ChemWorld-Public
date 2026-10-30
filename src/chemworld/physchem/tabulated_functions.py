@@ -5,15 +5,19 @@ ScientificTable units, uncertainty declarations and source identities survive
 serialization. Stored input uncertainty is not an output prediction interval.
 """
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
 from itertools import product
 from math import isfinite, prod
 from numbers import Real
 from types import MappingProxyType
+from typing import Any, Self, cast, overload
 
 import numpy as np
+from numpy.typing import NDArray
 
 from chemworld.data.scientific_inputs import (
     ScientificTable,
@@ -29,7 +33,7 @@ TABLE_FUNCTION_VERSION = "rectilinear-scalar-parameter-function-1"
 MAX_GRID_NODES = 262144
 
 
-def _number(value):
+def _number(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
         raise ValueError("table function inputs must be finite real numbers")
     return float(value)
@@ -50,7 +54,7 @@ class TabulatedScalar:
     output_unit: str
     row_ids: tuple[str, ...] = ()
     _points: tuple[tuple[float, ...], ...] = field(init=False, repr=False, compare=False)
-    _values: np.ndarray = field(init=False, repr=False, compare=False)
+    _values: NDArray[np.float64] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.table, ScientificTable) or self.table.kind != "parameters":
@@ -84,10 +88,10 @@ class TabulatedScalar:
         for identity in selected:
             row = rows[identity]
             coordinate_rows.append(tuple(
-                convert_value(row.values[column].value, row.values[column].unit, unit)
+                convert_value(cast(float, row.values[column].value), row.values[column].unit, unit)
                 for _, column, unit in axes))
             cell = row.values[self.output_column]
-            values.append(convert_value(cell.value, cell.unit, self.output_unit))
+            values.append(convert_value(cast(float, cell.value), cell.unit, self.output_unit))
         points = tuple(tuple(sorted({r[i] for r in coordinate_rows})) for i in range(len(axes)))
         if any(not isfinite(value) for axis in points for value in axis):
             raise ValueError("converted parameter axes must remain finite")
@@ -103,8 +107,8 @@ class TabulatedScalar:
             raise ValueError("parameter rows must cover the complete Cartesian grid")
         tensor = np.empty(tuple(map(len, points)))
         indices = [{value: i for i, value in enumerate(axis)} for axis in points]
-        for row, value in zip(coordinate_rows, values, strict=True):
-            tensor[tuple(index[x] for index, x in zip(indices, row, strict=True))] = value
+        for coordinates, value in zip(coordinate_rows, values, strict=True):
+            tensor[tuple(index[x] for index, x in zip(indices, coordinates, strict=True))] = value
         if not np.all(np.isfinite(tensor)):
             raise ValueError("converted parameter values must remain finite")
         tensor.setflags(write=False)
@@ -114,16 +118,18 @@ class TabulatedScalar:
         object.__setattr__(self, "_values", tensor)
 
     @property
-    def domain(self):
+    def domain(self) -> Mapping[str, tuple[float, float]]:
         return MappingProxyType({axis[0]: (points[0], points[-1])
                                  for axis, points in zip(self.axes, self._points, strict=True)})
 
     @property
-    def value_range(self):
+    def value_range(self) -> tuple[float, float]:
         """Vertex range, not an uncertainty interval or an outward-rounded error bound."""
         return float(self._values.min()), float(self._values.max())
 
-    def _location(self, inputs, *, trial):
+    def _location(
+        self, inputs: Mapping[str, float], *, trial: bool,
+    ) -> tuple[tuple[float, ...], tuple[int, ...]]:
         if not isinstance(trial, bool):
             raise ValueError("numerical trial extension must be explicitly Boolean")
         if not isinstance(inputs, Mapping) or inputs.keys() != {axis[0] for axis in self.axes}:
@@ -139,35 +145,47 @@ class TabulatedScalar:
             cells.append(max(0, min(len(axis)-2, index)))
         return point, tuple(cells)
 
-    def _interpolate(self, point, cells):
+    @overload
+    def _interpolate(self, point: Sequence[float], cells: Sequence[int]) -> float: ...
+
+    @overload
+    def _interpolate(
+        self, point: Sequence[float | FirstDerivative], cells: Sequence[int],
+    ) -> float | FirstDerivative: ...
+
+    def _interpolate(
+        self, point: Sequence[float | FirstDerivative], cells: Sequence[int],
+    ) -> float | FirstDerivative:
         if not self.axes:
             return float(self._values)
         fractions = tuple((x-axis[i])/(axis[i+1]-axis[i])
                           for x, axis, i in zip(point, self._points, cells, strict=True))
-        result = 0.0
+        result: float | FirstDerivative = 0.0
         for corners in product((0, 1), repeat=len(self.axes)):
-            value = float(self._values[tuple(i+b for i, b in zip(cells, corners, strict=True))])
+            value: float | FirstDerivative = float(
+                self._values[tuple(i+b for i, b in zip(cells, corners, strict=True))])
             for b, fraction in zip(corners, fractions, strict=True):
                 value *= fraction if b else 1-fraction
             result += value
         return result
 
-    def value(self, inputs, *, trial=False):
+    def value(self, inputs: Mapping[str, float], *, trial: bool = False) -> float:
         point, cells = self._location(inputs, trial=trial)
         result = self._interpolate(point, cells)
         if not isfinite(result):
             raise ValueError("nonfinite parameter interpolation")
         return result
 
-    def _partial(self, point, cells, index):
-        dual = list(point)
+    def _partial(self, point: Sequence[float], cells: Sequence[int], index: int) -> float:
+        dual: list[float | FirstDerivative] = list(point)
         dual[index] = FirstDerivative(point[index], 1.0)
         result = self._interpolate(dual, cells)
-        return result.slope
+        # The selected axis carries a jet through every corner product.
+        return cast(FirstDerivative, result).slope
 
-    def _exact_partial(self, point, cells, index):
+    def _exact_partial(self, point: Sequence[float], cells: Sequence[int], index: int) -> Fraction:
         """Knot certificate for the actual finite binary data, not a smoothed fit."""
-        point = tuple(Fraction(x) for x in point)
+        exact_point = tuple(Fraction(x) for x in point)
         grid = tuple(tuple(Fraction(x) for x in axis) for axis in self._points)
         total = Fraction(0)
         for corner in product((0, 1), repeat=len(self.axes)):
@@ -178,12 +196,14 @@ class TabulatedScalar:
                 if j == index:
                     value *= Fraction(1 if b else -1)/width
                 else:
-                    fraction = (point[j]-axis[i])/width
+                    fraction = (exact_point[j]-axis[i])/width
                     value *= fraction if b else 1-fraction
             total += value
         return total
 
-    def gradient(self, inputs, *, trial=False):
+    def gradient(
+        self, inputs: Mapping[str, float], *, trial: bool = False,
+    ) -> Mapping[str, float]:
         """Analytic partials; no invented two-sided derivative at a grid kink.
 
         Numerical trial extension is explicit. Public boundary derivatives are
@@ -208,7 +228,7 @@ class TabulatedScalar:
             result[axis[0]] = derivative
         return MappingProxyType(result)
 
-    def positive_coordinate_product_derivative(self, input_name):
+    def positive_coordinate_product_derivative(self, input_name: str) -> bool:
         """Certify d(x*f)/dx > 0 on every cell side, not from sampled points.
 
         For a rectilinear multilinear f this derivative is affine in x and
@@ -233,13 +253,13 @@ class TabulatedScalar:
                     return False
         return True
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"schema_version": TABLE_FUNCTION_VERSION, "table": self.table.to_dict(),
                 "axes": [list(axis) for axis in self.axes], "output_column": self.output_column,
                 "output_unit": self.output_unit, "row_ids": list(self.row_ids)}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         _keys(payload, (
             "schema_version", "table", "axes", "output_column", "output_unit", "row_ids"))
         if payload["schema_version"] != TABLE_FUNCTION_VERSION:
@@ -248,5 +268,5 @@ class TabulatedScalar:
                    payload["output_column"], payload["output_unit"], payload["row_ids"])
 
     @classmethod
-    def from_json(cls, text):
+    def from_json(cls, text: str) -> Self:
         return cls.from_dict(strict_json_loads(text))
