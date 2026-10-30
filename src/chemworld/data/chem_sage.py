@@ -1,14 +1,19 @@
 """Provenanced original ChemSage DAT input and common native Gibbs declarations."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass
+from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any, cast
 
 from chemworld.data.chem_sage_compiler import compile_chem_sage
 from chemworld.data.chem_sage_parser import ChemSageParseError, parse_chem_sage
-from chemworld.data.chem_sage_records import ChemSageInput
+from chemworld.data.chem_sage_records import ChemSageInput, ChemSagePhase
 from chemworld.data.scientific_inputs import InputSource, _keys
-from chemworld.data.tdb import TdbDatabase
+from chemworld.data.tdb import TdbDatabase, TdbPhase
 
 CHEMSAGE_SCHEMA_VERSION = "chemworld-chemsage-1"
 
@@ -19,7 +24,9 @@ class ChemSageDatabase(TdbDatabase):
     excess_pressure_unit: str | None = None
 
     @classmethod
-    def from_string(cls, text, *, source, excess_pressure_unit=None):
+    def from_string(
+        cls, text: str, *, source: InputSource, excess_pressure_unit: str | None = None,
+    ) -> ChemSageDatabase:
         if not isinstance(source, InputSource):
             raise ValueError("ChemSage requires the existing explicit InputSource provenance")
         if excess_pressure_unit not in {None, "Pa", "bar"}:
@@ -29,19 +36,22 @@ class ChemSageDatabase(TdbDatabase):
         return cls(source, text, *compiled, declarations, excess_pressure_unit)
 
     @classmethod
-    def from_file(cls, path, *, source, excess_pressure_unit=None):
-        path = Path(path)
-        if path.stat().st_size > 20*1024*1024:
+    def from_file(
+        cls, path: str | PathLike[str], *, source: InputSource,
+        excess_pressure_unit: str | None = None,
+    ) -> ChemSageDatabase:
+        file_path = Path(path)
+        if file_path.stat().st_size > 20*1024*1024:
             raise ChemSageParseError("ChemSage exceeds 20 MiB")
-        return cls.from_string(path.read_text(encoding="utf-8-sig"), source=source,
+        return cls.from_string(file_path.read_text(encoding="utf-8-sig"), source=source,
                                excess_pressure_unit=excess_pressure_unit)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"schema_version": CHEMSAGE_SCHEMA_VERSION, "source": self.source.to_dict(),
                 "text": self.text, "excess_pressure_unit": self.excess_pressure_unit}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> ChemSageDatabase:
         _keys(payload, ("schema_version", "source", "text", "excess_pressure_unit"))
         if payload["schema_version"] != CHEMSAGE_SCHEMA_VERSION:
             raise ValueError("unsupported ChemSage schema version")
@@ -49,5 +59,6 @@ class ChemSageDatabase(TdbDatabase):
                                excess_pressure_unit=payload["excess_pressure_unit"])
 
     @property
-    def phase_records(self):
-        return MappingProxyType(dict(zip(self.phases, self.declarations.phases, strict=True)))
+    def phase_records(self) -> Mapping[str, ChemSagePhase]:
+        phases = cast(Mapping[str, TdbPhase], self.phases)
+        return MappingProxyType(dict(zip(phases, self.declarations.phases, strict=True)))

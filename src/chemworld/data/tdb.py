@@ -177,7 +177,7 @@ class TdbElement:
 class TdbSpecies:
     name: str
     constituents: tuple[tuple[str, float], ...]
-    charge: int = 0
+    charge: float = 0
 
     @property
     def number_of_atoms(self):

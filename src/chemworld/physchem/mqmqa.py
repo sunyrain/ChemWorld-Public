@@ -3,8 +3,10 @@
 from dataclasses import dataclass, field, replace
 from math import isfinite
 from types import MappingProxyType
+from typing import cast
 
 from chemworld.data.chem_sage import ChemSageDatabase
+from chemworld.data.chem_sage_records import ChemSageMQMQA
 from chemworld.physchem.gibbs_phase import GibbsPhaseModel
 from chemworld.physchem.mqmqa_energy import energies
 from chemworld.physchem.mqmqa_topology import compile_topology
@@ -63,6 +65,8 @@ class MQMQAPhaseModel(GibbsPhaseModel):
             object.__setattr__(self, "components", components)
         topology = compile_topology(self.database, name).restrict(eligible)
         source = self.database.phase_records[name]
+        # compile_topology has validated this phase's SUBG/SUBQ declaration.
+        mqmqa = cast(ChemSageMQMQA, source.mqmqa)
         non_atom_indices = [i for i, e in enumerate(self.database.declarations.header.components)
                             if e not in self.database.elements and e != "VA"]
         if any(m.stoichiometry[i] for m in source.endmembers for i in non_atom_indices):
@@ -70,7 +74,7 @@ class MQMQAPhaseModel(GibbsPhaseModel):
         parameters = tuple(_Curve(p) for p in self.database.parameters if p.phase == name)
         if any(p.source.kind not in {"MQMG", "MQMX"} for p in parameters):
             raise ValueError("MQMQA has an unconsumed contribution type")
-        nc, na = len(source.mqmqa.cations), len(source.mqmqa.anions)
+        nc, na = len(mqmqa.cations), len(mqmqa.anions)
         for item in source.interactions:
             if item.mixing_type not in {3, 4}:
                 raise ValueError("MQMQA source interaction type must be 3 or 4")
@@ -106,7 +110,7 @@ class MQMQAPhaseModel(GibbsPhaseModel):
 
         def is_active(parameter):
             if parameter.source.kind == "MQMG":
-                c, a = source.mqmqa.pair_indices[parameter.source.source_index]
+                c, a = mqmqa.pair_indices[parameter.source.source_index]
                 return {c-1, nc+a-1} <= active
             item = source.interactions[parameter.source.source_index]
             indices = (*item.indices, item.additional_constituent,

@@ -5,9 +5,11 @@ option has an implemented equation. No source text is executed or imported.
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import replace
 from itertools import pairwise
 from math import isfinite, prod
+from typing import TypeVar
 
 from chemworld.data.chem_sage_records import (
     ChemSageEndmember,
@@ -20,6 +22,7 @@ from chemworld.data.chem_sage_records import (
 )
 
 LIMIT = 100000
+_T = TypeVar("_T")
 
 
 class ChemSageParseError(ValueError):
@@ -27,13 +30,14 @@ class ChemSageParseError(ValueError):
 
 
 class _Reader:
-    def __init__(self, text):
+    def __init__(self, text: str) -> None:
         if not isinstance(text, str) or not text.strip() or len(text) > 20*1024*1024:
             raise ChemSageParseError("ChemSage requires nonempty text up to 20 MiB")
         lines = text.splitlines()
         self.title = lines[0]
         self.lines = lines
-        self.tokens, self.status = [], {}
+        self.tokens: list[tuple[str, int, int]] = []
+        self.status: dict[int, str] = {}
         for line_number, original in enumerate(lines[1:], 2):
             line = original
             if len(line) > 25 and line[25] in "!#":
@@ -45,14 +49,14 @@ class _Reader:
             raise ChemSageParseError("ChemSage exceeds two million tokens")
         self.position = 0
 
-    def word(self):
+    def word(self) -> str:
         if self.position == len(self.tokens):
             raise ChemSageParseError("truncated ChemSage declaration")
         value, _, _ = self.tokens[self.position]
         self.position += 1
         return value
 
-    def integer(self):
+    def integer(self) -> int:
         value = self.word()
         if len(value) > 12 or not re.fullmatch(r"[+-]?\d+", value):
             raise ChemSageParseError(f"expected bounded ChemSage integer, got {value[:80]}")
@@ -61,13 +65,13 @@ class _Reader:
             raise ChemSageParseError("ChemSage integer/count exceeds supported bounds")
         return result
 
-    def count(self, *, minimum=0):
+    def count(self, *, minimum: int = 0) -> int:
         value = self.integer()
         if value < minimum:
             raise ChemSageParseError("ChemSage count has an invalid sign or is empty")
         return value
 
-    def real(self):
+    def real(self) -> float:
         value = self.word()
         if not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[ED][+-]?\d+)?", value):
             raise ChemSageParseError(f"expected ChemSage real number, got {value[:80]}")
@@ -76,12 +80,12 @@ class _Reader:
             raise ChemSageParseError("ChemSage coefficients must be finite")
         return result
 
-    def many(self, size, method):
+    def many(self, size: int, method: Callable[[], _T]) -> tuple[_T, ...]:
         if not 0 <= size <= LIMIT:
             raise ChemSageParseError("ChemSage array exceeds supported bounds")
         return tuple(method() for _ in range(size))
 
-    def name(self):
+    def name(self) -> tuple[str, str]:
         if self.position == len(self.tokens):
             raise ChemSageParseError("missing ChemSage name")
         line = self.tokens[self.position][1]
@@ -90,11 +94,13 @@ class _Reader:
             raise ChemSageParseError(f"invalid ChemSage identifier {name[:80]}")
         return name, self.status.get(line, "entered")
 
-    def peek(self):
+    def peek(self) -> str | None:
         return None if self.position == len(self.tokens) else self.tokens[self.position][0]
 
 
-def _interval(reader, header, option, *, transition=False):
+def _interval(
+    reader: _Reader, header: ChemSageHeader, option: int, *, transition: bool = False,
+) -> ChemSageInterval:
     reduced = (option-1) % 12+1
     heat = reduced >= 7
     latent = reader.real() if transition else 0.0
@@ -108,12 +114,14 @@ def _interval(reader, header, option, *, transition=False):
     return ChemSageInterval(upper, coefficients, extra, pressure, latent)
 
 
-def _endmember(reader, header, *, family="CEF", zeta=None):
+def _endmember(
+    reader: _Reader, header: ChemSageHeader, *, family: str = "CEF", zeta: float | None = None,
+) -> ChemSageEndmember:
     name, status = reader.name()
     if reader.peek() == "#":
         reader.word()  # Authored dummy marker, retained in the original text.
     # Some sources include two zero-valued legacy fields after a species name.
-    if (reader.peek() is not None and not re.fullmatch(r"[+-]?\d+", reader.peek())
+    if ((next_word := reader.peek()) is not None and not re.fullmatch(r"[+-]?\d+", next_word)
             and (reader.real() != 0 or reader.real() != 0)):
         raise ChemSageParseError("nonzero legacy species fields lack a declared meaning")
     option = reader.integer()
@@ -150,8 +158,11 @@ def _endmember(reader, header, *, family="CEF", zeta=None):
     return result
 
 
-def _excess(reader, header, *, family="RKM"):
-    records, overrides = [], ()
+def _excess(
+    reader: _Reader, header: ChemSageHeader, *, family: str = "RKM",
+) -> tuple[tuple[ChemSageInteraction, ...], tuple[tuple[str, ...], ...]]:
+    records: list[ChemSageInteraction] = []
+    overrides: tuple[tuple[str, ...], ...] = ()
     while True:
         size = reader.integer()
         if size == 0:
@@ -182,7 +193,10 @@ def _excess(reader, header, *, family="RKM"):
     return tuple(records), overrides
 
 
-def _mqmqa(reader, header, name, status, family, size, gas_slot):
+def _mqmqa(
+    reader: _Reader, header: ChemSageHeader, name: str, status: str,
+    family: str, size: int, gas_slot: bool,
+) -> ChemSagePhase:
     zeta = reader.real() if family == "SUBG" else None
     pair_count, coordination_count = reader.count(minimum=1), reader.count()
     members = tuple(_endmember(reader, header, family=family, zeta=zeta)
@@ -202,7 +216,8 @@ def _mqmqa(reader, header, name, status, family, size, gas_slot):
         raise ChemSageParseError("MQMQA needs unique charged species and complete pair indices")
     coordinations = tuple((reader.many(4, reader.integer), reader.many(4, reader.real))
                          for _ in range(coordination_count))
-    records, overrides = [], ()
+    records: list[ChemSageInteraction] = []
+    overrides: tuple[tuple[str, ...], ...] = ()
     while True:
         mixing_type = reader.integer()
         if mixing_type == 0:
@@ -227,7 +242,7 @@ def _mqmqa(reader, header, name, status, family, size, gas_slot):
                          interactions=tuple(records), overrides=overrides, mqmqa=mqmqa)
 
 
-def _phase(reader, header, size, index):
+def _phase(reader: _Reader, header: ChemSageHeader, size: int, index: int) -> ChemSagePhase:
     name, status = reader.name()
     family = reader.word()
     if family in {"SUBQ", "SUBG"}:
@@ -240,14 +255,16 @@ def _phase(reader, header, size, index):
     base = family[:-1] if family in {"RKMPM", "SUBLM"} else family
     member_family = "AQUEOUS" if base in {"IDWZ", "PITZ"} else base
     members = tuple(_endmember(reader, header, family=member_family) for _ in range(size))
-    ratios, constituents, indices = (1.0,), (), ()
+    ratios: tuple[float, ...] = (1.0,)
+    constituents: tuple[tuple[str, ...], ...] = ()
+    indices: tuple[tuple[int, ...], ...] = ()
     if base == "SUBL":
         count = reader.count(minimum=1)
         ratios = reader.many(count, reader.real)
         if ":" in name:
-            _, atom_count = name.rsplit(":", 1)
+            _, atom_count_text = name.rsplit(":", 1)
             try:
-                atom_count = float(atom_count)
+                atom_count = float(atom_count_text)
             except ValueError as exc:
                 raise ChemSageParseError("invalid sublattice atom-count suffix") from exc
             if not isfinite(atom_count) or atom_count <= 0:
@@ -261,7 +278,8 @@ def _phase(reader, header, size, index):
         indices = tuple(zip(*index_rows, strict=True))
         if any(not 1 <= value <= counts[i] for row in indices for i, value in enumerate(row)):
             raise ChemSageParseError("sublattice endmember index is out of bounds")
-    interactions, overrides = (), ()
+    interactions: tuple[ChemSageInteraction, ...] = ()
+    overrides: tuple[tuple[str, ...], ...] = ()
     if base in {"RKMP", "SUBL"}:
         magnetic, _ = _excess(reader, header, family="MAGNETIC") if afm is not None else ((), ())
         regular, _ = _excess(reader, header)
@@ -272,7 +290,7 @@ def _phase(reader, header, size, index):
                          indices, interactions, overrides, afm, structure)
 
 
-def _parse_reader(reader):
+def _parse_reader(reader: _Reader) -> ChemSageInput:
     components, solutions = reader.count(minimum=1), reader.count()
     sizes = reader.many(solutions, reader.count)
     stoichiometric = reader.count()
@@ -299,7 +317,7 @@ def _parse_reader(reader):
     return ChemSageInput(header, tuple(phases), trailer)
 
 
-def parse_chem_sage(text):
+def parse_chem_sage(text: str) -> ChemSageInput:
     """Return immutable syntax, preserving every declared phase occurrence."""
     reader = _Reader(text)
     try:

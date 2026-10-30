@@ -4,9 +4,11 @@ The Cp primitive is data normalization. It adds no caloric state, numerical
 quadrature, differentiation kernel, or separate thermodynamic evaluator.
 """
 
+from collections.abc import Sequence
 from math import isfinite
 from typing import ClassVar
 
+from chemworld.data.chem_sage_records import ChemSageEndmember, ChemSageHeader, ChemSageInterval
 from chemworld.data.tdb import TdbFunction, TdbSegment
 from chemworld.physchem.caloric_math import FirstDerivative, exponential_minus_one
 from chemworld.physchem.tdb_expressions import TdbExpression
@@ -20,14 +22,17 @@ class ChemSageExpression(TdbExpression):
     _functions: ClassVar[dict] = {**TdbExpression._functions, "EXPM1": exponential_minus_one}
 
 
-def _literal(value):
+def _literal(value: float) -> str:
     number = float(value)
     if not isfinite(number):
         raise ValueError("ChemSage expression constants must be finite")
     return repr(number)
 
 
-def basis_expression(indices, coefficients, *, excess_pressure_unit=None):
+def basis_expression(
+    indices: Sequence[int], coefficients: Sequence[float], *,
+    excess_pressure_unit: str | None = None,
+) -> str:
     if len(indices) != len(coefficients):
         raise ValueError("ChemSage basis indices and coefficients must match")
     if excess_pressure_unit not in {None, "Pa", "bar"}:
@@ -48,7 +53,7 @@ def basis_expression(indices, coefficients, *, excess_pressure_unit=None):
     return "+".join(terms) or "0"
 
 
-def _gibbs_expression(header, interval):
+def _gibbs_expression(header: ChemSageHeader, interval: ChemSageInterval) -> ChemSageExpression:
     parts = [basis_expression(header.gibbs_indices, interval.coefficients)]
     for coefficient, power in interval.extra_powers:
         if coefficient != 0:
@@ -57,7 +62,7 @@ def _gibbs_expression(header, interval):
     return ChemSageExpression("+".join(parts))
 
 
-def _power_thermal_expression(coefficient, power, reference):
+def _power_thermal_expression(coefficient: float, power: float, reference: float) -> str:
     """Cp=c*T**p -> delta H - T*delta S, referenced at positive Tr."""
     c, tr = _literal(coefficient), _literal(reference)
     ratio = f"(T/({tr}))"
@@ -77,7 +82,9 @@ def _power_thermal_expression(coefficient, power, reference):
             f"-{ratio}*EXPM1(({p})*{log_ratio})/({p}))")
 
 
-def _cp_expression(interval, reference, enthalpy, entropy):
+def _cp_expression(
+    interval: ChemSageInterval, reference: float, enthalpy: float, entropy: float,
+) -> ChemSageExpression:
     if len(interval.coefficients) != 4:
         raise ValueError("ChemSage Cp requires four standard coefficients")
     terms = [f"({_literal(enthalpy)})-T*({_literal(entropy)})"]
@@ -88,14 +95,16 @@ def _cp_expression(interval, reference, enthalpy, entropy):
     return ChemSageExpression("+".join(terms))
 
 
-def _enthalpy_entropy(expression, temperature):
+def _enthalpy_entropy(expression: TdbExpression, temperature: float) -> tuple[float, float]:
     response = expression.evaluate({"T": FirstDerivative(temperature, 1), "P": 101325.})
     value = response.value if isinstance(response, FirstDerivative) else response
     slope = response.slope if isinstance(response, FirstDerivative) else 0.
     return float(value-temperature*slope), float(-slope)
 
 
-def endmember_function(member, header, name):
+def endmember_function(
+    member: ChemSageEndmember, header: ChemSageHeader, name: str,
+) -> TdbFunction:
     if not member.intervals:
         raise ValueError("ChemSage endmember requires at least one interval")
     reduced = (member.option-1) % 12+1

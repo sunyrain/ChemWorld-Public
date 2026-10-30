@@ -2,12 +2,27 @@
 
 import re
 from collections import Counter
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from math import isclose, isfinite
 from types import MappingProxyType
+from typing import cast
 
 from chemworld.data.chem_sage_functions import basis_expression, endmember_function
-from chemworld.data.tdb import TdbFunction, TdbParameter, TdbPhase, TdbSegment, TdbSpecies
+from chemworld.data.chem_sage_records import (
+    ChemSageEndmember,
+    ChemSageHeader,
+    ChemSageInput,
+    ChemSagePhase,
+)
+from chemworld.data.tdb import (
+    TdbFunction,
+    TdbParameter,
+    TdbPhase,
+    TdbSegment,
+    TdbSpecies,
+    TdbTypeDefinition,
+)
 from chemworld.physchem.elements import ELEMENTS
 from chemworld.physchem.tdb_expressions import TdbExpression
 
@@ -21,12 +36,21 @@ class ChemSageElement:
     entropy_298_J_mol_K: None = None
 
 
-def is_auxiliary(name):
+_ConstituentArray = tuple[tuple[str, ...], ...]
+CompiledChemSage = tuple[
+    Mapping[str, ChemSageElement], Mapping[str, TdbSpecies], Mapping[str, TdbPhase],
+    Mapping[str, TdbFunction], tuple[TdbParameter, ...], tuple[TdbTypeDefinition, ...],
+    tuple[tuple[str, str], ...],
+]
+
+
+def is_auxiliary(name: str) -> bool:
     return name.startswith("E(") or name in {"E", "EA", "E-", "/-"}
 
 
-def phase_identifiers(phases):
-    counts, seen = Counter(p.name for p in phases), Counter()
+def phase_identifiers(phases: Sequence[ChemSagePhase]) -> tuple[str, ...]:
+    counts = Counter(p.name for p in phases)
+    seen: Counter[str] = Counter()
     result = []
     for phase in phases:
         seen[phase.name] += 1
@@ -37,7 +61,7 @@ def phase_identifiers(phases):
     return tuple(result)
 
 
-def _from_formula(name, elements):
+def _from_formula(name: str, elements: Collection[str]) -> TdbSpecies:
     if name == "VA":
         return TdbSpecies(name, (("VA", 1.),))
     if is_auxiliary(name):
@@ -51,7 +75,8 @@ def _from_formula(name, elements):
         return TdbSpecies(name, ((base, 1.),), charge)
     # Only declared elemental symbols may appear in a derived formula. Prefer
     # the longest valid symbol, as in the original uppercase ChemSage names.
-    atoms, offset = {}, 0
+    atoms: dict[str, float] = {}
+    offset = 0
     while offset < len(base):
         candidates = [e for e in elements if base.startswith(e, offset)]
         if not candidates:
@@ -67,7 +92,9 @@ def _from_formula(name, elements):
     return TdbSpecies(name, tuple(sorted(atoms.items())), charge)
 
 
-def _member_species(member, header, elements):
+def _member_species(
+    member: ChemSageEndmember, header: ChemSageHeader, elements: Collection[str],
+) -> TdbSpecies:
     atoms = tuple(sorted((e, n) for e, n in zip(header.components, member.stoichiometry,
                                               strict=True) if e in elements and n != 0))
     if any(n < 0 for _, n in atoms):
@@ -78,7 +105,7 @@ def _member_species(member, header, elements):
     return TdbSpecies(member.name, atoms, charge)
 
 
-def _ion_composition(name, elements):
+def _ion_composition(name: str, elements: Collection[str]) -> TdbSpecies:
     # Several source files repeat a valence in the species label as well as
     # the separate charge column. It is not an atom-count suffix (Fe2+, Na+1).
     for element in sorted(elements, key=len, reverse=True):
@@ -88,12 +115,12 @@ def _ion_composition(name, elements):
     return _from_formula(name, elements)
 
 
-def _constant_curve(name, value):
+def _constant_curve(name: str, value: float) -> TdbFunction:
     return TdbFunction(name, (TdbSegment(.01, 10000., TdbExpression(repr(float(value)))),))
 
 
-def _interaction_array(indices, array):
-    result = [[] for _ in array]
+def _interaction_array(indices: Sequence[int], array: _ConstituentArray) -> _ConstituentArray:
+    result: list[list[str]] = [[] for _ in array]
     for raw in indices:
         offset = raw-1
         for i, subl in enumerate(array):
@@ -108,7 +135,9 @@ def _interaction_array(indices, array):
     return tuple(tuple(subl) for subl in result)
 
 
-def compile_chem_sage(parsed, *, excess_pressure_unit=None):
+def compile_chem_sage(
+    parsed: ChemSageInput, *, excess_pressure_unit: str | None = None,
+) -> CompiledChemSage:
     header = parsed.header
     known = {name.upper() for name in ELEMENTS}
     elements = {e: ChemSageElement(e, mass) for e, mass in zip(
@@ -116,17 +145,23 @@ def compile_chem_sage(parsed, *, excess_pressure_unit=None):
     unknown = tuple(e for e in header.components if e not in known and not is_auxiliary(e)
                     and e != "VA")
     species = {e: TdbSpecies(e, ((e, 1.),)) for e in elements}
-    phases, parameters = {}, []
+    phases: dict[str, TdbPhase] = {}
+    parameters: list[TdbParameter] = []
 
-    def insert(item):
+    def insert(item: TdbSpecies) -> None:
         if item.name in species and species[item.name] != item:
             raise ValueError(f"ChemSage species {item.name} has conflicting elemental identities")
         species[item.name] = item
 
     for phase_index, (key, source) in enumerate(zip(phase_identifiers(parsed.phases), parsed.phases,
                                                    strict=True)):
-        hints = {"source_format": "ChemSage", "source_phase_index": phase_index,
-                 "phase_family": source.phase_type, "initial_status": source.status}
+        hints: dict[str, object] = {
+            "source_format": "ChemSage", "source_phase_index": phase_index,
+            "phase_family": source.phase_type, "initial_status": source.status,
+        }
+        groups: dict[str, int] = {}
+        array: _ConstituentArray
+        ratios: tuple[float, ...]
         limits = [f"component basis requires explicit mapping: {e}" for e in unknown]
         family = source.phase_type
         if family in {"IDVD", "IDWZ", "PITZ"}:
@@ -176,8 +211,11 @@ def compile_chem_sage(parsed, *, excess_pressure_unit=None):
                 raise ValueError("ChemSage magnetic phase requires a positive AFM source factor")
             hints.update(magnetic_afm_factor=-1/source.magnetic_afm_factor,
                          magnetic_structure_factor=source.magnetic_structure_factor)
-        aux = {e: [] for e in header.components if is_auxiliary(e)}
+        aux: dict[str, list[tuple[_ConstituentArray, float]]] = {
+            e: [] for e in header.components if is_auxiliary(e)
+        }
         suppressed = []
+        end_array: _ConstituentArray
         for i, member in enumerate(source.endmembers):
             if source.mqmqa:
                 c, a = source.mqmqa.pair_indices[i]
@@ -192,7 +230,7 @@ def compile_chem_sage(parsed, *, excess_pressure_unit=None):
             if member.status != "entered":
                 suppressed.append((end_array, member.status))
             if not source.mqmqa and family not in {"IDVD", "IDWZ", "PITZ"}:
-                derived = {}
+                derived: dict[str, float] = {}
                 for ratio, subl in zip(ratios, end_array, strict=True):
                     for e, count in species[subl[0]].constituents:
                         if e not in {"VA", "/-"}:
@@ -215,14 +253,14 @@ def compile_chem_sage(parsed, *, excess_pressure_unit=None):
                                            curve, source_index=i))
             if member.curie_temperature_K is not None:
                 for kind, value in (("TC", member.curie_temperature_K),
-                                    ("BMAGN", member.magnetic_moment)):
+                                    ("BMAGN", cast(float, member.magnetic_moment))):
                     parameters.append(TdbParameter(kind, key, end_array, 0, _constant_curve(
                         f"CS_{phase_index}_{kind}_{i}", value), source_index=i))
             if member.chemical_group is not None:
-                groups = dict(hints.get("chemical_groups", ()))
                 groups[member.name] = member.chemical_group
                 hints["chemical_groups"] = tuple(groups.items())
-                if not isclose(member.stoichiometric_factor, 1., rel_tol=0, abs_tol=1e-12):
+                if not isclose(cast(float, member.stoichiometric_factor), 1.,
+                               rel_tol=0, abs_tol=1e-12):
                     limits.append("non-unity QKTO stoichiometric factor needs its declared model")
         for i, item in enumerate(source.interactions):
             # MQ metadata stays in immutable source records; curves still
