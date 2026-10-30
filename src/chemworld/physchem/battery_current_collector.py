@@ -5,10 +5,13 @@ This module deliberately contains no time integration or electrochemical state;
 it is the geometry/port primitive consumed by :mod:`battery_collector_spm`.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from math import isfinite
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 
 @dataclass(frozen=True)
@@ -49,40 +52,42 @@ class CollectorGeometrySpec:
             raise ValueError("negative_tab must be left or right")
 
     @property
-    def dz_m(self):
+    def dz_m(self) -> float:
         return self.height_m / self.cells
 
     @property
-    def z_centres_m(self):
+    def z_centres_m(self) -> NDArray[np.float64]:
         return (np.arange(self.cells, dtype=float) + 0.5) * self.dz_m
 
     @property
-    def negative_sheet_conductance_s(self):
+    def negative_sheet_conductance_s(self) -> float:
         return self.negative_conductivity_S_m * self.negative_thickness_m * self.width_m
 
     @property
-    def positive_sheet_conductance_s(self):
+    def positive_sheet_conductance_s(self) -> float:
         return self.positive_conductivity_S_m * self.positive_thickness_m * self.width_m
 
     @property
-    def negative_green(self):
+    def negative_green(self) -> NDArray[np.float64]:
         z = self.z_centres_m
         distance = z if self.negative_tab == "left" else self.height_m - z
         return np.minimum(distance[:, None], distance[None, :]) / self.negative_sheet_conductance_s
 
     @property
-    def positive_green(self):
+    def positive_green(self) -> NDArray[np.float64]:
         z = self.z_centres_m
         distance = self.height_m - z
         return np.minimum(distance[:, None], distance[None, :]) / self.positive_sheet_conductance_s
 
-    def _validate_currents(self, q, name):
+    def _validate_currents(self, q: ArrayLike, name: str) -> NDArray[np.float64]:
         result = np.asarray(q, dtype=float)
         if result.shape != (self.cells,) or not np.all(np.isfinite(result)):
             raise ValueError(f"{name} must be a finite vector of length cells")
         return result
 
-    def potentials(self, q_negative, q_positive, tab_voltage_V):
+    def potentials(
+        self, q_negative: ArrayLike, q_positive: ArrayLike, tab_voltage_V: float,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Return local collector potentials, with the negative tab as gauge.
 
         ``tab_voltage_V`` is the positive physical tab minus the negative tab.
@@ -97,7 +102,9 @@ class CollectorGeometrySpec:
         positive = float(tab_voltage_V) - self.positive_green @ qp
         return negative, positive
 
-    def face_currents(self, q_negative, q_positive):
+    def face_currents(
+        self, q_negative: ArrayLike, q_positive: ArrayLike,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Current through each collector face, oriented left-to-right.
 
         The returned arrays have ``cells + 1`` entries and include the tab
@@ -116,7 +123,9 @@ class CollectorGeometrySpec:
         pos = np.r_[0.0, -np.cumsum(qp)]
         return neg, pos
 
-    def boundary_voltage_v(self, positive_potential, *, source_linear=True):
+    def boundary_voltage_v(
+        self, positive_potential: ArrayLike, *, source_linear: bool = True,
+    ) -> float:
         """Source-style positive boundary voltage diagnostic.
 
         Finite-volume source codes commonly extrapolate the right tab from the
@@ -134,7 +143,10 @@ class CollectorGeometrySpec:
         return float(values[-1] + 0.5 * self.dz_m * slope)
 
 
-def collector_potentials(geometry, q_negative, q_positive, tab_voltage_V):
+def collector_potentials(
+    geometry: CollectorGeometrySpec, q_negative: ArrayLike, q_positive: ArrayLike,
+    tab_voltage_V: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Functional wrapper used by tests and downstream readout code."""
     if not isinstance(geometry, CollectorGeometrySpec):
         raise TypeError("geometry must be CollectorGeometrySpec")

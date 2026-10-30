@@ -13,10 +13,15 @@ Surface SOC uses linear extrapolation of the last two cell centers, matching
 the explicitly selected upstream ``surf`` convention (use_bcs=False).
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import isfinite
+from typing import Any, Self, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import sparse
 
 from chemworld.data.scientific_inputs import ScientificTable, _keys, _number, _sequence, _text
@@ -35,10 +40,10 @@ class TheveninDiffusionSpec:
     faces: tuple[float, ...]
     convention: str = DIFFUSION_CONVENTION
     tau_s: float = field(init=False)
-    weights: np.ndarray = field(init=False, repr=False, compare=False)
-    centers: np.ndarray = field(init=False, repr=False, compare=False)
+    weights: NDArray[np.float64] = field(init=False, repr=False, compare=False)
+    centers: NDArray[np.float64] = field(init=False, repr=False, compare=False)
     _operator: sparse.csr_matrix = field(init=False, repr=False, compare=False)
-    _surface_weights: np.ndarray = field(init=False, repr=False, compare=False)
+    _surface_weights: NDArray[np.float64] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.parameters, ScientificTable) or self.parameters.kind != "parameters":
@@ -50,7 +55,8 @@ class TheveninDiffusionSpec:
         row = rows[self.parameter_row_id]
         if set(row.values) != {TAU_COLUMN}:
             raise ValueError("diffusion parameter row requires only diffusion_time_constant_s")
-        tau = convert_value(row.values[TAU_COLUMN].value, row.values[TAU_COLUMN].unit, "s")
+        tau = convert_value(cast(float, row.values[TAU_COLUMN].value),
+                            row.values[TAU_COLUMN].unit, "s")
         if not isfinite(tau) or tau <= 0:
             raise ValueError("diffusion time constant must be finite and positive")
         if self.convention != DIFFUSION_CONVENTION:
@@ -77,30 +83,32 @@ class TheveninDiffusionSpec:
         object.__setattr__(self, "_surface_weights", surface_weights)
 
     @property
-    def coordinate_keys(self):
+    def coordinate_keys(self) -> tuple[str, ...]:
         return tuple(f"thevenin:diffusion_deviation_{i}" for i in range(len(self.weights)-1))
 
     @property
-    def coordinate_declarations(self):
+    def coordinate_declarations(self) -> tuple[CoupledCoordinate, ...]:
         return tuple(CoupledCoordinate(key, "dimensionless", 1.) for key in self.coordinate_keys)
 
-    def deviations(self, coordinates):
+    def deviations(self, coordinates: Mapping[str, float]) -> NDArray[np.float64]:
         values = np.array([coordinates[key] for key in self.coordinate_keys], dtype=float)
         return np.r_[values, -np.dot(self.weights[:-1], values)/self.weights[-1]]
 
-    def profile(self, mean_soc, coordinates):
+    def profile(self, mean_soc: float, coordinates: Mapping[str, float]) -> NDArray[np.float64]:
         return float(mean_soc)+self.deviations(coordinates)
 
-    def surface_soc(self, mean_soc, coordinates):
+    def surface_soc(self, mean_soc: float, coordinates: Mapping[str, float]) -> float:
         return float(mean_soc)+float(self._surface_weights @ self.deviations(coordinates))
 
     @property
-    def surface_deviation_gradient(self):
+    def surface_deviation_gradient(self) -> NDArray[np.float64]:
         """Surface derivative w.r.t. independent deviations, for local analysis."""
         return (self._surface_weights[:-1]
                 - self._surface_weights[-1]*self.weights[:-1]/self.weights[-1])
 
-    def deviation_rates(self, coordinates, current_A, capacity_C):
+    def deviation_rates(
+        self, coordinates: Mapping[str, float], current_A: float, capacity_C: float,
+    ) -> dict[str, float]:
         if not isfinite(current_A) or not isfinite(capacity_C) or capacity_C <= 0:
             raise ValueError("diffusion current/capacity must be finite and capacity positive")
         rates = self._operator @ self.deviations(coordinates)
@@ -108,7 +116,9 @@ class TheveninDiffusionSpec:
         # retained rates removes mean_SOC'=-I/Q, preserving the sole charge state.
         return dict(zip(self.coordinate_keys, rates[:-1]+current_A/capacity_C, strict=True))
 
-    def validate_profile(self, mean_soc, coordinates, lower, upper):
+    def validate_profile(
+        self, mean_soc: float, coordinates: Mapping[str, float], lower: float, upper: float,
+    ) -> None:
         profile = self.profile(mean_soc, coordinates)
         surface = self.surface_soc(mean_soc, coordinates)
         guard = 32*np.spacing(1.)
@@ -117,12 +127,12 @@ class TheveninDiffusionSpec:
                 or max(float(profile.max()), surface) > upper+guard):
             raise ValueError("Thevenin internal/surface SOC is outside its physical domain")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"parameters": self.parameters.to_dict(), "parameter_row_id": self.parameter_row_id,
                 "faces": list(self.faces), "convention": self.convention}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         _keys(payload, ("parameters", "parameter_row_id", "faces", "convention"))
         return cls(ScientificTable.from_dict(payload["parameters"]), payload["parameter_row_id"],
                    payload["faces"], payload["convention"])

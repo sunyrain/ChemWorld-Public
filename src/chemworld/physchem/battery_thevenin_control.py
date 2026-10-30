@@ -6,13 +6,17 @@ positive-current fixed point is generally unstable, not silently stabilised.
 These declarations own neither a clock nor an integrator.
 """
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 from math import isfinite
 from types import MappingProxyType
+from typing import Any, Self, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 from chemworld.data.scientific_inputs import ScientificTable, _keys, _text
 from chemworld.foundation.units import convert_value
@@ -21,6 +25,7 @@ from chemworld.physchem.coupled_system import CoupledCoordinate
 from chemworld.physchem.reactor_shared import ScalarControlProgram
 from chemworld.physchem.residual_system import ResidualDomainError, ResidualVariable
 from chemworld.physchem.root_isolation import isolate_roots
+from chemworld.physchem.tabulated_functions import TabulatedScalar
 
 CONTROLLER_CURRENT = "thevenin:controller_current_A"
 CONTROL_UNITS = {
@@ -64,7 +69,7 @@ class TheveninControlSpec:
         if row.values.keys() != CONTROL_UNITS.keys():
             raise ValueError("Thevenin controller constants must match its declared equations")
         values = {
-            key: convert_value(row.values[key].value, row.values[key].unit, unit)
+            key: convert_value(cast(float, row.values[key].value), row.values[key].unit, unit)
             for key, unit in CONTROL_UNITS.items()
         }
         if any(
@@ -82,16 +87,16 @@ class TheveninControlSpec:
         object.__setattr__(self, "_native", MappingProxyType(values))
 
     @property
-    def native_parameters(self):
+    def native_parameters(self) -> Mapping[str, float]:
         return self._native
 
     @property
-    def coordinate_declarations(self):
+    def coordinate_declarations(self) -> tuple[CoupledCoordinate, ...]:
         # Internal windup q is not the terminal current: CCCV q can legitimately
         # lie below the imposed Icc. Actual-current stopping belongs to the port.
         return (CoupledCoordinate(CONTROLLER_CURRENT, "A", self._native["current_scale_A"]),)
 
-    def rate(self, mode, q, current, voltage, target):
+    def rate(self, mode: str, q: float, current: float, voltage: float, target: float) -> float:
         p = self._native
         if mode == "differential_power":
             return (
@@ -112,7 +117,7 @@ class TheveninControlSpec:
                     / p["voltage_scale_V"] / p["voltage_response_time_s"] * (voltage - target))
         return 0.0
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "parameters": self.parameters.to_dict(),
             "parameter_row_id": self.parameter_row_id,
@@ -120,7 +125,7 @@ class TheveninControlSpec:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         _keys(payload, ("parameters", "parameter_row_id", "convention"))
         return cls(
             ScientificTable.from_dict(payload["parameters"]),
@@ -175,18 +180,20 @@ class TheveninControlProgram:
             raise ValueError("this control mode does not accept a current-branch declaration")
 
     @property
-    def unit(self):
+    def unit(self) -> str:
         return self.target.unit
 
     @property
-    def setpoints(self):
+    def setpoints(self) -> tuple[tuple[float, float], ...]:
         return self.target.setpoints
 
-    def value_at(self, time_s):
+    def value_at(self, time_s: float) -> float:
         return self.target.value_at(time_s)
 
-    def to_dict(self):
-        payload = {"control_mode": self.control_mode, "target": self.target.to_dict()}
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "control_mode": self.control_mode, "target": self.target.to_dict(),
+        }
         if self.current_limit is not None:
             payload["current_limit"] = self.current_limit.to_dict()
         if self.current_branch_A is not None:
@@ -194,7 +201,7 @@ class TheveninControlProgram:
         return payload
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         _keys(payload, ("control_mode", "target"), optional=("current_limit", "current_branch_A"))
         for key in ("target", "current_limit"):
             if key in payload:
@@ -209,7 +216,9 @@ class TheveninControlProgram:
         )
 
 
-def thevenin_control_program(program):
+def thevenin_control_program(
+    program: TheveninControlProgram | ScalarControlProgram | Mapping[str, Any],
+) -> TheveninControlProgram:
     """Parse both historical scalar CC/CV and explicit named declarations."""
     if isinstance(program, TheveninControlProgram):
         return program
@@ -223,7 +232,10 @@ def thevenin_control_program(program):
     raise ValueError("legacy Thevenin scalar programs support only CC or CV")
 
 
-def isolate_control_current(resistance, inputs, open_voltage, target, branch, mode, scale):
+def isolate_control_current(
+    resistance: TabulatedScalar, inputs: Mapping[str, float], open_voltage: float,
+    target: float, branch: tuple[float, float], mode: str, scale: float,
+) -> float:
     """Certify every instantaneous root on the declared branch with common isolation.
 
     At fixed SOC/T, rectilinear R(I) is piecewise affine. The power residual
@@ -238,7 +250,7 @@ def isolate_control_current(resistance, inputs, open_voltage, target, branch, mo
     )
     nodes = (lo, *(v for v in grid if lo < v < hi), hi)
 
-    def rvalue(current):
+    def rvalue(current: float) -> float:
         supplied = {**inputs, "current_A": current}
         return resistance.value({key: supplied[key] for key, _, _ in resistance.axes}, trial=True)
 
@@ -248,18 +260,18 @@ def isolate_control_current(resistance, inputs, open_voltage, target, branch, mo
         slope = (rb - ra) / (b - a)
         segments.append((a, b, ra - slope * a, slope))
 
-    def coefficients(current):
+    def coefficients(current: float) -> tuple[float, float]:
         return next(
             ((a, b) for low, high, a, b in segments if low <= current <= high),
             segments[0][2:] if current < lo else segments[-1][2:],
         )
 
-    def function(values):
+    def function(values: Sequence[float] | NDArray[np.float64]) -> NDArray[np.float64]:
         i = values[0]
         voltage = open_voltage - i * rvalue(i)
         return np.array([i * voltage - target if mode == "power" else voltage - i * target])
 
-    def jacobian(values):
+    def jacobian(values: Sequence[float] | NDArray[np.float64]) -> NDArray[np.float64]:
         i = values[0]
         a, b = coefficients(i)
         return np.array(
@@ -272,7 +284,10 @@ def isolate_control_current(resistance, inputs, open_voltage, target, branch, mo
             ]
         )
 
-    def enclosure(lower, upper):
+    def enclosure(
+        lower: Sequence[float] | NDArray[np.float64],
+        upper: Sequence[float] | NDArray[np.float64],
+    ) -> tuple[tuple[Interval, ...], tuple[tuple[Interval, ...], ...]]:
         values, slopes = [], []
         for a, b, intercept, slope in segments:
             left, right = max(a, lower[0]), min(b, upper[0])
@@ -286,7 +301,7 @@ def isolate_control_current(resistance, inputs, open_voltage, target, branch, mo
                 values.append(open_voltage - (intercept + target) * i - slope * i**2)
                 slopes.append(-intercept - 2 * slope * i - target)
 
-        def hull(xs):
+        def hull(xs: Sequence[Interval]) -> Interval:
             return Interval(min(v.lower for v in xs), max(v.upper for v in xs))
 
         return (hull(values),), ((hull(slopes),),)
