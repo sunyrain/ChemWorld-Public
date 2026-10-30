@@ -97,7 +97,7 @@ def _world_matches(protocol, model_id, world):
         )
     }
     inputs = {
-        node.get("id"): float(node.get("value"))
+        node.attrib["id"]: float(node.attrib["value"])
         for node in tree.findall(
             namespace + "model/" + namespace + "listOfParameters/" + namespace + "parameter"
         )

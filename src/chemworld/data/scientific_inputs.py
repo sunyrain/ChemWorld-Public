@@ -10,10 +10,11 @@ import csv
 import io
 import json
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from math import isfinite
 from types import MappingProxyType
+from typing import Any, Never, cast
 
 from chemworld.foundation.units import convert_value, unit_spec
 from chemworld.physchem.data_conflicts import DataSourceProvenance
@@ -25,13 +26,13 @@ _CELL_FIELDS = ("value", "unit", "uncertainty", "uncertainty_note", "quality")
 _ROW_FIELDS = ("row_id", "source_id", "group_id", "sample_id", "split")
 
 
-def _text(value, field):
+def _text(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.strip() or value != value.strip():
         raise ValueError(f"{field} requires nonempty text without surrounding whitespace")
     return value
 
 
-def _number(value, field):
+def _number(value: object, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} requires a finite number")
     try:
@@ -45,7 +46,7 @@ def _number(value, field):
     return number
 
 
-def _keys(payload, required, *, optional=()):
+def _keys(payload: object, required: Collection[str], *, optional: Collection[str] = ()) -> None:
     if not isinstance(payload, Mapping) or any(not isinstance(key, str) for key in payload):
         raise ValueError("scientific input must be an object")
     missing, extra = set(required) - payload.keys(), payload.keys() - set(required) - set(optional)
@@ -55,14 +56,15 @@ def _keys(payload, required, *, optional=()):
         )
 
 
-def _sequence(value, field):
+def _sequence(value: object, field: str) -> Sequence[Any]:
     if not isinstance(value, (list, tuple)):
         raise ValueError(f"{field} must be a list")
     return value
 
 
-def strict_json_loads(text):
-    def pairs(items):
+def strict_json_loads(text: str) -> Any:
+    """Decode raw JSON; domain constructors validate its shape and scalar fields."""
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
         result = {}
         for key, value in items:
             if key in result:
@@ -70,7 +72,7 @@ def strict_json_loads(text):
             result[key] = value
         return result
 
-    def invalid_constant(value):
+    def invalid_constant(value: str) -> Never:
         raise ValueError(f"nonfinite JSON number: {value}")
 
     return json.loads(text, object_pairs_hook=pairs, parse_constant=invalid_constant)
@@ -89,11 +91,11 @@ class InputSource:
         # An explicit 'unknown/not established' licence is a declaration, not
         # permission to redistribute. No importer infers licensing from code.
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"provenance": self.provenance.to_dict(), "data_kind": self.data_kind}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> InputSource:
         _keys(payload, ("provenance", "data_kind"))
         raw = payload["provenance"]
         _keys(
@@ -130,7 +132,7 @@ class InputValue:
         if self.uncertainty is not None and _number(self.uncertainty, "uncertainty") < 0:
             raise ValueError("standard uncertainty must be nonnegative")
 
-    def to(self, unit):
+    def to(self, unit: str) -> InputValue:
         # Standard uncertainty is a difference, so Celsius offsets cancel.
         scale = abs(convert_value(1.0, self.unit, unit) - convert_value(0.0, self.unit, unit))
         return replace(
@@ -139,11 +141,11 @@ class InputValue:
             uncertainty=None if self.uncertainty is None else self.uncertainty * scale,
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str | float | None]:
         return {key: getattr(self, key) for key in _CELL_FIELDS}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> InputValue:
         _keys(payload, _CELL_FIELDS)
         return cls(**payload)
 
@@ -174,19 +176,19 @@ class QuantityColumn:
         if self.role != "observation" and normalized.quality != "valid":
             raise ValueError("parameters and conditions must be valid numeric values")
         if normalized.quality == "valid" and not (
-            self.valid_range[0] <= normalized.value <= self.valid_range[1]
+            self.valid_range[0] <= cast(float, normalized.value) <= self.valid_range[1]
         ):
             raise ValueError(f"{self.quantity_id} is outside its declared valid range")
         return normalized
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "quantity_id": self.quantity_id, "unit": self.unit, "role": self.role,
             "valid_range": list(self.valid_range), "reference_state": self.reference_state,
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> QuantityColumn:
         _keys(payload, ("quantity_id", "unit", "role", "valid_range", "reference_state"))
         return cls(**payload)
 
@@ -205,14 +207,14 @@ class ScientificRow:
             _text(getattr(self, key), key)
         object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             **{key: getattr(self, key) for key in _ROW_FIELDS},
             "values": {key: value.to_dict() for key, value in self.values.items()},
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> ScientificRow:
         _keys(payload, (*_ROW_FIELDS, "values"))
         if not isinstance(payload["values"], Mapping):
             raise ValueError("row values must be an object")
@@ -250,7 +252,10 @@ class ScientificTable:
         splits = {"parameters"} if self.kind == "parameters" else {
             "train", "validation", "test", "unused",
         }
-        seen_rows, seen_samples, group_splits, normalized = set(), set(), {}, []
+        seen_rows: set[str] = set()
+        seen_samples: set[tuple[str, str]] = set()
+        group_splits: dict[str, str] = {}
+        normalized: list[ScientificRow] = []
         for row in self.rows:
             if row.source_id not in sources:
                 raise ValueError(f"undefined source: {row.source_id}")
@@ -270,7 +275,7 @@ class ScientificTable:
             }))
         object.__setattr__(self, "rows", tuple(normalized))
 
-    def rows_for(self, split):
+    def rows_for(self, split: str) -> tuple[ScientificRow, ...]:
         allowed = {"parameters"} if self.kind == "parameters" else {
             "train", "validation", "test", "unused",
         }
@@ -278,7 +283,7 @@ class ScientificTable:
             raise ValueError("unknown data split")
         return tuple(row for row in self.rows if row.split == split)
 
-    def summary(self):
+    def summary(self) -> dict[str, str | int | dict[str, int]]:
         kinds = {source.provenance.source_id: source.data_kind for source in self.sources}
         return {
             "dataset_id": self.dataset_id, "kind": self.kind,
@@ -291,7 +296,7 @@ class ScientificTable:
             )),
         }
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": SCIENTIFIC_TABLE_VERSION, "dataset_id": self.dataset_id,
             "kind": self.kind, "columns": [col.to_dict() for col in self.columns],
@@ -300,7 +305,7 @@ class ScientificTable:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> ScientificTable:
         _keys(payload, ("schema_version", "dataset_id", "kind", "columns", "sources", "rows"))
         if payload["schema_version"] != SCIENTIFIC_TABLE_VERSION:
             raise ValueError("unsupported scientific table schema")
@@ -312,10 +317,10 @@ class ScientificTable:
         )
 
     @classmethod
-    def from_json(cls, text):
+    def from_json(cls, text: str) -> ScientificTable:
         return cls.from_dict(strict_json_loads(text))
 
-    def to_csv(self):
+    def to_csv(self) -> str:
         stream = io.StringIO(newline="")
         names = [*_ROW_FIELDS, *(
             f"{col.quantity_id}.{field}" for col in self.columns for field in _CELL_FIELDS
@@ -331,7 +336,7 @@ class ScientificTable:
         return stream.getvalue()
 
     @classmethod
-    def from_csv(cls, text, metadata):
+    def from_csv(cls, text: str, metadata: Mapping[str, Any]) -> ScientificTable:
         """Load wide CSV with an explicit table metadata object (without rows).
 
         sample_id identifies one acquisition, including all its measured columns;
@@ -348,11 +353,16 @@ class ScientificTable:
         for raw in reader:
             if set(raw) != required or any(value is None for value in raw.values()):
                 raise ValueError(f"CSV row {reader.line_num} has missing or extra cells")
+            # Exact headers and row width above exclude DictReader's rest key/list.
+            fields = cast(dict[str, str], raw)
             values = {}
             for column in columns:
-                cell = {key: raw[f"{column}.{key}"] for key in _CELL_FIELDS}
+                cell: dict[str, str | float | None] = {
+                    key: fields[f"{column}.{key}"] for key in _CELL_FIELDS
+                }
                 for key in ("value", "uncertainty"):
-                    cell[key] = None if cell[key] == "" else float(cell[key])
+                    text_value = fields[f"{column}.{key}"]
+                    cell[key] = None if text_value == "" else float(text_value)
                 values[column] = cell
             rows.append({**{key: raw[key] for key in _ROW_FIELDS}, "values": values})
         return cls.from_dict({**metadata, "rows": rows})

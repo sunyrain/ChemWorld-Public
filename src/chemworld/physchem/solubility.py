@@ -150,10 +150,9 @@ class HansenParameters:
             raise ValueError("unknown Hansen parameter schema")
         return cls(
             payload["component_id"],
-            *(
-                InputValue.from_dict(payload[k])
-                for k in ("dispersion", "polar", "hydrogen_bonding")
-            ),
+            InputValue.from_dict(payload["dispersion"]),
+            InputValue.from_dict(payload["polar"]),
+            InputValue.from_dict(payload["hydrogen_bonding"]),
             DataSourceProvenance.from_dict(payload["source"]),
             payload["record_id"],
         )

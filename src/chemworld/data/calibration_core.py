@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from math import exp, isfinite, log
+from typing import Any
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -204,7 +205,7 @@ class MeasurementCalibration:
             return {**self.values(full_coordinates(x)), **fixed}
 
         self._fit_started = True
-        report = {
+        report: dict[str, Any] = {
             "schema_version": self.schema_version,
             "dataset": self.table.summary(),
             "sources": [source.to_dict() for source in self.table.sources],

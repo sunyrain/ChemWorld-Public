@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from chemworld.data.scientific_inputs import InputValue, ScientificTable
 
@@ -18,7 +18,10 @@ class SieveSpecification:
 
     @property
     def opening_m(self) -> float:
-        return self.values["opening"].to("m").value
+        value = self.values["opening"].to("m").value
+        if value is None:
+            raise ValueError("sieve opening is unavailable")
+        return value
 
 
 class SieveCatalog:
@@ -47,7 +50,7 @@ class SieveCatalog:
             if not row.sample_id.startswith(prefix) or len(row.sample_id) == len(prefix):
                 raise ValueError("sieve sample identity must be standard:designation")
             opening = row.values["opening"].to("m")
-            if opening.quality != "valid" or opening.value <= 0:
+            if opening.quality != "valid" or cast(float, opening.value) <= 0:
                 raise ValueError("sieve opening must be a valid positive length")
             identity = (row.group_id, row.sample_id)
             if identity in identities:

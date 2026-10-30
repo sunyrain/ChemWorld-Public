@@ -7,6 +7,7 @@ The curves are authored analytic examples, not laboratory observations or fits.
 import json
 from dataclasses import replace
 from math import exp
+from typing import Any, cast
 
 from chemworld.data.scientific_inputs import (
     InputSource,
@@ -25,7 +26,7 @@ from chemworld.world.parameter_inputs import ModelParameterTarget, bind_paramete
 from chemworld.world.surface_world import surface_world_spec
 
 
-def curated_input(component_id="water"):
+def curated_input(component_id: str = "water") -> PropertyInputCard:
     package = curated_property_package(component_id)
     sources = tuple(
         InputSource(
@@ -42,7 +43,7 @@ def curated_input(component_id="water"):
             correlation.correlation_id: ComponentUncertainty(
                 field_id=correlation.correlation_id, unit=correlation.output_unit,
                 coverage="not_quantified",
-                source_id="chemicals:" + correlation.metadata["source_table"],
+                source_id="chemicals:" + cast(str, correlation.metadata["source_table"]),
                 note="Existing table regression does not establish measurement uncertainty.",
             )
             for correlation in package.correlations
@@ -55,7 +56,7 @@ def curated_input(component_id="water"):
     )
 
 
-def synthetic_source():
+def synthetic_source() -> InputSource:
     return InputSource(
         DataSourceProvenance(
             "chemworld:synthetic-input-example", 0,
@@ -65,7 +66,7 @@ def synthetic_source():
     )
 
 
-def synthetic_curves():
+def synthetic_curves() -> ScientificTable:
     columns = (
         QuantityColumn("time", "s", "condition", (0, 120), "elapsed experiment time"),
         QuantityColumn("ambient_temperature", "K", "condition", (280, 340),
@@ -96,7 +97,7 @@ def synthetic_curves():
     )
 
 
-def parameter_table():
+def parameter_table() -> ScientificTable:
     column = QuantityColumn(
         "heat_loss", "W/K", "parameter", (0, 1),
         "Heat flow per kelvin difference from the declared environment",
@@ -114,7 +115,7 @@ def parameter_table():
     )
 
 
-def parameter_response(table, row_id):
+def parameter_response(table: ScientificTable, row_id: str) -> dict[str, Any]:
     spec = surface_world_spec(include_surface=False, include_bulk=False)
     target = ModelParameterTarget(
         table.columns[0], "thermal", spec.modules.model_specs()["thermal"].version,
@@ -144,7 +145,7 @@ def parameter_response(table, row_id):
         session.close()
 
 
-def run_example():
+def run_example() -> dict[str, Any]:
     card = PropertyInputCard.from_json(json.dumps(curated_input().to_dict()))
     properties = card.evaluate_state(
         temperature_K=400, pressure_Pa=1000, phase="gas",

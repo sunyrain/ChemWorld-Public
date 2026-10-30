@@ -3,7 +3,7 @@
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from math import log
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -51,7 +51,7 @@ class DiameterDistributionCalibration(MeasurementCalibration):
         for row in table.rows:
             row.values[diameter_column].to("m")
             observed = row.values[cdf_column].to("dimensionless")
-            if observed.quality == "valid" and not 0 <= observed.value <= 1:
+            if observed.quality == "valid" and not 0 <= cast(float, observed.value) <= 1:
                 raise ValueError("CDF observations must lie in [0,1]")
         self.distribution, self.diameter_column, self.cdf_column = (
             distribution,
@@ -76,7 +76,7 @@ class DiameterDistributionCalibration(MeasurementCalibration):
         matrix = []
         for row_id, quantity in self.pairs["train"]:
             row = self.rows[row_id]
-            diameter = row.values[self.diameter_column].to("m").value
+            diameter = cast(float, row.values[self.diameter_column].to("m").value)
             cdf = distribution.cdf(diameter)
             derivatives = {"scale_m": 0.0, "shape": 0.0}
             if 0 < diameter < distribution.scale_m:
@@ -133,7 +133,7 @@ class DiameterDistributionCalibration(MeasurementCalibration):
             try:
                 distribution = self.candidate(values)
                 for row in rows:
-                    diameter = row.values[self.diameter_column].to("m").value
+                    diameter = cast(float, row.values[self.diameter_column].to("m").value)
                     value = distribution.cdf(diameter)
                     predictions[(row.row_id, self.cdf_column)] = value
                     record["readouts"].append(

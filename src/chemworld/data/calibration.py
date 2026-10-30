@@ -9,6 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from math import isclose, isfinite
+from typing import cast
 
 from chemworld.data.calibration_core import (
     BoundedParameterCoordinates,
@@ -234,7 +235,7 @@ class NativeCalibration(MeasurementCalibration):
                             )
                         if readout.time_column is not None:
                             time = self.rows[readout.row_id].values[readout.time_column].to("s")
-                            if not isclose(channel.sampled_at.time_s, time.value,
+                            if not isclose(channel.sampled_at.time_s, cast(float, time.value),
                                            rel_tol=1e-10, abs_tol=1e-8):
                                 raise ForwardEvaluationError(
                                     "public sampling time differs from fixed data"

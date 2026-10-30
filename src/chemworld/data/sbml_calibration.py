@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from math import isclose
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -97,7 +97,9 @@ class SBMLCalibration(NativeCalibration):
                     1.0, channels[readout.channel_id].unit, self.columns[readout.quantity_id].unit
                 )
                 expected = self.rows[readout.row_id].values[readout.time_column].to("s").value
-                if not isclose(times[readout.step], expected, rel_tol=1e-10, abs_tol=1e-8):
+                if not isclose(
+                    times[readout.step], cast(float, expected), rel_tol=1e-10, abs_tol=1e-8
+                ):
                     raise ValueError("SBML data time differs from its fixed native history")
 
     def _binding_identity(self, parameter: SBMLCalibrationParameter) -> str:

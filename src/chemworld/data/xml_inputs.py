@@ -2,10 +2,17 @@
 
 import re
 from io import StringIO
+from typing import Protocol, cast
 from xml.etree import ElementTree as ET
 
 
-def bounded_xml(text, *, max_bytes=20*1024*1024, max_nodes=100000, max_depth=128):
+class _CompletedXML(Protocol):
+    root: ET.Element
+
+
+def bounded_xml(
+    text: str, *, max_bytes: int = 20*1024*1024, max_nodes: int = 100000, max_depth: int = 128,
+) -> ET.Element:
     if not isinstance(text, str) or not text or len(text.encode("utf-8")) > max_bytes:
         raise ValueError("XML requires nonempty text within the declared byte limit")
     if re.search(r"<!\s*(DOCTYPE|ENTITY)\b", text, re.IGNORECASE):
@@ -28,4 +35,5 @@ def bounded_xml(text, *, max_bytes=20*1024*1024, max_nodes=100000, max_depth=128
                 depth -= 1
     except (ET.ParseError, RecursionError) as exc:
         raise ValueError("invalid declarative XML") from exc
-    return parser.root
+    # iterparse supplies root after exhaustion; some supported stubs omit it.
+    return cast(_CompletedXML, parser).root

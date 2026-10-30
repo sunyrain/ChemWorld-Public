@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from math import asin, atan, atan2, cos, degrees, isfinite, radians, sin, tan
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from numpy.polynomial.polynomial import polyval
 
@@ -109,7 +109,7 @@ class SolarParameters:
             )
             if index.quality != "valid" or value.quality != "valid":
                 raise ValueError("valid solar parameter cells required")
-            i, v = float(index.value), float(value.value)
+            i, v = float(cast(float, index.value)), float(cast(float, value.value))
             if not isfinite(i) or not i.is_integer() or not isfinite(v):
                 raise ValueError("finite coefficient and integer parameter index required")
             group = groups.setdefault(row.group_id, {})

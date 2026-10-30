@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from math import cos, exp, isfinite, log, sin
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.physchem.msis_harmonics import MSISHarmonics
 from chemworld.physchem.msis_profiles import (
@@ -59,7 +59,8 @@ class MSISParameters:
             )
             if index.quality != "valid" or value.quality != "valid":
                 raise ValueError("valid MSIS parameter cells required")
-            numeric_index, numeric_value = float(index.value), float(value.value)
+            numeric_index = float(cast(float, index.value))
+            numeric_value = float(cast(float, value.value))
             if (
                 not isfinite(numeric_index)
                 or not numeric_index.is_integer()

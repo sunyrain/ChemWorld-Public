@@ -172,7 +172,7 @@ class CombineArchive:
                     continue
                 if path not in files:
                     raise ValueError("manifest refers to a missing archive entry")
-                entries.append(ArchiveEntry(path, item.get("format"), files[path], master))
+                entries.append(ArchiveEntry(path, item.attrib["format"], files[path], master))
             if "." not in declared or set(files)-{"manifest.xml"} != {e.location for e in entries}:
                 raise ValueError("manifest must describe the archive and all actual data files")
             return cls(tuple(entries), source)

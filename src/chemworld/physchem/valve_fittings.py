@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import cos, isfinite, radians, sin, sqrt
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -304,9 +304,11 @@ class FittingCoefficientCatalog:
             if row.sample_id in self._parameters:
                 raise ValueError("duplicate named fitting; select one source explicitly")
             cells = {name: row.values[name].to("dimensionless") for name in expected[model]}
-            if any(c.quality != "valid" or c.value < 0 for c in cells.values()):
+            if any(c.quality != "valid" or cast(float, c.value) < 0 for c in cells.values()):
                 raise ValueError("valid nonnegative fitting parameter cells required")
-            self._parameters[row.sample_id] = {name: float(c.value) for name, c in cells.items()}
+            self._parameters[row.sample_id] = {
+                name: float(cast(float, c.value)) for name, c in cells.items()
+            }
         if not self._parameters:
             raise ValueError("nonempty fitting parameter table required")
 
@@ -341,13 +343,14 @@ def nominal_size_from_bore(
 ) -> float:
     """Linear source mapping; different from selecting a manufactured pipe size."""
     _positive(diameter_m, "internal diameter")
-    pairs = sorted(
-        (
-            float(r.values["inner_diameter"].to("m").value),
-            float(r.values["nominal_size"].to("dimensionless").value),
-        )
-        for r in table.rows
-    )
+    pairs = []
+    for row in table.rows:
+        diameter = row.values["inner_diameter"].to("m").value
+        nominal = row.values["nominal_size"].to("dimensionless").value
+        if diameter is None or nominal is None:
+            raise ValueError("nominal mapping requires numeric bore and size values")
+        pairs.append((float(diameter), float(nominal)))
+    pairs.sort()
     if len(pairs) < 2 or len({p[0] for p in pairs}) != len(pairs):
         raise ValueError("at least two unique bore nodes required")
     x, y = zip(*pairs, strict=True)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from math import isfinite, sqrt
-from typing import Any
+from typing import Any, cast
 
 from scipy.interpolate import BSpline, make_interp_spline
 
@@ -183,8 +183,10 @@ class ValveOpeningCurve:
             rows = {row.row_id: row for row in curve.table.rows}
             points = sorted(
                 (
-                    float(rows[key].values[column].to("dimensionless").value),
-                    float(rows[key].values[curve.output_column].to("dimensionless").value),
+                    float(cast(float, rows[key].values[column].to("dimensionless").value)),
+                    float(
+                        cast(float, rows[key].values[curve.output_column].to("dimensionless").value)
+                    ),
                 )
                 for key in curve.row_ids
             )

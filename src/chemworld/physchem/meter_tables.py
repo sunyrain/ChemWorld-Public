@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from scipy.interpolate import RectBivariateSpline, interp1d
@@ -58,7 +58,8 @@ class MeterTableSurface:
             )
             if any(cell.quality != "valid" for cell in cells):
                 raise ValueError("meter surface requires valid source cells")
-            x, y, z = (cell.value for cell in cells)
+            # Valid InputValue cells cannot carry None; conversion preserves quality.
+            x, y, z = (cast(float, cell.value) for cell in cells)
             if not 0 < x < 1 or y <= 0 or z <= 0:
                 raise ValueError("physical beta and positive meter coordinates/values required")
             triples.append((x, y, z))

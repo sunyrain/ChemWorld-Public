@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from chemworld.data.scientific_inputs import InputValue
 from chemworld.physchem.caloric_math import logarithm, scalar_value
@@ -159,7 +159,7 @@ def hansen_activity_model(
         volume = molar_volumes[vector.component_id]
         if not isinstance(volume, InputValue) or volume.quality != "valid" or volume.value is None:
             raise ValueError("Hansen reference volumes must be explicit valid InputValues")
-        parameters[f"V:{vector.component_id}"] = volume.to("m^3/mol").value
+        parameters[f"V:{vector.component_id}"] = cast(float, volume.to("m^3/mol").value)
         parameters.update(
             {
                 f"{prefix}:{vector.component_id}": value

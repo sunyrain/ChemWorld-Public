@@ -8,7 +8,7 @@ are explicit; no chart observations, spline arrays or fit coefficients bundled.
 from __future__ import annotations
 
 from math import isfinite
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from scipy.interpolate import BSpline, bisplev
@@ -46,7 +46,7 @@ class FittingCurve:
             if coordinate.quality != "valid" or value.quality != "valid":
                 raise ValueError("valid fitting curve cells required")
             groups.setdefault(row.group_id, []).append(
-                (float(coordinate.value), float(value.value))
+                (float(cast(float, coordinate.value)), float(cast(float, value.value)))
             )
         self._arrays = {}
         for name, pairs in groups.items():

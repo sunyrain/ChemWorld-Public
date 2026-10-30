@@ -6,6 +6,7 @@ the same database, identities, values, candidates and source provenance.
 
 from dataclasses import dataclass, fields
 from math import isfinite
+from typing import cast
 
 from chemworld.data.constant_catalog import CONSTANT_SOURCES, ConstantField, ConstantSource
 from chemworld.data.constants import ConstantDatabase, ConstantRecord
@@ -191,14 +192,14 @@ class RefractiveIndexObservation:
             raise ValueError("source refractive-index temperature is invalid")
         inputs, warnings = {}, ()
         if self.temperature.value is not None:
-            inputs["temperature"] = self.temperature.to("K").value
+            inputs["temperature"] = cast(float, self.temperature.to("K").value)
         else:
             warnings = ("Source refractive-index measurement temperature unavailable",)
         return PropertyEvaluation(
             "refractive_index",
             self.record_id,
             "Na_D_source_observation",
-            self.index.to("dimensionless").value,
+            cast(float, self.index.to("dimensionless").value),
             "dimensionless",
             inputs,
             warnings,
