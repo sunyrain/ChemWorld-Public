@@ -7,13 +7,13 @@ from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any
 
 from chemworld.data.chem_sage_compiler import compile_chem_sage
 from chemworld.data.chem_sage_parser import ChemSageParseError, parse_chem_sage
 from chemworld.data.chem_sage_records import ChemSageInput, ChemSagePhase
 from chemworld.data.scientific_inputs import InputSource, _keys
-from chemworld.data.tdb import TdbDatabase, TdbPhase
+from chemworld.data.tdb import TdbDatabase
 
 CHEMSAGE_SCHEMA_VERSION = "chemworld-chemsage-1"
 
@@ -60,5 +60,4 @@ class ChemSageDatabase(TdbDatabase):
 
     @property
     def phase_records(self) -> Mapping[str, ChemSagePhase]:
-        phases = cast(Mapping[str, TdbPhase], self.phases)
-        return MappingProxyType(dict(zip(phases, self.declarations.phases, strict=True)))
+        return MappingProxyType(dict(zip(self.phases, self.declarations.phases, strict=True)))

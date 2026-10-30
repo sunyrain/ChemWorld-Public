@@ -64,13 +64,13 @@ class GibbsPhaseModel:
             if not isclose(sum(values.values()), 1, abs_tol=1e-10, rel_tol=0):
                 raise ValueError("CEF site fractions must sum to one on every sublattice")
             result.append(values)
-        result = tuple(result)
-        constraints = self._constraints(result)
+        normalized = tuple(result)
+        constraints = self._constraints(normalized)
         if check_constraints and any(abs(scalar_value(c)) > 1e-9 for c in constraints):
             raise ValueError(
                 "CEF site constitution violates charge neutrality or auxiliary balance")
-        self._composition(result)
-        return result
+        self._composition(normalized)
+        return normalized
 
 
     def gibbs(self, fractions, temperature_K, pressure_Pa=101325.0):

@@ -8,16 +8,20 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from math import inf, isfinite
+from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any, Protocol, TypeVar, overload
 
 from chemworld.data.scientific_inputs import InputSource, _keys
 from chemworld.physchem.tdb_expressions import (
     TDB_GAS_CONSTANT_J_MOL_K,
     TdbExpression,
+    TdbScalar,
     scalar_value,
 )
 
@@ -38,13 +42,36 @@ _PARAMETER_TYPES = frozenset((
     "VISC", "ELRS", "THCD", "SIGM", "XI", "MQ", "MF", "DQ", "DF", "VS",
 ))
 _PHASE_OPTIONS = frozenset("YFBLGAI")
+_T = TypeVar("_T")
+_ConstituentArray = tuple[tuple[str, ...], ...]
+_PhaseRow = tuple[tuple[float, ...], frozenset[str], str]
+AuxiliaryBalances = tuple[tuple[str, tuple[tuple[_ConstituentArray, float], ...]], ...]
+
+
+class ElementDeclaration(Protocol):
+    """Read-only element fields shared by TDB and ChemSage source records."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def molar_mass_g_mol(self) -> float: ...
+
+    @property
+    def reference_phase(self) -> str | None: ...
+
+    @property
+    def enthalpy_298_J_mol(self) -> float | None: ...  # noqa: N802 -- declared unit-bearing field
+
+    @property
+    def entropy_298_J_mol_K(self) -> float | None: ...  # noqa: N802 -- declared unit-bearing field
 
 
 class TdbParseError(ValueError):
     """An invalid complete input; no partially usable database is returned."""
 
 
-def _expand(candidate, choices):
+def _expand(candidate: str, choices: Collection[str]) -> str:
     if candidate in choices:
         return candidate
     pieces = candidate.replace("-", "_").upper().split("_")
@@ -57,7 +84,7 @@ def _expand(candidate, choices):
     return matches[0]
 
 
-def _number(text):
+def _number(text: str) -> float:
     if not re.fullmatch(_NUMBER, text):
         raise ValueError(f"invalid TDB real number: {text}")
     result = float(text)
@@ -66,13 +93,13 @@ def _number(text):
     return result
 
 
-def _name(text):
+def _name(text: str) -> str:
     if not re.fullmatch(r"[A-Z0-9_+*/.\-]+", text) or not text:
         raise ValueError(f"invalid TDB identifier: {text}")
     return text
 
 
-def _phase_name(text):
+def _phase_name(text: str) -> tuple[str, frozenset[str]]:
     pieces = text.split(":")
     if len(pieces) > 2:
         raise ValueError("invalid TDB phase option suffix")
@@ -83,7 +110,7 @@ def _phase_name(text):
     return name, options
 
 
-def _commands(text):
+def _commands(text: str) -> Iterator[tuple[int, str]]:
     # TDB has one command terminator per physical line; trailing text is a
     # comment even if it resembles another command (commercial/pycalphad rule).
     pending, start, count = [], None, 0
@@ -119,7 +146,7 @@ class TdbFunction:
     segments: tuple[TdbSegment, ...]
     reference: str = ""
 
-    def segment(self, temperature_K, *, extrapolation="reject"):
+    def segment(self, temperature_K: TdbScalar, *, extrapolation: str = "reject") -> TdbSegment:
         if extrapolation not in {"reject", "extend"}:
             raise ValueError("TDB extrapolation must be reject or extend")
         temperature = scalar_value(temperature_K)
@@ -133,7 +160,7 @@ class TdbFunction:
         raise ValueError(f"TDB {self.name}: temperature {temperature} K outside declared intervals")
 
 
-def _function(name, text):
+def _function(name: str, text: str) -> TdbFunction:
     parts = text.split(";")
     if len(parts) < 2:
         raise ValueError("TDB function requires a temperature expression and ; limit N")
@@ -180,7 +207,7 @@ class TdbSpecies:
     charge: float = 0
 
     @property
-    def number_of_atoms(self):
+    def number_of_atoms(self) -> float:
         return sum(amount for element, amount in self.constituents if element not in {"VA", "/-"})
 
 
@@ -191,7 +218,7 @@ class TdbPhase:
     constituents: tuple[tuple[str, ...], ...]
     options: frozenset[str]
     type_characters: str
-    model_hints: object
+    model_hints: Mapping[str, object]
 
 
 @dataclass(frozen=True)
@@ -213,11 +240,12 @@ class TdbTypeDefinition:
     feature: str
 
 
-def _formula(name, formula):
+def _formula(name: str, formula: str) -> TdbSpecies:
     pieces = formula.split("/")
     if len(pieces) > 2 or (len(pieces) == 2 and not re.fullmatch(r"[+-]?\d+", pieces[1])):
         raise ValueError("TDB species charge must be an integer after /")
-    atoms, offset = {}, 0
+    atoms: dict[str, float] = {}
+    offset = 0
     for match in re.finditer(rf"([A-Z]{{1,2}})({_NUMBER})?", pieces[0]):
         if match.start() != offset:
             raise ValueError(f"invalid TDB species formula: {formula}")
@@ -230,7 +258,7 @@ def _formula(name, formula):
     return TdbSpecies(name, tuple(sorted(atoms.items())), int(pieces[1]) if len(pieces) == 2 else 0)
 
 
-def _constituents(text):
+def _constituents(text: str) -> _ConstituentArray:
     result = []
     for sublattice in text.split(":"):
         species = tuple(sorted(_name(s.rstrip("%")) for s in re.split(r"[,\s]+", sublattice.strip())
@@ -246,16 +274,16 @@ def _constituents(text):
 class TdbDatabase:
     source: InputSource
     text: str
-    elements: object
-    species: object
-    phases: object
-    functions: object
+    elements: Mapping[str, ElementDeclaration]
+    species: Mapping[str, TdbSpecies]
+    phases: Mapping[str, TdbPhase]
+    functions: Mapping[str, TdbFunction]
     parameters: tuple[TdbParameter, ...]
     type_definitions: tuple[TdbTypeDefinition, ...]
     metadata: tuple[tuple[str, str], ...]
 
     @classmethod
-    def from_string(cls, text, *, source):
+    def from_string(cls, text: str, *, source: InputSource) -> TdbDatabase:
         if not isinstance(source, InputSource):
             raise ValueError("TDB requires the existing explicit InputSource provenance")
         if not isinstance(text, str) or not text.strip() or len(text) > 20 * 1024 * 1024:
@@ -263,37 +291,42 @@ class TdbDatabase:
         return _parse(text, source)
 
     @classmethod
-    def from_file(cls, path, *, source):
-        path = Path(path)
-        if path.stat().st_size > 20 * 1024 * 1024:
+    def from_file(cls, path: str | PathLike[str], *, source: InputSource) -> TdbDatabase:
+        file_path = Path(path)
+        if file_path.stat().st_size > 20 * 1024 * 1024:
             raise ValueError("TDB exceeds 20 MiB")
-        return cls.from_string(path.read_text(encoding="utf-8-sig"), source=source)
+        return cls.from_string(file_path.read_text(encoding="utf-8-sig"), source=source)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         # The original declaration is the single serialized input; parsing it
         # again validates every association instead of trusting parallel caches.
         return {"schema_version": TDB_SCHEMA_VERSION, "source": self.source.to_dict(),
                 "text": self.text}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> TdbDatabase:
         _keys(payload, ("schema_version", "source", "text"))
         if payload["schema_version"] != TDB_SCHEMA_VERSION:
             raise ValueError("unsupported TDB schema version")
         return cls.from_string(payload["text"], source=InputSource.from_dict(payload["source"]))
 
-    def _evaluate(self, function, temperature_K, pressure_Pa, extrapolation, overrides):
+    def _evaluate(
+        self, function: TdbFunction, temperature_K: TdbScalar, pressure_Pa: TdbScalar,
+        extrapolation: str, overrides: Mapping[str, float] | None,
+    ) -> TdbScalar:
         if not isfinite(scalar_value(pressure_Pa)) or scalar_value(pressure_Pa) <= 0:
             raise ValueError("TDB pressure must be finite and positive")
-        values = {"T": temperature_K, "P": pressure_Pa, "R": TDB_GAS_CONSTANT_J_MOL_K}
+        values: dict[str, TdbScalar] = {
+            "T": temperature_K, "P": pressure_Pa, "R": TDB_GAS_CONSTANT_J_MOL_K,
+        }
         overrides = {} if overrides is None else dict(overrides)
         if overrides.keys() - self.functions.keys():
             raise ValueError("TDB overrides must name declared functions")
         if any(type(v) not in (int, float) or not isfinite(v) for v in overrides.values()):
             raise ValueError("TDB function overrides require finite real scalars")
-        cache = dict(overrides)
+        cache: dict[str, TdbScalar] = dict(overrides)
 
-        def evaluate(curve):
+        def evaluate(curve: TdbFunction) -> TdbScalar:
             segment = curve.segment(temperature_K, extrapolation=extrapolation)
             resolved = dict(values)
             for name in segment.expression.symbols:
@@ -306,8 +339,22 @@ class TdbDatabase:
 
         return evaluate(function)
 
-    def evaluate_function(self, name, temperature_K, pressure_Pa=101325.0, *,
-                          extrapolation="reject", overrides=None):
+    @overload
+    def evaluate_function(
+        self, name: str, temperature_K: float, pressure_Pa: float = 101325.0, *,
+        extrapolation: str = "reject", overrides: Mapping[str, float] | None = None,
+    ) -> float: ...
+
+    @overload
+    def evaluate_function(
+        self, name: str, temperature_K: TdbScalar, pressure_Pa: TdbScalar = 101325.0, *,
+        extrapolation: str = "reject", overrides: Mapping[str, float] | None = None,
+    ) -> TdbScalar: ...
+
+    def evaluate_function(
+        self, name: str, temperature_K: TdbScalar, pressure_Pa: TdbScalar = 101325.0, *,
+        extrapolation: str = "reject", overrides: Mapping[str, float] | None = None,
+    ) -> TdbScalar:
         name = name.upper()
         if name not in self.functions:
             raise ValueError(f"unknown TDB function {name}")
@@ -319,15 +366,33 @@ class TdbDatabase:
         return self._evaluate(self.functions[name], temperature_K, pressure_Pa,
                               extrapolation, overrides)
 
-    def evaluate_parameter(self, parameter, temperature_K, pressure_Pa=101325.0, *,
-                           extrapolation="reject", overrides=None):
+    @overload
+    def evaluate_parameter(
+        self, parameter: TdbParameter, temperature_K: float, pressure_Pa: float = 101325.0, *,
+        extrapolation: str = "reject", overrides: Mapping[str, float] | None = None,
+    ) -> float: ...
+
+    @overload
+    def evaluate_parameter(
+        self, parameter: TdbParameter, temperature_K: TdbScalar,
+        pressure_Pa: TdbScalar = 101325.0, *,
+        extrapolation: str = "reject", overrides: Mapping[str, float] | None = None,
+    ) -> TdbScalar: ...
+
+    def evaluate_parameter(
+        self, parameter: TdbParameter, temperature_K: TdbScalar,
+        pressure_Pa: TdbScalar = 101325.0, *,
+        extrapolation: str = "reject", overrides: Mapping[str, float] | None = None,
+    ) -> TdbScalar:
         if parameter not in self.parameters:
             raise ValueError("TDB parameter does not belong to this database")
         return self._evaluate(parameter.function, temperature_K, pressure_Pa,
                               extrapolation, overrides)
 
-    def consumer_diagnostics(self, *, parameter_types, phase_options, type_features,
-                             metadata_commands=()):
+    def consumer_diagnostics(
+        self, *, parameter_types: Collection[str], phase_options: Collection[str],
+        type_features: Collection[str], metadata_commands: Collection[str] = (),
+    ) -> tuple[str, ...]:
         """List every unsupported declaration; parsing never implies consumption."""
         return (
             *(f"unconsumed parameter type {kind}" for kind in sorted(
@@ -344,7 +409,7 @@ class TdbDatabase:
                           "ZEROVOLUME_SPECIES"} and kind not in set(metadata_commands)),
         )
 
-    def summary(self):
+    def summary(self) -> dict[str, object]:
         return {"elements": len(self.elements), "species": len(self.species),
                 "phases": len(self.phases), "functions": len(self.functions),
                 "parameters": len(self.parameters),
@@ -353,11 +418,17 @@ class TdbDatabase:
                 "source_id": self.source.provenance.source_id}
 
 
-def _parse(text, source):
-    elements, species, phases, constituents, functions = {}, {}, {}, {}, {}
-    parameters, typedefs, metadata = [], [], []
+def _parse(text: str, source: InputSource) -> TdbDatabase:
+    elements: dict[str, TdbElement] = {}
+    species: dict[str, TdbSpecies] = {}
+    phases: dict[str, _PhaseRow] = {}
+    constituents: dict[str, _ConstituentArray] = {}
+    functions: dict[str, TdbFunction] = {}
+    parameters: list[TdbParameter] = []
+    typedefs: list[TdbTypeDefinition] = []
+    metadata: list[tuple[str, str]] = []
 
-    def insert(mapping, key, value):
+    def insert(mapping: dict[str, _T], key: str, value: _T) -> None:
         if key in mapping:
             raise ValueError(f"duplicate TDB declaration {key}")
         mapping[key] = value
@@ -455,14 +526,19 @@ def _parse(text, source):
         raise TdbParseError(f"TDB associations: {exc}") from exc
 
 
-def _finish(source, text, elements, species, phase_rows, constituents, functions,
-            parameters, typedefs, metadata):
+def _finish(
+    source: InputSource, text: str, elements: dict[str, TdbElement],
+    species: dict[str, TdbSpecies], phase_rows: Mapping[str, _PhaseRow],
+    constituents: Mapping[str, _ConstituentArray], functions: dict[str, TdbFunction],
+    parameters: Sequence[TdbParameter], typedefs: Sequence[TdbTypeDefinition],
+    metadata: Sequence[tuple[str, str]],
+) -> TdbDatabase:
     if set(phase_rows) != set(constituents):
         raise ValueError("TDB phases and constituent declarations must match")
     for spec in species.values():
         if {el for el, _ in spec.constituents} - elements.keys():
             raise ValueError(f"TDB species {spec.name} uses undeclared elements")
-    hints = {name: {} for name in phase_rows}
+    hints: dict[str, dict[str, object]] = {name: {} for name in phase_rows}
     seen_types = set()
     for definition in typedefs:
         if definition.character in seen_types:
@@ -530,7 +606,7 @@ def _finish(source, text, elements, species, phase_rows, constituents, functions
             raise ValueError(f"unresolved TDB symbols in {curve.name}: {sorted(missing)}")
     visited = set()
 
-    def visit(name, ancestors=()):
+    def visit(name: str, ancestors: tuple[str, ...] = ()) -> None:
         if name in ancestors or len(ancestors) >= 64:
             raise ValueError(
                 f"cyclic or excessively deep TDB function references: {(*ancestors, name)}",

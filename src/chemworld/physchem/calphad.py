@@ -12,10 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from itertools import permutations, product
 from math import isclose, prod
+from typing import cast
 
 import numpy as np
 
-from chemworld.data.tdb import TdbDatabase, TdbParameter, TdbPhase
+from chemworld.data.tdb import AuxiliaryBalances, TdbDatabase, TdbParameter, TdbPhase
 from chemworld.physchem.caloric_math import FirstDerivative, exponential, logarithm
 from chemworld.physchem.calphad_extrapolation import qkt_weight, validate_qkt
 from chemworld.physchem.gibbs_phase import GibbsPhaseModel, GibbsPhaseProperties, _slope
@@ -176,7 +177,7 @@ class CefPhaseModel(GibbsPhaseModel):
         original = self.database.phases[name]
         if original.model_hints.get("unsupported_physics"):
             raise ValueError("unconsumed ChemSage physical declarations: "+"; ".join(
-                original.model_hints["unsupported_physics"]))
+                cast(tuple[str, ...], original.model_hints["unsupported_physics"])))
         if original.model_hints.get("phase_family") in {"SUBQ", "SUBG"}:
             raise ValueError("MQMQA requires its declared quadruplet model")
         if original.model_hints.get("chemical_group_overrides"):
@@ -373,14 +374,15 @@ class CefPhaseModel(GibbsPhaseModel):
         auxiliary = tuple(sum(coefficient*prod(
             fractions[i].get(species[0], 0.) for i, species in enumerate(array))
             for array, coefficient in terms)
-            for _, terms in self._phase.model_hints.get("auxiliary_balances", ()))
+            for _, terms in cast(AuxiliaryBalances,
+                                 self._phase.model_hints.get("auxiliary_balances", ())))
         return (*(sum(subl.values()) - 1 for subl in fractions), charge, *auxiliary)
 
     @property
     def constraint_labels(self):
         return (*(f"site_sum:{i}" for i in range(len(self.constituents))), "charge",
-                *(f"auxiliary:{name}" for name, _ in self._phase.model_hints.get(
-                    "auxiliary_balances", ())))
+                *(f"auxiliary:{name}" for name, _ in cast(
+                    AuxiliaryBalances, self._phase.model_hints.get("auxiliary_balances", ()))))
 
     def _composition(self, fractions):
         amounts = {}
@@ -503,7 +505,7 @@ class CefPhaseModel(GibbsPhaseModel):
                  / sum(ratios[i] for i in indices) for s in self.constituents[indices[0]]}
         disordered_fractions = (quasi, *(fractions[i] for i in self._interstitial))
         disordered = CefPhaseModel(
-            self.database, self._phase.model_hints["disordered_phase"], self.components,
+            self.database, cast(str, self._phase.model_hints["disordered_phase"]), self.components,
             self.extrapolation, self.unspecified_endmembers,
         )
         randomized = tuple(quasi if i in indices else subl

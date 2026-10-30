@@ -45,7 +45,7 @@ class MQMQAPhaseModel(GibbsPhaseModel):
         phase = self.database.phases[name]
         if phase.model_hints.get("unsupported_physics"):
             raise ValueError("unconsumed MQMQA physical declarations: "+"; ".join(
-                phase.model_hints["unsupported_physics"]))
+                cast(tuple[str, ...], phase.model_hints["unsupported_physics"])))
         if phase.model_hints.get("chemical_group_overrides"):
             raise ValueError("MQMQA group overrides require their explicitly supported model")
         if not self.activate_suppressed and (phase.model_hints.get("initial_status") != "entered"

@@ -4,31 +4,35 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from math import isfinite
-from typing import ClassVar
+from typing import ClassVar, cast, overload
 
-from chemworld.physchem.caloric_math import exponential, logarithm
+from chemworld.physchem.caloric_math import FirstDerivative, exponential, logarithm
 from chemworld.physchem.caloric_math import scalar_value as derivative_scalar_value
+from chemworld.physchem.precise_scalar import PreciseScalar
+from chemworld.physchem.second_order_pair import SecondOrderPair
 
 # The SGTE/TDB convention used by the selected pycalphad reference. This does
 # not replace the gas constant of another declared native thermodynamic model.
 TDB_GAS_CONSTANT_J_MOL_K = 8.3145
 _FUNCTIONS = {"LN": logarithm, "LOG": logarithm, "EXP": exponential}
 _BINARY = {ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow}
+TdbScalar = float | FirstDerivative | SecondOrderPair | PreciseScalar
 
 
-def scalar_value(value):
+def scalar_value(value: object) -> float:
     """Extract only the primal for domain/branch checks, retaining jets elsewhere."""
-    value = derivative_scalar_value(value)
-    if isinstance(value, bool):
+    primal = derivative_scalar_value(value)
+    if isinstance(primal, bool):
         raise ValueError("TDB scalars cannot be boolean")
-    return float(value)
+    return float(primal)
 
 
 @dataclass(frozen=True)
 class TdbExpression:
-    _functions: ClassVar[dict] = _FUNCTIONS
+    _functions: ClassVar[dict[str, Callable[[TdbScalar], TdbScalar]]] = _FUNCTIONS
     text: str
     symbols: tuple[str, ...] = field(init=False)
     _tree: ast.AST = field(init=False, repr=False, compare=False)
@@ -46,7 +50,7 @@ class TdbExpression:
         if len(nodes) > 1024:
             raise ValueError("TDB expression exceeds 1024 syntax nodes")
 
-        def validate(node, depth=0):
+        def validate(node: ast.AST, depth: int = 0) -> None:
             if depth > 64:
                 raise ValueError("TDB expression nesting exceeds 64")
             if isinstance(node, ast.Expression):
@@ -55,7 +59,7 @@ class TdbExpression:
                 if type(node.value) not in (int, float):
                     raise ValueError("TDB expressions accept only finite real constants")
                 try:
-                    finite = isfinite(node.value)
+                    finite = isfinite(cast(float, node.value))
                 except OverflowError:
                     finite = False
                 if not finite:
@@ -81,11 +85,22 @@ class TdbExpression:
         object.__setattr__(self, "symbols", tuple(sorted(names)))
         object.__setattr__(self, "_tree", tree.body)
 
-    def evaluate(self, values):
+    @overload
+    def evaluate(self, values: Mapping[str, float]) -> float: ...
+
+    @overload
+    def evaluate(
+        self, values: Mapping[str, float | FirstDerivative],
+    ) -> float | FirstDerivative: ...
+
+    @overload
+    def evaluate(self, values: Mapping[str, TdbScalar]) -> TdbScalar: ...
+
+    def evaluate(self, values: Mapping[str, TdbScalar]) -> TdbScalar:
         """Interpret arithmetic over real scalars or the common analytic jets."""
-        def visit(node):
+        def visit(node: ast.AST) -> TdbScalar:
             if isinstance(node, ast.Constant):
-                return float(node.value)
+                return float(cast(float, node.value))
             if isinstance(node, ast.Name):
                 try:
                     return values[node.id]
@@ -95,15 +110,16 @@ class TdbExpression:
                 value = visit(node.operand)
                 return -value if isinstance(node.op, ast.USub) else value
             if isinstance(node, ast.Call):
-                return self._functions[node.func.id](visit(node.args[0]))
-            left, right = visit(node.left), visit(node.right)
-            if isinstance(node.op, ast.Add):
+                return self._functions[cast(ast.Name, node.func).id](visit(node.args[0]))
+            binary = cast(ast.BinOp, node)  # Syntax was checked at construction.
+            left, right = visit(binary.left), visit(binary.right)
+            if isinstance(binary.op, ast.Add):
                 return left + right
-            if isinstance(node.op, ast.Sub):
+            if isinstance(binary.op, ast.Sub):
                 return left - right
-            if isinstance(node.op, ast.Mult):
+            if isinstance(binary.op, ast.Mult):
                 return left * right
-            if isinstance(node.op, ast.Div):
+            if isinstance(binary.op, ast.Div):
                 return left / right
             if isinstance(right, (int, float)):
                 return left**right
