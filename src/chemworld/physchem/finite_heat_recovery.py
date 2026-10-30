@@ -20,6 +20,7 @@ from chemworld.physchem.residual_system import (
 )
 from chemworld.physchem.specs import PropertyCorrelation
 from chemworld.physchem.transport import (
+    FluidState,
     counterflow_effectiveness,
     pipe_pressure_drop,
     pump_operating_point,
@@ -232,12 +233,16 @@ def heat_recovery_profile(
             raise ValueError("finite feed requires positive initial liquid inventory")
         t = spec.at_ph(index, amounts, state.enthalpies_J[index])
         fluid, h, volume = p.evaluate(amounts, t)
+
+        def pressure_load(q: float, s: int = side, f: FluidState = fluid) -> float:
+            return pipe_pressure_drop(
+                spec.pipes[s], f, volumetric_flow_m3_s=q,
+            ).pressure_drop_total_Pa
+
         pump = pump_operating_point(
             spec.pumps[side],
             requested,
-            lambda q, s=side, f=fluid: (
-                pipe_pressure_drop(spec.pipes[s], f, volumetric_flow_m3_s=q).pressure_drop_total_Pa
-            ),
+            pressure_load,
         )
         flow = pump["actual_flow_m3_s"]
         rate = total * flow / volume

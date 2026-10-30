@@ -9,7 +9,11 @@ from typing import Any
 import numpy as np
 
 from chemworld.physchem.phase_inventory import PhaseInventoryRates, integrate_phase_inventory
-from chemworld.physchem.transport import pipe_pressure_drop, pump_operating_point
+from chemworld.physchem.transport import (
+    PumpOperatingPoint,
+    pipe_pressure_drop,
+    pump_operating_point,
+)
 from chemworld.physchem.transport_devices import TransportInventory
 from chemworld.physchem.zero_order_treatment_specs import ZeroOrderTreatmentSpec, finite_number
 
@@ -55,7 +59,7 @@ def treatment_profile(
     if feed_volume == 0:
         if requested_flow_m3_s:
             raise ValueError("cannot draw from an empty liquid source")
-        point = {
+        point: PumpOperatingPoint = {
             "actual_flow_m3_s": 0.0,
             "pressure_rise_Pa": 0.0,
             "shaft_power_W": 0.0,

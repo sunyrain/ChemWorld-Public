@@ -9,9 +9,10 @@ chemical-engineering correlations, not wrappers around reference projects.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from math import exp, isfinite, log, log10, pi, sqrt
-from typing import Literal
+from typing import Literal, TypedDict
 
 GRAVITY_M_S2 = 9.80665
 
@@ -101,19 +102,30 @@ class PumpSpec:
         if not isfinite(self.efficiency) or not 0 < self.efficiency <= 1:
             raise ValueError("pump efficiency must be in (0, 1]")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, float]:
         return {"maximum_pressure_rise_Pa": self.maximum_pressure_rise_Pa,
                 "maximum_shaft_power_W": self.maximum_shaft_power_W,
                 "efficiency": self.efficiency}
 
 
-def pump_operating_point(pump, requested_flow_m3_s, pressure_load):
+class PumpOperatingPoint(TypedDict):
+    actual_flow_m3_s: float
+    pressure_rise_Pa: float
+    shaft_power_W: float
+    hydraulic_power_W: float
+    external_loss_W: float
+    flow_limited: bool
+
+
+def pump_operating_point(
+    pump: PumpSpec, requested_flow_m3_s: float, pressure_load: Callable[[float], float],
+) -> PumpOperatingPoint:
     """Largest requested flow within both limits for a monotone load law."""
     from scipy.optimize import brentq
 
     _nonnegative(requested_flow_m3_s, "requested flow")
 
-    def at(fraction):
+    def at(fraction: float) -> tuple[float, float, float]:
         flow = requested_flow_m3_s * fraction
         pressure = float(pressure_load(flow))
         _nonnegative(pressure, "connected pressure load")
@@ -121,7 +133,7 @@ def pump_operating_point(pump, requested_flow_m3_s, pressure_load):
                           efficiency=pump.efficiency)
         return flow, pressure, shaft
 
-    def margin(fraction):
+    def margin(fraction: float) -> float:
         _, pressure, shaft = at(fraction)
         return min((pump.maximum_pressure_rise_Pa-pressure)
                    / max(pump.maximum_pressure_rise_Pa, 1),

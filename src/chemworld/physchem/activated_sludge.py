@@ -33,7 +33,11 @@ from chemworld.physchem.coupled_system import (
     ProcessContribution,
 )
 from chemworld.physchem.solver_backend import ODESolverPolicy
-from chemworld.physchem.transport import pipe_pressure_drop, pump_operating_point
+from chemworld.physchem.transport import (
+    PumpOperatingPoint,
+    pipe_pressure_drop,
+    pump_operating_point,
+)
 
 WORK_FIELDS = ("aeration_electricity_J", "throughput_m3", "hydraulic_work_J")
 
@@ -149,7 +153,7 @@ def flow_profile(spec: ActivatedSludgeSpec, requested_flow_m3_s: float) -> dict[
     }
     fluid = spec.properties.evaluate({"H2O": 1.0}, spec.temperature_K)[0]
 
-    def pump(name: str, q: float) -> dict[str, Any]:
+    def pump(name: str, q: float) -> PumpOperatingPoint:
         device, pipe = (
             (spec.pump, spec.pipe) if name == "feed" else (spec.recycle_pump, spec.recycle_pipe)
         )

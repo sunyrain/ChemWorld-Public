@@ -5,10 +5,13 @@ hydraulic dissipation enters liquid H and shaft inefficiency leaves to ambient.
 The utility is an explicit fixed-temperature thermal boundary.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from math import isfinite
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal, NotRequired, Protocol, TypedDict, Unpack, cast
 
 import numpy as np
 
@@ -22,12 +25,17 @@ from chemworld.physchem.flow_meters import LiquidOrificeSpec, liquid_orifice_pre
 from chemworld.physchem.fluids_devices import LiquidControlValveSpec, liquid_valve_pressure_drop
 from chemworld.physchem.incompressible_properties import IncompressibleMaterialModel
 from chemworld.physchem.packed_beds import PackedBedSpec, packed_bed_pressure
-from chemworld.physchem.phase_inventory import PhaseInventoryRates, integrate_phase_inventory
+from chemworld.physchem.phase_inventory import (
+    PhaseInventoryAdvance,
+    PhaseInventoryRates,
+    integrate_phase_inventory,
+)
 from chemworld.physchem.property_packages import ComponentPropertyPackage, evaluate_property_state
 from chemworld.physchem.property_reports import CaloricReference
 from chemworld.physchem.transport import (
     FluidState,
     PipeSpec,
+    PumpOperatingPoint,
     PumpSpec,
     counterflow_effectiveness,
     internal_heat_transfer_coefficient,
@@ -40,16 +48,54 @@ from chemworld.physchem.transport import (
 from chemworld.physchem.transport_properties import liquid_transport_state
 
 
+class _CaloricDerivativeOptions(TypedDict, total=False):
+    heat_capacity_at_temperature: Callable[[float], float]
+
+
+class _HydraulicPressures(TypedDict, total=False):
+    downstream_pressure_Pa: float | None
+    saturation_pressure_Pa: float | None
+    critical_pressure_Pa: float | None
+
+
+class _HydraulicOptions(_HydraulicPressures, total=False):
+    check_choking: bool
+
+
+class _TransportStateView(Protocol):
+    @property
+    def amounts_mol(self) -> tuple[dict[str, float], ...]: ...
+
+    @property
+    def enthalpies_J(self) -> tuple[float, ...]: ...  # noqa: N802 - existing inventory field
+
+
+class TransportDiagnostics(PumpOperatingPoint):
+    utility_heat_W: float
+    source_temperature_K: float
+    control_valve_closed: NotRequired[bool]
+    source_viscosity_Pa_s: NotRequired[float]
+    hydraulic_devices: NotRequired[dict[str, Any]]
+    pump_outlet_enthalpy_margin_J_mol: NotRequired[float | None]
+
+
+class TransportAdvanceDiagnostics(TransportDiagnostics):
+    shaft_work_J: float
+    hydraulic_work_J: float
+    external_loss_J: float
+    utility_heat_J: float
+
+
 @dataclass(frozen=True)
 class LiquidTransportProperties:
     packages: tuple[ComponentPropertyPackage, ...]
     temperature_bounds_K: tuple[float, float] = (280.0, 340.0)
     pressure_Pa: float = 101325.0
-    caloric_references: dict[str, CaloricReference] | None = None
-    viscosity_pressure_parameters: dict[str, dict[str, float]] | None = None
+    caloric_references: Mapping[str, CaloricReference] | None = None
+    viscosity_pressure_parameters: Mapping[str, Mapping[str, float]] | None = None
     volume_mixing_method: str | None = None
-    volume_mixing_parameters: dict[str, dict[str, float]] | None = None
-    volume_pressure_parameters: dict[str, float | str] | None = None
+    volume_mixing_parameters: Mapping[str, Mapping[str, float]] | None = None
+    volume_pressure_parameters: Mapping[str, float | str] | None = None
     volume_mixing_note: str = ""
     activity_model: ActivityModelSpec | None = None
     incompressible_model: IncompressibleMaterialModel | None = None
@@ -151,21 +197,23 @@ class LiquidTransportProperties:
             dict(pressure_parameters)))
 
     @property
-    def component_ids(self):
+    def component_ids(self) -> tuple[str, ...]:
         return tuple(p.component.identifier for p in self.packages)
 
     @property
-    def references(self):
-        return self.caloric_references
+    def references(self) -> Mapping[str, CaloricReference]:
+        return cast(Mapping[str, CaloricReference], self.caloric_references)
 
-    def enthalpy(self, amounts, temperature):
+    def enthalpy(self, amounts: Mapping[str, float], temperature: float) -> float:
         return self._caloric_quantity(amounts, temperature, "enthalpy")
 
-    def heat_capacity(self, amounts, temperature):
+    def heat_capacity(self, amounts: Mapping[str, float], temperature: float) -> float:
         """dH/dT at fixed liquid amounts and the same declared pressure/reference."""
         return self._caloric_quantity(amounts, temperature, "cp")
 
-    def _caloric_quantity(self, amounts, temperature, quantity):
+    def _caloric_quantity(
+        self, amounts: Mapping[str, float], temperature: float, quantity: str,
+    ) -> float:
         if (
             set(amounts) != set(self.component_ids)
             or any(not isfinite(n) or n < 0 for n in amounts.values())
@@ -187,7 +235,9 @@ class LiquidTransportProperties:
         )
         return sum(amounts.values()) * report.properties[quantity].value
 
-    def evaluate(self, amounts, temperature):
+    def evaluate(
+        self, amounts: Mapping[str, float], temperature: float,
+    ) -> tuple[FluidState, float, float]:
         if not self.temperature_bounds_K[0] <= temperature <= self.temperature_bounds_K[1]:
             raise ValueError("liquid transport request leaves its temperature domain")
         return liquid_transport_state(
@@ -200,20 +250,23 @@ class LiquidTransportProperties:
             incompressible_model=self.incompressible_model,
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {
             "packages": [p.to_dict() for p in self.packages],
             "temperature_bounds_K": list(self.temperature_bounds_K),
             "pressure_Pa": self.pressure_Pa,
             "caloric_references": {key: ref.to_dict() for key, ref in self.references.items()},
             "viscosity_pressure_parameters": {
-                key: dict(p) for key, p in self.viscosity_pressure_parameters.items()
+                key: dict(p) for key, p in cast(
+                    Mapping[str, Mapping[str, float]], self.viscosity_pressure_parameters).items()
             },
             "volume_mixing_method": self.volume_mixing_method,
             "volume_mixing_parameters": {
-                key: dict(p) for key, p in self.volume_mixing_parameters.items()
+                key: dict(p) for key, p in cast(
+                    Mapping[str, Mapping[str, float]], self.volume_mixing_parameters).items()
             },
-            "volume_pressure_parameters": dict(self.volume_pressure_parameters),
+            "volume_pressure_parameters": dict(cast(
+                Mapping[str, float | str], self.volume_pressure_parameters)),
             "volume_mixing_note": self.volume_mixing_note,
             **({"activity_model": self.activity_model.to_dict()}
                if self.activity_model is not None else {}),
@@ -222,7 +275,7 @@ class LiquidTransportProperties:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> LiquidTransportProperties:
         return cls(
             tuple(
                 ComponentPropertyPackage.from_dict(p)
@@ -356,10 +409,12 @@ class TransportPathSpec:
         diagnostics["total_pressure_drop_Pa"] = pressure
         return diagnostics
 
-    def pressure_drop(self, fluid, flow, **kwargs):
+    def pressure_drop(
+        self, fluid: FluidState, flow: float, **kwargs: Unpack[_HydraulicOptions],
+    ) -> float:
         return self.hydraulic_diagnostics(fluid, flow, **kwargs)["total_pressure_drop_Pa"]
 
-    def heat_rate(self, fluid, flow, temperature):
+    def heat_rate(self, fluid: FluidState, flow: float, temperature: float) -> float:
         if flow == 0 or self.exchanger_area_m2 == 0:
             return 0.0
         re = (
@@ -394,7 +449,7 @@ class TransportPathSpec:
             * (self.utility_temperature_K - temperature)
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         payload = {name: getattr(self, name) for name in self.__dataclass_fields__}
         payload["pipe"] = asdict(self.pipe)
         for name in ("control_valve", "orifice_meter", "differential_meter"):
@@ -403,7 +458,7 @@ class TransportPathSpec:
         return payload
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> TransportPathSpec:
         payload = {**value, "pipe": PipeSpec(**value["pipe"])}
         for key, kind in (("control_valve", LiquidControlValveSpec),
                           ("orifice_meter", LiquidOrificeSpec),
@@ -452,13 +507,13 @@ class FiniteTransportSpec:
             if not package.by_property("vapor_pressure"):
                 raise ValueError("IEC valve requires a current vapor-pressure correlation")
 
-    def enthalpy(self, index, amounts, temperature):
+    def enthalpy(self, index: int, amounts: Mapping[str, float], temperature: float) -> float:
         return self.properties.enthalpy(amounts, temperature) + self.capacities_j_k[index] * (
             temperature - self.support_reference_temperature_K
         )
 
-    def at_ph(self, index, amounts, enthalpy):
-        options = {} if self.caloric_algorithm == "brentq" else {
+    def at_ph(self, index: int, amounts: Mapping[str, float], enthalpy: float) -> float:
+        options: _CaloricDerivativeOptions = {} if self.caloric_algorithm == "brentq" else {
             "heat_capacity_at_temperature": lambda t: (
                 self.properties.heat_capacity(amounts, t) + self.capacities_j_k[index]
             ),
@@ -469,7 +524,7 @@ class FiniteTransportSpec:
             algorithm=self.caloric_algorithm, **options,
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {
             "properties": self.properties.to_dict(),
             "pump": self.pump.to_dict(),
@@ -483,7 +538,7 @@ class FiniteTransportSpec:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> FiniteTransportSpec:
         return cls(
             **{
                 **value,
@@ -504,7 +559,10 @@ class TransportInventory:
     condenser_energy_J: float = 0.0
 
 
-def transport_rates(spec, state, temperatures, requested_flow_m3_s):
+def transport_rates(
+    spec: FiniteTransportSpec, state: _TransportStateView, temperatures: Sequence[float],
+    requested_flow_m3_s: float,
+) -> tuple[PhaseInventoryRates, TransportDiagnostics]:
     n, temperature = state.amounts_mol[0], temperatures[0]
     valve_closed = spec.path.control_valve is not None and not spec.path.control_valve.is_open
     if requested_flow_m3_s == 0 or not sum(n.values()) or valve_closed:
@@ -521,14 +579,14 @@ def transport_rates(spec, state, temperatures, requested_flow_m3_s):
             "control_valve_closed": valve_closed,
         }
     fluid, h, volume = spec.properties.evaluate(n, temperature)
-    valve_properties = {}
+    valve_properties: _HydraulicPressures = {}
     if spec.path.control_valve is not None:
         package = spec.properties.packages[0]
         valve_properties = {
             "downstream_pressure_Pa": spec.properties.pressure_Pa,
             "saturation_pressure_Pa": package.evaluate("vapor_pressure",
                 temperature_K=temperature, validity_policy="raise").to("Pa").value,
-            "critical_pressure_Pa": package.component.metadata["critical_pressure_Pa"],
+            "critical_pressure_Pa": cast(float, package.component.metadata["critical_pressure_Pa"]),
         }
     point = pump_operating_point(
         spec.pump, requested_flow_m3_s, lambda flow: spec.path.pressure_drop(
@@ -554,15 +612,17 @@ def transport_rates(spec, state, temperatures, requested_flow_m3_s):
         # Only trial property evaluation is bounded. An independent event
         # stops an unsupported outlet before any inventory/work is committed;
         # the derivative below always retains the full hydraulic energy.
+        caloric_options: _CaloricDerivativeOptions = (
+            {} if spec.caloric_algorithm == "brentq" else {
+                "heat_capacity_at_temperature": lambda t: (
+                    spec.properties.heat_capacity(n, t) / sum(n.values())
+                ),
+            })
         stream_temperature = caloric_temperature(
             lambda t: spec.properties.enthalpy(n, t) / sum(n.values()),
             min(max(target_h, low_h), high_h), (lo, hi), energy_basis="enthalpy",
             algorithm=spec.caloric_algorithm,
-            **({} if spec.caloric_algorithm == "brentq" else {
-                "heat_capacity_at_temperature": lambda t: (
-                    spec.properties.heat_capacity(n, t) / sum(n.values())
-                ),
-            }),
+            **caloric_options,
         )
     stream_fluid, _, stream_volume = spec.properties.evaluate(n, stream_temperature)
     stream_flow = flow * stream_volume / volume
@@ -591,7 +651,10 @@ def transport_rates(spec, state, temperatures, requested_flow_m3_s):
     }
 
 
-def advance_transport(spec, state, requested_flow_m3_s, duration_s, *, max_step_s=None):
+def advance_transport(
+    spec: FiniteTransportSpec, state: TransportInventory, requested_flow_m3_s: float,
+    duration_s: float, *, max_step_s: float | None = None,
+) -> tuple[PhaseInventoryAdvance, TransportAdvanceDiagnostics]:
     if (
         not isfinite(requested_flow_m3_s)
         or requested_flow_m3_s < 0
@@ -600,10 +663,11 @@ def advance_transport(spec, state, requested_flow_m3_s, duration_s, *, max_step_
     ):
         raise ValueError("transport needs two tank inventories and a finite nonnegative flow")
 
-    def bounds(index, amounts):
-        return tuple(spec.enthalpy(index, amounts, t) for t in spec.properties.temperature_bounds_K)
+    def bounds(index: int, amounts: Mapping[str, float]) -> tuple[float, float]:
+        return cast(tuple[float, float], tuple(
+            spec.enthalpy(index, amounts, t) for t in spec.properties.temperature_bounds_K))
 
-    def volume(index, state, temperatures):
+    def volume(index: int, state: _TransportStateView, temperatures: Sequence[float]) -> float:
         if not sum(state.amounts_mol[index].values()):
             return 0.0
         return 1000 * spec.properties.evaluate(state.amounts_mol[index], temperatures[index])[2]
@@ -615,7 +679,7 @@ def advance_transport(spec, state, requested_flow_m3_s, duration_s, *, max_step_
     initial_rates, point = transport_rates(spec, state, temperatures, requested_flow_m3_s)
     counters = {"empty_source_trial_extensions": 0}
 
-    def rates(candidate, temperatures):
+    def rates(candidate: _TransportStateView, temperatures: Sequence[float]) -> PhaseInventoryRates:
         if not sum(candidate.amounts_mol[0].values()):
             # The solver may trial past the positive pickup event. Extend the
             # draining source's invariant stream only for this rejected region;
@@ -624,13 +688,13 @@ def advance_transport(spec, state, requested_flow_m3_s, duration_s, *, max_step_
             return initial_rates
         return transport_rates(spec, candidate, temperatures, requested_flow_m3_s)[0]
 
-    def outlet_margin(candidate, temperatures):
+    def outlet_margin(candidate: _TransportStateView, temperatures: Sequence[float]) -> float:
         margin = transport_rates(spec, candidate, temperatures, requested_flow_m3_s)[1].get(
             "pump_outlet_enthalpy_margin_J_mol"
         )
         return 1.0 if margin is None else margin
 
-    stops = (
+    stops: list[tuple[str, Callable[[_TransportStateView, Sequence[float]], float]]] = (
         [
             ("feed_pickup_exhausted", lambda s, t: volume(0, s, t) - spec.pickup_volume_L),
             ("receiver_full", lambda s, t: spec.receiver_capacity_L - volume(1, s, t)),
@@ -640,15 +704,25 @@ def advance_transport(spec, state, requested_flow_m3_s, duration_s, *, max_step_
         else []
     )
     for i in (0, 1):
+        def minimum_temperature(
+            s: _TransportStateView, t: Sequence[float], i: int = i,
+        ) -> float:
+            return s.enthalpies_J[i] - bounds(i, s.amounts_mol[i])[0]
+
+        def maximum_temperature(
+            s: _TransportStateView, t: Sequence[float], i: int = i,
+        ) -> float:
+            return bounds(i, s.amounts_mol[i])[1] - s.enthalpies_J[i]
+
         stops.extend(
             (
                 (
                     f"tank:{i}:minimum_temperature",
-                    lambda s, t, i=i: s.enthalpies_J[i] - bounds(i, s.amounts_mol[i])[0],
+                    minimum_temperature,
                 ),
                 (
                     f"tank:{i}:maximum_temperature",
-                    lambda s, t, i=i: bounds(i, s.amounts_mol[i])[1] - s.enthalpies_J[i],
+                    maximum_temperature,
                 ),
             )
         )
@@ -667,9 +741,12 @@ def advance_transport(spec, state, requested_flow_m3_s, duration_s, *, max_step_
     )
     # These are exact constant-boundary integrals for this draining-source
     # model, not a second time advance or energy inferred from a residual.
+    power_keys: tuple[Literal[
+        "shaft_power_W", "hydraulic_power_W", "external_loss_W", "utility_heat_W",
+    ], ...] = ("shaft_power_W", "hydraulic_power_W", "external_loss_W", "utility_heat_W")
     energy = {
         key.replace("_power_W", "_work_J").replace("_W", "_J"): point[key]
         * result.actual_duration_s
-        for key in ("shaft_power_W", "hydraulic_power_W", "external_loss_W", "utility_heat_W")
+        for key in power_keys
     }
-    return result, {**point, **energy}
+    return result, cast(TransportAdvanceDiagnostics, {**point, **energy})
