@@ -87,7 +87,7 @@ class CaloricReference:
                 or (self.entropy_J_mol_K is not None and not isfinite(self.entropy_J_mol_K))):
             raise ValueError("caloric reference needs a phase, finite datum and provenance")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {"phase": self.phase, "temperature_K": self.temperature_K,
                 "pressure_Pa": self.pressure_Pa, "energy_basis": self.energy_basis,
                 "energy_J_mol": self.energy_J_mol, "entropy_J_mol_K": self.entropy_J_mol_K,
@@ -137,12 +137,12 @@ class StatePropertyReport:
         object.__setattr__(self, "model_details", MappingProxyType(dict(self.model_details)))
 
     @property
-    def valid(self):
+    def valid(self) -> bool:
         return all(value.valid for value in self.properties.values()) and all(
             value.valid for values in self.component_properties.values()
             for value in values.values())
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {"model_id": self.model_id, "phase": self.phase,
                 "temperature_K": self.temperature_K, "pressure_Pa": self.pressure_Pa,
                 "component_amounts_mol": dict(self.component_amounts_mol),

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
 from typing import cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import brentq
 
 from chemworld.physchem.correlation_families import CORRELATION_FAMILIES
@@ -40,16 +41,16 @@ from chemworld.physchem.specs import PropertyCorrelation
 
 
 def caloric_residual_system(
-    energy_at_temperature,
-    heat_capacity_at_temperature,
-    target_energy_J,
-    temperature_bounds_K,
+    energy_at_temperature: Callable[[float, NDArray[np.float64]], float | None],
+    heat_capacity_at_temperature: Callable[[float, NDArray[np.float64]], float | None],
+    target_energy_J: float,
+    temperature_bounds_K: tuple[float, float],
     *,
-    energy_basis,
-    parameters=(),
-    parameter_values=(),
-    energy_parameter_jacobian=None,
-):
+    energy_basis: str,
+    parameters: Sequence[ResidualVariable] = (),
+    parameter_values: ArrayLike = (),
+    energy_parameter_jacobian: Callable[[float, NDArray[np.float64]], ArrayLike] | None = None,
+) -> ResidualSystem:
     """Declare E(T,p)-E_target=0 with native analytic caloric derivatives.
 
     Energy/capacity callbacks take (temperature_K, physical_parameters).
@@ -66,7 +67,7 @@ def caloric_residual_system(
     values = vector(parameter_values, len(parameters), "caloric parameters")
     values.setflags(write=False)
 
-    def energy(t, p):
+    def energy(t: float, p: NDArray[np.float64]) -> float:
         value = energy_at_temperature(t, p)
         if value is None or not isfinite(value):
             raise ResidualDomainError(
@@ -74,7 +75,7 @@ def caloric_residual_system(
             )
         return float(value)
 
-    def capacity(t, p):
+    def capacity(t: float, p: NDArray[np.float64]) -> float:
         value = heat_capacity_at_temperature(t, p)
         if value is None or not isfinite(value) or value <= 0:
             raise ResidualDomainError("caloric residual requires positive finite heat capacity")
@@ -86,9 +87,12 @@ def caloric_residual_system(
     if not low <= target_energy_J <= high:
         raise ValueError(f"prescribed {energy_basis} is outside the caloric temperature domain")
 
-    def parameter_jacobian(t, y, v, p):
+    def parameter_jacobian(
+        t: float, y: NDArray[np.float64], v: NDArray[np.float64], p: NDArray[np.float64],
+    ) -> NDArray[np.float64]:
         physical = np.empty(0) if not parameters else vector(
-            energy_parameter_jacobian(y[0], p[1:]), len(parameters), "caloric parameter Jacobian",
+            cast(Callable[[float, NDArray[np.float64]], ArrayLike], energy_parameter_jacobian)(
+                y[0], p[1:]), len(parameters), "caloric parameter Jacobian",
         )
         return np.r_[-1.0, physical][None, :]
 
@@ -108,7 +112,7 @@ def caloric_residual_system(
 
 
 def caloric_temperature(
-    energy_at_temperature: Callable[[float], float],
+    energy_at_temperature: Callable[[float], float | None],
     target_energy_J: float,
     temperature_bounds_K: tuple[float, float],
     *,
@@ -116,7 +120,7 @@ def caloric_temperature(
     xtol: float = 1e-10,
     rtol: float = 4 * np.finfo(float).eps,
     algorithm: str = "brentq",
-    heat_capacity_at_temperature: Callable[[float], float] | None = None,
+    heat_capacity_at_temperature: Callable[[float], float | None] | None = None,
 ) -> float:
     """Invert a caller's continuous, increasing H(T) or U(T) at fixed inventory.
 
@@ -135,7 +139,7 @@ def caloric_temperature(
     ):
         raise ValueError("caloric closure requires an explicit H/U basis and finite T/energy")
 
-    def residual(temperature):
+    def residual(temperature: float) -> float:
         value = energy_at_temperature(temperature)
         if value is None or not isfinite(value):
             raise ValueError(f"{energy_basis} is unavailable or nonfinite in caloric closure")
@@ -161,7 +165,8 @@ def caloric_temperature(
         capacities = [heat_capacity_at_temperature(t) for t in (lower, upper)]
         if any(c is None or not isfinite(c) or c <= 0 for c in capacities):
             raise ResidualDomainError("caloric residual requires positive finite heat capacity")
-        energy_tolerance = (xtol + rtol * lower) * min(*capacities, (high - low) / (upper - lower))
+        energy_tolerance = (xtol + rtol * lower) * min(
+            *cast(list[float], capacities), (high - low) / (upper - lower))
         result = solve_steady_residual(
             system, [lower - low * (upper - lower) / (high - low)],
             policy=RootPolicy(tolerance=energy_tolerance / (high - low)),
@@ -696,13 +701,13 @@ def caloric_polynomial_change(
     if entropy:
         from math import log
 
-        def primitive(temperature):
+        def primitive(temperature: float) -> float:
             coefficients = normalized.coefficients
             return coefficients.get("a", 0.0) * log(temperature) + sum(
                 coefficients.get(key, 0.0) * temperature ** power / power
                 for power, key in enumerate(("b", "c", "d", "e"), 1))
     else:
-        def primitive(temperature):
+        def primitive(temperature: float) -> float:
             return _cp_polynomial_integral(temperature, normalized.coefficients)
     if not entropy and not any(normalized.coefficients.get(key, 0) for key in ("b", "c", "d", "e")):
         value = normalized.coefficients.get("a", 0.0) * (
@@ -781,8 +786,8 @@ def _ensure_positive_heat_capacity_interval(
     lower = min(initial_temperature, final_temperature)
     upper = max(initial_temperature, final_temperature)
     coefficients = [correlation.coefficients.get(key, 0.0) for key in ("a", "b", "c", "d", "e")]
-    critical = (np.polynomial.Polynomial(coefficients).deriv().roots()
-                if any(coefficients[1:]) else ())
+    critical = cast(Iterable[complex], np.polynomial.Polynomial(coefficients).deriv().roots()
+                    if any(coefficients[1:]) else ())
     sample_temperatures = (lower, upper, *(float(root.real) for root in critical
                                            if abs(root.imag) < 1e-10 and lower < root.real < upper))
     for temperature in sample_temperatures:
