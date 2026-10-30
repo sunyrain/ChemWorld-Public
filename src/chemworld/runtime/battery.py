@@ -158,7 +158,7 @@ class BatteryRuntime:
         return replace(transition, state=active.replace(inactive_vessels=locals_),
                        receipt={**transition.receipt, "battery_initialization": changed})
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         declared = {c.vessel for c in self.composition.components
                     if c.kind in {"battery_spm", "battery_cell"}}
         installed = {

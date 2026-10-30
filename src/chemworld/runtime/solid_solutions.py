@@ -238,7 +238,7 @@ class SolidSolutionRuntime:
             )
         return self.calphad_thermal.reconcile_initialization(transition)
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         from chemworld.runtime.calphad_thermal import CalphadThermalSpec
 
         if self.composition is None or self.composition.physics is None:

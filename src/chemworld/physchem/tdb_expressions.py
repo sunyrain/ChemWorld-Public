@@ -33,7 +33,7 @@ class TdbExpression:
     symbols: tuple[str, ...] = field(init=False)
     _tree: ast.AST = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.text, str) or not self.text.strip() or len(self.text) > 16384:
             raise ValueError("TDB expression requires 1-16384 characters")
         text = self.text.upper().replace("#", "").replace("^", "**").strip()

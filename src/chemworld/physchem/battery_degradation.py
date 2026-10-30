@@ -27,7 +27,7 @@ class SEISpec:
     film_resistivity_ohm_m: float = 1e5
     reference_driving_energy_J_mol: float = 50000.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name, value in vars(self).items():
             if not isfinite(value) or value < 0:
                 raise ValueError(f"SEI {name} must be finite and nonnegative")

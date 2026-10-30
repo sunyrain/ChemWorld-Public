@@ -42,7 +42,7 @@ class ResidualSolvePolicy:
     root: RootPolicy = field(default_factory=lambda: RootPolicy(tolerance=1e-12))
     structure_tolerance: float = 1e-10
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.ode.method not in {"BDF", "Radau"} or self.ode.vectorized:
             raise ValueError("residual reduction supports nonvectorized BDF or Radau")
         if not isfinite(self.structure_tolerance) or self.structure_tolerance <= 0:
@@ -58,7 +58,7 @@ class ResidualPoint:
     state: np.ndarray
     rate: np.ndarray
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "time_s", float(self.time_s))
         object.__setattr__(self, "state", readonly(self.state))
         object.__setattr__(self, "rate", readonly(self.rate))
@@ -80,7 +80,7 @@ class ResidualEvent:
     terminal: bool = True
     initial_violation_stops: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.name or not callable(self.value) or self.direction not in {-1, 0, 1}:
             raise ValueError("residual event needs identity, callback and crossing direction")
         if type(self.terminal) is not bool:

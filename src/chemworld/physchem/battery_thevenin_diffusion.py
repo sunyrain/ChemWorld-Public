@@ -40,7 +40,7 @@ class TheveninDiffusionSpec:
     _operator: sparse.csr_matrix = field(init=False, repr=False, compare=False)
     _surface_weights: np.ndarray = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.parameters, ScientificTable) or self.parameters.kind != "parameters":
             raise ValueError("Thevenin diffusion requires a sourced parameter table")
         _text(self.parameter_row_id, "parameter_row_id")

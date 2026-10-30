@@ -87,7 +87,7 @@ class GasImpingingSurfaceSpec:
     flux_model: str = "mixture-averaged"
     maximum_mach: float = 0.05
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not isinstance(self.mesh, DiffusionMesh)
             or self.mesh.geometry != "planar"

@@ -181,7 +181,7 @@ def markdown():
     return "\n".join(rows)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--format", choices=("markdown", "json", "summary", "execution-json"), default="markdown"

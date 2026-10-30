@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from chemworld.foundation.lab_clock import LabClockState
 from chemworld.foundation.material_properties import MATERIAL_METRICS, extract_material_properties
@@ -22,6 +22,9 @@ from chemworld.foundation.state_ledgers import (
 )
 from chemworld.foundation.state_ownership import StateSlots
 
+if TYPE_CHECKING:
+    from chemworld.foundation.state import WorldState
+
 
 def _solvents(value: dict[str, Any]) -> SolventInventory:
     if "volumes_L" in value:  # previous dataclasses.asdict sample representation
@@ -29,7 +32,9 @@ def _solvents(value: dict[str, Any]) -> SolventInventory:
     return SolventInventory(tuple(value.get(key, 0.0) for key in SOLVENT_IDS))
 
 
-def _phases(value: dict[str, Any], *, order=None) -> PhaseLedger:
+def _phases(
+    value: dict[str, Any], *, order: list[str] | tuple[str, ...] | None = None,
+) -> PhaseLedger:
     # Historical dataclasses.asdict used one wrapper. A phase itself may also
     # have the identity "phases"; its explicit record is not that wrapper.
     if set(value) == {"phases"} and "phase_id" not in value["phases"]:
@@ -66,7 +71,7 @@ def _equipment(value: dict[str, Any]) -> EquipmentLedger:
     )
 
 
-def restore_sample(payload: dict[str, Any], *, require_order=False) -> StoredSample:
+def restore_sample(payload: dict[str, Any], *, require_order: bool = False) -> StoredSample:
     values = dict(payload)
     contents = values.get("contents")
     if contents is not None:
@@ -92,7 +97,7 @@ def restore_sample(payload: dict[str, Any], *, require_order=False) -> StoredSam
     return StoredSample(**values)
 
 
-def restore_state(payload: dict[str, Any], *, require_order=False):
+def restore_state(payload: dict[str, Any], *, require_order: bool = False) -> WorldState:
     from chemworld.foundation.state import Ledger, WorldState
 
     if "species_amounts" not in payload:

@@ -228,7 +228,7 @@ class CombustionData:
     missing_handling: str
     product_enthalpies: dict
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for key in ("HHV", "Hf"):
             _finite(getattr(self, key), key)
         _positive(self.MW, "molecular weight")

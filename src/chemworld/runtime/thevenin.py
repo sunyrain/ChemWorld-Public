@@ -88,7 +88,7 @@ class TheveninRuntime:
 
     validate = validate_state
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         if self.composition is None:
             return
         physics = self.composition.physics

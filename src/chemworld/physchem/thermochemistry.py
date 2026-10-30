@@ -421,7 +421,7 @@ class CorrelationSpeciesThermo:
     reference: CaloricReference
     composition: dict[str, float] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (not self.species_id or self.reference.phase is None
                 or self.reference.energy_basis != "enthalpy"
                 or self.reference.entropy_J_mol_K is None):

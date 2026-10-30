@@ -67,7 +67,7 @@ class BatteryCompositeDFNSpec:
     series_resistance_ohm: float = 0.0
     provenance: str = "declared-single-valued-composite-DFN-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         phases = tuple(
             ActiveMaterialPhaseSpec.from_dict(p) if isinstance(p, dict) else p
             for p in self.negative_phases
@@ -160,7 +160,7 @@ class BatteryCompositeDFNSpec:
         return "residual"
 
     @property
-    def thermal(self):
+    def thermal(self) -> None:
         return None
 
     sei = plating = negative_ocp = positive_ocp = thermal

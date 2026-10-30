@@ -136,7 +136,7 @@ class ElectrodeSOHSpec:
     source_row_id: str = ""
     parameter_inputs: tuple[tuple[str, InputValue], ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _validate(self, ("negative_capacity_C", "positive_capacity_C", "known_capacity_C"))
         if self.known not in {"cyclable_lithium", "cell_capacity"}:
             raise ValueError("SOH known quantity must be cyclable_lithium or cell_capacity")
@@ -163,7 +163,7 @@ class HalfCellSOHSpec:
     source_row_id: str = ""
     parameter_inputs: tuple[tuple[str, InputValue], ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _validate(self, ("working_capacity_C",))
         if not isinstance(self.working_ocv, ElectrodeOCV):
             raise ValueError(

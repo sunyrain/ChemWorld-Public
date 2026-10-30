@@ -77,7 +77,7 @@ class CaloricReference:
     entropy_J_mol_K: float | None = None
     source_note: str = "Explicit caloric reference; no formation-data claim"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.phase is not None:
             _validate_phase(self.phase)
         if (self.energy_basis not in {"enthalpy", "internal_energy"}
@@ -113,7 +113,7 @@ class StatePropertyReport:
         default_factory=dict)
     model_details: Mapping[str, object] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _validate_phase(self.phase)
         amounts = {key: float(value) for key, value in self.component_amounts_mol.items()}
         if (not self.model_id or not amounts or not isfinite(sum(amounts.values()))

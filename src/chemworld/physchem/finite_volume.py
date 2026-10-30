@@ -41,7 +41,7 @@ class DiffusionMesh:
     cell_volumes_m3: np.ndarray = field(init=False, repr=False, compare=False)
     face_areas_m2: np.ndarray = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         faces = np.asarray(self.faces_m, dtype=float)
         if (self.geometry not in {"planar", "spherical"} or faces.ndim != 1
                 or faces.size < 2 or not np.all(np.isfinite(faces))
@@ -113,7 +113,7 @@ class DiffusionBoundary:
     kind: str = "symmetry"
     value: float = 0.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (self.kind not in {"symmetry", "flux", "concentration"}
                 or not isfinite(self.value)
                 or (self.kind == "concentration" and self.value < 0)
@@ -127,7 +127,7 @@ class DiffusionRates:
     # Positive along increasing coordinate; each internal face is computed once.
     face_rates_mol_s: np.ndarray
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("amount_rates_mol_s", "face_rates_mol_s"):
             object.__setattr__(self, name, _readonly(getattr(self, name)))
 
@@ -151,7 +151,7 @@ class ConservativeDiffusion:
     storage_fractions: tuple[float, ...] | None = field(default=None, kw_only=True)
     _jacobian: csr_matrix = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         coefficient = np.asarray(self.diffusivity_m2_s, dtype=float)
         if (coefficient.shape not in {(), (self.mesh.cells,)}
                 or not np.all(np.isfinite(coefficient)) or np.any(coefficient < 0)):

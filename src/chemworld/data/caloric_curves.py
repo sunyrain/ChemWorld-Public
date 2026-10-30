@@ -51,7 +51,7 @@ class HeatCapacityData:
     notes: tuple[str, ...] = ()
     capacity_qualities: tuple[str, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.phase not in _PHASE_PROPERTY:
             raise ValueError("source curve requires an explicit physical phase")
         object.__setattr__(self, "coefficients", MappingProxyType(dict(self.coefficients)))

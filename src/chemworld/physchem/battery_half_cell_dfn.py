@@ -127,7 +127,7 @@ class BatteryHalfCellElectrolyteSpec:
     positive_solid_conductivity_S_m: float = 100.0
     model_version: str = ELECTROLYTE_VERSION
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.model_version != ELECTROLYTE_VERSION:
             raise ValueError("unknown half-cell electrolyte version")
         for name in ("lengths_m", "porosities", "bruggeman", "cells"):
@@ -270,7 +270,7 @@ class LithiumMetalSaltKineticsSpec:
     parameter_row_id: str
     model_version: str = METAL_KINETICS_VERSION
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.parameters, ScientificTable) or self.parameters.kind != "parameters":
             raise ValueError("metal salt kinetics require a sourced parameter table")
         _text(self.parameter_row_id, "parameter_row_id")
@@ -328,7 +328,7 @@ class BatteryHalfCellDFNSpec:
     maximum_current_A: float = 2.0
     provenance: str = "declared-fixed-geometry-half-cell-DFN-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         constructors = {
             "metal": LithiumMetalCounterElectrodeSpec.from_dict,
             "positive": lambda value: ParticleSpec(**value),
@@ -408,7 +408,7 @@ class BatteryHalfCellDFNSpec:
         return "residual"
 
     @property
-    def thermal(self):
+    def thermal(self) -> None:
         return None
 
     sei = plating = negative_ocp = positive_ocp = thermal
@@ -591,7 +591,7 @@ class HalfCellDFNReadout:
     electrolyte_ohmic_V: float
     solid_ohmic_V: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Keep public measurements finite and JSON-safe.
 
         The DFN readout is derived data, so it must never become a second

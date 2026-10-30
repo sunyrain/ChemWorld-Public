@@ -46,7 +46,7 @@ class CoupledConcentrationSpec:
     minimum_target_recovery: float = 0.95
     minimum_liquid_solvent_mol: float = 1e-7
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         from chemworld.physchem.concentration_units import VacuumConcentratorSpec
 
         object.__setattr__(self, "solvent_component_ids", tuple(self.solvent_component_ids))
@@ -194,7 +194,7 @@ class CoupledConcentrationState:
     outlet_amounts_mol: dict[str, float] = field(default_factory=dict)
     outlet_enthalpy_J: float = 0.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "amounts_mol", tuple(dict(n) for n in self.amounts_mol))
         object.__setattr__(self, "enthalpies_J", tuple(self.enthalpies_J))
         object.__setattr__(self, "outlet_amounts_mol", dict(self.outlet_amounts_mol))

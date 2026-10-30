@@ -61,7 +61,7 @@ class BatteryMSMRSPMSpec:
     resistance_ohm: float = 0.0
     provenance: str = "declared-msmr-spm-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("negative", "positive"):
             particle, material = getattr(self, name), getattr(self, name + "_material")
             if isinstance(particle, dict):
@@ -120,15 +120,15 @@ class BatteryMSMRSPMSpec:
         return "residual"
 
     @property
-    def thermal(self):
+    def thermal(self) -> None:
         return None
 
     @property
-    def sei(self):
+    def sei(self) -> None:
         return None
 
     @property
-    def electrolyte(self):
+    def electrolyte(self) -> None:
         return None
 
     @property

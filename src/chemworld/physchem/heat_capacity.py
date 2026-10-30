@@ -72,7 +72,7 @@ class PiecewiseHeatCapacity:
     segments: tuple[PropertyCorrelation, ...]
     source_note: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.correlation_id or not self.source_note or not self.segments:
             raise ValueError("piecewise capacity requires identity, source note and segments")
         segments = tuple(PropertyCorrelation.from_dict(c.to_dict()) for c in self.segments)

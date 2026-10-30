@@ -248,7 +248,7 @@ class ChromatographyProgram:
     duration_s: float = 60.0
     delay_s: float = 0.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _positive(self.dead_time_min, "dead_time_min")
         _positive(self.duration_s, "duration_s")
         _nonnegative(self.delay_s, "delay_s")

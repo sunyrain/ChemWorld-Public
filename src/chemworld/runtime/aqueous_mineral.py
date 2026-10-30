@@ -241,7 +241,7 @@ class AqueousMineralRuntime:
             return True
         return record is not None and "mineral_kinetics" not in record.settings
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         if self.composition is None or self.composition.physics is None:
             return
         physics = self.composition.physics

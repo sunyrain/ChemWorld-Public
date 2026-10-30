@@ -94,7 +94,7 @@ def run_example():
         right.close()
 
 
-def main():
+def main() -> None:
     print(json.dumps(run_example(), indent=2))
 
 

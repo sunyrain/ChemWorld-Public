@@ -36,7 +36,7 @@ class SDEParameter:
     value: float
     dimension: DimensionVector = field(default_factory=DimensionVector)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if _identifier(self.name) != self.name or not isinstance(self.dimension, DimensionVector):
             raise ValueError("SDE parameters require an exact symbol and common dimension")
         object.__setattr__(self, "value", finite_real(self.value, "SDE parameter"))
@@ -78,7 +78,7 @@ class ReactionNoise:
     expression: MathExpression | str | None = None
     parameters: tuple[SDEParameter, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.reaction_id, str) or not self.reaction_id:
             raise ValueError("reaction noise requires a declared channel identity")
         parameters = tuple(self.parameters)
@@ -147,7 +147,7 @@ class ReactionFlux:
     expression: MathExpression | str
     parameters: tuple[SDEParameter, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         declaration = ReactionNoise(self.reaction_id, self.expression, self.parameters)
         if declaration.expression is None:
             raise ValueError("an explicit reaction flux requires bounded MathML")
@@ -178,7 +178,7 @@ class SDEControl:
     upper: float
     parameter: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             _identifier(self.name) != self.name
             or not isinstance(self.reaction_id, str)
@@ -223,7 +223,7 @@ class StochasticSDESpec:
     minimum_volume_L: float | None = None
     output_policy: str = "linear"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("volume_L", "temperature_K", "step_s", "min_step_s"):
             object.__setattr__(self, name, finite_real(getattr(self, name), name, positive=True))
         if self.min_step_s > self.step_s:

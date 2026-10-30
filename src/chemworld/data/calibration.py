@@ -28,7 +28,7 @@ class CalibrationParameter(BoundedParameterCoordinates):
     initial: float
     coordinate: str = "log"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "path", tuple(self.path))
         if self.column.role != "parameter" or self.coordinate not in {"linear", "log"}:
             raise ValueError("calibration requires parameter columns and linear/log coordinates")
@@ -76,7 +76,7 @@ class NativeCalibrationExperiment:
     readouts: tuple[CalibrationReadout, ...]
     seed: int = 0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "actions", tuple(deepcopy(self.actions)))
         object.__setattr__(self, "readouts", tuple(self.readouts))
         if not self.group_id or not self.actions or not self.readouts:

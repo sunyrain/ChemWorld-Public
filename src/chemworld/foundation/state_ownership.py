@@ -11,7 +11,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from math import isfinite
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ class InventoryInteractionSpec:
     capacity_fields: tuple[str, ...]
     coefficients_J_mol: tuple[tuple[float, ...], ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "fields", tuple(self.fields))
         object.__setattr__(self, "capacity_fields", tuple(self.capacity_fields))
         matrix = tuple(tuple(row) for row in self.coefficients_J_mol)
@@ -131,7 +131,7 @@ class StateSlotSpec:
         for term in self.energy_interactions:
             if any(
                 key not in fields or fields[key].unit != "mol" or fields[key].mixing != "sum"
-                or fields[key].minimum is None or fields[key].minimum < 0
+                or (minimum := fields[key].minimum) is None or minimum < 0
                 for key in (*term.fields, *term.capacity_fields)
             ):
                 raise ValueError("interaction fields must be nonnegative extensive mol inventories")
@@ -143,8 +143,8 @@ class StateSlotSpec:
             if spec.weight_field and (
                 spec.weight_field not in fields
                 or fields[spec.weight_field].mixing != "sum"
-                or fields[spec.weight_field].minimum is None
-                or fields[spec.weight_field].minimum < 0
+                or (minimum := fields[spec.weight_field].minimum) is None
+                or minimum < 0
             ):
                 raise ValueError("Mixing weights must refer to an extensive field")
         if self.heat_capacity_field and (
@@ -159,7 +159,7 @@ class StateSlotSpec:
                 raise ValueError("Capacity constraints require declared extensive fields")
             if len({fields[name].unit for name in names}) != 1:
                 raise ValueError("Capacity and occupied quantities must have the same unit")
-            if any(fields[name].minimum is None or fields[name].minimum < 0 for name in names):
+            if any((minimum := fields[name].minimum) is None or minimum < 0 for name in names):
                 raise ValueError("Capacity inventories must be nonnegative")
 
 
@@ -217,7 +217,8 @@ class StateSlot:
             self,
             location_id=location_id,
             values=scaled(self.values),
-            initial_values=scaled(self.initial_values),
+            # __post_init__ materializes the optional constructor input.
+            initial_values=scaled(cast(dict[str, float], self.initial_values)),
         )
 
     def move(self, location_id: str) -> StateSlot:
@@ -243,7 +244,9 @@ class StateSlot:
                         raise ValueError(f"Incompatible material field {spec.name}")
                     values[spec.name] = a
                 else:
-                    wa, wb = left[spec.weight_field], right[spec.weight_field]
+                    # StateFieldSpec requires a weight exactly for weighted fields.
+                    weight = cast(str, spec.weight_field)
+                    wa, wb = left[weight], right[weight]
                     if wa + wb == 0 and a != b:
                         raise ValueError("Undefined intensive mixing with zero capacity")
                     values[spec.name] = (wa * a + wb * b) / (wa + wb) if wa + wb else a
@@ -252,12 +255,15 @@ class StateSlot:
         return replace(
             self,
             values=mixed(self.values, other.values),
-            initial_values=mixed(self.initial_values, other.initial_values),
+            initial_values=mixed(
+                cast(dict[str, float], self.initial_values),
+                cast(dict[str, float], other.initial_values),
+            ),
         )
 
     def reset(self, *, full: bool = False) -> StateSlot | None:
         if full or self.spec.batch_reset == "initial":
-            return replace(self, values=self.initial_values)
+            return replace(self, values=cast(dict[str, float], self.initial_values))
         return None if self.spec.batch_reset == "clear" else self
 
     def to_dict(self, *, include_hidden: bool = True) -> dict[str, Any]:
@@ -426,7 +432,9 @@ class StateSlots:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any], *, order=None) -> StateSlots:
+    def from_dict(
+        cls, payload: dict[str, Any], *, order: list[str] | tuple[str, ...] | None = None,
+    ) -> StateSlots:
         if order is not None and (
             not isinstance(order, list | tuple) or any(not isinstance(key, str) for key in order)
         ):

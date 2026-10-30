@@ -53,7 +53,7 @@ def run_example(path, amounts_mol, *, phase_name=None):
         runtime.close()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mechanism")
     parser.add_argument("--phase")

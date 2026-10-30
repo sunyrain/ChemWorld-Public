@@ -67,7 +67,7 @@ def run(output, *, spec=None, noise="keyed"):
             "scope": "synthetic isothermal Newman-Tobias; two average lithium inventories"}
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--noise", choices=("keyed", "sequential"), default="keyed")

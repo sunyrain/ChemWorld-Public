@@ -216,17 +216,17 @@ class ProcessLedger:
 
     def __init__(
         self,
-        time_s=0.0,
-        cost=0.0,
-        risk=0.0,
-        sample_consumed_L=0.0,
-        waste_L=0.0,
-        metrics=None,
-        last_observation_record=None,
-        last_observation=None,
-        last_observed_mask=None,
-        stochastic_continuation=None,
-    ):
+        time_s: float = 0.0,
+        cost: float = 0.0,
+        risk: float = 0.0,
+        sample_consumed_L: float = 0.0,
+        waste_L: float = 0.0,
+        metrics: dict[str, float] | None = None,
+        last_observation_record: Observation | dict[str, Any] | None = None,
+        last_observation: dict[str, float | None] | None = None,
+        last_observed_mask: dict[str, bool] | None = None,
+        stochastic_continuation: dict[str, Any] | None = None,
+    ) -> None:
         # Old snapshots enter here once. New snapshots store only the native record.
         if isinstance(last_observation_record, dict):
             last_observation_record = Observation.from_native_record(last_observation_record)

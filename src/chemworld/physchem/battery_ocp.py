@@ -40,7 +40,7 @@ class ElectrodeOCPSpec:
     convention: str = OCP_CONVENTION
     _native: object = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.mode not in {"single", *OCP_UNITS} or self.convention != OCP_CONVENTION:
             raise ValueError("unsupported operational OCP mode or convention")
         if self.mode == "single":

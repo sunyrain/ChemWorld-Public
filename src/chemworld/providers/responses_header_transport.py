@@ -29,7 +29,7 @@ def standard_headers_transport(base_url: str, audit: Path, timeout: float):
             handle.write(json.dumps(row, sort_keys=True) + "\n")
 
     class Handler(BaseHTTPRequestHandler):
-        def do_POST(self):
+        def do_POST(self) -> None:
             nonlocal sequence
             if self.path != "/responses" or stopping.is_set():
                 self.send_error(404)

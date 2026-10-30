@@ -55,7 +55,7 @@ class CoordinateEventSpec:
     persistent: bool = True
     use_trigger_values: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "targets", tuple(self.targets))
         if not isinstance(self.event_id, str) or not self.event_id:
             raise ValueError("coordinate event requires a stable identity")
@@ -78,7 +78,7 @@ class PendingCoordinateEvent:
     due_time_s: float
     payload: object = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (not isinstance(self.event_id, str) or not self.event_id
                 or not _integer(self.generation, 1) or not _integer(self.sequence)
                 or not _finite_real(self.due_time_s) or self.due_time_s < 0):
@@ -106,7 +106,7 @@ class CoordinateEventMemory:
     pending: tuple = ()
     next_sequence: int = 0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (not isinstance(self.previous, Mapping) or not isinstance(self.generations, Mapping)
                 or set(self.previous) != set(self.generations)
                 or any(not isinstance(k, str) or not k or type(v) is not bool

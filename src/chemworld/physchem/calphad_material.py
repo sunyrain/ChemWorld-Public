@@ -43,7 +43,7 @@ class CefMaterialSpec:
     pressure_Pa: float = 101325.0
     support_heat_capacity_J_K: float = 0.2
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.phase_model, GibbsPhaseModel):
             raise ValueError("CEF material requires an explicit native phase model")
         if self.phase_type not in {"solid", "liquid"}:

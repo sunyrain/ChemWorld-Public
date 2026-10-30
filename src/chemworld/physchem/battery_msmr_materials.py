@@ -136,7 +136,7 @@ class MSMRMaterialSpec:
     reference_electrolyte_concentration_mol_m3: float = 1000.0
     _rows: tuple = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _text(self.material_id, "MSMR material_id")
         if not isinstance(self.parameters, ScientificTable) or self.parameters.kind != "parameters":
             raise ValueError("MSMR requires a sourced parameter table")

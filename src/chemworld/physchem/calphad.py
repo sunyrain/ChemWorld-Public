@@ -143,7 +143,7 @@ class CefPhaseModel(GibbsPhaseModel):
     _interstitial: tuple[int, ...] = field(init=False, repr=False, default=())
     _diagnostics: tuple[str, ...] = field(init=False, repr=False, default=())
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.database, TdbDatabase):
             raise ValueError("CEF requires a validated native TdbDatabase")
         if type(self.activate_suppressed) is not bool:
@@ -306,7 +306,7 @@ class CefPhaseModel(GibbsPhaseModel):
                             generated[key] = _Parameter(parameter.source, array)
         return (*selected, *generated.values())
 
-    def _check_endmembers(self):
+    def _check_endmembers(self) -> None:
         if self.unspecified_endmembers == "zero":
             return
         if prod(map(len, self.constituents)) > 100000:

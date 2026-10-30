@@ -94,7 +94,7 @@ def run(output, *, spec=None, noise="keyed"):
             "scope": "synthetic 2+1 material phases, single-valued OCV, isothermal"}
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--noise", choices=("keyed", "sequential"), default="keyed")

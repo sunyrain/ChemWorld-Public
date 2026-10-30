@@ -41,7 +41,7 @@ class SorbentKineticsSpec:
     temperature_bounds_K: tuple[float, float] = (280.0, 430.0)
     carrier_heat_capacity_J_kg_K: float = 1000.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in (
             "reference_affinity_L_per_mol",
             "mass_transfer_rates_s_inv",

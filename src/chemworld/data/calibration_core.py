@@ -15,7 +15,7 @@ from chemworld.data.scientific_inputs import ScientificTable
 class BoundedParameterCoordinates:
     """Shared linear/log normalization; concrete parameters own units and identity."""
 
-    def _validate_coordinates(self):
+    def _validate_coordinates(self) -> None:
         lower, upper = self.bounds
         if (
             self.coordinate not in {"linear", "log"}

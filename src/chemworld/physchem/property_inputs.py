@@ -60,7 +60,7 @@ class PropertyInputCard:
     reference: CaloricReference | None
     reference_note: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _text(self.reference_note, "reference_note")
         sources = {source.provenance.source_id for source in self.sources}
         if not sources or len(sources) != len(self.sources):

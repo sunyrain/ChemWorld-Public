@@ -72,7 +72,7 @@ class LithiumMetalCounterElectrodeSpec:
     convention: str = METAL_CONVENTION
     _native: object = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.parameters, ScientificTable) or self.parameters.kind != "parameters":
             raise ValueError("lithium metal requires a sourced parameter table")
         _text(self.parameter_row_id, "parameter_row_id")
@@ -135,7 +135,7 @@ class BatteryHalfCellSPMSpec:
     maximum_current_A: float = 2.0
     provenance: str = "declared-fixed-geometry-half-cell-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if isinstance(self.metal, dict):
             object.__setattr__(self, "metal",
                                LithiumMetalCounterElectrodeSpec.from_dict(self.metal))
@@ -182,15 +182,15 @@ class BatteryHalfCellSPMSpec:
         return "residual"
 
     @property
-    def thermal(self):
+    def thermal(self) -> None:
         return None
 
     @property
-    def sei(self):
+    def sei(self) -> None:
         return None
 
     @property
-    def electrolyte(self):
+    def electrolyte(self) -> None:
         return None
 
     @property
@@ -283,7 +283,7 @@ class HalfCellReadout:
     metal_ohmic_V: float
     metal_resistance_ohm: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Keep the diagnostic codec finite so strict JSON remains possible."""
         for name in (
             "voltage_V",

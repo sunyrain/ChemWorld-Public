@@ -27,7 +27,7 @@ class SEDMLAlgorithm:
     atol: float = 1e-12
     maximum_step_source: float | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         values = (self.rtol, self.atol, *((self.maximum_step_source,)
                   if self.maximum_step_source is not None else ()))
         if self.kisao_id not in _METHODS or any(
@@ -58,7 +58,7 @@ class UniformTimeCourse:
     number_of_steps: int
     algorithm: SEDMLAlgorithm | SEDMLStochasticAlgorithm
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         values = (self.initial_time, self.output_start, self.output_end)
         if (any(isinstance(v, bool) or not isinstance(v, (int, float)) or not isfinite(v)
                 for v in values) or not self.initial_time <= self.output_start <= self.output_end

@@ -271,7 +271,7 @@ class KineticOnlyThermodynamics:
 
     inventory_keys: tuple[str, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.inventory_keys:
             raise ValueError("formal kinetics cannot replace a chemical inventory's thermodynamics")
 
@@ -582,7 +582,7 @@ class CoupledCoordinate:
     minimum: float | None = None
     maximum: float | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.name or not self.unit or not isfinite(self.scale) or self.scale <= 0:
             raise ValueError("coordinate requires a name, native unit and positive finite scale")
         if any(v is not None and not isfinite(v) for v in (self.minimum, self.maximum)):
@@ -610,7 +610,7 @@ class CoupledAlgebraic:
     initial_values: Callable[[CoupledStateView], Mapping[str, float]]
     residual: Callable[[CoupledStateView], Sequence[float]]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         from chemworld.physchem.residual_system import ResidualEquation, ResidualVariable
 
         object.__setattr__(self, "variables", tuple(self.variables))

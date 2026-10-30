@@ -23,7 +23,7 @@ class PressureData:
     pressures_Pa: tuple[float | None, ...] = ()
     notes: tuple[str, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.property_id not in {"vapor_pressure", "sublimation_pressure"}:
             raise ValueError("pressure source requires vapor or sublimation identity")
         object.__setattr__(self, "coefficients", MappingProxyType(dict(self.coefficients)))

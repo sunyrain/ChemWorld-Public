@@ -210,7 +210,7 @@ class VirialGasThermodynamics:
     package: ComponentPropertyPackage
     ideal_caloric: SpeciesCaloricModel
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.ideal_caloric.reference.phase != "gas":
             raise ValueError("virial caloric reference must explicitly describe ideal gas")
         # The ideal datum anchors only the ideal caloric integral. Residual

@@ -50,7 +50,7 @@ class DynamicColumnSpec:
     condenser_conductance_W_K: float = 0.5
     liquid_molar_holdup_L_mol: float = 0.05
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         n = self.equipment.theoretical_stages
         if (
             n != int(n)
@@ -166,7 +166,7 @@ class DynamicColumnState:
     condenser_energy_J: float = 0.0
     withdrawn_product_mol: float = 0.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "amounts_mol", tuple(dict(v) for v in self.amounts_mol))
         object.__setattr__(self, "enthalpies_J", tuple(self.enthalpies_J))
         if (

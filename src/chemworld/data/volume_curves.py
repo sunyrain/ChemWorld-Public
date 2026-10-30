@@ -25,7 +25,7 @@ class VolumeData:
     values: tuple = ()
     notes: tuple = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "coefficients", MappingProxyType(dict(self.coefficients)))
 
     @property

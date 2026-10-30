@@ -64,7 +64,7 @@ class IncompressibleMaterialModel:
     preparation_reference_temperature_K: float | None = None
     preparation_source: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         components = tuple(self.components)
         if (
             not isinstance(self.fluid, IncompressibleFluid)

@@ -105,7 +105,7 @@ class TheveninSpec:
     control: TheveninControlSpec | None = None
     _native: Mapping[str, float] = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.parameters, ScientificTable) or self.parameters.kind != "parameters":
             raise ValueError("Thevenin constants require a sourced parameter table")
         _text(self.parameter_row_id, "parameter_row_id")

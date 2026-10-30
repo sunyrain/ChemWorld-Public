@@ -54,7 +54,7 @@ class ArchiveEntry:
     data: bytes
     master: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (local_archive_path(self.location) != self.location or self.location == "manifest.xml"
                 or len(self.location) > 1024
                 or PurePosixPath(self.location).suffix.casefold() in _EXECUTABLE
@@ -71,7 +71,7 @@ class CombineArchive:
     entries: tuple[ArchiveEntry, ...]
     source: InputSource
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         entries = tuple(self.entries)
         if (not isinstance(self.source, InputSource) or not 1 <= len(entries) < MAX_ENTRIES
                 or any(not isinstance(e, ArchiveEntry) for e in entries)

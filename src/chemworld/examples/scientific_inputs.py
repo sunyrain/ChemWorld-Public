@@ -169,7 +169,7 @@ def run_example():
     }
 
 
-def main():
+def main() -> None:
     print(json.dumps(run_example(), indent=2, allow_nan=False))
 
 

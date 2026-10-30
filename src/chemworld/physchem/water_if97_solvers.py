@@ -138,7 +138,7 @@ class IF97Equilibrium:
     vapor: IF97State | None = None
     vapor_mass_fraction: float | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.homogeneous is not None:
             if (self.liquid is not None or self.vapor is not None
                     or self.vapor_mass_fraction is not None):

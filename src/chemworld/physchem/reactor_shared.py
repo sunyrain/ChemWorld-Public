@@ -33,7 +33,7 @@ class ScalarControlProgram:
     unit: str
     mode: str = "linear"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "setpoints", tuple(tuple(p) for p in self.setpoints))
         if not self.setpoints or not self.unit or self.mode not in {"step", "linear"}:
             raise ValueError("control requires setpoints, units and step/linear interpolation")

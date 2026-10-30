@@ -33,7 +33,7 @@ class SEDMLRanges:
     _order: tuple = field(init=False, repr=False, compare=False)
     count: int = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (type(self.maximum_values) is not int or not 1 <= self.maximum_values <= 100000
                 or self.task.local_name != "repeatedTask"):
             raise ValueError("range plan needs a repeated task and a finite positive budget")

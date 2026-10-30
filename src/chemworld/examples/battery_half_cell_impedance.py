@@ -63,7 +63,7 @@ def run(output, *, spec=None, state=None, frequencies_Hz=(1e-4, 1e-3, 1e-2)):
     return report
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--cells", type=int, default=24)

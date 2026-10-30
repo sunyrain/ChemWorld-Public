@@ -38,7 +38,7 @@ class CefStationaryPolicy:
     maximum_saddle_escapes: int = 2
     root: RootPolicy = field(default_factory=lambda: RootPolicy(maximum_iterations=50))
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if any(isinstance(v, bool) or not isfinite(v) or v <= 0 for v in (
             self.rank_tolerance, self.absolute_stationarity_J_mol,
             self.relative_stationarity, self.site_floor,

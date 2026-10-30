@@ -81,7 +81,7 @@ def run_example(*, include_surface=True, include_bulk=False, mobile=False, termi
         env.close()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--no-surface", action="store_true")
     parser.add_argument("--bulk", action="store_true")

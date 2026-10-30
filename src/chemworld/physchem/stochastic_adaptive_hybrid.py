@@ -50,7 +50,7 @@ class AdaptiveHybridSpec:
     max_events_per_advance: int = 100000
     max_evaluations_per_advance: int = 1000000
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("volume_L", "temperature_K", "step_s", "rtol", "atol_particles"):
             object.__setattr__(self, name, _real(getattr(self, name), name, positive=True))
         for name in ("lower_limit", "upper_limit"):
@@ -105,7 +105,7 @@ class AdaptiveHybridModel:
     channels: tuple = field(init=False)
     signature: str = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.spec, AdaptiveHybridSpec):
             raise ValueError("adaptive model requires its explicit physical declaration")
         channels = compile_elementary_channels(self.network)

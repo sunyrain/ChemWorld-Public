@@ -30,7 +30,7 @@ class IncompressibleCorrelation:
     family: str
     coefficients: tuple[tuple[float, ...], ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         coefficients = tuple(tuple(row) for row in self.coefficients)
         if not coefficients or not coefficients[0] or any(
             len(row) != len(coefficients[0]) for row in coefficients
@@ -132,7 +132,7 @@ class IncompressibleReference:
     enthalpy_J_kg: float = 0.0
     entropy_J_kg_K: float = 0.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for key, value in asdict(self).items():
             _finite(value, key)
         if self.temperature_K <= 0 or self.pressure_Pa <= 0:
@@ -195,7 +195,7 @@ class IncompressibleFluid:
     correlations: tuple[tuple[str, IncompressibleCorrelation | None], ...]
     reference: IncompressibleReference = IncompressibleReference()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.fluid_id or not self.source or self.fraction_basis not in {
             "pure", "mass", "volume", "mole"
         }:

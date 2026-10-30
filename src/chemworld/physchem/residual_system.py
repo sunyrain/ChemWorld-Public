@@ -94,7 +94,7 @@ class ResidualVariable:
     lower: float | None = None
     upper: float | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.name or not self.unit or not isfinite(self.scale) or self.scale <= 0:
             raise ValueError("variables require identity, units and positive finite scale")
         if self.role not in {"differential", "algebraic", "parameter"}:
@@ -111,7 +111,7 @@ class ResidualEquation:
     unit: str
     scale: float = 1.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.name or not self.unit or not isfinite(self.scale) or self.scale <= 0:
             raise ValueError("equations require identity, units and positive finite scale")
 
@@ -199,7 +199,7 @@ class ResidualDerivatives:
     relative_step: float = 6e-6
     state_sparsity: tuple[tuple[int, ...], ...] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.mode not in {"analytic", "finite_difference", "hybrid"}:
             raise ValueError("declare analytic, finite_difference or hybrid derivatives")
         callbacks = (self.state, self.rate, self.parameter, self.time)
@@ -231,7 +231,7 @@ class ResidualSystem:
     parameter_values: tuple[float, ...] = ()
     time_scale_s: float = 1.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("variables", "equations", "parameters", "parameter_values"):
             object.__setattr__(self, name, tuple(getattr(self, name)))
         if not self.system_id or not callable(self.residual):
@@ -424,7 +424,7 @@ class RootPolicy:
     maximum_iterations: int = 40
     maximum_backtracks: int = 24
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isfinite(self.tolerance) or self.tolerance <= 0:
             raise ValueError("root tolerance must be positive and finite")
         if any(
@@ -443,7 +443,7 @@ class RootResult:
     failure_reason: str
     diagnostics: dict
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.value is not None:
             object.__setattr__(self, "value", readonly(self.value))
 
@@ -571,7 +571,7 @@ class SteadyResidualResult:
     parameter_response: np.ndarray | None = None
     diagnostics: dict = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.parameter_response is not None:
             object.__setattr__(self, "parameter_response", readonly(self.parameter_response))
 

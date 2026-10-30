@@ -545,7 +545,7 @@ class SEDMLExperimentSession:
         runner.iterations = payload["iterations"]
         self.runner = runner
 
-    def _validate_stack(self):
+    def _validate_stack(self) -> None:
         if len(self.stack) > 16 or bool(self.stack) != (self.runner is not None):
             raise ValueError("checkpoint stack depth or native runner presence is invalid")
         courses = sum(

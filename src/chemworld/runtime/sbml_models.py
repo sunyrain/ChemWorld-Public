@@ -198,7 +198,7 @@ class SBMLAdvanceStrategy:
             diagnostics["source_events_executed"] = result.source_events_executed
         return ModelProviderResult({}, diagnostics, state=candidate, actual_duration_s=0.)
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         if self.composition is None or self.composition.physics is None:
             return
         physics = self.composition.physics

@@ -17,7 +17,7 @@ class SEDMLArray:
     sample_keys: tuple
     unit: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         values, shape, axes, keys = map(tuple,
             (self.values, self.shape, self.axes, self.sample_keys))
         if (len(shape) > 16 or any(type(n) is not int or n < 1 for n in shape)
@@ -50,7 +50,7 @@ class SEDMLReports:
     generators: object = field(init=False, repr=False)
     reports: object = field(init=False, repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         bindings, generators, reports = {}, {}, {}
         models = dict(self.models)
         for node in records(self.tasks.document.declaration, "listOfDataGenerators"):

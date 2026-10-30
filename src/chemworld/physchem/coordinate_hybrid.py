@@ -25,7 +25,7 @@ class CoordinateRoot:
     value: object
     derivative: object
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (not isinstance(self.root_id, str) or not self.root_id
                 or not callable(self.value) or not callable(self.derivative)):
             raise ValueError("coordinate roots need identity and pure value/derivative callbacks")
@@ -36,7 +36,7 @@ class CoordinateHybridMemory:
     events: CoordinateEventMemory
     root_values: object = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         from collections.abc import Mapping
 
         if (not isinstance(self.events, CoordinateEventMemory)

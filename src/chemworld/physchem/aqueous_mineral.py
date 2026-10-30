@@ -48,7 +48,7 @@ class CarbonateEquilibriumSpec:
     temperature_K: float = 298.15
     maximum_pressure_Pa: float = 200000.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not self.model_id
             or any(

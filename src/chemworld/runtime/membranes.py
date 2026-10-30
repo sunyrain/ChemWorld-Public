@@ -255,7 +255,7 @@ class MembraneRuntime:
                 result.update(membrane_liquid_ids(state, spec))
         return result
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         states = self.composition.physics.initial_states
         installed = {v for v, s in states.items() if self.supports(s)}
         declared = {c.vessel for c in self.composition.components if c.kind == "ro_membrane"}

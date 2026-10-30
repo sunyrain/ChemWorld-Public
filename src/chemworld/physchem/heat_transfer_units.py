@@ -97,7 +97,7 @@ class CondensedBackgroundSpec:
     solvent_index: int = 0
     source_vessel_id: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _positive(self.volumetric_cv_J_L_K, "background heat capacity")
         _positive(self.feed_temperature_K, "background feed temperature")
         if self.source_vessel_id is not None and (

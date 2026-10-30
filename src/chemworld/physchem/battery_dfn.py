@@ -68,7 +68,7 @@ class BatteryDFNSpec(BatterySPMSpec):
     model_family: str = DFN_ID
     provenance: str = "synthetic-DFN-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         super().__post_init__()
         if self.model_family != DFN_ID or self.electrolyte is None:
             raise ValueError("DFN requires its explicit model identity and electrolyte")

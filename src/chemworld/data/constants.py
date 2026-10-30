@@ -131,7 +131,7 @@ class ConstantRecord:
     source_attributes: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     document_metadata: Mapping[str, str] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if len(self.field_names) != len(self.raw_fields) or len(set(self.field_names)) != len(
             self.field_names
         ):

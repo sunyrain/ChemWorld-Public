@@ -84,7 +84,7 @@ class GasFlamePhaseSpec:
     position_m: float
     temperature_K: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _positive(self.position_m, "phase position")
         _positive(self.temperature_K, "phase temperature")
 
@@ -105,7 +105,7 @@ class GasPremixedFlowSpec:
     maximum_mach: float = 0.05
     advection_scheme: str = "upwind"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.mesh, DiffusionMesh) or self.mesh.geometry != "planar":
             raise ValueError("premixed flow requires the original planar DiffusionMesh")
         if self.mesh.cells < 2:

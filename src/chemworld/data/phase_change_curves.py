@@ -25,7 +25,7 @@ class LatentHeatData:
     enthalpies_J_mol: tuple[float | None, ...] = ()
     notes: tuple[str, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.property_id not in {
             "heat_of_vaporization",
             "heat_of_fusion",

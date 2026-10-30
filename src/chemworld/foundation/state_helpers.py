@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.foundation.state_ledgers import (
     EquipmentLedger,
@@ -12,10 +12,15 @@ from chemworld.foundation.state_ledgers import (
     PhaseRecord,
 )
 
+if TYPE_CHECKING:
+    from chemworld.foundation.state import WorldState
 
-def attached_device_record(state, equipment_type):
+
+def attached_device_record(state: WorldState, equipment_type: str) -> EquipmentRecord | None:
     """Find one device of the requested kind attached to this local vessel."""
-    records = [r for r in state.equipment.equipment.values()
+    # WorldState materializes optional ledger inputs during construction.
+    equipment = cast(EquipmentLedger, state.equipment)
+    records = [r for r in equipment.equipment.values()
                if r.equipment_type == equipment_type and r.attached_vessel_id == state.vessel_id]
     if len(records) > 1:
         raise ValueError("a local system has one device of each declared kind")
@@ -129,17 +134,17 @@ def equipment_status(
 INSTRUMENT_DEVICE_SELECTION = "_instrument_device_selection"
 
 
-def instrument_equipment_id(instrument_id: str, *, state=None) -> str:
+def instrument_equipment_id(instrument_id: str, *, state: WorldState | None = None) -> str:
     """Resolve an explicitly bound real instance, or the legacy single instance."""
 
     selection = {} if state is None else state.metadata.get(INSTRUMENT_DEVICE_SELECTION, {})
-    if selection.get("instrument") == instrument_id:
-        identity = selection.get("device_id")
-        record = state.equipment.equipment.get(identity)
+    if state is not None and selection.get("instrument") == instrument_id:
+        identity = cast(str, selection.get("device_id"))
+        record = cast(EquipmentLedger, state.equipment).equipment.get(identity)
         if (record is None or record.equipment_type != "instrument"
                 or record.settings.get("lab_analyzer_instrument") != instrument_id):
             raise ValueError("selected analyzer does not own the declared instrument contract")
-        return identity
+        return cast(str, identity)
     return f"instrument:{instrument_id}"
 
 

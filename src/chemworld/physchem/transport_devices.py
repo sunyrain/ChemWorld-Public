@@ -54,7 +54,7 @@ class LiquidTransportProperties:
     activity_model: ActivityModelSpec | None = None
     incompressible_model: IncompressibleMaterialModel | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.packages or len(set(self.component_ids)) != len(self.packages):
             raise ValueError("liquid transport needs distinct component packages")
         if self.activity_model is not None and (
@@ -263,7 +263,7 @@ class TransportPathSpec:
     bed_sphericity: float = 1.0
     differential_meter: DifferentialMeterSpec | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         values = {name: getattr(self, name) for name in self.__dataclass_fields__}
         values.pop("pipe")
         values.pop("control_valve")
@@ -425,7 +425,7 @@ class FiniteTransportSpec:
     support_reference_temperature_K: float = 298.15
     caloric_algorithm: str = "residual"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not self.source_vessel_id
             or len(self.capacities_j_k) != 2

@@ -63,10 +63,13 @@ class DimensionVector:
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> DimensionVector:
         values = {name: payload.get(name, 0) for name in cls().to_dict()}
-        return cls(**{name: float(v) if isinstance(v, str) else v for name, v in values.items()})
+        return cls(**{
+            name: _exponent(float(v) if isinstance(v, str) else v)
+            for name, v in values.items()
+        })
 
 
-def _exponent(value: int | float) -> int | float:
+def _exponent(value: object) -> int | float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError("dimension exponent must be a finite number")
     if not isfinite(value):

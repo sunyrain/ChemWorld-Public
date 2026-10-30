@@ -54,7 +54,7 @@ def run(output, *, spec=None, noise="keyed"):
             "scope": "synthetic isothermal SPM; explicit constant metal deactivation"}
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--gamma", type=float, default=.02, help="Constant rate in 1/s")

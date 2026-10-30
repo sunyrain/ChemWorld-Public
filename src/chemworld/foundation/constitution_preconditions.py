@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from math import pi
-from typing import Any
+from typing import Any, cast
 
 from chemworld.foundation.state import (
     WorldState,
@@ -12,6 +12,7 @@ from chemworld.foundation.state import (
     instrument_completed,
     phases_are_settled,
 )
+from chemworld.foundation.state_ledgers import EquipmentLedger
 
 # The public cooling-crystallization runtime fixes these four values in
 # CrystallizationServices.cool_crystallize.  Keep the constitution conservative
@@ -103,7 +104,7 @@ def check_operation_preconditions(
     )
     flow_ready = {"flow_rate_mL_min", "residence_time_s"} <= set(flow_settings)
     flow_ready |= any(r.settings.get("flow_control", {}).get("configured", False)
-                      for r in state.equipment.equipment.values()
+                      for r in cast(EquipmentLedger, state.equipment).equipment.values()
                       if r.attached_vessel_id == state.vessel_id)
     potential_ready = {"potential_V", "current_mA"} <= set(potential_settings)
     crystallization_ready = (

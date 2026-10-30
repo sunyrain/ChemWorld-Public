@@ -4,7 +4,7 @@ from chemworld.runtime import ChemWorldRuntime
 from chemworld.world.transport_world import transport_world_spec
 
 
-def main():
+def main() -> None:
     runtime = ChemWorldRuntime(composition=transport_world_spec())
     runtime.reset(seed=24)
     for action in (

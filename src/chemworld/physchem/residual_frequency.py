@@ -29,7 +29,7 @@ class FrequencyPoint:
     relative_linear_residual: float | None
     failure_reason: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.response is not None:
             owned = np.array(self.response, dtype=complex, copy=True)
             owned.setflags(write=False)

@@ -53,7 +53,7 @@ class TheveninControlSpec:
     convention: str = "pybamm-25.4.2-named"
     _native: Mapping[str, float] = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.parameters, ScientificTable) or self.parameters.kind != "parameters":
             raise ValueError("Thevenin controller requires a sourced parameter table")
         _text(self.parameter_row_id, "parameter_row_id")
@@ -136,7 +136,7 @@ class TheveninControlProgram:
     current_limit: ScalarControlProgram | None = None
     current_branch_A: tuple[float, float] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.control_mode not in TARGET_UNITS or not isinstance(
             self.target, ScalarControlProgram
         ):

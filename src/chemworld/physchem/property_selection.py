@@ -13,7 +13,7 @@ class PropertySelectionPolicy:
     correlation_id: str | None = None
     source_priority: tuple[str, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if isinstance(self.source_priority, str):
             raise TypeError("source_priority must be a sequence of source IDs, not a string")
         priorities = tuple(self.source_priority)

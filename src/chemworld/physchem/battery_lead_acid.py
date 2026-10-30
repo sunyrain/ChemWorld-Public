@@ -74,7 +74,7 @@ class LeadAcidGeometrySpec:
     separator_porosity: float = 0.6
     reaction_area_densities_m_inv: tuple[float, float] = (2e5, 2e5)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name, count in (
             ("lengths_m", 3),
             ("inactive_solid_volumes_m3", 2),
@@ -129,7 +129,7 @@ class LeadAcidMaterialSpec:
     water_molar_mass_kg_mol: float = 0.01801528
     provenance: str = "synthetic compatible volumes; Bode1977 OCP; Sulzer2019 kinetic form"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         volumes = tuple(self.molar_volumes_m3_mol)
         if len(volumes) != 5:
             raise ValueError("LOQS material requires Pb/PbO2/PbSO4/acid/water molar volumes")
@@ -179,7 +179,7 @@ class BatteryLeadAcidSpec:
     maximum_current_A: float = 2.0
     provenance: str = "synthetic closed LOQS; default initial eps=.5/.6/.5 and acid=4000mol/m3"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name, cls in (("geometry", LeadAcidGeometrySpec), ("material", LeadAcidMaterialSpec)):
             value = getattr(self, name)
             if isinstance(value, dict):
@@ -279,15 +279,15 @@ class BatteryLeadAcidSpec:
         return ()
 
     @property
-    def thermal(self):
+    def thermal(self) -> None:
         return None
 
     @property
-    def electrolyte(self):
+    def electrolyte(self) -> None:
         return None
 
     @property
-    def sei(self):
+    def sei(self) -> None:
         return None
 
     @property

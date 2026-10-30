@@ -110,7 +110,7 @@ class BatteryParameterField:
     usage: str
     scope: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             self.kind not in {"number", "function", "metadata"}
             or self.usage not in {"consumed", "retained-not-consumed"}
@@ -132,7 +132,7 @@ class BatteryParameterFunction:
     parameters: ScientificTable
     validity_note: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if _FUNCTIONS.get(self.function_id) != (self.kind, tuple(self.arguments)):
             raise ValueError("unknown battery source function or argument declaration")
         object.__setattr__(self, "arguments", tuple(self.arguments))
@@ -258,7 +258,7 @@ class BatteryParameterSet:
 
     _payload_json: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         canonical = _json(strict_json_loads(self._payload_json))
         if canonical != _released_json():
             raise ValueError("unknown or modified released battery parameter set")
@@ -519,7 +519,7 @@ class BatteryParameterDerivation:
     value: InputValue
     inputs: tuple[tuple[str, InputValue], ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "source_fields", tuple(self.source_fields))
         object.__setattr__(self, "inputs", tuple(sorted(tuple(v) for v in self.inputs)))
         if (
@@ -563,7 +563,7 @@ class BatteryParameterBinding:
     projection_id: str
     derivations: tuple[BatteryParameterDerivation, ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "derivations", tuple(self.derivations))
         source = battery_parameter_set(self.parameter_set_id, version=self.source_version)
         if (

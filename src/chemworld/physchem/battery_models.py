@@ -68,7 +68,7 @@ class BatteryThermalSpec:
     minimum_temperature_K: float = 270.0
     maximum_temperature_K: float = 360.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not isfinite(self.heat_capacity_J_K)
             or self.heat_capacity_J_K <= 0
@@ -93,7 +93,7 @@ class ParticleSpec:
     mesh_exponent: float = 2.0
     exchange_current_scale_A_m2: float = 1.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for key in (
             "radius_m",
             "diffusivity_m2_s",
@@ -158,7 +158,7 @@ class BatterySPMSpec:
     cell_envelope_volume_m3: float | None = None
     kinetics_stoichiometry_clip: float | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.numerical_form not in {"ode", "residual"}:
             raise ValueError("battery numerical form must be ode or residual")
         if isinstance(self.sei, dict):

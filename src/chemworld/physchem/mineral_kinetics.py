@@ -20,7 +20,7 @@ class MineralKineticsSpec:
     rate_constant_mol_m2_s: float = 1e-6
     saturation_tolerance: float = 1e-9
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not self.model_id
             or not isfinite(self.rate_constant_mol_m2_s)
@@ -43,7 +43,7 @@ class MineralGeometry:
     reference_area_m2: float = 0.01
     reference_amount_mol: float = 0.01
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not isfinite(self.reference_area_m2)
             or self.reference_area_m2 < 0

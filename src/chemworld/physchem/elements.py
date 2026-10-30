@@ -21,7 +21,7 @@ class ElementSpec:
     weight_source: str = "caller"
     standard_weight: AtomicEstimate | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not isinstance(self.symbol, str)
             or re.fullmatch(r"[A-Z][a-z]?", self.symbol) is None

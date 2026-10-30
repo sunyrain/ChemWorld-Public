@@ -69,7 +69,7 @@ class AveragedElectrodeSpec:
     active_volume_m3: float = 1e-6
     exchange_current_scale_A_m2: float = 4.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if any(isinstance(v, bool) or not isfinite(v) or v <= 0 for v in asdict(self).values()):
             raise ValueError("averaged electrode requires positive finite parameters")
         if any(not isfinite(v) or v <= 0 for v in (self.area_m2, self.capacity_mol)):
@@ -107,7 +107,7 @@ class BatteryNewmanTobiasSpec:
     resistance_ohm: float = 0.0
     provenance: str = "synthetic-Newman-Tobias-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name, cls in (
             ("negative", AveragedElectrodeSpec),
             ("positive", AveragedElectrodeSpec),
@@ -178,15 +178,15 @@ class BatteryNewmanTobiasSpec:
         return "residual"
 
     @property
-    def thermal(self):
+    def thermal(self) -> None:
         return None
 
     @property
-    def sei(self):
+    def sei(self) -> None:
         return None
 
     @property
-    def electrolyte(self):
+    def electrolyte(self) -> None:
         return None
 
     @property

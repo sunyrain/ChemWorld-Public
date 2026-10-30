@@ -184,7 +184,7 @@ class LennardJonesSpec:
     source_note: str
     sources: dict = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _positive(self.epsilon_k_K, "epsilon/k")
         _positive(self.sigma_m, "diameter")
         if not isinstance(self.component_id, str) or not self.component_id.strip():

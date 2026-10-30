@@ -463,7 +463,7 @@ def run_workflow(name, output, *, noise_mode="sequential"):
         session.close()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workflow", choices=WORKFLOWS, action="append")

@@ -214,7 +214,7 @@ class MathExpression:
     xml: str
     _root: MathNode = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         root = bounded_xml(self.xml, max_bytes=262144, max_nodes=4096, max_depth=64)
         if _tag(root) != "math":
             raise ValueError("SBML MathML expression requires a math container")

@@ -37,7 +37,7 @@ class BatteryMPMSpec(BatterySPMSpec):
     model_family: str = MPM_ID
     provenance: str = "synthetic-MPM-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # The base validates enabled plating against actual bin areas. Decode
         # PSDs before that validation, including when restoring a JSON payload.
         for name in ("negative_distribution", "positive_distribution"):

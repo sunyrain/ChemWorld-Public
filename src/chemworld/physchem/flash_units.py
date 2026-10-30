@@ -140,7 +140,7 @@ class VLEPropertyPackage:
     vapor_eos: object = None
     nonvolatile_references: Mapping[str, CaloricReference] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # Endpoint caches must not outlive a mutation of correlation data.
         # Own immutable copies rather than relying on shallow frozen dataclasses.
         packages = []
@@ -570,7 +570,7 @@ class FlashSystemSpec:
     stop_temperature_K: float = 490.0
     liquid_molar_holdup_L_mol: float = .05
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (any(not isfinite(v) or v <= 0 for v in (
                 self.pressure_Pa, self.support_heat_capacity_J_K,
                 self.support_reference_temperature_K, self.environment_temperature_K,

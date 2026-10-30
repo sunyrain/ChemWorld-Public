@@ -29,7 +29,7 @@ class MQMQAPhaseModel(GibbsPhaseModel):
     _topology: object = field(init=False, repr=False)
     _diagnostics: tuple = field(init=False, repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.database, ChemSageDatabase):
             raise ValueError("MQMQA requires original validated ChemSage input")
         if (not isinstance(self.phase_name, str)

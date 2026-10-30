@@ -185,7 +185,7 @@ class Interval:
     lower: float
     upper: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isfinite(self.lower) or not isfinite(self.upper) or self.lower > self.upper:
             raise ValueError("caloric interval must have ordered finite bounds")
 

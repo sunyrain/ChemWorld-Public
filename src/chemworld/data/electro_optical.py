@@ -164,7 +164,7 @@ class RefractiveIndexObservation:
     source: DataSourceProvenance
     record_id: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.component_id or not self.record_id:
             raise ValueError("RI observation needs component and record identities")
         for cell, unit in ((self.index, "dimensionless"), (self.temperature, "K")):

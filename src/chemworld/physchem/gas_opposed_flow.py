@@ -81,7 +81,7 @@ class GasOpposedFlowSpec:
     flux_model: str = "mixture-averaged"
     maximum_mach: float = 0.05
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.mesh, DiffusionMesh) or self.mesh.geometry != "planar":
             raise ValueError("opposed flow requires the original planar DiffusionMesh")
         if self.mesh.cells < 2:

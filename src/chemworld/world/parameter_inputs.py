@@ -16,7 +16,7 @@ class ModelParameterTarget:
     binding: str
     field_path: tuple[str, ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.column.role != "parameter":
             raise ValueError("model bindings require parameter columns")
         if not all(isinstance(v, str) and v.strip() == v and v for v in (

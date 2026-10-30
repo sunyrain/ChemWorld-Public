@@ -41,7 +41,7 @@ class SBMLRates:
     reaction_extents_mol_s: object
     held_pool_reaction_rates_mol_s: object
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("coordinate_rates", "reaction_extents_mol_s",
                      "held_pool_reaction_rates_mol_s"):
             object.__setattr__(self, name, MappingProxyType(dict(getattr(self, name))))
@@ -70,7 +70,7 @@ class SBMLKinetics:
     _time_scale: float = field(init=False, repr=False, compare=False)
     _extent_scale: float | None = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if type(self.integer_quantities) is not bool:
             raise ValueError("integer source quantity views require an explicit Boolean")
         if not isinstance(self.model, SBMLModel):

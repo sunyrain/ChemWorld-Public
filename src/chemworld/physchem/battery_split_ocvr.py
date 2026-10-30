@@ -80,7 +80,7 @@ class BatterySplitOCVRSpec:
     numerical_form: str = "residual"
     provenance: str = "synthetic SplitOCVR; independent capacities and linear OCVs"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in self.__dataclass_fields__:
             if name not in {"negative_ocv", "positive_ocv", "numerical_form", "provenance"}:
                 _finite(getattr(self, name), name)
@@ -132,15 +132,15 @@ class BatterySplitOCVRSpec:
         return SPLIT_OCVR_FAMILY
 
     @property
-    def thermal(self):
+    def thermal(self) -> None:
         return None
 
     @property
-    def sei(self):
+    def sei(self) -> None:
         return None
 
     @property
-    def electrolyte(self):
+    def electrolyte(self) -> None:
         return None
 
     @property

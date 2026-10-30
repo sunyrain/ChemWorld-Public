@@ -7,9 +7,15 @@ state; only actual external sources and sinks belong here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import fsum, isclose, isfinite
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+from chemworld.foundation.state_ledgers import EquipmentLedger
+
+if TYPE_CHECKING:
+    from chemworld.foundation.state import WorldState
 
 
 @dataclass(frozen=True)
@@ -31,7 +37,7 @@ class MaterialPacket:
             or not self.source or not self.destination or self.source == self.destination
         ):
             raise ValueError("material packet requires distinct explicit endpoints")
-        values = tuple(tuple(item) for item in self.amounts_mol)
+        values = tuple((key, value) for key, value in self.amounts_mol)
         if len(dict(values)) != len(values) or any(
             not isinstance(key, str) or not key or isinstance(value, bool)
             or not isinstance(value, int | float) or not isfinite(value) or value < 0
@@ -45,10 +51,14 @@ class MaterialPacket:
         amounts = receipt.get("amounts_mol")
         if not isinstance(amounts, dict):
             raise ValueError("executed material packet requires explicit molecular amounts")
-        return cls(receipt.get("source"), receipt.get("destination"), tuple(amounts.items()))
+        # Constructor validation handles absent or wrongly typed endpoint values.
+        return cls(cast(str, receipt.get("source")), cast(str, receipt.get("destination")),
+                   tuple(amounts.items()))
 
     @classmethod
-    def representative(cls, source, destination, inventory, *, amount_mol):
+    def representative(
+        cls, source: str, destination: str, inventory: Mapping[str, float], *, amount_mol: float,
+    ) -> MaterialPacket:
         available = fsum(inventory.values())
         if (
             isinstance(amount_mol, bool) or not isinstance(amount_mol, int | float)
@@ -63,7 +73,9 @@ class MaterialPacket:
     def total_mol(self) -> float:
         return fsum(value for _, value in self.amounts_mol)
 
-    def validate_representative(self, inventory, *, requested_mol):
+    def validate_representative(
+        self, inventory: Mapping[str, float], *, requested_mol: float,
+    ) -> None:
         """Authenticate a receipt from the source law, never a candidate deficit."""
         expected = self.representative(
             self.source, self.destination, inventory, amount_mol=requested_mol
@@ -71,7 +83,9 @@ class MaterialPacket:
         if self.amounts_mol != expected.amounts_mol:
             raise ValueError("executed packet differs from the declared representative feed")
 
-    def apply(self, source, destination):
+    def apply(
+        self, source: Mapping[str, float], destination: Mapping[str, float],
+    ) -> tuple[dict[str, float], dict[str, float]]:
         amounts = dict(self.amounts_mol)
         if amounts.keys() - source.keys() or any(
             amount > source[key] for key, amount in self.amounts_mol
@@ -83,7 +97,7 @@ class MaterialPacket:
             received[key] = received.get(key, 0) + amount
         return remaining, received
 
-    def check_debit(self, before, after):
+    def check_debit(self, before: Mapping[str, float], after: Mapping[str, float]) -> None:
         amounts = dict(self.amounts_mol)
         for key in before.keys() | after.keys() | amounts.keys():
             if not isclose(
@@ -135,16 +149,17 @@ class MaterialExchange:
         }
 
 
-def inventory_balance_exclusions(state):
+def inventory_balance_exclusions(state: WorldState) -> tuple[str, ...]:
     """Registered chemical balances make no claims about unformulated entities."""
     states = (state, *state.inactive_vessels.values())
-    exclusions = []
+    exclusions: list[str] = []
     if any(local.phase == "formal" for local in states):
         exclusions.extend(("formal_entity_element_inventory", "formal_entity_charge_inventory",
                            "formal_entity_energy", "formal_compartment_carrier_mass"))
     if any(record.attached_vessel_id == local.vessel_id
            and record.settings.get("empirical_reaction_balance") is not None
-           for local in states for record in local.equipment.equipment.values()):
+           for local in states
+           for record in cast(EquipmentLedger, local.equipment).equipment.values()):
         # A COD/N/equivalent source matrix is not a molecular formula, charge or
         # reaction-enthalpy model. Registered carrier water keeps its own balance.
         exclusions.extend(("empirical_full_element_inventory", "empirical_full_charge_inventory",

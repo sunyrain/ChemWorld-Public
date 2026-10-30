@@ -45,7 +45,7 @@ class LithiumPlatingSpec:
     initial_dead_mol: float = 0.0
     _native: object = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.mode not in {"reversible", "irreversible", "partially reversible"}:
             raise ValueError("unknown plating kinetic mode")
         if not isinstance(self.parameters, ScientificTable) or self.parameters.kind != "parameters":

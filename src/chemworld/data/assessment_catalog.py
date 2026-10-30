@@ -43,7 +43,7 @@ class AssessmentMethod:
     unit: str | None = "dimensionless"
     conditions: dict = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "conditions", MappingProxyType(dict(self.conditions)))
 
 

@@ -62,7 +62,7 @@ class AdaptiveHybridStochasticRuntime:
         )
         return spec
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         if not self.models:
             return
         physics = self.composition.physics

@@ -186,7 +186,7 @@ class SpeciesCaloricModel:
     heat_capacity: PropertyCorrelation | PiecewiseHeatCapacity
     reference: CaloricReference
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (self.heat_capacity.input_units.get("temperature", "K") != "K"
                 or set(self.heat_capacity.validity_ranges) - {"temperature"}
                 or set(self.heat_capacity.input_units) - {"temperature"}):
@@ -240,7 +240,7 @@ class PropertyPackageThermodynamics:
     support_heat_capacity_J_K: float = 0.0
     reference_temperature_K: float = 350.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (any(not isinstance(key, str) or not key for key in self.species)
                 or any(not isinstance(value, SpeciesCaloricModel)
                        for value in self.species.values())

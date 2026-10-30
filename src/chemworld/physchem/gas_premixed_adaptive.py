@@ -74,7 +74,7 @@ class GasPremixedMeshPolicy:
     prune_threshold: float = 0.0
     minimum_cells: int = 2
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("maximum_cycles", "maximum_cells", "maximum_root_calls", "minimum_cells"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f"{name} must be a positive integer")

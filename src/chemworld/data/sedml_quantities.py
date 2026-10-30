@@ -18,7 +18,7 @@ class SEDMLQuantity:
     native_to_source: float
     source_unit: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if ((self.observable is not None and not isinstance(self.observable, SBMLObservable))
                 or isinstance(self.native_to_source, bool)
                 or not isinstance(self.native_to_source, (int, float))

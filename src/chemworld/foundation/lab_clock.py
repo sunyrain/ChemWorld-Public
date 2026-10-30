@@ -1,8 +1,9 @@
 """Finite scheduling state; physical time remains solely in the world ledger."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -14,7 +15,7 @@ class SharedAdvanceSystem:
     vessels: tuple[str, ...]
     connections: tuple[str, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("system_id", "strategy_id"):
             if not isinstance(getattr(self, name), str) or not getattr(self, name):
                 raise ValueError("shared systems require explicit identities")
@@ -33,7 +34,7 @@ class LabAnalyzerSpec:
     device_id: str
     instrument: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if any(not isinstance(value, str) or not value
                for value in (self.device_id, self.instrument)):
             raise ValueError("laboratory analyzers require explicit device and instrument IDs")
@@ -46,8 +47,12 @@ class LabClockSpec:
     capacity: int = 64
     vessel_capacity: int = 2
 
-    def __init__(self, heater_id=None, analyzer=None, capacity=64, vessel_capacity=2,
-                 *, heater_ids=None, analyzers=None):
+    def __init__(
+        self, heater_id: str | None = None, analyzer: str | None = None,
+        capacity: int = 64, vessel_capacity: int = 2, *,
+        heater_ids: Iterable[str] | None = None,
+        analyzers: Iterable[LabAnalyzerSpec | Mapping[str, str]] | Mapping[str, str] | None = None,
+    ) -> None:
         if heater_id is not None and heater_ids:
             raise ValueError("declare heater identities once")
         if analyzer is not None and analyzers:
@@ -62,7 +67,7 @@ class LabClockSpec:
             )
         elif isinstance(analyzers, Mapping):
             analyzers = tuple(LabAnalyzerSpec(key, value) for key, value in analyzers.items())
-        analyzers = tuple(
+        analyzer_specs = tuple(
             value if isinstance(value, LabAnalyzerSpec) else LabAnalyzerSpec(**value)
             for value in analyzers
         )
@@ -72,31 +77,33 @@ class LabClockSpec:
         if (any(not isinstance(value, str) or not value for value in heater_ids)
                 or len(set(heater_ids)) != len(heater_ids) or len(heater_ids) > 64):
             raise ValueError("declare at most 64 distinct nonempty heater identities")
-        identities = tuple(value.device_id for value in analyzers)
+        identities = tuple(value.device_id for value in analyzer_specs)
         if (len(set(identities)) != len(identities) or set(identities) & set(heater_ids)
                 or len(identities) > 64):
             raise ValueError("declare at most 64 distinct analyzers without device aliases")
         object.__setattr__(self, "heater_ids", tuple(sorted(heater_ids)))
-        object.__setattr__(self, "analyzers", tuple(sorted(analyzers, key=lambda a: a.device_id)))
+        object.__setattr__(self, "analyzers", tuple(sorted(
+            analyzer_specs, key=lambda a: a.device_id,
+        )))
         object.__setattr__(self, "capacity", capacity)
         object.__setattr__(self, "vessel_capacity", vessel_capacity)
         self.__post_init__()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if type(self.capacity) is not int or not 1 <= self.capacity <= 256:
             raise ValueError("lab queue capacity must be an integer in [1, 256]")
         if type(self.vessel_capacity) is not int or not 1 <= self.vessel_capacity <= 64:
             raise ValueError("lab vessel capacity must be an integer in [1, 64]")
 
     @property
-    def heater_id(self):
+    def heater_id(self) -> str | None:
         return self.heater_ids[0] if len(self.heater_ids) == 1 else None
 
     @property
-    def analyzer(self):
+    def analyzer(self) -> str | None:
         return self.analyzers[0].instrument if len(self.analyzers) == 1 else None
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -112,13 +119,13 @@ class LabClockState:
     exchanges: tuple[dict, ...] = ()
     stopped: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for key in ("queued", "running", "completed", "exchanges"):
             object.__setattr__(self, key, tuple(deepcopy(getattr(self, key))))
         object.__setattr__(self, "detector_rng", deepcopy(self.detector_rng))
         object.__setattr__(self, "detector_noise", deepcopy(self.detector_noise))
 
-    def to_dict(self, *, include_hidden=True):
+    def to_dict(self, *, include_hidden: bool = True) -> dict[str, Any]:
         if include_hidden:
             return asdict(self)
         return {
@@ -130,6 +137,6 @@ class LabClockState:
         }
 
     @staticmethod
-    def public_job(job):
+    def public_job(job: Mapping[str, Any]) -> dict[str, Any]:
         private = {"observation", "measurement_status", "readout_error"}
         return {k: deepcopy(v) for k, v in job.items() if k not in private}

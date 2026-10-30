@@ -26,7 +26,7 @@ class RI5Draw:
     hat: tuple[float, ...]
     tilde: tuple[int, ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         try:
             hat, tilde = tuple(self.hat), tuple(self.tilde)
         except TypeError as exc:

@@ -388,7 +388,7 @@ class PhysicalConstitution:
             return CheckResult("material_conservation", False,
                                "integer atom balance does not close", value=atoms, tolerance=0)
         delta: dict[str, float] = {}
-        entity_delta = {}
+        entity_delta: dict[tuple[str, str], float] = {}
         for exchange in balance.exchanges:
             if exchange.inventory_kind == "entity":
                 known = self.owned_inventory(before).keys() | self.owned_inventory(after).keys()

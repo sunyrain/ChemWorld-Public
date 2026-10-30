@@ -19,7 +19,7 @@ class AtomicEstimate:
     standard_uncertainty: float | None = None
     interval: tuple[float, float] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.value is not None and (not isfinite(self.value) or self.value < 0):
             raise ValueError("atomic estimate must be finite and nonnegative")
         if self.standard_uncertainty is not None and (

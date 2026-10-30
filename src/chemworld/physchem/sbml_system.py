@@ -42,7 +42,7 @@ class SBMLObservable:
     source_id: str
     unit_name: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.kind, str) or self.kind not in {
                 "amount", "concentration", "volume", "parameter", "reaction_rate"}:
             raise ValueError("unknown formal readout kind")
@@ -104,7 +104,7 @@ class SBMLSystemSpec:
     _guard_critical_reactions: frozenset = field(init=False, repr=False, compare=False,
                                                default=frozenset())
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("maximum_events", "maximum_segments", "maximum_pending_events",
                      "maximum_coordinates"):
             if not _integer(getattr(self, name), 1):

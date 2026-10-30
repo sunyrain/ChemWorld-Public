@@ -49,7 +49,7 @@ class StrictLiquidSystemSpec:
     entrainment_fraction: float = .01
     max_iterations: int = 1000
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if len(self.activity_model.component_ids) not in (2, 3):
             raise ValueError("strict liquid model supports binary/ternary material")
         volumes = dict(self.molar_holdups_L_mol)

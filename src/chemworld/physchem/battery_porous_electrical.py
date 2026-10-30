@@ -27,7 +27,7 @@ class PorousElectrodeGeometrySpec:
     conductivity_S_m: float = 1.0
     solid_conductivity_S_m: tuple[float, float] = (100.0, 100.0)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name, size in (
             ("lengths_m", 3),
             ("porosities", 3),

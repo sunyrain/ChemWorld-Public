@@ -99,7 +99,7 @@ class CompositionPhysics:
         if advance_bindings is None:
             self._normalize_legacy_advance_inputs()
 
-    def _normalize_legacy_advance_inputs(self):
+    def _normalize_legacy_advance_inputs(self) -> None:
         """Old inputs gain explicit solver choices once, before serialization."""
         strategies = self.declared_advance_strategies(self.modules)
         defaults = {

@@ -30,7 +30,7 @@ class CollectorGeometrySpec:
     cells: int = 8
     negative_tab: str = "left"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if any(
             not isfinite(value) or value <= 0.0
             for value in (

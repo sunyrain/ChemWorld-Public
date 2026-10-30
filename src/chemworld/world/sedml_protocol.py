@@ -138,7 +138,7 @@ class SEDMLProtocol:
     worlds: object = field(init=False, repr=False)
     layouts: object = field(init=False, repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         resources = dict(self.resources)
         models = resolve_models(self.document, resources, document_location=self.document_location)
         tasks = SEDMLTasks(self.document)

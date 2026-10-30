@@ -24,7 +24,7 @@ class SolidPhaseSpec:
     L0_J_mol: float = 10000.0
     L1_J_mol: float = 0.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.name or any(
             not isfinite(v) or abs(v) > 20000
             for v in (self.gA_J_mol, self.gB_J_mol, self.L0_J_mol, self.L1_J_mol)
@@ -106,7 +106,7 @@ class SolidSolutionSpec:
     molar_volume_L_mol: float = 0.01
     pressure_Pa: float = 101325.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "phases", tuple(self.phases))
         if not 1 <= len(self.phases) <= 2 or len({p.name for p in self.phases}) != len(self.phases):
             raise ValueError("one or two uniquely named binary solid phases are supported")

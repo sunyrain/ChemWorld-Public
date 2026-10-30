@@ -37,7 +37,7 @@ class MembraneFoulingSpec:
     waste_vessel_id: str = "waste"
     waste_capacity_L: float = 0.2
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for key in (
             "deposition_fraction",
             "detachment_s",
@@ -78,7 +78,7 @@ class MembraneSpec:
     pickup_volume_L: float = 1e-6
     fouling: MembraneFoulingSpec | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in (
             "water_permeability_m_Pa_s",
             "mass_transfer_m_s",

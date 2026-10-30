@@ -37,7 +37,7 @@ class CrystalThermalSpec:
     birth_interval_s: float = 30.0
     impurity_resolution_fraction: float = 1e-8
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         required = {self.target_component}
         if self.impurity_component is not None:
             required.add(self.impurity_component)
@@ -95,7 +95,7 @@ class ThermalCrystalCohort:
     seed_mol: float = 0.0
     target_mol: float | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             any(
                 not isfinite(v) or v < 0

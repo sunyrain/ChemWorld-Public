@@ -39,7 +39,7 @@ class BatteryElectrolyteSpec:
     solid_conductivity_S_m: tuple[float, float] = (100.0, 100.0)
     potential_form: str = "composite"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.model_version != "spme-isothermal-v1":
             raise ValueError("unknown electrolyte model version")
         if self.potential_form not in {"composite", "integrated"}:

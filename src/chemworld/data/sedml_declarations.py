@@ -193,7 +193,7 @@ class SEDMLDocument:
     source: InputSource
     _declaration: ExperimentXMLNode = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.source, InputSource):
             raise ValueError("experiment input requires explicit source provenance")
         declaration = experiment_xml(self.xml)

@@ -5,7 +5,7 @@ from chemworld.runtime import ChemWorldRuntime
 from chemworld.world.membrane_world import membrane_world_spec
 
 
-def main():
+def main() -> None:
     runtime = ChemWorldRuntime(
         composition=membrane_world_spec(MembraneSpec(fouling=MembraneFoulingSpec()))
     )

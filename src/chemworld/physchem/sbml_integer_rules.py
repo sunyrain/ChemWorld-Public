@@ -43,7 +43,7 @@ class SBMLIntegerRules:
     assigned: object = field(init=False, repr=False)
     mutable_coordinates: frozenset = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         frame, root = self.frame, self.frame.model.declaration
         rules = root.items("listOfRules")
         if any(rule.kind != "assignmentRule" for rule in rules):

@@ -59,7 +59,7 @@ class TransientElectrodeSpec:
     provenance: str = "synthetic-planar-supported-electrolyte-v1"
     numerical_form: str = "residual"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.numerical_form not in {"ode", "residual"}:
             raise ValueError("electrode numerical form must be ode or residual")
         for name in (

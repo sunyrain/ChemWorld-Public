@@ -4,7 +4,7 @@ from chemworld.runtime import ChemWorldRuntime
 from chemworld.world.solid_world import solid_world_spec
 
 
-def main():
+def main() -> None:
     runtime = ChemWorldRuntime(composition=solid_world_spec())
     runtime.reset(seed=40)
     for target in (800, 300):

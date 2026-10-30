@@ -1,6 +1,23 @@
 """Exact molecular interpretation of the existing mol inventory, not a second ledger."""
 
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
 from math import fsum, isfinite, ulp
+from typing import TYPE_CHECKING, Any, TypedDict, cast
+
+from chemworld.foundation.state_ledgers import ProcessLedger
+
+if TYPE_CHECKING:
+    from chemworld.foundation.balances import TransitionBalance
+    from chemworld.foundation.ontology import Substance
+    from chemworld.foundation.state import WorldState
+
+
+class TransferReceipt(TypedDict):
+    schema: str
+    channel_stoichiometry: dict[str, dict[str, int]]
+    firings: dict[str, int]
 
 AVOGADRO = 6.02214076e23
 MAX_COUNT = 2**40
@@ -14,8 +31,11 @@ CONTINUOUS_REACTION_ALGORITHMS = frozenset({
 })
 
 
-def validate_cross_partition_transition(before_amounts, after_amounts, discrete_species,
-                                        formulae, before_receipt, after_receipt):
+def validate_cross_partition_transition(
+    before_amounts: Mapping[str, float], after_amounts: Mapping[str, float],
+    discrete_species: Iterable[str], formulae: Mapping[str, Mapping[str, float]],
+    before_receipt: object, after_receipt: object,
+) -> dict[str, float]:
     """Check internal integer jump receipts against the one real mol inventory.
 
     Continuous stocks need not be integers. Their atomic error and floating-point
@@ -39,7 +59,7 @@ def validate_cross_partition_transition(before_amounts, after_amounts, discrete_
             if isinstance(amount, bool) or not isfinite(amount) or amount < 0:
                 raise ValueError("cross-partition inventory must be finite and nonnegative")
 
-    def receipt(value):
+    def receipt(value: object) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
         if (not isinstance(value, dict)
                 or set(value) != {"schema", "channel_stoichiometry", "firings"}
                 or value["schema"] != CROSS_PARTITION_TRANSFER_SCHEMA):
@@ -83,11 +103,11 @@ def validate_cross_partition_transition(before_amounts, after_amounts, discrete_
             coefficient = int(formulae[key].get(atom, 0))
             if not coefficient:
                 continue
-            values = (before_amounts[key], after_amounts[key])
-            if any(not isfinite(AVOGADRO * value) for value in values):
+            amount_pair = (before_amounts[key], after_amounts[key])
+            if any(not isfinite(AVOGADRO * value) for value in amount_pair):
                 raise ValueError("continuous molecular quantum cannot be represented")
             resolution += abs(coefficient) * max(
-                max(ulp(AVOGADRO * value), AVOGADRO * ulp(value)) for value in values
+                max(ulp(AVOGADRO * value), AVOGADRO * ulp(value)) for value in amount_pair
             )
         if resolution > CROSS_PARTITION_ATOM_TOLERANCE / 16:
             raise ValueError("continuous molecular quantum is not numerically resolved")
@@ -102,17 +122,17 @@ def validate_cross_partition_transition(before_amounts, after_amounts, discrete_
     return residuals
 
 
-def validate_counts(counts):
+def validate_counts(counts: Mapping[str, int]) -> dict[str, int]:
     if any(type(n) is not int or not 0 <= n <= MAX_COUNT for n in counts.values()):
         raise ValueError("inventory requires bounded nonnegative integer counts")
     return dict(counts)
 
 
-def counts_to_mol(counts):
+def counts_to_mol(counts: Mapping[str, int]) -> dict[str, float]:
     return {key: n / AVOGADRO for key, n in validate_counts(counts).items()}
 
 
-def mol_to_counts(amounts):
+def mol_to_counts(amounts: Mapping[str, float]) -> dict[str, int]:
     counts = {}
     for key, amount in amounts.items():
         if isinstance(amount, bool) or not isfinite(amount) or amount < 0:
@@ -127,26 +147,30 @@ def mol_to_counts(amounts):
     return counts
 
 
-def integer_element_residual(before, after, balance, substances):
+def integer_element_residual(
+    before: WorldState, after: WorldState, balance: TransitionBalance,
+    substances: Mapping[str, Substance],
+) -> int | None:
     """Return an exact atom residual when the complete boundary is discrete."""
     locals_before = (before, *before.inactive_vessels.values())
     locals_after = (after, *after.inactive_vessels.values())
     continuous = _check_sde_inventories(locals_before, locals_after, balance, substances)
     discrete = {s.vessel_id for s in locals_before
-                if s.process.stochastic_continuation is not None} - continuous
+                if cast(ProcessLedger, s.process).stochastic_continuation is not None} - continuous
     mixed = len(discrete) != len(locals_before)
     if not discrete or (mixed and before.lab_clock is None):
         return None
     after_discrete = {
         s.vessel_id for s in locals_after
-        if s.process.stochastic_continuation is not None and s.vessel_id not in continuous
+        if cast(ProcessLedger, s.process).stochastic_continuation is not None
+        and s.vessel_id not in continuous
     }
     if discrete != after_discrete:
         raise ValueError("discrete inventory lost its declared process state")
     hybrid = _check_hybrid_partitions(locals_before, locals_after, balance, substances)
-    residual = {}
+    residual: dict[str, int] = {}
 
-    def accumulate(amounts, sign):
+    def accumulate(amounts: Mapping[str, float], sign: int) -> None:
         for key, count in mol_to_counts(amounts).items():
             for atom, coefficient in substances[key].formula.items():
                 if not float(coefficient).is_integer():
@@ -170,7 +194,10 @@ def integer_element_residual(before, after, balance, substances):
     return max(map(abs, residual.values()), default=0)
 
 
-def _check_sde_inventories(before, after, balance, substances):
+def _check_sde_inventories(
+    before: Sequence[WorldState], after: Sequence[WorldState], balance: TransitionBalance,
+    substances: Mapping[str, Substance],
+) -> set[str]:
     """Continuous SDE does not weaken the integer checks on any other vessel.
 
     Actual immutable model binding is checked by the original advance strategy,
@@ -180,10 +207,10 @@ def _check_sde_inventories(before, after, balance, substances):
     previous = {s.vessel_id: s for s in before}
     following = {s.vessel_id: s for s in after}
 
-    def identities(states):
+    def identities(states: Sequence[WorldState]) -> set[str]:
         return {s.vessel_id for s in states
-                if s.process.stochastic_continuation is not None
-                and s.process.stochastic_continuation.get("algorithm")
+                if (memory := cast(ProcessLedger, s.process).stochastic_continuation) is not None
+                and cast(str, memory.get("algorithm"))
                 in CONTINUOUS_REACTION_ALGORITHMS}
 
     continuous = identities(before)
@@ -191,8 +218,10 @@ def _check_sde_inventories(before, after, balance, substances):
         raise ValueError("continuous SDE process declaration changed during a transition")
     for identity in continuous:
         old, new = previous[identity], following[identity]
-        if (old.process.stochastic_continuation['algorithm']
-                != new.process.stochastic_continuation['algorithm']):
+        # Both identities have the checked algorithm; constructors normalize process ledgers.
+        old_memory = cast(dict[str, Any], cast(ProcessLedger, old.process).stochastic_continuation)
+        new_memory = cast(dict[str, Any], cast(ProcessLedger, new.process).stochastic_continuation)
+        if old_memory['algorithm'] != new_memory['algorithm']:
             raise ValueError("continuous reaction algorithm changed during a transition")
         if set(old.species_amounts) != set(new.species_amounts):
             raise ValueError("continuous SDE species declaration changed")
@@ -212,14 +241,17 @@ def _check_sde_inventories(before, after, balance, substances):
             error = fsum([totals[1], -totals[0], *(-v for v in packets)])
             scale = max(*map(abs, totals), fsum(map(abs, packets)))
             tolerance = 1e-10 * scale
-            if old.process.stochastic_continuation['algorithm'] == CONTINUOUS_ADAPTIVE_ALGORITHM:
+            if old_memory['algorithm'] == CONTINUOUS_ADAPTIVE_ALGORITHM:
                 tolerance = min(tolerance, 1e-4 / AVOGADRO)
             if not isfinite(error) or abs(error) > max(1e-300, tolerance):
                 raise ValueError("continuous SDE atom inventory does not close")
     return continuous
 
 
-def _check_hybrid_partitions(before, after, balance, substances):
+def _check_hybrid_partitions(
+    before: Sequence[WorldState], after: Sequence[WorldState], balance: TransitionBalance,
+    substances: Mapping[str, Substance],
+) -> set[str]:
     """Check a fixed mixed partition without weakening old all-integer boundaries.
 
     The runtime independently verifies this state declaration against its actual
@@ -230,8 +262,8 @@ def _check_hybrid_partitions(before, after, balance, substances):
     following = {state.vessel_id: state for state in after}
     hybrid = set()
 
-    def partition(state):
-        continuation = state.process.stochastic_continuation
+    def partition(state: WorldState) -> tuple[str, ...] | None:
+        continuation = cast(ProcessLedger, state.process).stochastic_continuation
         if continuation is None or continuation.get("algorithm") not in {
                 "integrated-hazard-pdmp-v1", CROSS_PARTITION_ALGORITHM}:
             return None
@@ -243,8 +275,8 @@ def _check_hybrid_partitions(before, after, balance, substances):
         return tuple(keys)
 
     hybrid_identities = {state.vessel_id for state in (*before, *after)
-                        if state.process.stochastic_continuation is not None
-                        and state.process.stochastic_continuation.get("algorithm")
+                        if (memory := cast(ProcessLedger, state.process).stochastic_continuation)
+                        is not None and cast(str, memory.get("algorithm"))
                         in {"integrated-hazard-pdmp-v1", CROSS_PARTITION_ALGORITHM}}
     for identity in hybrid_identities:
         if identity not in previous or identity not in following:
@@ -255,7 +287,10 @@ def _check_hybrid_partitions(before, after, balance, substances):
             raise ValueError("hybrid fixed integer subset changed during the transition")
         if keys is None:
             continue
-        old_memory, new_memory = (s.process.stochastic_continuation for s in (old, new))
+        old_memory, new_memory = (
+            cast(dict[str, Any], cast(ProcessLedger, s.process).stochastic_continuation)
+            for s in (old, new)
+        )
         if old_memory["algorithm"] != new_memory["algorithm"]:
             raise ValueError("hybrid algorithm changed during the transition")
         hybrid.add(identity)
@@ -273,10 +308,11 @@ def _check_hybrid_partitions(before, after, balance, substances):
                 {key: substances[key].formula for key in old.species_amounts},
                 old_receipt, new_receipt,
             )
-            totals = [sum(r["firings"].values()) for r in (old_receipt, new_receipt)]
+            totals = [sum(cast(TransferReceipt, r)["firings"].values())
+                      for r in (old_receipt, new_receipt)]
             events = [m.get("events_committed") for m in (old_memory, new_memory)]
             if (any(type(e) is not int or e < n for e, n in zip(events, totals, strict=True))
-                    or events[1] - events[0] < totals[1] - totals[0]):
+                    or cast(int, events[1]) - cast(int, events[0]) < totals[1] - totals[0]):
                 raise ValueError("cross-partition receipts exceed committed jump events")
             continue
         integer_before = mol_to_counts({k: old.species_amounts[k] for k in keys})
@@ -290,8 +326,10 @@ def _check_hybrid_partitions(before, after, balance, substances):
                         int(substances[k].formula.get(atom, 0)) for k in keys)
             if delta != 0:
                 raise ValueError("hybrid integer atom balance does not close")
-            totals = [fsum(state.species_amounts[k] * substances[k].formula.get(atom, 0)
+            continuous_totals = [fsum(state.species_amounts[k] * substances[k].formula.get(atom, 0)
                            for k in continuous) for state in (old, new)]
-            if abs(totals[0] - totals[1]) > max(1e-30, 1e-9 * max(map(abs, totals))):
+            if abs(continuous_totals[0] - continuous_totals[1]) > max(
+                1e-30, 1e-9 * max(map(abs, continuous_totals))
+            ):
                 raise ValueError("hybrid continuous atom balance does not close")
     return hybrid

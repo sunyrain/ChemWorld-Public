@@ -150,7 +150,7 @@ class SBMLModel:
     _identities: object = field(init=False, repr=False, compare=False)
     _units: object = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.source, InputSource):
             raise ValueError("SBML requires explicit input provenance")
         if not isinstance(self.unit_defaults, (dict, MappingProxyType)):

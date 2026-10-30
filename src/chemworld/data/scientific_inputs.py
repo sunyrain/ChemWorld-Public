@@ -81,7 +81,7 @@ class InputSource:
     provenance: DataSourceProvenance
     data_kind: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for key in ("source_id", "citation", "license", "version"):
             _text(getattr(self.provenance, key), f"source.{key}")
         if self.data_kind not in DATA_KINDS:
@@ -115,7 +115,7 @@ class InputValue:
     uncertainty_note: str
     quality: str = "valid"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         unit_spec(self.unit)
         _text(self.uncertainty_note, "uncertainty_note")
         if self.quality not in QUALITIES:
@@ -156,7 +156,7 @@ class QuantityColumn:
     valid_range: tuple[float, float]
     reference_state: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _text(self.quantity_id, "quantity_id")
         _text(self.reference_state, "reference_state")
         unit_spec(self.unit)
@@ -200,7 +200,7 @@ class ScientificRow:
     split: str
     values: Mapping[str, InputValue]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for key in _ROW_FIELDS:
             _text(getattr(self, key), key)
         object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
@@ -230,7 +230,7 @@ class ScientificTable:
     sources: tuple[InputSource, ...]
     rows: tuple[ScientificRow, ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _text(self.dataset_id, "dataset_id")
         if self.kind not in {"parameters", "measurements"}:
             raise ValueError("table kind must be parameters or measurements")

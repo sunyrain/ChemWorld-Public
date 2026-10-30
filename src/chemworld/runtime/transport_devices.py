@@ -263,7 +263,7 @@ class TransportRuntime:
             receipt={**transition.receipt, "transport_equilibration": changed},
         )
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         declared = {c.vessel for c in self.composition.components if c.kind == "finite_transport"}
         states = self.composition.physics.initial_states
         installed = {v for v, s in states.items() if self.supports(s)}

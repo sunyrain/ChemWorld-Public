@@ -19,7 +19,7 @@ class IF97IsochoricThermodynamics:
     support_heat_capacity_J_K: float = 0.0
     reference_temperature_K: float = 298.15
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         IF97WaterModel().validate_component(self.component)
         _positive(self.volume_L, "volume_L")
         _positive(self.reference_temperature_K, "reference_temperature_K")

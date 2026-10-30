@@ -46,7 +46,7 @@ class SBMLUnitSignature:
     dimension: DimensionVector = _ONE
     si_factor: float = 1.
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.dimension, DimensionVector):
             raise ValueError("SBML unit must use the common DimensionVector")
         if (not isinstance(self.si_factor, Real) or isinstance(self.si_factor, bool)
@@ -100,7 +100,7 @@ class SBMLUnitTerm:
     scale: int
     multiplier: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.kind not in SBML_UNIT_KINDS:
             raise ValueError("unsupported SBML unit kind "+str(self.kind))
         if (not isinstance(self.exponent, Real) or isinstance(self.exponent, bool)

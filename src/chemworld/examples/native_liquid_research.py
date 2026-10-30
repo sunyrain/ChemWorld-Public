@@ -43,7 +43,7 @@ def run_example(amplitude=3):
         session.close()
 
 
-def main():
+def main() -> None:
     import json
 
     print(json.dumps(run_example(), indent=2, allow_nan=False))

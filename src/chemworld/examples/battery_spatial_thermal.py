@@ -97,7 +97,7 @@ def run(output, *, spec=None, noise="keyed"):
                       "constant OCV, zero entropy, fixed D/BV scale")}
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--noise", choices=("keyed", "sequential"), default="keyed")

@@ -23,7 +23,7 @@ def run(output, *, noise="keyed", spec=None):
     return run_battery_workflow(output, noise=noise, spec=spec)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--noise", choices=("keyed", "sequential"), default="keyed")

@@ -82,7 +82,7 @@ class BatterySpatialThermalSPMSpec:
     maximum_current_A: float = 2.0
     provenance: str = "declared-constant-OCV-spatial-thermal-SPM-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name, cls in (
             ("negative", ParticleSpec),
             ("positive", ParticleSpec),
@@ -175,7 +175,7 @@ class BatterySpatialThermalSPMSpec:
         return 0.0
 
     @property
-    def sei(self):
+    def sei(self) -> None:
         return None
 
     electrolyte = negative_ocp = positive_ocp = sei

@@ -43,7 +43,7 @@ class CriticalEstimate:
     citation: str
     kind: str = "pure_estimate"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.property_id not in _UNITS or not isfinite(self.value):
             raise ValueError("critical estimate requires a known property and finite value")
         if self.property_id not in {"omega", "Stiel"} and self.value <= 0:

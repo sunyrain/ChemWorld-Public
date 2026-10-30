@@ -69,7 +69,7 @@ class SBMLJumpTriggers:
     _guards: tuple = field(init=False, repr=False)
     roots: tuple = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         guards = []
         for index, event in enumerate(self.frame.model.declaration.items("listOfEvents")):
             expression = event.of("trigger")[0].mathematics

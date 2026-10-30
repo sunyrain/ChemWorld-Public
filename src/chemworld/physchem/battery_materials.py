@@ -43,7 +43,7 @@ class ElectrodeOCVEndpointPolicy:
     barrier_V: float = 1e-6
     stoichiometry_clip: float = 1e-10
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.source, InputSource) or self.source.data_kind == "measured":
             raise ValueError("OCV endpoint policy requires an explicit model InputSource")
         barrier, clip = _number(self.barrier_V), _number(self.stoichiometry_clip)
@@ -87,7 +87,7 @@ class ElectrodeOCV:
     parameter_inputs: tuple[tuple[str, InputValue], ...] = ()
     endpoint_policy: ElectrodeOCVEndpointPolicy | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.material_id, str) or not self.material_id.strip():
             raise ValueError("OCV requires a material identity")
         if not isinstance(self.source, InputSource):

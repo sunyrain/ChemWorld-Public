@@ -151,7 +151,7 @@ class CefDerivativeResponse:
     hessian: np.ndarray
     diagnostics: tuple[str, ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in ("values", "jacobian", "hessian"):
             object.__setattr__(self, name, readonly(getattr(self, name)))
 

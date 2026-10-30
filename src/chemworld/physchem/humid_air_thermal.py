@@ -24,7 +24,7 @@ class HumidAirIsochoricThermodynamics:
     reference_temperature_K: float = 298.15
     material_outlet_phase: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for component, composition, cas in zip(self.components,
             ({"N": 2}, {"O": 2}, {"Ar": 1}, {"H": 2, "O": 1}),
             ("7727-37-9", "7782-44-7", "7440-37-1", "7732-18-5"), strict=True):

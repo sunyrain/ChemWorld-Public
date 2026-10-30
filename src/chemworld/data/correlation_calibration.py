@@ -37,7 +37,7 @@ class CorrelationFitParameter(BoundedParameterCoordinates):
     initial: float
     coordinate: str = "linear"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not isinstance(self.name, str)
             or not self.name.strip()

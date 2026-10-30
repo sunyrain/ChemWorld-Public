@@ -98,7 +98,7 @@ def run(output, *, spec=None, noise="keyed"):
             "scope": "synthetic fixed-temperature SPM and two real metal-Li stocks"}
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--mode", choices=("reversible", "irreversible"), default="reversible")

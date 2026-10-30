@@ -33,7 +33,7 @@ def run_cycle(session, spec):
     return results
 
 
-def main():
+def main() -> None:
     spec, session = degradation_session()
     for cycle in range(1, 11):
         results = run_cycle(session, spec)

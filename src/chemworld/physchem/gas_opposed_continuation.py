@@ -270,7 +270,7 @@ class _OpposedBranchProblem:
             tuple((e.name, e.unit) for e in assembly.equations),
         )
 
-    def check_budget(self):
+    def check_budget(self) -> None:
         if perf_counter() - self.started > self.maximum_wall_time_s:
             raise ResidualDomainError("continuation_cooperative_wall_budget")
 

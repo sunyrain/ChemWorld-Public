@@ -44,7 +44,7 @@ class StochasticRuntime:
                 or state.vessel_id in self.hybrid.models or state.vessel_id in self.sde.models
                 or state.vessel_id in self.adaptive.models)
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         if self.composition is None or self.composition.physics is None:
             return
         physics = self.composition.physics

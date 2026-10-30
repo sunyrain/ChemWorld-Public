@@ -25,7 +25,7 @@ class IdealGasThermodynamics:
     support_heat_capacity_J_K: float = 0.0
     reference_temperature_K: float = 298.15
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isfinite(self.support_heat_capacity_J_K) or self.support_heat_capacity_J_K < 0:
             raise ValueError("support heat capacity must be finite and nonnegative")
         if not isfinite(self.reference_temperature_K) or self.reference_temperature_K <= 0:

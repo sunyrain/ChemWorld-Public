@@ -134,7 +134,7 @@ class TransientElectrodeRuntime:
     def supports(self, state):
         return electrode_record(state) is not None
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         if self.composition is None or self.composition.physics is None:
             return
         declared = {

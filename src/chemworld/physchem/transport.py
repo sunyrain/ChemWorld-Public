@@ -95,7 +95,7 @@ class PumpSpec:
     maximum_shaft_power_W: float = 0.005
     efficiency: float = 0.7
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _nonnegative(self.maximum_pressure_rise_Pa, "maximum_pressure_rise_Pa")
         _nonnegative(self.maximum_shaft_power_W, "maximum_shaft_power_W")
         if not isfinite(self.efficiency) or not 0 < self.efficiency <= 1:

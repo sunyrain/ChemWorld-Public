@@ -477,7 +477,7 @@ def validate_heat_capacity_interval(
     def valid(value):
         return isfinite(value) and (value >= minimum if allow_zero else value > minimum)
 
-    def reject():
+    def reject() -> None:
         raise ValueError("heat capacity is nonpositive or cannot be bounded over the interval")
 
     for T in (lower_K, upper_K):

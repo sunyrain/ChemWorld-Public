@@ -148,7 +148,7 @@ class BatteryCollectorSPMSpec:
     sei: object | None = None
     plating: object | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if isinstance(self.negative, dict):
             object.__setattr__(self, "negative", ParticleSpec(**self.negative))
         if isinstance(self.positive, dict):

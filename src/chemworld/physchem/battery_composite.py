@@ -54,7 +54,7 @@ class ActiveMaterialPhaseSpec:
     initial_fraction: float
     source: InputSource
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.phase_id, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,63}",
                                                                 self.phase_id):
             raise ValueError("phase identity must be a stable nonempty identifier")
@@ -95,7 +95,7 @@ class BatteryCompositeSPMSpec:
     series_resistance_ohm: float = 0.0
     provenance: str = "declared-single-valued-composite-SPM-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         phases = tuple(ActiveMaterialPhaseSpec.from_dict(p) if isinstance(p, dict) else p
                        for p in self.negative_phases)
         positive = (ActiveMaterialPhaseSpec.from_dict(self.positive_phase)
@@ -145,7 +145,7 @@ class BatteryCompositeSPMSpec:
         return "residual"
 
     @property
-    def thermal(self):
+    def thermal(self) -> None:
         return None
 
     sei = electrolyte = negative_ocp = positive_ocp = thermal

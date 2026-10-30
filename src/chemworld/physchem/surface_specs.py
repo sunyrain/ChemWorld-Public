@@ -114,7 +114,7 @@ class MultisiteSurfaceSpec:
     reference_temperature_K: float = 350.0
     reference_pressure_Pa: float = 100000.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         interaction = InventoryInteractionSpec(
             MULTISITE_ADSORBATES, ("sites_mol", "sites_B_mol"), self.interaction_matrix_J_mol
         )

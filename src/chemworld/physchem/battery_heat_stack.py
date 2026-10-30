@@ -44,7 +44,7 @@ class HeatStackLayer:
     cells: int
     source: InputSource
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _numbers(self, ("length_m", "heat_capacity_J_m3_K", "conductivity_W_m_K"))
         if type(self.cells) is not int or not 1 <= self.cells <= 256:
             raise ValueError("thermal layer requires 1 to 256 finite-volume cells")
@@ -72,7 +72,7 @@ class HeatStackCollector:
     tab_width_m: float
     source: InputSource
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         _numbers(
             self,
             ("length_m", "heat_capacity_J_m3_K"),
@@ -114,7 +114,7 @@ class BatteryHeatStackSpec:
     minimum_temperature_K: float = 270.0
     maximum_temperature_K: float = 370.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in (
             "negative",
             "separator",

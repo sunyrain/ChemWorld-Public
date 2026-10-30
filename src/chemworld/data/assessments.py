@@ -42,7 +42,7 @@ class AssessmentValue:
     conditions: dict
     warnings: tuple[str, ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not all((self.property_id, self.method, self.component_id, self.record_id)):
             raise ValueError("assessment requires property, method, component and record")
         if self.quality not in {"valid", "missing", "invalid", "not_listed"}:

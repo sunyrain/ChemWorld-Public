@@ -43,7 +43,7 @@ class SEDMLTasks:
     samples: object = field(init=False)
     roots: tuple = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if type(self.maximum_invocations) is not int or not 1 <= self.maximum_invocations <= 100000:
             raise ValueError("task invocation budget must be a finite positive integer")
         root = self.document.declaration

@@ -60,7 +60,7 @@ def run(output, *, noise="keyed", spec=None):
             "replay_steps": report.checked_steps, "noise": noise, "trajectory": str(output)}
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--noise", choices=("keyed", "sequential"), default="keyed")

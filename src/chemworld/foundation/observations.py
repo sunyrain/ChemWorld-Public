@@ -10,7 +10,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from itertools import pairwise
 from math import isfinite, isnan
-from typing import Any
+from typing import Any, cast
 
 from chemworld.foundation.units import unit_spec
 
@@ -123,7 +123,7 @@ class ObservationChannel:
             elif (
                 not missing
                 and self.quality in {"valid", "below_detection", "saturated"}
-                and any(not lo <= v <= hi for v in values)
+                and any(not lo <= cast(float, v) <= hi for v in values)
             ):
                 errors.append("range_quality")
         for name, value in (
@@ -137,7 +137,7 @@ class ObservationChannel:
         elif (
             self.quality == "below_detection"
             and not missing
-            and any(abs(v) > self.detection_limit for v in values)
+            and any(abs(cast(float, v)) > cast(float, self.detection_limit) for v in values)
         ):
             errors.append("detection_limit_quality")
         if self.role not in {"raw", "processed"}:
@@ -227,7 +227,8 @@ class ScalarProjection:
             raise ValueError("A finite curve requires an explicit scalar reduction")
         if not channel.projectable:
             return None
-        value = float(channel.value)
+        # projectable excludes None; the scalar guard above excludes tuples.
+        value = float(cast(float, channel.value))
         # Invalid finite contracts remain visible to validation, never clipped clean.
         return legacy_scalar_projection(value, self.lower, self.upper)
 
@@ -418,7 +419,7 @@ class Observation:
             std_links = [
                 (f"{c.channel_id}_std", c.channel_id) for c in readings if c.uncertainty is not None
             ]
-        for name, value in {
+        for name, field_value in {
             "channels": tuple(readings),
             "projection": tuple(projection),
             "projection_version": projection_version,
@@ -430,7 +431,7 @@ class Observation:
             "_uncertainty_links": tuple(std_links),
             "_mask_keys": mask_keys,
         }.items():
-            object.__setattr__(self, name, value)
+            object.__setattr__(self, name, field_value)
         ids = [c.channel_id for c in self.channels]
         if len(set(ids)) != len(ids):
             raise ValueError("Duplicate native observation channels")
@@ -462,17 +463,20 @@ class Observation:
 
     @property
     def uncertainty(self) -> dict[str, float]:
-        return {key: self.channel(cid).uncertainty for key, cid in self._uncertainty_links}
+        # Links are created only for channels with a declared uncertainty.
+        return {key: cast(float, self.channel(cid).uncertainty)
+                for key, cid in self._uncertainty_links}
 
     @property
     def raw_signal(self) -> dict[str, Any]:
-        def expand(value):
+        def expand(value: object) -> object:
             if isinstance(value, dict):
                 if set(value) == {"$channel_value"}:
                     reading = self.channel(value["$channel_value"]).value
                     return list(reading) if isinstance(reading, tuple) else reading
                 if set(value) == {"$channel_axis"}:
-                    return list(self.channel(value["$channel_axis"]).axis.values)
+                    axis = cast(ChannelAxis, self.channel(value["$channel_axis"]).axis)
+                    return list(axis.values)
                 if set(value) == {"$channel_uncertainty"}:
                     return self.channel(value["$channel_uncertainty"]).uncertainty
                 return {key: expand(item) for key, item in value.items()}
@@ -480,7 +484,7 @@ class Observation:
                 return [expand(item) for item in value]
             return deepcopy(value)
 
-        return expand(self._raw_template)
+        return cast(dict[str, Any], expand(self._raw_template))
 
     def errors(self) -> list[str]:
         errors = [f"{c.channel_id}:{error}" for c in self.channels for error in c.errors()]

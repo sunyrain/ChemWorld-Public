@@ -109,7 +109,7 @@ class MineralKineticsRuntime:
         else:
             mineral_geometry(state)
 
-    def validate_world(self):
+    def validate_world(self) -> None:
         if self.composition is None or self.composition.physics is None:
             return
         physics = self.composition.physics

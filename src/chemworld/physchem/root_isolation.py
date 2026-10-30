@@ -29,7 +29,7 @@ class IsolationPolicy:
         default_factory=lambda: RootPolicy(tolerance=1e-12, maximum_iterations=80)
     )
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isfinite(self.coordinate_tolerance) or self.coordinate_tolerance <= 0:
             raise ValueError("isolation needs a positive finite coordinate tolerance")
         if any(type(n) is not int or n < 1 for n in (self.maximum_boxes, self.maximum_depth)):

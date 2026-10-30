@@ -52,7 +52,7 @@ class TabulatedScalar:
     _points: tuple[tuple[float, ...], ...] = field(init=False, repr=False, compare=False)
     _values: np.ndarray = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isinstance(self.table, ScientificTable) or self.table.kind != "parameters":
             raise ValueError(
                 "a parameter function needs an explicit parameter table, not observations")

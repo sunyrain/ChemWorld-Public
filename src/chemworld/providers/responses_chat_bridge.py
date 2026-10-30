@@ -300,7 +300,7 @@ class ResponsesChatBridge:
         holder: list[Any] = []
         request_id = str(record.get("response_id", record["request"]))
 
-        def abort(*, timeout: bool = False):
+        def abort(*, timeout: bool = False) -> None:
             (expired if timeout else cancelled).set()
             if holder:
                 stream = holder[0]
@@ -310,7 +310,7 @@ class ResponsesChatBridge:
                     with suppress(OSError):
                         sock.shutdown(socket.SHUT_RDWR)
 
-        def check_cancelled():
+        def check_cancelled() -> None:
             if expired.is_set():
                 raise BridgeError("upstream_deadline", "Total upstream request deadline exceeded")
             if cancelled.is_set():
@@ -506,7 +506,7 @@ class ResponsesChatBridge:
             def log_message(self, *_args):
                 pass
 
-            def do_POST(self):
+            def do_POST(self) -> None:
                 token = self.headers.get("Authorization", "").removeprefix("Bearer ")
                 if not hmac.compare_digest(token, bridge.local_token):
                     self.send_error(401)
@@ -540,7 +540,7 @@ class ResponsesChatBridge:
                 streaming = request.get("stream", False)
                 sequence, lock, stop = 0, threading.Lock(), threading.Event()
 
-                def event(kind: str, **values):
+                def event(kind: str, **values) -> None:
                     nonlocal sequence
                     with lock:
                         payload = {"type": kind, "sequence_number": sequence, **values}
@@ -550,7 +550,7 @@ class ResponsesChatBridge:
                         )
                         self.wfile.flush()
 
-                def heartbeat():
+                def heartbeat() -> None:
                     while not stop.wait(15):
                         try:
                             with lock:

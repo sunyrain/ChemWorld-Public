@@ -40,7 +40,7 @@ class ReactionSDE:
     _flux_parameters: object = field(init=False, repr=False, compare=False)
     _noise_parameters: object = field(init=False, repr=False, compare=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         from chemworld.physchem.reaction_network import ReactionNetworkSpec
 
         if not isinstance(self.network, ReactionNetworkSpec) or not isinstance(

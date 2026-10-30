@@ -309,7 +309,7 @@ class AdvanceStrategySpec:
     legacy_input_default: bool = False
     shared_clock: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (not isinstance(self.strategy_id, str) or not self.strategy_id
                 or not callable(self.factory)):
             raise ValueError("Advance strategies require an explicit identity and factory")

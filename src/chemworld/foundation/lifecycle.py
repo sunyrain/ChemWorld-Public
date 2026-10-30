@@ -5,14 +5,16 @@ They record removed and declared replacement material rather than pretending a
 new batch is a closed physical transition. In-world flushing uses material routing.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from typing import cast
 
 from chemworld.foundation.material_properties import (
     extract_material_properties,
     install_material_properties,
 )
 from chemworld.foundation.state import WorldState
-from chemworld.foundation.state_ledgers import EquipmentLedger, ProcessLedger
+from chemworld.foundation.state_ledgers import EquipmentLedger, EquipmentRecord, ProcessLedger
 from chemworld.foundation.state_ownership import StateSlots
 
 
@@ -22,11 +24,11 @@ class LifecycleTransition:
     receipt: dict
 
 
-def _local_states(state):
+def _local_states(state: WorldState) -> dict[str, WorldState]:
     return {state.vessel_id: state.replace(inactive_vessels={}), **state.inactive_vessels}
 
 
-def _batch_equipment(equipment, initial):
+def _batch_equipment(equipment: EquipmentLedger, initial: EquipmentLedger) -> EquipmentLedger:
     # Completion means "this batch has a terminal readout". Usage, elapsed
     # instrument time, calibration and drift belong to the physical device.
     records = {}
@@ -40,7 +42,10 @@ def _batch_equipment(equipment, initial):
     return EquipmentLedger(records)
 
 
-def initialize_entities(current, initial, *, scope="batch", vessel_ids=None, preserve_vessels=()):
+def initialize_entities(
+    current: WorldState, initial: WorldState, *, scope: str = "batch",
+    vessel_ids: Iterable[str] | None = None, preserve_vessels: Iterable[str] = (),
+) -> LifecycleTransition:
     """Apply declared initialization while preserving states owned by retained entities.
 
     batch: slot-specific reset; material: replace contents and retain stationary
@@ -73,7 +78,8 @@ def initialize_entities(current, initial, *, scope="batch", vessel_ids=None, pre
             ))
         result[name] = template.replace(
             state_slots=slots,
-            equipment=(_batch_equipment(previous.equipment, template.equipment)
+            equipment=(_batch_equipment(cast(EquipmentLedger, previous.equipment),
+                                        cast(EquipmentLedger, template.equipment))
                        if scope == "batch" else install_material_properties(
                            previous.equipment,
                            extract_material_properties(template.equipment), name,
@@ -132,18 +138,23 @@ def initialize_entities(current, initial, *, scope="batch", vessel_ids=None, pre
     })
 
 
-def replace_equipment(state, equipment_id, replacement, *, slots=None):
+def replace_equipment(
+    state: WorldState, equipment_id: str, replacement: EquipmentRecord,
+    *, slots: StateSlots | None = None,
+) -> LifecycleTransition:
     """Replace one installed device, retaining the specimen and other devices."""
     slots = slots or StateSlots()
     locals_ = _local_states(state)
-    matches = [name for name, local in locals_.items() if equipment_id in local.equipment.equipment]
+    matches = [name for name, local in locals_.items()
+               if equipment_id in cast(EquipmentLedger, local.equipment).equipment]
     if len(matches) != 1:
         raise ValueError("replacement must identify exactly one installed device")
     name = matches[0]
     if replacement.attached_vessel_id != name:
         raise ValueError("replacement must attach to the same declared location")
     if replacement.equipment_id == equipment_id or any(
-        replacement.equipment_id in local.equipment.equipment for local in locals_.values()
+        replacement.equipment_id in cast(EquipmentLedger, local.equipment).equipment
+        for local in locals_.values()
     ):
         raise ValueError("a replacement device needs a new unique identity")
     if any(
@@ -152,7 +163,8 @@ def replace_equipment(state, equipment_id, replacement, *, slots=None):
     ):
         raise ValueError("replacement slots must belong to the new device")
     local = locals_[name]
-    removed = local.equipment.equipment[equipment_id]
+    equipment = cast(EquipmentLedger, local.equipment)
+    removed = equipment.equipment[equipment_id]
     if replacement.equipment_type != removed.equipment_type:
         raise ValueError("replacement must retain the installed equipment type")
     role = removed.settings.get("lab_analyzer_instrument")
@@ -162,19 +174,19 @@ def replace_equipment(state, equipment_id, replacement, *, slots=None):
         replacement = replace(replacement, settings={
             **replacement.settings, "lab_analyzer_instrument": role,
         })
-    records = {k: v for k, v in local.equipment.equipment.items() if k != equipment_id}
+    records = {k: v for k, v in equipment.equipment.items() if k != equipment_id}
     records[replacement.equipment_id] = replacement
     retained = tuple(s for s in local.state_slots.slots if not (
         s.spec.owner_kind == "equipment" and s.spec.owner_id == equipment_id
     ))
     locals_[name] = local.replace(
         equipment=EquipmentLedger(records), state_slots=StateSlots((*retained, *slots.slots)),
-        process=replace(local.process, last_observation_record=None),
+        process=replace(cast(ProcessLedger, local.process), last_observation_record=None),
     )
     active = locals_.pop(state.vessel_id)
     return LifecycleTransition(active.replace(inactive_vessels=locals_), {
         "scope": "equipment", "kind": "experiment_boundary_initialization",
-        "removed_device": local.equipment.equipment[equipment_id].to_dict(),
+        "removed_device": equipment.equipment[equipment_id].to_dict(),
         "introduced_device": replacement.to_dict(),
         "removed_slots": StateSlots(tuple(s for s in local.state_slots.slots if (
             s.spec.owner_kind == "equipment" and s.spec.owner_id == equipment_id

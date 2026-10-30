@@ -50,7 +50,7 @@ class StochasticSpec:
     algorithm: str = "gillespie-direct-v1"
     tau_policy: object = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if any(not isfinite(x) or x <= 0 for x in (self.volume_L, self.temperature_K)):
             raise ValueError("SSA requires finite positive constant volume and temperature")
         if type(self.max_events_per_advance) is not int or self.max_events_per_advance <= 0:
@@ -91,7 +91,7 @@ class EventProcessSpec:
     context: str
     tau_policy: object = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.algorithm not in {"gillespie-direct-v1", "gibson-bruck-next-reaction-v1",
                                   TAU_ALGORITHM}:
             raise ValueError("unsupported compiled event algorithm")

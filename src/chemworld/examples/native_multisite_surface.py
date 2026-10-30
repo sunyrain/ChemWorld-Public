@@ -5,7 +5,7 @@ from chemworld.runtime import ChemWorldRuntime
 from chemworld.world.surface_world import surface_world_spec
 
 
-def main():
+def main() -> None:
     model = MultisiteSurfaceSpec(
         interaction_matrix_J_mol=(
             (5000, 0, 2500, 0),

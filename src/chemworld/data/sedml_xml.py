@@ -26,7 +26,7 @@ class ExperimentXMLNode:
     text: str = ""
     tail: str = field(default="", repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "attributes", MappingProxyType(dict(self.attributes)))
         object.__setattr__(self, "namespaces", MappingProxyType(dict(self.namespaces)))
         object.__setattr__(self, "children", tuple(self.children))

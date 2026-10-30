@@ -21,7 +21,7 @@ class ParticleSizeDistribution:
     source_basis: str = "volume"
     distribution_parameters: tuple[tuple[str, InputValue], ...] = ()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         radii, weights = tuple(self.radii_m), tuple(self.volume_weights)
         if (
             not 1 <= len(radii) <= 64

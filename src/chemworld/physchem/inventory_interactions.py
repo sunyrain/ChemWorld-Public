@@ -12,7 +12,7 @@ class InventoryInteraction:
     coefficients_J_mol: tuple[tuple[float, ...], ...]
     capacity_mol: float
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not isfinite(self.capacity_mol) or self.capacity_mol < 0:
             raise ValueError("interaction carrier capacity must be finite and nonnegative")
 
@@ -39,7 +39,7 @@ class InteractingThermodynamics:
     base: object
     interactions: tuple[InventoryInteraction, ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if any(set(term.keys) - set(self.base.inventory_keys) for term in self.interactions):
             raise ValueError("interaction energy refers to an undeclared caloric inventory")
 

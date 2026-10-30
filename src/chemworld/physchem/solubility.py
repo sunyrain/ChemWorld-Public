@@ -99,7 +99,7 @@ class HansenParameters:
     source: DataSourceProvenance
     record_id: str
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.component_id or not self.record_id or not self.source.source_id:
             raise ValueError("Hansen parameters need component and source identities")
         for value in (self.dispersion, self.polar, self.hydrogen_bonding):

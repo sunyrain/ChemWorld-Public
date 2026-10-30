@@ -29,7 +29,7 @@ def cycle_session():
     return session
 
 
-def main():
+def main() -> None:
     session = cycle_session()
     for index in range(4):
         result = session.execute({"operation": "wait", "duration_s": 14400})
