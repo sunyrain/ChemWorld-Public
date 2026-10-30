@@ -11,10 +11,13 @@ charge and the declared two-node heat equation have separate exact balances.
 Optional spatial SOC diffusion uses the official PR 5869 voltage/heat correction.
 """
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from math import isfinite
 from types import MappingProxyType
+from typing import Any, NotRequired, Self, TypedDict, cast
 
 import numpy as np
 
@@ -23,6 +26,7 @@ from chemworld.foundation.units import convert_value
 from chemworld.physchem.battery_thevenin_control import (
     CONTROLLER_CURRENT,
     DYNAMIC_MODES,
+    TheveninControlProgram,
     TheveninControlSpec,
     isolate_control_current,
     thevenin_control_program,
@@ -73,15 +77,18 @@ CONSTANT_UNITS = {
 R_INPUTS = {"soc": "dimensionless", "temperature_K": "K", "current_A": "A"}
 
 
-def rc_key(index):
+def rc_key(index: int) -> str:
     return f"thevenin:polarization_{index}_V"
 
 
-def _law(law, values):
+def _law(law: TabulatedScalar, values: Mapping[str, float]) -> float:
     return law.value({name: values[name] for name, _, _ in law.axes}, trial=True)
 
 
-def _check_law(law, unit, allowed_inputs, domains):
+def _check_law(
+    law: object, unit: str, allowed_inputs: Mapping[str, str],
+    domains: Mapping[str, tuple[float, float]],
+) -> None:
     if not isinstance(law, TabulatedScalar) or law.output_unit != unit:
         raise ValueError(f"Thevenin function requires its explicit native output unit {unit}")
     for name, _, input_unit in law.axes:
@@ -121,7 +128,7 @@ class TheveninSpec:
         row = rows[self.parameter_row_id]
         if row.values.keys() != required.keys():
             raise ValueError("Thevenin constants must match the selected RC model exactly")
-        values = {key: convert_value(row.values[key].value, row.values[key].unit, unit)
+        values = {key: convert_value(cast(float, row.values[key].value), row.values[key].unit, unit)
                   for key, unit in required.items()}
         if any(not isfinite(value) for value in values.values()):
             raise ValueError("converted Thevenin parameters must remain finite")
@@ -171,11 +178,11 @@ class TheveninSpec:
         object.__setattr__(self, "_native", MappingProxyType(values))
 
     @property
-    def native_parameters(self):
+    def native_parameters(self) -> Mapping[str, float]:
         return self._native
 
     @property
-    def coordinate_declarations(self):
+    def coordinate_declarations(self) -> tuple[CoupledCoordinate, ...]:
         p = self._native
         # Event surfaces retain the exact authored stopping bounds. Dense-output
         # root evaluation can land a few floating-point units to either side;
@@ -207,7 +214,7 @@ class TheveninSpec:
             CoupledCoordinate(AMBIENT_LOSS, "J", heat_scale),
         )
 
-    def initial_state(self):
+    def initial_state(self) -> CoupledState:
         p = self._native
         coordinates = dict.fromkeys((item.name for item in self.coordinate_declarations), 0.)
         coordinates.update({SOC: p["initial_soc"], CELL_T: p["initial_cell_temperature_K"],
@@ -219,8 +226,9 @@ class TheveninSpec:
         return CoupledState({}, p["reference_frame_temperature_K"], p["housing_volume_L"],
                             coordinates=coordinates)
 
-    def to_dict(self):
-        payload = {"model_family": THEVENIN_ID, "parameters": self.parameters.to_dict(),
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+                "model_family": THEVENIN_ID, "parameters": self.parameters.to_dict(),
                 "parameter_row_id": self.parameter_row_id, "ocv": self.ocv.to_dict(),
                 "series_resistance": self.series_resistance.to_dict(),
                 "rc_elements": [{"resistance": r.to_dict(), "capacitance": c.to_dict()}
@@ -234,7 +242,7 @@ class TheveninSpec:
         return payload
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         _keys(payload, (
             "model_family", "parameters", "parameter_row_id", "ocv", "series_resistance",
             "rc_elements", "entropic_change", "ambient_program"), optional=("diffusion", "control"))
@@ -257,7 +265,29 @@ class TheveninSpec:
                    if "control" in payload else None)
 
 
-def _fields(spec, state, current):
+class TheveninFields(TypedDict):
+    current_A: float
+    voltage_V: float
+    ocv_V: float
+    r0_ohm: float
+    resistance_ohm: tuple[float, ...]
+    capacitance_F: tuple[float, ...]
+    polarization_V: tuple[float, ...]
+    soc: float
+    distributed_soc: tuple[float, ...]
+    surface_soc: float
+    diffusion_overpotential_V: float
+    diffusion_heat_W: float
+    cell_temperature_K: float
+    jig_temperature_K: float
+    ambient_temperature_K: float
+    empirical_heat_W: float
+    cell_to_jig_W: float
+    ambient_loss_W: float
+    controller_current_A: NotRequired[float]
+
+
+def _fields(spec: TheveninSpec, state: CoupledStateView, current: float) -> TheveninFields:
     p, x = spec._native, state.coordinates
     values = {"soc": x[SOC], "temperature_K": x[CELL_T], "current_A": current}
     ocv = _law(spec.ocv, values)
@@ -290,7 +320,11 @@ def _fields(spec, state, current):
             "ambient_loss_W": p["jig_ambient_conductance_W_K"]*(x[JIG_T]-ambient)}
 
 
-def thevenin_system(spec, program, *, control_events=()):
+def thevenin_system(
+    spec: TheveninSpec,
+    program: TheveninControlProgram | ScalarControlProgram | Mapping[str, Any],
+    *, control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     """Build named actual port/controller equations on the common residual."""
     program = thevenin_control_program(program)
     mode = program.control_mode
@@ -314,7 +348,7 @@ def thevenin_system(spec, program, *, control_events=()):
     ):
         raise ValueError("CV requires a certified nonsingular monotone instantaneous I*R0 law")
 
-    def saturated_current(state, target):
+    def saturated_current(state: CoupledStateView, target: float) -> float | None:
         # The certified positive derivative of I*R0 makes V(I) strictly
         # decreasing at a fixed physical state, including current-dependent R.
         # Endpoint voltages therefore identify the active source constraint
@@ -325,16 +359,18 @@ def thevenin_system(spec, program, *, control_events=()):
             return -limit
         return None
 
-    cached_key, cached_current = None, None
+    cached_key: tuple[float, tuple[tuple[str, float], ...]] | None = None
+    cached_current: float | None = None
 
-    def requested_current(state):
+    def requested_current(state: CoupledStateView) -> float | None:
         nonlocal cached_key, cached_current
         target = program.value_at(state.time_s)
         if mode == "current":
             return target
         if mode in DYNAMIC_MODES:
             q = state.coordinates[CONTROLLER_CURRENT]
-            return max(q, program.current_limit.value_at(state.time_s)) if mode == "cccv" else q
+            return max(q, cast(ScalarControlProgram, program.current_limit).value_at(state.time_s)
+                       ) if mode == "cccv" else q
         if mode == "voltage":
             return saturated_current(state, target)
         # Algebraic power/load roots use the shared certified isolator. This
@@ -343,18 +379,19 @@ def thevenin_system(spec, program, *, control_events=()):
         key = (state.time_s, tuple(state.coordinates.items()))
         if key != cached_key:
             inputs = {"soc": state.coordinates[SOC], "temperature_K": state.coordinates[CELL_T]}
-            branch = program.current_branch_A if mode == "power" else (-limit, limit)
+            branch = (cast(tuple[float, float], program.current_branch_A)
+                      if mode == "power" else (-limit, limit))
             cached_current = isolate_control_current(spec.series_resistance, inputs,
                 _fields(spec, state, 0.)["voltage_V"], target, branch, mode, limit)
             cached_key = key
         return cached_current
 
-    def guess(state):
+    def guess(state: CoupledStateView) -> dict[str, float]:
         requested = requested_current(state)
         current = 0. if requested is None else requested
         return {CURRENT: current, VOLTAGE: _fields(spec, state, current)["voltage_V"]}
 
-    def residual(state):
+    def residual(state: CoupledStateView) -> list[float]:
         current, voltage = (state.algebraic_values[key] for key in (CURRENT, VOLTAGE))
         actual = _fields(spec, state, current)
         target = program.value_at(state.time_s)
@@ -373,7 +410,7 @@ def thevenin_system(spec, program, *, control_events=()):
         (ResidualEquation("thevenin:control", "1"),
          ResidualEquation("thevenin:terminal", "V", voltage_scale)), guess, residual)
 
-    def evaluate(state):
+    def evaluate(state: CoupledStateView) -> ProcessContribution:
         current, voltage = (state.algebraic_values[key] for key in (CURRENT, VOLTAGE))
         if mode in DYNAMIC_MODES:
             # The controller already declares I=q or I=max(q,Icc). Substitute
@@ -381,7 +418,7 @@ def thevenin_system(spec, program, *, control_events=()):
             # Otherwise a stale consistency guess can evaluate V/I near zero
             # even though the actual controller state lies safely in its domain.
             # The shared terminal/control residual still enforces identical I/V.
-            current = requested_current(state)
+            current = cast(float, requested_current(state))
             voltage = _fields(spec, state, current)["voltage_V"]
         f = _fields(spec, state, current)
         rates = {
@@ -403,7 +440,7 @@ def thevenin_system(spec, program, *, control_events=()):
                 program.value_at(state.time_s))
         return ProcessContribution(coordinate_rates=rates)
 
-    def validate(state):
+    def validate(state: CoupledStateView) -> None:
         if (state.temperature_K != p["reference_frame_temperature_K"]
                 or state.volume_L != p["housing_volume_L"]):
             raise ValueError("Thevenin formal reference frame/housing is not a thermal cell state")
@@ -412,10 +449,10 @@ def thevenin_system(spec, program, *, control_events=()):
                                             p["minimum_soc"], p["maximum_soc"])
         if mode in DYNAMIC_MODES:
             guard = 32*np.spacing(max(1., limit))
-            if abs(requested_current(state)) > limit+guard:
+            if abs(cast(float, requested_current(state))) > limit+guard:
                 raise ValueError("dynamic controller actual current exceeds the source domain")
         if mode == "differential_resistance":
-            low, high = program.current_branch_A
+            low, high = cast(tuple[float, float], program.current_branch_A)
             guard = 32*np.spacing(max(1., abs(low), abs(high)))
             if not low-guard <= state.coordinates[CONTROLLER_CURRENT] <= high+guard:
                 raise ValueError(
@@ -435,7 +472,7 @@ def thevenin_system(spec, program, *, control_events=()):
                          lambda s: limit-s.algebraic_values[CURRENT]),
         ))
     if mode == "differential_resistance":
-        low, high = program.current_branch_A
+        low, high = cast(tuple[float, float], program.current_branch_A)
         events.extend((
             CoupledEvent("thevenin:minimum-control-branch",
                          lambda s: s.coordinates[CONTROLLER_CURRENT]-low),
@@ -455,11 +492,15 @@ def thevenin_system(spec, program, *, control_events=()):
                 p["maximum_soc"]-max(diffusion.profile(s.coordinates[SOC], s.coordinates))),
         ))
     for key in (CELL_T, JIG_T):
+        def minimum_temperature(state: CoupledStateView, key: str = key) -> float:
+            return state.coordinates[key]-p["minimum_temperature_K"]
+
+        def maximum_temperature(state: CoupledStateView, key: str = key) -> float:
+            return p["maximum_temperature_K"]-state.coordinates[key]
+
         events.extend((
-            CoupledEvent(f"{key}:minimum", lambda s, key=key:
-                         s.coordinates[key]-p["minimum_temperature_K"]),
-            CoupledEvent(f"{key}:maximum", lambda s, key=key:
-                         p["maximum_temperature_K"]-s.coordinates[key]),
+            CoupledEvent(f"{key}:minimum", minimum_temperature),
+            CoupledEvent(f"{key}:maximum", maximum_temperature),
         ))
     return CoupledSystem(
         KineticOnlyThermodynamics(),
@@ -474,7 +515,10 @@ def thevenin_system(spec, program, *, control_events=()):
         })
 
 
-def thevenin_fields(spec, state, program):
+def thevenin_fields(
+    spec: TheveninSpec, state: CoupledState,
+    program: TheveninControlProgram | ScalarControlProgram | Mapping[str, Any],
+) -> TheveninFields:
     """Read the same consistent terminal, without persisting an I/V truth copy."""
     result = thevenin_system(spec, program).advance(state, 0.)
     algebraic = result.solver_diagnostic["algebraic_values"]

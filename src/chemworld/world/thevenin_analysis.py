@@ -1,8 +1,10 @@
 """Explicitly opt-in synthetic model analysis, not a physical sweep acquisition."""
 
 import json
+from collections.abc import Mapping
+from typing import cast
 
-from chemworld.foundation import Instrument, Observation
+from chemworld.foundation import Instrument, Observation, WorldState
 from chemworld.foundation.observations import ChannelAxis, ObservationChannel
 from chemworld.world.domain_modules import InstrumentSpec
 from chemworld.world.instruments import InstrumentContract
@@ -12,7 +14,9 @@ FREQUENCIES_HZ = tuple(10.**(-4+.5*k) for k in range(13))
 COST = .02
 
 
-def read_thevenin_analysis(state, action, rng):
+def read_thevenin_analysis(
+    state: WorldState, action: Mapping[str, object], rng: object,
+) -> Observation:
     from chemworld.physchem.thevenin_frequency import thevenin_impedance
     from chemworld.runtime.thevenin import unpack_thevenin
 
@@ -25,16 +29,18 @@ def read_thevenin_analysis(state, action, rng):
     if not result.success:
         raise ValueError("small-signal analysis failed: "
                          +json.dumps(result.to_dict(), allow_nan=False))
+    # success requires a response at every frequency; none are dropped here.
+    impedances = cast(tuple[complex, ...], result.impedance_ohm)
     axis = ChannelAxis("frequency", "Hz", FREQUENCIES_HZ)
     return Observation(channels=(
         ObservationChannel("impedance_real", "Ohm",
-            tuple(float(z.real) for z in result.impedance_ohm), axis=axis),
+            tuple(float(z.real) for z in impedances), axis=axis),
         ObservationChannel("impedance_imag", "Ohm",
-            tuple(float(z.imag) for z in result.impedance_ohm), axis=axis),
+            tuple(float(z.imag) for z in impedances), axis=axis),
     ), instrument_id=THEVENIN_ANALYSIS, cost=COST, sample_consumed_L=0.)
 
 
-def thevenin_analysis_instrument_spec():
+def thevenin_analysis_instrument_spec() -> InstrumentSpec:
     keys = ("impedance_real", "impedance_imag")
     definition = Instrument(THEVENIN_ANALYSIS, "Synthetic stationary model small-signal analysis",
                             keys, COST, 0., dict.fromkeys(keys, 0.))

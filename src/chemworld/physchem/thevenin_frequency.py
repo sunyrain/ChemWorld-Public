@@ -6,9 +6,14 @@ and absolute throughput is not differentiable at zero current. No device state
 is relaxed, clipped, or replaced and no sinusoidal acquisition is simulated.
 """
 
+from __future__ import annotations
+
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any, cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scipy import sparse
 
 from chemworld.physchem.battery_thevenin import (
@@ -16,21 +21,31 @@ from chemworld.physchem.battery_thevenin import (
     JIG_T,
     SOC,
     VOLTAGE,
+    TheveninSpec,
     rc_key,
     thevenin_system,
 )
-from chemworld.physchem.coupled_system import CoupledStateView, assemble_coupled_rates
+from chemworld.physchem.coupled_system import (
+    CoupledAlgebraic,
+    CoupledCoordinate,
+    CoupledState,
+    CoupledStateView,
+    assemble_coupled_rates,
+)
 from chemworld.physchem.reactor_shared import ScalarControlProgram
 from chemworld.physchem.residual_frequency import FrequencyResponse, residual_frequency_response
 from chemworld.physchem.residual_solver import mass_matrix_system
 from chemworld.physchem.residual_system import (
     ResidualDomainError,
     ResidualEquation,
+    ResidualSystem,
     ResidualVariable,
 )
 
 
-def thevenin_impedance_system(spec, state):
+def thevenin_impedance_system(
+    spec: TheveninSpec, state: CoupledState,
+) -> tuple[ResidualSystem, NDArray[np.float64]]:
     """Declare the common residual and current input at the supplied rest point."""
     coupled = thevenin_system(spec, ScalarControlProgram(((0., 0.),), "A"))
     declared = {c.name for c in coupled.coordinates}
@@ -71,10 +86,11 @@ def thevenin_impedance_system(spec, state):
     retained = {SOC, CELL_T, JIG_T,
                 *(rc_key(k) for k in range(len(spec.rc_elements))), *surface_gradient}
     coordinates = tuple(c for c in coupled.coordinates if c.name in retained)
-    count, closure = len(coordinates), coupled.algebraic
+    # thevenin_system always supplies its actual terminal/control closure.
+    count, closure = len(coordinates), cast(CoupledAlgebraic, coupled.algebraic)
     names = tuple(c.name for c in coordinates)
     algebraic_names = tuple(v.name for v in closure.variables)
-    def local_variable(c):
+    def local_variable(c: CoupledCoordinate) -> ResidualVariable:
         lower, upper = c.minimum, c.maximum
         intervals = []
         if c.name == SOC and soc_segment:
@@ -82,8 +98,8 @@ def thevenin_impedance_system(spec, state):
         coefficient = 1. if c.name == SOC else surface_gradient.get(c.name, 0.)
         if coefficient != 0. and surface_segment:
             value = state.coordinates[c.name]
-            intervals.append(tuple(sorted(value+(edge-surface)/coefficient
-                                          for edge in surface_segment)))
+            intervals.append(cast(tuple[float, float], tuple(sorted(
+                value+(edge-surface)/coefficient for edge in surface_segment))))
         for lo, hi in intervals:
             lower = lo if lower is None else max(lower, lo)
             upper = hi if upper is None else min(upper, hi)
@@ -96,7 +112,7 @@ def thevenin_impedance_system(spec, state):
     initial = np.array([*(state.coordinates[k] for k in names),
                         *(guess[k] for k in algebraic_names)])
 
-    def view(time_s, values):
+    def view(time_s: float, values: Sequence[float] | NDArray[np.float64]) -> CoupledStateView:
         return CoupledStateView({}, state.temperature_K, state.volume_L, time_s,
             coordinates={**state.coordinates, **dict(zip(names, values[:count], strict=True))},
             algebraic_values=dict(zip(algebraic_names, values[count:], strict=True)))
@@ -120,7 +136,9 @@ def thevenin_impedance_system(spec, state):
     forcing = np.zeros((len(variables), 1))
     forcing[control, 0] = 1/limit
 
-    def rhs(time_s, values, parameters):
+    def rhs(
+        time_s: float, values: NDArray[np.float64], parameters: NDArray[np.float64],
+    ) -> NDArray[np.float64]:
         candidate = view(time_s, values)
         rates = assemble_coupled_rates(candidate, processes=coupled.processes,
             thermodynamics=coupled.thermodynamics, heat_flux=coupled.heat_flux,
@@ -146,15 +164,15 @@ class TheveninImpedance:
     voltage_index: int
 
     @property
-    def success(self):
+    def success(self) -> bool:
         return self.response.success
 
     @property
-    def impedance_ohm(self):
+    def impedance_ohm(self) -> tuple[complex | None, ...]:
         return tuple(None if p.response is None else -p.response[self.voltage_index, 0]
                      for p in self.response.points)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"success": self.success, "unit": "ohm", "definition": "Z = -delta_V / delta_I",
             "current_convention": "positive discharge", "phasor_convention": "exp(+i*2*pi*f*t)",
             "scope": ("stationary RC/optional SOC diffusion/two-node circuit; frozen boundary; "
@@ -168,7 +186,10 @@ class TheveninImpedance:
             "diagnostics": dict(self.response.diagnostics)}
 
 
-def thevenin_impedance(spec, frequencies_Hz, *, state=None, stationary_tolerance=1e-9):
+def thevenin_impedance(
+    spec: TheveninSpec, frequencies_Hz: ArrayLike, *, state: CoupledState | None = None,
+    stationary_tolerance: float = 1e-9,
+) -> TheveninImpedance:
     """Read-only local port response; actual nonstationary body states reject."""
     state = spec.initial_state() if state is None else state
     system, initial = thevenin_impedance_system(spec, state)
