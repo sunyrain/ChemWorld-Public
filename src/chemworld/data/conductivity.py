@@ -55,7 +55,7 @@ class ConductivityRecord(ConstantRecord):
     def correlation(self, *, temperature_bounds_K=None):
         def number(key):
             value = self.value(key)
-            if value.quality != "valid" or not isfinite(value.value):
+            if value.quality != "valid" or value.value is None or not isfinite(value.value):
                 raise ValueError(f"missing or invalid conductivity field {key}")
             return value.value
 
@@ -123,7 +123,10 @@ class ConductivityDatabase(ConstantDatabase):
         )
 
     def thermal_conductivity(self, identity, *, method, temperature_bounds_K=None):
-        return self.record(identity, method=method).correlation(
+        record = self.record(identity, method=method)
+        if not isinstance(record, ConductivityRecord):
+            raise ValueError("select a conductivity correlation source")
+        return record.correlation(
             temperature_bounds_K=temperature_bounds_K
         )
 
@@ -139,6 +142,8 @@ class ConductivityDatabase(ConstantDatabase):
             component.identifier,
         }:
             raise ValueError("conductivity source identity does not match ComponentSpec")
+        if not isinstance(record, ConductivityRecord):
+            raise ValueError("select a conductivity correlation source")
         curve = record.correlation(temperature_bounds_K=temperature_bounds_K)
         source = record.source.provenance
         return PropertyInputCard(

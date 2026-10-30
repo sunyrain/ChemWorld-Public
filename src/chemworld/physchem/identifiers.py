@@ -1,12 +1,13 @@
 """Pure canonical identifier checks shared by component inputs and data readers."""
 
 import re
+from collections.abc import Iterable
 from numbers import Integral
 
 _CAS = re.compile(r"[1-9][0-9]{1,6}-[0-9]{2}-[0-9]")
 
 
-def validate_cas_number(value):
+def validate_cas_number(value: object) -> str:
     if not isinstance(value, str) or _CAS.fullmatch(value) is None:
         raise ValueError("cas_number must use CAS Registry Number format (2-7/2/1 ASCII digits)")
     digits = value.replace("-", "")
@@ -16,7 +17,7 @@ def validate_cas_number(value):
     return value
 
 
-def check_cas_number(value):
+def check_cas_number(value: object) -> bool:
     try:
         validate_cas_number(value)
     except ValueError:
@@ -24,11 +25,11 @@ def check_cas_number(value):
     return True
 
 
-def cas_to_int(value):
+def cas_to_int(value: object) -> int:
     return int(validate_cas_number(value).replace("-", ""))
 
 
-def int_to_cas(value):
+def int_to_cas(value: object) -> str:
     if isinstance(value, bool) or not isinstance(value, Integral) or value < 0:
         raise ValueError("CAS integer representation must be a nonnegative integer")
     digits = str(value)
@@ -37,5 +38,5 @@ def int_to_cas(value):
     return validate_cas_number(f"{digits[:-3]}-{digits[-3:-1]}-{digits[-1]}")
 
 
-def sorted_cas_key(values):
+def sorted_cas_key(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(values, key=cas_to_int))

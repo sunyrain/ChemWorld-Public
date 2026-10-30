@@ -6,11 +6,13 @@ import csv
 import gzip
 import json
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from math import isfinite
+from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, SupportsFloat, cast
 
 from chemworld.data.constant_catalog import (
     CONSTANT_SOURCES,
@@ -22,15 +24,21 @@ from chemworld.data.constant_catalog import (
     XML_FIELD_ALIASES,
     XML_UNIT_NAMES,
     ConstantField,
+    ConstantSource,
 )
 from chemworld.data.scientific_inputs import (
     InputSource,
     InputValue,
+    QuantityColumn,
     ScientificRow,
     ScientificTable,
 )
 from chemworld.foundation.units import Quantity, canonical_unit
 from chemworld.physchem.identifiers import check_cas_number, int_to_cas
+
+if TYPE_CHECKING:
+    from chemworld.physchem.property_inputs import PropertyInputCard
+    from chemworld.physchem.specs import ComponentSpec
 
 _SOURCES = {source.source_id: source for source in CONSTANT_SOURCES}
 
@@ -72,12 +80,12 @@ class NonScalarConstantError(ValueError):
 
 
 class ConflictingConstantDataError(ValueError):
-    def __init__(self, candidates):
+    def __init__(self, candidates: Sequence[ConstantValue]) -> None:
         self.candidates = tuple(candidates)
         super().__init__("constant sources disagree; select a method or explicit source priority")
 
 
-def _cas(value):
+def _cas(value: object) -> str | None:
     text = str(value).strip()
     if check_cas_number(text):
         return text
@@ -89,7 +97,7 @@ def _cas(value):
     return None
 
 
-def _lookup_key(identity):
+def _lookup_key(identity: object) -> tuple[str, str]:
     if isinstance(identity, bool) or not isinstance(identity, (str, int)):
         raise ValueError("constant identity requires text or an integer source key")
     text = str(identity).strip()
@@ -99,8 +107,8 @@ def _lookup_key(identity):
     return ("cas", cas) if cas else ("source_key", text)
 
 
-def _field_names(headers):
-    counts = {}
+def _field_names(headers: Iterable[str]) -> tuple[str, ...]:
+    counts: dict[str, int] = {}
     result = []
     for index, header in enumerate(headers):
         base = header.strip() or f"unnamed_{index}"
@@ -145,30 +153,31 @@ class ConstantRecord:
                            MappingProxyType(dict(self.document_metadata)))
 
     @property
-    def record_id(self):
+    def record_id(self) -> str:
         return f"{self.source_id}:{self.row_number}"
 
     @property
-    def source(self):
+    def source(self) -> ConstantSource:
         return _SOURCES[self.source_id]
 
-    def raw(self, field_id):
+    def raw(self, field_id: str) -> object:
         field_id = self.source_field(field_id)
         try:
             return self.raw_fields[self.field_names.index(field_id)]
         except ValueError as exc:
             raise ConstantFieldNotFoundError(f"{self.record_id}: no field {field_id!r}") from exc
 
-    def source_field(self, field_id):
+    def source_field(self, field_id: str) -> str:
         if self.source.kind == "xml":
             return XML_FIELD_ALIASES.get(field_id, field_id)
         return field_id
 
-    def descriptor(self, field_id):
+    def descriptor(self, field_id: str) -> ConstantField:
         name = self.source_field(field_id)
         self.raw(name)
         if self.source.kind == "xml":
-            unit = XML_UNIT_NAMES.get(self.source_units.get(name))
+            source_unit = self.source_units.get(name)
+            unit = None if source_unit is None else XML_UNIT_NAMES.get(source_unit)
             description = f"ChemSep {name}; original unit={self.source_units.get(name)!r}"
             if isinstance(self.raw(name), SourceCorrelation):
                 return ConstantField(
@@ -195,7 +204,7 @@ class ConstantRecord:
             name, ConstantField(name, None, "Raw source metadata or undocumented field")
         )
 
-    def value(self, field_id, *, point=None):
+    def value(self, field_id: str, *, point: int | None = None) -> ConstantValue:
         name = self.source_field(field_id)
         raw = self.raw(name)
         descriptor = self.descriptor(name)
@@ -221,7 +230,7 @@ class ConstantRecord:
                 else:
                     if isinstance(raw, bool):
                         raise ValueError("a boolean is not a physical constant")
-                    number = float(raw)
+                    number = float(cast(str | SupportsFloat, raw))
             except (TypeError, ValueError):
                 number, quality = None, "invalid"
             else:
@@ -248,10 +257,10 @@ class ConstantValue:
     point: int | None = None
 
     @property
-    def unit(self):
+    def unit(self) -> str | None:
         return self.descriptor.unit
 
-    def quantity(self, target_unit=None):
+    def quantity(self, target_unit: str | None = None) -> Quantity:
         if self.quality != "valid":
             raise ConstantValueUnavailableError(
                 f"{self.record.record_id}/{self.field_id}: {self.quality}"
@@ -260,9 +269,10 @@ class ConstantValue:
             raise ConstantUnitUnavailableError(
                 f"{self.record.record_id}/{self.field_id}: no established physical unit"
             )
-        return Quantity(self.value, self.unit).to(target_unit or canonical_unit(self.unit))
+        return Quantity(cast(float, self.value), self.unit).to(
+            target_unit or canonical_unit(self.unit))
 
-    def input_value(self, target_unit=None):
+    def input_value(self, target_unit: str | None = None) -> InputValue:
         if self.unit is None:
             raise ConstantUnitUnavailableError(f"{self.field_id}: no established physical unit")
         quality = "missing" if self.quality == "source_default_or_ambiguous" else self.quality
@@ -277,7 +287,7 @@ class ConstantValue:
         )
         return answer.to(target_unit or canonical_unit(self.unit))
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "record_id": self.record.record_id,
             "source_key": self.record.source_key,
@@ -300,7 +310,9 @@ class SaturationSeries:
     temperatures_K: tuple[float, ...]
     values: tuple[ConstantValue, ...]
 
-    def valid_points(self, target_unit=None):
+    def valid_points(
+        self, target_unit: str | None = None,
+    ) -> tuple[tuple[float, ...], tuple[float, ...]]:
         selected = [
             (temperature, value.quantity(target_unit).value)
             for temperature, value in zip(self.temperatures_K, self.values, strict=True)
@@ -312,26 +324,26 @@ class SaturationSeries:
 class ConstantDatabase:
     """Read selected source files under an explicit chemicals data directory."""
 
-    def __init__(self, source_directory):
+    def __init__(self, source_directory: str | PathLike[str]) -> None:
         self.source_directory = Path(source_directory).resolve()
-        self._records = {}
-        self._indices = {}
+        self._records: dict[str, tuple[ConstantRecord, ...]] = {}
+        self._indices: dict[str, dict[tuple[str, str], list[ConstantRecord]]] = {}
 
     @property
-    def catalog(self):
+    def catalog(self) -> tuple[ConstantSource, ...]:
         return CONSTANT_SOURCES
 
     @property
-    def loaded_sources(self):
+    def loaded_sources(self) -> tuple[str, ...]:
         return tuple(self._records)
 
-    def source(self, source_id):
+    def source(self, source_id: str) -> ConstantSource:
         try:
             return _SOURCES[source_id]
         except KeyError as exc:
             raise UnknownConstantMethodError(f"unknown constant method {source_id!r}") from exc
 
-    def records(self, source_id):
+    def records(self, source_id: str) -> tuple[ConstantRecord, ...]:
         source = self.source(source_id)
         if source_id in self._records:
             return self._records[source_id]
@@ -342,7 +354,7 @@ class ConstantDatabase:
             result = self._read_records(source, path)
         except (ValueError, TypeError, IndexError, StopIteration, csv.Error, ET.ParseError) as exc:
             raise ConstantSourceFormatError(f"{source_id}: {exc}") from exc
-        index = {}
+        index: dict[tuple[str, str], list[ConstantRecord]] = {}
         for record in result:
             aliases = [record.source_key, record.record_id]
             if record.cas_number:
@@ -366,7 +378,7 @@ class ConstantDatabase:
         self._indices[source_id] = index
         return self._records[source_id]
 
-    def _read_records(self, source, path):
+    def _read_records(self, source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         """Format hook shared by source-specific, read-only property data adapters."""
         if source.kind == "xml":
             return self._xml_records(source, path)
@@ -377,11 +389,11 @@ class ConstantDatabase:
         return self._text_records(source, path)
 
     @staticmethod
-    def _text_records(source, path):
+    def _text_records(source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         opener = gzip.open if source.kind == "tsv-gzip" else open
         with opener(path, mode="rt", encoding="utf-8", newline="") as stream:
             if source.kind == "elements":
-                headers = ELEMENT_TEXT_FIELDS
+                headers: tuple[str, ...] = ELEMENT_TEXT_FIELDS
                 rows = csv.reader(
                     (line for line in stream if line.strip() and not line.startswith("#")),
                     delimiter="\t",
@@ -410,7 +422,7 @@ class ConstantDatabase:
         return tuple(result)
 
     @staticmethod
-    def _mapping_records(source, path):
+    def _mapping_records(source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         """Flat source-keyed records; nulls, booleans and text remain original."""
         with path.open(encoding="utf8") as stream:
             payload = json.load(stream)
@@ -429,13 +441,16 @@ class ConstantDatabase:
         return tuple(result)
 
     @staticmethod
-    def _xml_records(source, path):
+    def _xml_records(source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         root = ET.parse(path).getroot()
         if root.tag != "compounds":
             raise ValueError("unexpected ChemSep document root")
         result = []
         for number, node in enumerate(root, 1):
-            names, values, units, attributes = [], [], {}, {}
+            names: list[str] = []
+            values: list[str | SourceCorrelation] = []
+            units: dict[str, str] = {}
+            attributes: dict[str, dict[str, str]] = {}
             for item in node:
                 names.append(item.tag)
                 attributes[item.tag] = dict(item.attrib)
@@ -468,7 +483,7 @@ class ConstantDatabase:
         return tuple(result)
 
     @staticmethod
-    def _vdi_records(source, path):
+    def _vdi_records(source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         with path.open(encoding="utf-8") as stream:
             payload = json.load(stream)
         if not isinstance(payload, dict):
@@ -496,8 +511,11 @@ class ConstantDatabase:
             )
         return tuple(result)
 
-    def virial_input(self, identity, component, *, method, constant_source,
-                     temperature_range_K, parameters=None, polar=None):
+    def virial_input(
+        self, identity: object, component: ComponentSpec, *, method: str, constant_source: str,
+        temperature_range_K: tuple[float, float], parameters: Mapping[str, float] | None = None,
+        polar: Mapping[str, str | float | bool] | None = None,
+    ) -> PropertyInputCard:
         """Select one source explicitly; use existing records without another cache."""
         from chemworld.data.virial_inputs import sourced_virial_input
 
@@ -505,11 +523,11 @@ class ConstantDatabase:
             constant_source=constant_source, temperature_range_K=temperature_range_K,
             parameters=parameters, polar=polar)
 
-    def records_for(self, identity, *, method):
+    def records_for(self, identity: object, *, method: str) -> tuple[ConstantRecord, ...]:
         self.records(method)
         return tuple(self._indices[method].get(_lookup_key(identity), ()))
 
-    def record(self, identity, *, method):
+    def record(self, identity: object, *, method: str) -> ConstantRecord:
         matches = self.records_for(identity, method=method)
         if not matches:
             raise ConstantIdentityNotFoundError(f"{method}: no record for {identity!r}")
@@ -520,10 +538,15 @@ class ConstantDatabase:
             )
         return matches[0]
 
-    def value(self, identity, field_id, *, method, point=None):
+    def value(
+        self, identity: object, field_id: str, *, method: str, point: int | None = None,
+    ) -> ConstantValue:
         return self.record(identity, method=method).value(field_id, point=point)
 
-    def inspect_value(self, identity, field_id, *, methods=None, point=None):
+    def inspect_value(
+        self, identity: object, field_id: str, *, methods: Iterable[str] | None = None,
+        point: int | None = None,
+    ) -> dict[str, Any]:
         """Explain every requested source, including unavailable and ambiguous data.
 
         Unlike scalar candidates, this report retains missing fields, missing
@@ -539,9 +562,11 @@ class ConstantDatabase:
                    if methods is None else tuple(methods))
         if len(set(methods)) != len(methods):
             raise ValueError("duplicate constant methods")
-        reports, identities, quantities = [], set(), set()
+        reports: list[dict[str, Any]] = []
+        identities: set[str] = set()
+        quantities: set[tuple[float, str]] = set()
         for method in methods:
-            report = {"method": method, "records": []}
+            report: dict[str, Any] = {"method": method, "records": []}
             reports.append(report)
             try:
                 source = self.source(method)
@@ -557,8 +582,10 @@ class ConstantDatabase:
                                 else "ambiguous_records" if len(records) > 1 else "matched")
             for record in records:
                 identities.add(record.cas_number or record.source_key)
-                item = {"record_id": record.record_id, "source_key": record.source_key,
-                        "cas_number": record.cas_number, "diagnostics": []}
+                item: dict[str, Any] = {
+                    "record_id": record.record_id, "source_key": record.source_key,
+                    "cas_number": record.cas_number, "diagnostics": [],
+                }
                 report["records"].append(item)
                 try:
                     value = record.value(field_id, point=point)
@@ -585,7 +612,9 @@ class ConstantDatabase:
                 "methods": reports, "identity_conflict": len(identities) > 1,
                 "value_conflict": len(quantities) > 1, "selected_record_id": None}
 
-    def candidates(self, identity, field_id, *, methods=None):
+    def candidates(
+        self, identity: object, field_id: str, *, methods: Iterable[str] | None = None,
+    ) -> tuple[ConstantValue, ...]:
         methods = (tuple(source.source_id for source in self.catalog)
                    if methods is None else tuple(methods))
         if len(set(methods)) != len(methods):
@@ -599,7 +628,9 @@ class ConstantDatabase:
                     result.append(record.value(field_id))
         return tuple(result)
 
-    def methods(self, identity, field_id, *, sources=None):
+    def methods(
+        self, identity: object, field_id: str, *, sources: Iterable[str] | None = None,
+    ) -> tuple[str, ...]:
         return tuple(
             dict.fromkeys(
                 value.record.source_id
@@ -608,7 +639,10 @@ class ConstantDatabase:
             )
         )
 
-    def resolve(self, identity, field_id, *, methods=None, source_priority=()):
+    def resolve(
+        self, identity: object, field_id: str, *, methods: Iterable[str] | None = None,
+        source_priority: Sequence[str] = (),
+    ) -> ConstantValue:
         values = self.candidates(identity, field_id, methods=methods)
         valid = [value for value in values if value.quality == "valid" and value.unit is not None]
         if not valid:
@@ -628,9 +662,10 @@ class ConstantDatabase:
             raise ConflictingConstantDataError(valid)
         return valid[0]
 
-    def saturation_series(self, identity, field_id):
+    def saturation_series(self, identity: object, field_id: str) -> SaturationSeries:
         record = self.record(identity, method="VDI")
-        temperatures = tuple(float(value) for value in record.raw("T"))
+        temperatures = tuple(
+            float(value) for value in cast(tuple[str | SupportsFloat, ...], record.raw("T")))
         if any(not isfinite(t) or t <= 0 for t in temperatures):
             raise ConstantValueUnavailableError("VDI temperatures must be positive finite Kelvin")
         if not isinstance(record.raw(field_id), tuple):
@@ -638,7 +673,10 @@ class ConstantDatabase:
         values = tuple(record.value(field_id, point=i) for i in range(len(temperatures)))
         return SaturationSeries(record, field_id, temperatures, values)
 
-    def parameter_table(self, identities, *, method, columns, field_bindings, dataset_id, group_id):
+    def parameter_table(
+        self, identities: Iterable[object], *, method: str, columns: Iterable[QuantityColumn],
+        field_bindings: Mapping[str, str], dataset_id: str, group_id: str,
+    ) -> ScientificTable:
         columns = tuple(columns)
         if set(field_bindings) != {column.quantity_id for column in columns}:
             raise ValueError("every parameter column needs one explicit source field binding")
@@ -669,13 +707,16 @@ class ConstantDatabase:
             tuple(rows),
         )
 
-    def saturation_table(self, identity, *, columns, field_bindings, dataset_id, group_id, split):
+    def saturation_table(
+        self, identity: object, *, columns: Iterable[QuantityColumn],
+        field_bindings: Mapping[str, str], dataset_id: str, group_id: str, split: str,
+    ) -> ScientificTable:
         record = self.record(identity, method="VDI")
         columns = tuple(columns)
         if set(field_bindings) != {column.quantity_id for column in columns}:
             raise ValueError("every saturation column needs one explicit source field binding")
         rows = []
-        for point in range(len(record.raw("T"))):
+        for point in range(len(cast(tuple[object, ...], record.raw("T")))):
             values = {
                 column.quantity_id: record.value(
                     field_bindings[column.quantity_id], point=point

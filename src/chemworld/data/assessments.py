@@ -8,6 +8,7 @@ No regulatory currency, exposure duration or material state is inferred.
 from dataclasses import dataclass, fields
 from math import isfinite
 from types import MappingProxyType
+from typing import SupportsInt, cast
 
 from chemworld.data.assessment_catalog import (
     ASSESSMENT_METHODS,
@@ -203,7 +204,9 @@ class AssessmentDatabase(ConstantDatabase):
                 "Source JSON includes derived unit conversions; "
                 "raw source annotations remain separate"
             )
-        value, quality, raw = None, "missing", None
+        value: str | float | bool | None = None
+        quality = "missing"
+        raw: object = None
         selected_unit = spec.unit
         if property_id in {"TWA", "STEL", "Ceiling"}:
             source_units = {"ppmv": f"{property_id} (ppm)", "mg/m^3": f"{property_id} (mg/m^3)"}
@@ -225,7 +228,7 @@ class AssessmentDatabase(ConstantDatabase):
                         IARC_CLASSIFICATIONS if spec.source_id == "IARC" else NTP_CLASSIFICATIONS
                     )
                     try:
-                        value = codes[int(raw)]
+                        value = codes[int(cast(str | SupportsInt, raw))]
                     except (ValueError, TypeError, KeyError):
                         quality = "invalid"
                     else:
@@ -247,7 +250,8 @@ class AssessmentDatabase(ConstantDatabase):
                 for key, suffix in (("text", ""), ("minimum", " Min"), ("maximum", " Max"))
             }
         warnings = ("Historical source snapshot; no assertion of current regulatory limits",)
-        if property_id in {"LFL", "UFL"} and value is not None and not 0 < value <= 1:
+        if (property_id in {"LFL", "UFL"} and value is not None
+                and not 0 < cast(float, value) <= 1):
             warnings += (
                 "Reported flammability limit is outside 0 < fraction <= 1; unusable in mixing",
             )

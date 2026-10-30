@@ -286,7 +286,7 @@ class ElectroOpticalDatabase(ConstantDatabase):
         }:
             raise ValueError("electro-optical source identity does not match component")
         if method == "CRC_PERMITTIVITY":
-            curve = record.correlation(
+            curve = cast(PermittivityRecord, record).correlation(
                 source_point=source_point, temperature_bounds_K=temperature_bounds_K
             )
         elif method in REFRACTIVE_INDEX_SOURCES:

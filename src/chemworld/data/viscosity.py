@@ -55,7 +55,7 @@ class ViscosityRecord(ConstantRecord):
         """
         def number(key):
             value = self.value(key)
-            if value.quality != "valid" or not isfinite(value.value):
+            if value.quality != "valid" or value.value is None or not isfinite(value.value):
                 raise ValueError(f"missing or invalid viscosity source field {key}")
             return value.value
 
@@ -119,7 +119,10 @@ class ViscosityDatabase(ConstantDatabase):
                      for r in records)
 
     def viscosity(self, identity, *, method, temperature_bounds_K=None):
-        return self.record(identity, method=method).correlation(
+        record = self.record(identity, method=method)
+        if not isinstance(record, ViscosityRecord):
+            raise ValueError("select a viscosity correlation source")
+        return record.correlation(
             temperature_bounds_K=temperature_bounds_K)
 
     def property_input(self, identity, component, *, method, temperature_bounds_K=None):
@@ -132,6 +135,8 @@ class ViscosityDatabase(ConstantDatabase):
         if (record.cas_number or record.source_key) not in {
                 component.cas_number, component.identifier}:
             raise ValueError("viscosity source identity does not match ComponentSpec")
+        if not isinstance(record, ViscosityRecord):
+            raise ValueError("select a viscosity correlation source")
         curve = record.correlation(temperature_bounds_K=temperature_bounds_K)
         source = record.source.provenance
         return PropertyInputCard(

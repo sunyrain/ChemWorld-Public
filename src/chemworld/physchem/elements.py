@@ -93,7 +93,7 @@ _ISOTOPE = re.compile(r"\[([1-9][0-9]*)([A-Z][a-z]?)\]")
 _ALIASES = {"D": "[2H]", "T": "[3H]"}
 
 
-def get_element(identity):
+def get_element(identity: object) -> ElementSpec:
     """Resolve symbol, English name or atomic number without loading isotopes."""
     if isinstance(identity, bool):
         raise ValueError("an element identity cannot be boolean")

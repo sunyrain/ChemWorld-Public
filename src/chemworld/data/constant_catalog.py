@@ -21,7 +21,7 @@ class ConstantSource:
     citation: str = ""
 
     @property
-    def provenance(self):
+    def provenance(self) -> DataSourceProvenance:
         return DataSourceProvenance(
             "chemicals-constants:" + self.source_id,
             100,
@@ -118,7 +118,7 @@ class ConstantField:
     continuation: str = "22B3"
 
 
-def _fields(names, unit, description):
+def _fields(names: str, unit: str | None, description: str) -> dict[str, ConstantField]:
     return {name: ConstantField(name, unit, description) for name in names.split()}
 
 

@@ -46,7 +46,7 @@ class InterfaceRecord(ConstantRecord):
     def correlation(self, *, temperature_bounds_K=None, source_point=False):
         def number(key):
             result = self.value(key)
-            if result.quality != "valid" or not isfinite(result.value):
+            if result.quality != "valid" or result.value is None or not isfinite(result.value):
                 raise ValueError(f"missing or invalid interface field {key}")
             return result.value
 
@@ -54,7 +54,8 @@ class InterfaceRecord(ConstantRecord):
 
         def bound(key):
             result = self.value(key)
-            return result.value if result.quality == "valid" and isfinite(result.value) else None
+            return (result.value if result.quality == "valid" and result.value is not None
+                    and isfinite(result.value) else None)
 
         if source == "JASPER_LANGE":
             method, p = "Jasper", {k: number(k) for k in ("a", "b")}
@@ -155,7 +156,10 @@ class InterfaceDatabase(ConstantDatabase):
         )
 
     def surface_tension(self, identity, *, method, temperature_bounds_K=None, source_point=False):
-        return self.record(identity, method=method).correlation(
+        record = self.record(identity, method=method)
+        if not isinstance(record, InterfaceRecord):
+            raise ValueError("select a interface correlation source")
+        return record.correlation(
             temperature_bounds_K=temperature_bounds_K, source_point=source_point
         )
 
@@ -173,6 +177,8 @@ class InterfaceDatabase(ConstantDatabase):
             component.identifier,
         }:
             raise ValueError("interface source identity does not match ComponentSpec")
+        if not isinstance(record, InterfaceRecord):
+            raise ValueError("select a interface correlation source")
         curve = record.correlation(
             temperature_bounds_K=temperature_bounds_K, source_point=source_point
         )
