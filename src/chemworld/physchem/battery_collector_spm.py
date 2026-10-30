@@ -7,11 +7,16 @@ small, source-faithful model: electrolyte, heat, SEI, plating, hysteresis and
 multiple particle phases are outside this family.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from math import asinh, hypot, isfinite, sqrt
+from typing import Any, NotRequired, Self, TypedDict, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import sparse
 
 from chemworld.physchem.battery_current_collector import CollectorGeometrySpec
@@ -25,6 +30,7 @@ from chemworld.physchem.battery_models import (
     particle_surface_fraction,
 )
 from chemworld.physchem.coupled_system import (
+    CoupledAdvanceResult,
     CoupledAlgebraic,
     CoupledCoordinate,
     CoupledEvent,
@@ -50,6 +56,30 @@ from chemworld.physchem.residual_system import (
 COLLECTOR_SPM_FAMILY = "collector-spm-isothermal-v1"
 
 
+class CollectorSPMFields(TypedDict):
+    """Derived per-cell fields and the shared circuit's algebraic values."""
+
+    current_A: float
+    voltage_V: float
+    reaction_current_A: NDArray[np.float64]
+    negative_reaction_current_A: NDArray[np.float64]
+    positive_reaction_current_A: NDArray[np.float64]
+    through_current_A: NDArray[np.float64]
+    surface_fraction: NDArray[np.float64]
+    average_fraction: NDArray[np.float64]
+    kinetic_overpotential_V: NDArray[np.float64]
+    collector_potential_negative_V: NDArray[np.float64]
+    collector_potential_positive_V: NDArray[np.float64]
+    negative_collector_face_current_A: NDArray[np.float64]
+    positive_collector_face_current_A: NDArray[np.float64]
+    local_voltage_V: NDArray[np.float64]
+    source_boundary_voltage_V: float
+    electrolyte_potential_V: NDArray[np.float64]
+    bv_residual_V: NDArray[np.float64]
+    algebraic_values: dict[str, float]
+    closure_diagnostic: NotRequired[dict[str, Any]]
+
+
 @dataclass(frozen=True)
 class CollectorSPMReadout:
     voltage_V: float
@@ -67,7 +97,7 @@ class CollectorSPMReadout:
     local_voltage_V: tuple[float, ...]
     source_boundary_voltage_V: float
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         """Return the bounded diagnostic payload used by JSON consumers.
 
         Reaction currents and collector potentials are derived readout data;
@@ -93,7 +123,7 @@ class CollectorSPMReadout:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         """Decode a readout payload without creating a second device state."""
         payload = dict(value)
         if payload.pop("model_family", COLLECTOR_SPM_FAMILY) != COLLECTOR_SPM_FAMILY:
@@ -149,10 +179,12 @@ class BatteryCollectorSPMSpec:
     plating: object | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.negative, dict):
-            object.__setattr__(self, "negative", ParticleSpec(**self.negative))
-        if isinstance(self.positive, dict):
-            object.__setattr__(self, "positive", ParticleSpec(**self.positive))
+        negative: object = self.negative
+        positive: object = self.positive
+        if isinstance(negative, dict):
+            object.__setattr__(self, "negative", ParticleSpec(**negative))
+        if isinstance(positive, dict):
+            object.__setattr__(self, "positive", ParticleSpec(**positive))
         if self.numerical_form != "residual":
             raise ValueError("collector SPM requires the common residual formulation")
         if self.thermal is not None or self.electrolyte is not None or self.sei is not None:
@@ -185,9 +217,9 @@ class BatteryCollectorSPMSpec:
             ("initial_positive_fractions", self.initial_positive_fractions),
         ):
             if np.isscalar(values):
-                values = tuple(float(values) for _ in range(geometry.cells))
+                values = tuple(float(cast(float, values)) for _ in range(geometry.cells))
             else:
-                values = tuple(float(value) for value in values)
+                values = tuple(float(value) for value in cast(tuple[float, ...], values))
             if len(values) != geometry.cells or any(
                 not self.surface_margin < value < 1 - self.surface_margin for value in values
             ):
@@ -195,15 +227,15 @@ class BatteryCollectorSPMSpec:
             object.__setattr__(self, name, values)
 
     @property
-    def model_family(self):
+    def model_family(self) -> str:
         return COLLECTOR_SPM_FAMILY
 
     @property
-    def model_id(self):
+    def model_id(self) -> str:
         return COLLECTOR_SPM_FAMILY
 
     @cached_property
-    def geometry(self):
+    def geometry(self) -> CollectorGeometrySpec:
         return CollectorGeometrySpec(
             self.height_m,
             self.width_m,
@@ -216,7 +248,7 @@ class BatteryCollectorSPMSpec:
         )
 
     @property
-    def volume_l(self):
+    def volume_l(self) -> float:
         return 1000 * (
             self.height_m
             * self.width_m
@@ -226,7 +258,7 @@ class BatteryCollectorSPMSpec:
         )
 
     @cached_property
-    def particle_bins(self):
+    def particle_bins(self) -> tuple[tuple[str, int, ParticleSpec, tuple[str, ...], str], ...]:
         bins = []
         for name, particle in (("negative", self.negative), ("positive", self.positive)):
             local = ParticleSpec(
@@ -244,35 +276,35 @@ class BatteryCollectorSPMSpec:
         return tuple(bins)
 
     @property
-    def inventory_species(self):
+    def inventory_species(self) -> dict[str, str]:
         return {key: "Li" for _, _, _, keys, _ in self.particle_bins for key in keys}
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str, ...]:
         return tuple(self.inventory_species)
 
     @property
-    def coordinate_keys(self):
+    def coordinate_keys(self) -> tuple[str, ...]:
         return BATTERY_COORDINATES
 
     @property
-    def hysteresis_keys(self):
+    def hysteresis_keys(self) -> tuple[()]:
         return ()
 
     @property
-    def reaction_keys(self):
+    def reaction_keys(self) -> tuple[str, ...]:
         return tuple(f"collector:z:{i}:reaction_A" for i in range(self.collector_cells - 1))
 
     @property
-    def algebraic_names(self):
+    def algebraic_names(self) -> tuple[str, ...]:
         return (*self.reaction_keys, *BATTERY_ALGEBRAIC)
 
     @property
-    def usable_charge_c(self):
+    def usable_charge_c(self) -> float:
         negative = sum(
             p.capacity_mol * f
             for f, (_, _, p, _, _) in zip(
-                self.initial_negative_fractions,
+                cast(tuple[float, ...], self.initial_negative_fractions),
                 self.particle_bins[: self.collector_cells],
                 strict=True,
             )
@@ -280,7 +312,7 @@ class BatteryCollectorSPMSpec:
         positive = sum(
             p.capacity_mol * (1 - f)
             for f, (_, _, p, _, _) in zip(
-                self.initial_positive_fractions,
+                cast(tuple[float, ...], self.initial_positive_fractions),
                 self.particle_bins[self.collector_cells :],
                 strict=True,
             )
@@ -288,7 +320,7 @@ class BatteryCollectorSPMSpec:
         return F * min(negative, positive)
 
     @cached_property
-    def electrical_maps(self):
+    def electrical_maps(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         # The collector map is affine in q and tab voltage; keep this property
         # explicit for frequency/diagnostic consumers rather than hide it in a
         # cell solver.
@@ -297,7 +329,9 @@ class BatteryCollectorSPMSpec:
             matrix.setflags(write=False)
         return maps
 
-    def ocv(self, electrode, theta, *, derivative=False):
+    def ocv(
+        self, electrode: str, theta: float | np.floating[Any], *, derivative: bool = False,
+    ) -> float | np.floating[Any]:
         if electrode == "negative":
             intercept, slope = self.negative_ocv_intercept_V, self.negative_ocv_slope_V
         elif electrode == "positive":
@@ -306,14 +340,14 @@ class BatteryCollectorSPMSpec:
             raise ValueError("unknown electrode")
         return slope if derivative else intercept + slope * theta
 
-    def initial_state(self):
-        amounts = {}
+    def initial_state(self) -> CoupledState:
+        amounts: dict[str, float] = {}
         for name, fractions in (
             ("negative", self.initial_negative_fractions),
             ("positive", self.initial_positive_fractions),
         ):
             for fraction, (_, _, particle, keys, _) in zip(
-                fractions,
+                cast(tuple[float, ...], fractions),
                 [item for item in self.particle_bins if item[0] == name],
                 strict=True,
             ):
@@ -333,8 +367,8 @@ class BatteryCollectorSPMSpec:
             coordinates=dict.fromkeys(BATTERY_COORDINATES, 0.0),
         )
 
-    def to_dict(self):
-        def particle_dict(particle):
+    def to_dict(self) -> dict[str, Any]:
+        def particle_dict(particle: ParticleSpec) -> dict[str, float]:
             return {
                 "radius_m": particle.radius_m,
                 "diffusivity_m2_s": particle.diffusivity_m2_s,
@@ -349,8 +383,10 @@ class BatteryCollectorSPMSpec:
             "model_family": self.model_family,
             "negative": particle_dict(self.negative),
             "positive": particle_dict(self.positive),
-            "initial_negative_fractions": list(self.initial_negative_fractions),
-            "initial_positive_fractions": list(self.initial_positive_fractions),
+            "initial_negative_fractions": list(
+                cast(tuple[float, ...], self.initial_negative_fractions)),
+            "initial_positive_fractions": list(
+                cast(tuple[float, ...], self.initial_positive_fractions)),
             "height_m": self.height_m,
             "width_m": self.width_m,
             "negative_collector_thickness_m": self.negative_collector_thickness_m,
@@ -374,13 +410,16 @@ class BatteryCollectorSPMSpec:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         value = dict(value)
         value.pop("model_family", None)
         return cls(**value)
 
 
-def _kinetics(spec, particle, theta, current, temperature):
+def _kinetics(
+    spec: BatteryCollectorSPMSpec, particle: ParticleSpec, theta: float, current: float,
+    temperature: float,
+) -> tuple[float, float, float, float]:
     """BV and its derivatives; only residual trial kinetics use an extension.
 
     The actual surface fraction is never changed. Accepted operation is stopped
@@ -400,22 +439,24 @@ def _kinetics(spec, particle, theta, current, temperature):
     return eta, d_current, d_theta, eta / temperature
 
 
-def _fractions(spec, state, values):
+def _fractions(
+    spec: BatteryCollectorSPMSpec, state: CoupledStateView, values: Mapping[str, float],
+) -> CollectorSPMFields:
     current, voltage = (values[key] for key in BATTERY_ALGEBRAIC)
     qn, qp = _reaction_currents(spec, values)
-    surfaces, averages, eta, ocv = [], [], [], []
+    surfaces, averages, eta_values, ocv_values = [], [], [], []
     for q, (name, _, particle, keys, identity) in zip((*qn, *qp), spec.particle_bins, strict=True):
         theta = particle_surface_fraction(particle, identity, state, q / F)
-        eta.append(_kinetics(spec, particle, theta, q, state.temperature_K)[0])
+        eta_values.append(_kinetics(spec, particle, theta, q, state.temperature_K)[0])
         surfaces.append(theta)
         averages.append(sum(state.amounts_mol[key] for key in keys) / particle.capacity_mol)
-        ocv.append(spec.ocv(name, theta))
+        ocv_values.append(spec.ocv(name, theta))
     n = spec.collector_cells
     negative, positive = spec.geometry.potentials(
         qn, qp, voltage + current * spec.series_resistance_ohm
     )
     faces_n, faces_p = spec.geometry.face_currents(qn, qp)
-    ocv, eta = np.asarray(ocv), np.asarray(eta)
+    ocv, eta = np.asarray(ocv_values), np.asarray(eta_values)
     local = positive - negative
     # No lateral electrolyte current is declared. Each through-plane cell has
     # its own derived electrolyte offset and the same q in its two electrodes.
@@ -443,13 +484,17 @@ def _fractions(spec, state, values):
     }
 
 
-def _reaction_currents(spec, values):
+def _reaction_currents(
+    spec: BatteryCollectorSPMSpec, values: Mapping[str, float],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     free = np.asarray([values[key] for key in spec.reaction_keys], dtype=float)
     q = np.r_[free, values[BATTERY_ALGEBRAIC[0]] - np.sum(free)]
     return q, -q
 
 
-def _reaction_map(spec, identities):
+def _reaction_map(
+    spec: BatteryCollectorSPMSpec, identities: Sequence[str],
+) -> NDArray[np.float64]:
     """Derivative of the unique local through-current in arbitrary packed order."""
     index = {key: i for i, key in enumerate(identities)}
     matrix = np.zeros((spec.collector_cells, len(identities)))
@@ -460,7 +505,9 @@ def _reaction_map(spec, identities):
     return matrix
 
 
-def _control_residual(spec, state, program):
+def _control_residual(
+    spec: BatteryCollectorSPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> float:
     current, voltage = (state.algebraic_values[key] for key in BATTERY_ALGEBRAIC)
     target = program.value_at(state.time_s)
     if program.unit == "A":
@@ -471,7 +518,10 @@ def _control_residual(spec, state, program):
     ) / spec.maximum_current_A
 
 
-def _closure_jacobian(spec, state, program, identities):
+def _closure_jacobian(
+    spec: BatteryCollectorSPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+    identities: Sequence[str],
+) -> sparse.csc_matrix:
     """Full derivative of local BV/collector constraints, including surface flux."""
     index = {key: i for i, key in enumerate(identities)}
     n = spec.collector_cells
@@ -512,7 +562,9 @@ def _closure_jacobian(spec, state, program, identities):
     return sparse.csc_matrix(jac)
 
 
-def collector_spm_algebraic(spec, program):
+def collector_spm_algebraic(
+    spec: BatteryCollectorSPMSpec, program: ScalarControlProgram,
+) -> CoupledAlgebraic:
     if program.unit not in {"A", "V"}:
         raise ValueError("collector SPM control uses A or V")
     for _, value in program.setpoints:
@@ -541,7 +593,7 @@ def collector_spm_algebraic(spec, program):
         ResidualEquation("battery:control", "1"),
     )
 
-    def initial_values(state):
+    def initial_values(state: CoupledStateView) -> dict[str, float]:
         if program.unit == "V":
             # A CV Newton step can request a current far beyond the source
             # limit. Projecting only the terminal current then leaves the
@@ -593,7 +645,7 @@ def collector_spm_algebraic(spec, program):
             )
         )
 
-    def residual(state):
+    def residual(state: CoupledStateView) -> NDArray[np.float64]:
         values = state.algebraic_values
         f = _fractions(spec, state, values)
         return np.r_[f["bv_residual_V"], _control_residual(spec, state, program)]
@@ -601,7 +653,10 @@ def collector_spm_algebraic(spec, program):
     return CoupledAlgebraic(variables, equations, initial_values, residual)
 
 
-def collector_spm_fields(spec, state, *, current_A=None, program=None):
+def collector_spm_fields(
+    spec: BatteryCollectorSPMSpec, state: CoupledStateView, *, current_A: float | None = None,
+    program: ScalarControlProgram | None = None,
+) -> CollectorSPMFields:
     if (current_A is None) == (program is None):
         raise ValueError("supply either a current or a control programme")
     if current_A is not None:
@@ -609,9 +664,11 @@ def collector_spm_fields(spec, state, *, current_A=None, program=None):
             raise ValueError("current is outside collector source bounds")
         program = ScalarControlProgram(((0.0, current_A),), "A")
     names = spec.algebraic_names
+    # Exactly one input was supplied, and a current has already become a program.
+    program = cast(ScalarControlProgram, program)
     closure = collector_spm_algebraic(spec, program)
 
-    def view(y):
+    def view(y: NDArray[np.float64]) -> CoupledStateView:
         return CoupledStateView(
             state.amounts_mol,
             state.temperature_K,
@@ -645,7 +702,9 @@ def collector_spm_fields(spec, state, *, current_A=None, program=None):
     return {**fields, "closure_diagnostic": answer.root.diagnostics}
 
 
-def collector_spm_readout(spec, state, current_A):
+def collector_spm_readout(
+    spec: BatteryCollectorSPMSpec, state: CoupledStateView, current_A: float,
+) -> CollectorSPMReadout:
     fields = collector_spm_fields(spec, state, current_A=current_A)
     n = spec.collector_cells
     return CollectorSPMReadout(
@@ -666,7 +725,9 @@ def collector_spm_readout(spec, state, current_A):
     )
 
 
-def collector_spm_control_mode(spec, state, program):
+def collector_spm_control_mode(
+    spec: BatteryCollectorSPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> tuple[str, float]:
     target = program.value_at(state.time_s)
     if program.unit == "A":
         return "constant_current", target
@@ -679,7 +740,9 @@ def collector_spm_control_mode(spec, state, program):
     return "constant_voltage", target
 
 
-def collector_spm_control_current(spec, state, program):
+def collector_spm_control_current(
+    spec: BatteryCollectorSPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> float:
     if BATTERY_ALGEBRAIC[0] in state.algebraic_values:
         return state.algebraic_values[BATTERY_ALGEBRAIC[0]]
     if program.unit == "A":
@@ -690,7 +753,10 @@ def collector_spm_control_current(spec, state, program):
     return float(collector_spm_fields(spec, state, program=program)["current_A"])
 
 
-def collector_spm_system(spec, program, *, thermal_device=None, control_events=()):
+def collector_spm_system(
+    spec: BatteryCollectorSPMSpec, program: ScalarControlProgram, *,
+    thermal_device: object | None = None, control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     if thermal_device is not None:
         raise ValueError("collector SPM is isothermal and cannot accept a thermal device")
     closure = collector_spm_algebraic(spec, program)
@@ -701,12 +767,12 @@ def collector_spm_system(spec, program, *, thermal_device=None, control_events=(
         for _, _, p, keys, identity in spec.particle_bins
     ]
 
-    def fields(state):
+    def fields(state: CoupledStateView) -> CollectorSPMFields:
         if all(key in state.algebraic_values for key in spec.algebraic_names):
             return _fractions(spec, state, state.algebraic_values)
         return collector_spm_fields(spec, state, program=program)
 
-    def source(state):
+    def source(state: CoupledStateView) -> ProcessContribution:
         f = fields(state)
         n = spec.collector_cells
         transfers = []
@@ -727,7 +793,7 @@ def collector_spm_system(spec, program, *, thermal_device=None, control_events=(
             },
         )
 
-    def validate(state):
+    def validate(state: CoupledStateView) -> None:
         if (
             abs(state.temperature_K - spec.temperature_K) > 1e-8
             or abs(state.volume_L - spec.volume_l) > 1e-12
@@ -744,7 +810,7 @@ def collector_spm_system(spec, program, *, thermal_device=None, control_events=(
         CoupledProcess("battery:collector-spm-intercalation", source, validate_state=validate)
     )
 
-    def surface_limit(state, row, lower):
+    def surface_limit(state: CoupledStateView, row: int, lower: bool) -> float:
         f = fields(state)
         q, theta = f["reaction_current_A"][row], f["surface_fraction"][row]
         # A stopped endpoint may rest or accept inward current. These gates
@@ -763,12 +829,18 @@ def collector_spm_system(spec, program, *, thermal_device=None, control_events=(
             lambda s: spec.maximum_voltage_V - fields(s)["voltage_V"],
         ),
     ]
+    def surface_event(row: int, lower: bool) -> Callable[[CoupledStateView], float]:
+        def event(state: CoupledStateView) -> float:
+            return surface_limit(state, row, lower)
+
+        return event
+
     for row, (name, z, _particle, _keys, _identity) in enumerate(spec.particle_bins):
         for lower, label in ((True, "minimum"), (False, "maximum")):
             events.append(
                 CoupledEvent(
                     f"battery:collector:{name}:z:{z}:{label}-surface",
-                    lambda state, row=row, lower=lower: surface_limit(state, row, lower),
+                    surface_event(row, lower),
                 )
             )
 
@@ -777,7 +849,7 @@ def collector_spm_system(spec, program, *, thermal_device=None, control_events=(
         for _, _, p, keys, _ in spec.particle_bins
     )
 
-    def jacobian(state, identities):
+    def jacobian(state: CoupledStateView, identities: Sequence[str]) -> sparse.csc_matrix:
         index = {key: i for i, key in enumerate(identities)}
         jac = sparse.lil_matrix((len(identities), len(identities)))
         for keys, block in diffusion_blocks:
@@ -828,22 +900,24 @@ def collector_spm_system(spec, program, *, thermal_device=None, control_events=(
 
 
 def advance_collector_spm(
-    spec,
-    state,
-    program,
-    duration_s,
+    spec: BatteryCollectorSPMSpec,
+    state: CoupledState,
+    program: ScalarControlProgram,
+    duration_s: float,
     *,
-    evaluation_times_s=None,
-    thermal_device=None,
-    control_events=(),
-):
+    evaluation_times_s: Sequence[float] | None = None,
+    thermal_device: object | None = None,
+    control_events: Sequence[CoupledEvent] = (),
+) -> CoupledAdvanceResult:
     result = collector_spm_system(
         spec, program, thermal_device=thermal_device, control_events=control_events
     ).advance(state, duration_s, evaluation_times_s=evaluation_times_s)
     return result
 
 
-def default_collector_spm_spec(*, cells=6, collector_cells=4):
+def default_collector_spm_spec(
+    *, cells: int = 6, collector_cells: int = 4,
+) -> BatteryCollectorSPMSpec:
     """Small deterministic fixture for examples and focused integration tests."""
     particle = ParticleSpec(cells=cells, active_volume_m3=5e-7)
     return BatteryCollectorSPMSpec(
