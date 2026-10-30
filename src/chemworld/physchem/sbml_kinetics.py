@@ -7,39 +7,55 @@ Unknown chemical compositions remain formal entities, not fictitious elements.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from math import isfinite
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Generic, TypeAlias, TypeVar, cast, overload
 
 import numpy as np
+from numpy.typing import NDArray
 
 from chemworld.data.sbml import SBMLModel
-from chemworld.data.sbml_parser import acyclic_order, walk_records
+from chemworld.data.sbml_parser import SBMLRecord, acyclic_order, walk_records
 from chemworld.physchem.caloric_math import FirstDerivative, scalar_value
+from chemworld.physchem.mathml import MathExpression
 from chemworld.physchem.residual_system import linear_solve
 from chemworld.physchem.stoichiometric_rates import stoichiometric_amount_rates
+
+if TYPE_CHECKING:
+    from chemworld.physchem.coupled_system import (
+        CoupledEvent,
+        CoupledStateView,
+        CoupledSystem,
+        ProcessContribution,
+    )
+    from chemworld.physchem.solver_backend import ODESolverPolicy
+
+SBMLScalar: TypeAlias = float | FirstDerivative[Any, Any]
+_Scalar = TypeVar("_Scalar", bound=SBMLScalar, covariant=True)
 
 
 @dataclass(frozen=True)
 class _Recipe:
     mode: str
-    value: object
+    value: float | str | MathExpression | None
     volume: str | None = None
     scale: float = 1.
-    local: tuple = ()
+    local: tuple[tuple[str, float], ...] = ()
 
     @property
-    def dependencies(self):
+    def dependencies(self) -> set[str]:
         if self.mode == "expression":
-            return set(self.value.symbols)-dict(self.local).keys()-{"$time"}
+            return set(cast(MathExpression, self.value).symbols)-dict(self.local).keys()-{"$time"}
         return {self.volume} if self.volume is not None else set()
 
 
 @dataclass(frozen=True)
-class SBMLRates:
-    coordinate_rates: object
-    reaction_extents_mol_s: object
-    held_pool_reaction_rates_mol_s: object
+class SBMLRates(Generic[_Scalar]):
+    coordinate_rates: Mapping[str, _Scalar]
+    reaction_extents_mol_s: Mapping[str, _Scalar]
+    held_pool_reaction_rates_mol_s: Mapping[str, _Scalar]
 
     def __post_init__(self) -> None:
         for name in ("coordinate_rates", "reaction_extents_mol_s",
@@ -53,20 +69,21 @@ class SBMLKinetics:
     initial_model_time: float = 0.
     controlled_parameters: tuple[str, ...] = ()
     integer_quantities: bool = False
-    _initial: object = field(init=False, repr=False, compare=False)
-    _initial_values: object = field(init=False, repr=False, compare=False)
-    _recipes: object = field(init=False, repr=False, compare=False)
-    _order: tuple = field(init=False, repr=False, compare=False)
-    _functions: object = field(init=False, repr=False, compare=False)
-    _species: object = field(init=False, repr=False, compare=False)
-    _compartments: object = field(init=False, repr=False, compare=False)
-    _parameters: object = field(init=False, repr=False, compare=False)
-    _assigned: object = field(init=False, repr=False, compare=False)
-    _rate_rules: object = field(init=False, repr=False, compare=False)
-    _amount_scale: object = field(init=False, repr=False, compare=False)
-    _volume_scale: object = field(init=False, repr=False, compare=False)
-    _stoichiometries: tuple = field(init=False, repr=False, compare=False)
-    _reaction_ids: tuple = field(init=False, repr=False, compare=False)
+    _initial: Mapping[str, float] = field(init=False, repr=False, compare=False)
+    _initial_values: Mapping[str, float] = field(init=False, repr=False, compare=False)
+    _recipes: Mapping[str, _Recipe] = field(init=False, repr=False, compare=False)
+    _order: tuple[str, ...] = field(init=False, repr=False, compare=False)
+    _functions: Mapping[str, MathExpression] = field(init=False, repr=False, compare=False)
+    _species: Mapping[str, SBMLRecord] = field(init=False, repr=False, compare=False)
+    _compartments: Mapping[str, SBMLRecord] = field(init=False, repr=False, compare=False)
+    _parameters: Mapping[str, SBMLRecord] = field(init=False, repr=False, compare=False)
+    _assigned: Mapping[str, MathExpression] = field(init=False, repr=False, compare=False)
+    _rate_rules: Mapping[str, MathExpression] = field(init=False, repr=False, compare=False)
+    _amount_scale: Mapping[str, float] = field(init=False, repr=False, compare=False)
+    _volume_scale: Mapping[str, float] = field(init=False, repr=False, compare=False)
+    _stoichiometries: tuple[tuple[str, Mapping[str, float]], ...] = field(
+        init=False, repr=False, compare=False)
+    _reaction_ids: tuple[str, ...] = field(init=False, repr=False, compare=False)
     _time_scale: float = field(init=False, repr=False, compare=False)
     _extent_scale: float | None = field(init=False, repr=False, compare=False)
 
@@ -147,7 +164,7 @@ class SBMLKinetics:
                         for name, expression in assigned.items()})
         order = acyclic_order({n: r.dependencies for n, r in initial.items()},
                               label="initial basis")
-        initial_scope = self._evaluate(initial, order, {}, 0.)
+        initial_scope = cast(dict[str, float], self._evaluate(initial, order, {}, 0.))
         object.__setattr__(self, "_initial", MappingProxyType(initial_scope))
         values = {}
         for name, record in species.items():
@@ -183,7 +200,7 @@ class SBMLKinetics:
         object.__setattr__(self, "_order", order)
         coefficients = []
         for name, reaction in reactions:
-            row = {}
+            row: dict[str, float] = {}
             for group, sign in (("listOfReactants", -1.), ("listOfProducts", 1.)):
                 for reference in reaction.items(group):
                     s = reference.get("species")
@@ -199,7 +216,11 @@ class SBMLKinetics:
         object.__setattr__(self, "_stoichiometries", tuple(coefficients))
         self.validate_values(values, 0.)
 
-    def _evaluate(self, recipes, order, values, time_s, targets=None):
+    def _evaluate(
+        self, recipes: Mapping[str, _Recipe], order: Sequence[str],
+        values: Mapping[str, SBMLScalar], time_s: SBMLScalar,
+        targets: Iterable[str] | None = None,
+    ) -> dict[str, SBMLScalar]:
         needed = set(order) if targets is None else set(targets)
         pending = list(needed)
         while pending:
@@ -207,25 +228,27 @@ class SBMLKinetics:
                 if name in recipes and name not in needed:
                     needed.add(name)
                     pending.append(name)
-        context = {"$time": self.initial_model_time+time_s/self._time_scale}
+        context: dict[str, SBMLScalar] = {"$time": self.initial_model_time+time_s/self._time_scale}
         for name in order:
             if name not in needed:
                 continue
             recipe = recipes[name]
             mode, value, volume, scale = recipe.mode, recipe.value, recipe.volume, recipe.scale
+            result: SBMLScalar | None
             if mode == "expression":
-                result = value.evaluate({**context, **dict(recipe.local)},
+                result = cast(MathExpression, value).evaluate({**context, **dict(recipe.local)},
                                         functions=self._functions)
             elif mode == "state":
-                result = self._source_coordinate(values, value, scale)
+                result = self._source_coordinate(values, cast(str, value), scale)
             elif mode == "concentration":
-                result = self._source_coordinate(values, value, scale)/context[volume]
+                result = self._source_coordinate(values, cast(str, value), scale)/context[
+                    cast(str, volume)]
             elif mode == "divide_volume":
-                result = value/context[volume]
+                result = cast(float, value)/context[cast(str, volume)]
             elif mode == "multiply_volume":
-                result = value*context[volume]
+                result = cast(float, value)*context[cast(str, volume)]
             else:
-                result = value
+                result = cast(float | None, value)
             if result is None or not isfinite(scalar_value(result)):
                 raise ValueError("uninitialized or nonfinite SBML quantity "+name)
             if name in self._compartments and scalar_value(result) <= 0:
@@ -233,11 +256,13 @@ class SBMLKinetics:
             context[name] = result
         return context
 
-    def _source_coordinate(self, values, key, scale):
+    def _source_coordinate(
+        self, values: Mapping[str, SBMLScalar], key: str, scale: float,
+    ) -> SBMLScalar:
         if self.integer_quantities and key.startswith("N:"):
             from chemworld.foundation.discrete_inventory import AVOGADRO, mol_to_counts
 
-            count = mol_to_counts({key: values[key]})[key]
+            count = mol_to_counts({key: cast(float, values[key])})[key]
             quantum = AVOGADRO*scale
             # Canonical item amounts are the exact original integer view. A
             # float mol/display round trip must not falsify A+B==N guards.
@@ -245,23 +270,51 @@ class SBMLKinetics:
         return values[key]/scale
 
     @property
-    def initial_values(self):
+    def initial_values(self) -> Mapping[str, float]:
         """An initialization template, not the evolving state."""
         return self._initial_values
 
-    def context(self, values, time_s, *, targets=None):
+    @overload
+    def context(
+        self, values: Mapping[str, float], time_s: float, *, targets: Iterable[str] | None = None,
+    ) -> dict[str, float]: ...
+
+    @overload
+    def context(
+        self, values: Mapping[str, SBMLScalar], time_s: SBMLScalar, *,
+        targets: Iterable[str] | None = None,
+    ) -> dict[str, SBMLScalar]: ...
+
+    def context(
+        self, values: Mapping[str, SBMLScalar], time_s: SBMLScalar, *,
+        targets: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
         if set(values) != set(self._initial_values):
             raise ValueError("SBML candidate coordinates differ from their declared basis")
         return self._evaluate(self._recipes, self._order, values, time_s, targets)
 
-    def quantities(self, values, time_s):
+    @overload
+    def quantities(
+        self, values: Mapping[str, float], time_s: float,
+    ) -> tuple[dict[str, float], dict[str, float]]: ...
+
+    @overload
+    def quantities(
+        self, values: Mapping[str, SBMLScalar], time_s: SBMLScalar,
+    ) -> tuple[dict[str, SBMLScalar], dict[str, SBMLScalar]]: ...
+
+    def quantities(
+        self, values: Mapping[str, SBMLScalar], time_s: SBMLScalar,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         context = self.context(values, time_s)
         volumes = {n: context[n]*self._volume_scale[n] for n in self._compartments}
         amounts = {n: context[n]*self._amount_scale[n]*(1. if r.get("hasOnlySubstanceUnits") else
                    context[r.get("compartment")]) for n, r in self._species.items()}
         return amounts, volumes
 
-    def controlled_values(self, values, time_s, assignments):
+    def controlled_values(
+        self, values: Mapping[str, float], time_s: float, assignments: Mapping[str, float],
+    ) -> dict[str, float]:
         """Explicit external parameter inputs; source constant-event rules stay intact."""
         if not assignments or set(assignments)-set(self.controlled_parameters):
             raise ValueError("parameter input is not a declared external model control")
@@ -274,7 +327,9 @@ class SBMLKinetics:
         self.validate_values(candidate, time_s)
         return candidate
 
-    def assigned_values(self, values, time_s, assignments):
+    def assigned_values(
+        self, values: Mapping[str, float], time_s: float, assignments: Mapping[str, float],
+    ) -> dict[str, float]:
         """Convert source targets on one pre-execution volume view, then jump.
 
         Source RHS values may have been captured earlier. The implicit
@@ -306,7 +361,7 @@ class SBMLKinetics:
         self.validate_values(proposed, time_s)
         return proposed
 
-    def validate_values(self, values, time_s):
+    def validate_values(self, values: Mapping[str, SBMLScalar], time_s: SBMLScalar) -> None:
         if any(not isfinite(scalar_value(v)) for v in values.values()):
             raise ValueError("SBML candidate values must be finite")
         amounts, volumes = self.quantities(values, time_s)
@@ -316,16 +371,27 @@ class SBMLKinetics:
             raise ValueError("native SBML entity amount cannot be negative")
         context = self.context(values, time_s)
         for constraint in self.model.declaration.items("listOfConstraints"):
-            if not bool(scalar_value(constraint.mathematics.evaluate(context,
+            if not bool(scalar_value(cast(MathExpression, constraint.mathematics).evaluate(context,
                                                                      functions=self._functions))):
                 raise ValueError("SBML model constraint failed")
 
-    def rates(self, values, time_s):
+    @overload
+    def rates(self, values: Mapping[str, float], time_s: float) -> SBMLRates[float]: ...
+
+    @overload
+    def rates(
+        self, values: Mapping[str, SBMLScalar], time_s: SBMLScalar,
+    ) -> SBMLRates[SBMLScalar]: ...
+
+    def rates(
+        self, values: Mapping[str, SBMLScalar], time_s: SBMLScalar,
+    ) -> SBMLRates[SBMLScalar]:
         context = self.context(values, time_s)
         source_rates = {n: context[n] for n in self._reaction_ids}
         source_amount_rates = stoichiometric_amount_rates(self._species,
             self._stoichiometries, source_rates)
-        rates, held = {}, {}
+        rates: dict[str, SBMLScalar] = {}
+        held: dict[str, SBMLScalar] = {}
         conversion = self.model.declaration.get("conversionFactor")
         for name, record in self._species.items():
             coefficient = record.get("conversionFactor", conversion)
@@ -367,7 +433,9 @@ class SBMLKinetics:
             matrix, rhs = [], []
             known = np.asarray([rates[k] for k in keys]+[1.], dtype=float)
             for name, target in unknown:
-                gradient = (scope[name].slope if isinstance(scope[name], FirstDerivative) else
+                resolved = scope[name]
+                gradient = (cast(NDArray[np.float64], resolved.slope)
+                            if isinstance(resolved, FirstDerivative) else
                             np.zeros(len(keys)+1))
                 matrix.append(gradient[indices])
                 rhs.append(float(target)-float(gradient@known))
@@ -376,12 +444,15 @@ class SBMLKinetics:
                 rates["N:"+name] = float(rate)
         if set(rates) != set(values):
             raise ValueError("SBML rate output does not cover exactly its active coordinates")
-        return SBMLRates(rates, {name: r*self._extent_scale/self._time_scale
+        return SBMLRates(rates, {name: r*cast(float, self._extent_scale)/self._time_scale
                                 for name, r in source_rates.items()}, held)
 
 
-def sbml_continuous_system(frame, *, events=(), coordinate_scales=None, policy=None,
-                           numerical_form="ode"):
+def sbml_continuous_system(
+    frame: SBMLKinetics, *, events: Sequence[CoupledEvent] = (),
+    coordinate_scales: Mapping[str, float] | None = None, policy: ODESolverPolicy | None = None,
+    numerical_form: str = "ode",
+) -> CoupledSystem:
     """Build one continuous segment on the shared solver, not a full simulator.
 
     The hybrid coordinator supplies its stop surfaces and applies every source
@@ -404,6 +475,7 @@ def sbml_continuous_system(frame, *, events=(), coordinate_scales=None, policy=N
     positive_amounts = [v for k, v in frame.initial_values.items() if k.startswith("N:") and v > 0]
     amount_scale = max(positive_amounts, default=min(frame._amount_scale.values(), default=1.))
     coordinates = []
+    minimum: float | None
     for name, value in frame.initial_values.items():
         if name.startswith("N:"):
             unit, scale, minimum = "mol", max(value, amount_scale), 0.
@@ -414,11 +486,11 @@ def sbml_continuous_system(frame, *, events=(), coordinate_scales=None, policy=N
             scale, minimum = max(abs(value), 1.), None
         coordinates.append(CoupledCoordinate(name, unit, scales.get(name, scale), minimum))
 
-    def evaluate(state):
+    def evaluate(state: CoupledStateView) -> ProcessContribution:
         return ProcessContribution(coordinate_rates=frame.rates(
             state.coordinates, state.time_s).coordinate_rates)
 
-    def validate(state):
+    def validate(state: CoupledStateView) -> None:
         frame.validate_values(state.coordinates, state.time_s)
 
     return CoupledSystem(KineticOnlyThermodynamics(),

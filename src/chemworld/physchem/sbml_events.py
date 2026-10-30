@@ -1,29 +1,44 @@
 """Pure SBML event adapters for the common atomic coordinate-event queue."""
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from types import MappingProxyType
+from typing import Any, cast
 
 from chemworld.physchem.analytic_functions import SMOOTH_FUNCTIONS
 from chemworld.physchem.caloric_math import FirstDerivative, scalar_value
 from chemworld.physchem.coordinate_events import CoordinateEventSpec
 from chemworld.physchem.coordinate_hybrid import CoordinateRoot
-from chemworld.physchem.mathml import _COMPARISONS
+from chemworld.physchem.coupled_system import CoupledState
+from chemworld.physchem.mathml import _COMPARISONS, MathExpression
 from chemworld.physchem.sbml_kinetics import SBMLKinetics
 
 
-def sbml_coordinate_events(frame):
+def sbml_coordinate_events(frame: SBMLKinetics) -> tuple[CoordinateEventSpec, ...]:
     """Compile declarations only; neither advance time nor own a live queue."""
     if not isinstance(frame, SBMLKinetics):
         raise ValueError("SBML event adapters require a compiled native quantity basis")
 
-    def evaluate(expression, state):
+    def evaluate(expression: MathExpression, state: CoupledState) -> Any:
         return expression.evaluate(frame.context(state.coordinates, state.time_s),
                                    functions=frame._functions)
 
-    def apply(state, payload):
+    def apply(state: CoupledState, payload: Mapping[str, float]) -> CoupledState:
         return replace(state, coordinates=frame.assigned_values(
             state.coordinates, state.time_s, payload))
+
+    def expression_callback(expression: MathExpression) -> Callable[[CoupledState], Any]:
+        def callback(state: CoupledState) -> Any:
+            return evaluate(expression, state)
+
+        return callback
+
+    def delay_callback(expression: MathExpression) -> Callable[[CoupledState], float]:
+        def callback(state: CoupledState) -> float:
+            return evaluate(expression, state)*frame._time_scale
+
+        return callback
 
     result = []
     for index, record in enumerate(frame.model.declaration.items("listOfEvents")):
@@ -32,19 +47,21 @@ def sbml_coordinate_events(frame):
                        for r in record.items("listOfEventAssignments")}
         delays, priorities = record.of("delay"), record.of("priority")
 
-        def capture(state, expressions=assignments):
+        def capture(
+            state: CoupledState, expressions: Mapping[str, MathExpression] = assignments,
+        ) -> dict[str, float]:
             scope = frame.context(state.coordinates, state.time_s)
             return {name: expression.evaluate(scope, functions=frame._functions)
                     for name, expression in expressions.items()}
 
         result.append(CoordinateEventSpec(record.get("id", f"@event:{index}"),
             tuple(assignments),
-            trigger=lambda state, expr=trigger.mathematics: evaluate(expr, state),
+            trigger=expression_callback(cast(MathExpression, trigger.mathematics)),
             capture=capture, apply=apply,
             delay_s=(lambda _: 0.) if not delays else
-                lambda state, expr=delays[0].mathematics: evaluate(expr, state)*frame._time_scale,
+                delay_callback(cast(MathExpression, delays[0].mathematics)),
             priority=None if not priorities else
-                lambda state, expr=priorities[0].mathematics: evaluate(expr, state),
+                expression_callback(cast(MathExpression, priorities[0].mathematics)),
             initial_value=trigger.get("initialValue"), persistent=trigger.get("persistent"),
             use_trigger_values=record.get("useValuesFromTriggerTime")))
     return tuple(result)
@@ -83,7 +100,8 @@ class SBMLTriggerRoots:
                 if name not in visited:
                     recipe = frame._recipes[name]
                     if recipe.mode == "expression":
-                        dynamic = scalar(recipe.value._root, frozenset(dict(recipe.local)),
+                        dynamic = scalar(cast(MathExpression, recipe.value)._root,
+                                         frozenset(dict(recipe.local)),
                                          visited | {name})
                     elif recipe.mode in {"state", "concentration"}:
                         # Parameters without rate rules only change at an atomic

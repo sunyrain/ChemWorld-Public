@@ -4,6 +4,7 @@ This declaration contains initialization recipes, numerical and readout policy,
 never evolving coordinates or a clock. Live data belong to EquipmentRecord.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import isfinite
 from types import MappingProxyType
@@ -92,7 +93,7 @@ class SBMLSystemSpec:
     maximum_segments: int = 10000
     maximum_pending_events: int = 1024
     maximum_coordinates: int = 256
-    coordinate_scales: object = field(default_factory=dict)
+    coordinate_scales: Mapping[str, float] = field(default_factory=dict)
     readout_relative_sd: float = .01
     controlled_parameters: tuple[str, ...] = ()
     solver_method: str = "BDF"
