@@ -62,7 +62,7 @@ def solve_coupled_residual(system, state, initial, scales, rhs, view, callbacks,
         return {key: float(value) for key, value in zip(names, y[count:], strict=True)}
 
     if algebraic is None:
-        guess = np.empty(0)
+        guess: np.ndarray = np.empty(0)
     else:
         guessed = algebraic.initial_values(state)
         if set(guessed) != set(names):

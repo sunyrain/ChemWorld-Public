@@ -251,9 +251,13 @@ def molecular_tp_stability(
                             except (ValueError, ArithmeticError) as exc:
                                 raise ResidualDomainError(str(exc)) from exc
 
+                        def stationary_jacobian(
+                            q: FloatArray, dimension: int = dimension,
+                        ) -> FloatArray:
+                            return finite_jacobian(stationarity, q, np.ones(dimension))
+
                         polish = solve_root(stationarity, result.x,
-                            jacobian=lambda q, dimension=dimension: finite_jacobian(stationarity, q,
-                                np.ones(dimension)), variables=tuple(
+                            jacobian=stationary_jacobian, variables=tuple(
                                     ResidualVariable(f"log_ratio_{i}", "dimensionless")
                                     for i in range(dimension)),
                             residual_scales=np.ones(dimension), policy=RootPolicy(
@@ -393,10 +397,13 @@ def molecular_tp_flash(
                     "gtol": 1e-10, "ftol": 1e-14, "maxiter": max_iterations})
             record["minimization"] = {"success": bool(optimum.success),
                 "iterations": int(optimum.nit), "message": str(optimum.message)}
+            def residual_jacobian(
+                q: FloatArray, n: int = n, lower: FloatArray = lower, upper: FloatArray = upper,
+            ) -> FloatArray:
+                return finite_jacobian(residual, q, np.ones(n), lower=lower, upper=upper)
+
             root = solve_root(residual, optimum.x,
-                jacobian=lambda q, n=n, lower=lower, upper=upper: finite_jacobian(
-                    residual, q, np.ones(n),
-                    lower=lower, upper=upper),
+                jacobian=residual_jacobian,
                 variables=tuple(ResidualVariable(f"allocation_{i}", "dimensionless",
                     lower=-70, upper=70) for i in active), residual_scales=np.ones(n),
                 policy=RootPolicy(tolerance=2e-9, maximum_iterations=max_iterations))

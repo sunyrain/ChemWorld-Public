@@ -349,12 +349,17 @@ def _joint_stability(
                         except (ValueError, ArithmeticError) as exc:
                             raise ResidualDomainError(str(exc)) from exc
 
+                    def stationary_jacobian(
+                        q: np.ndarray, lower: np.ndarray = lower, upper: np.ndarray = upper,
+                    ) -> np.ndarray:
+                        return finite_jacobian(
+                            stationary, q, np.ones(len(q)), lower=lower, upper=upper,
+                        )
+
                     polish = solve_root(
                         stationary,
                         point,
-                        jacobian=lambda q, lower=lower, upper=upper: finite_jacobian(
-                            stationary, q, np.ones(len(q)), lower=lower, upper=upper
-                        ),
+                        jacobian=stationary_jacobian,
                         variables=tuple(
                             ResidualVariable(
                                 f"tpd_{j}", "dimensionless", lower=float(lo), upper=float(hi)
@@ -389,18 +394,19 @@ def _joint_stability(
                             except (ValueError, ArithmeticError) as exc:
                                 raise ResidualDomainError(str(exc)) from exc
 
+                        def boundary_jacobian(
+                            q: np.ndarray, lo: np.ndarray = lower, hi: np.ndarray = upper,
+                            free_indices: np.ndarray = free_indices,
+                        ) -> np.ndarray:
+                            return finite_jacobian(
+                                boundary_stationary, q, np.ones(len(q)),
+                                lower=lo[free_indices], upper=hi[free_indices],
+                            )
+
                         polish = solve_root(
                             boundary_stationary,
                             point[free_indices],
-                            jacobian=lambda q, lo=lower, hi=upper, free_indices=free_indices: (
-                                finite_jacobian(
-                                    boundary_stationary,
-                                    q,
-                                    np.ones(len(q)),
-                                    lower=lo[free_indices],
-                                    upper=hi[free_indices],
-                                )
-                            ),
+                            jacobian=boundary_jacobian,
                             variables=tuple(
                                 ResidualVariable(
                                     f"boundary_tpd_{j}",

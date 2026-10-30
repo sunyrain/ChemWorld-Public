@@ -346,6 +346,11 @@ def solve_aqueous_mineral_equilibrium(
                 except ValueError as exc:
                     raise ResidualDomainError(str(exc)) from exc
 
+            def rate_jacobian(
+                t: float, y: np.ndarray, rate: np.ndarray, p: np.ndarray, width: int = width,
+            ) -> np.ndarray:
+                return np.zeros((width, width))
+
             system = ResidualSystem(
                 db.database_id + ":mineral-TP",
                 tuple(
@@ -360,7 +365,7 @@ def solve_aqueous_mineral_equilibrium(
                 ResidualDerivatives(
                     "analytic",
                     state=jacobian,
-                    rate=lambda t, y, rate, p, width=width: np.zeros((width, width)),
+                    rate=rate_jacobian,
                 ),
             )
             seed_fraction = feasible.x[:-1].copy()

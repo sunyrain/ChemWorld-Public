@@ -10,10 +10,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from math import exp, isfinite, log
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from chemworld.physchem.caloric_math import partial_derivative
-from chemworld.physchem.residual_system import ResidualVariable, RootPolicy, RootResult, solve_root
+from chemworld.physchem.residual_system import ResidualVariable, RootOutcome, RootPolicy, solve_root
+
+if TYPE_CHECKING:
+    import numpy as np
 from chemworld.physchem.second_order_pair import SecondOrderPair
 
 
@@ -157,7 +160,7 @@ def _molecular_density_root(
     model: ResidualHelmholtzModel, temperature_K: float, pressure_Pa: float,
     mole_fractions: Sequence[float], *, initial_density_mol_m3: float,
     density_bounds_mol_m3: tuple[float, float], policy: RootPolicy,
-) -> RootResult:
+) -> RootOutcome:
     """Shared log-density equation solve; caller must validate the final full state.
 
     Keeping the original result exposes root costs and failure diagnostics to a
@@ -169,7 +172,7 @@ def _molecular_density_root(
     )) or not low < initial_density_mol_m3 < high):
         raise ValueError("positive pressure and an interior initial density are required")
 
-    def pressure_response(log_density: Sequence[float]) -> tuple[float, float]:
+    def pressure_response(log_density: Sequence[float] | np.ndarray) -> tuple[float, float]:
         # Newton iterates are equation probes, not accepted physical states.
         # A valid target may require crossing a source pressure ceiling from
         # the caller's seed. Evaluate the same EOS P and dP/drho here, keeping

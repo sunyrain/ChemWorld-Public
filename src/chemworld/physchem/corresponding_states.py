@@ -9,7 +9,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from math import isfinite
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from chemworld.physchem.caloric_math import (
     compensated_sum,
@@ -164,12 +167,12 @@ def _lk_conformal_ratios(tr: Any, dr: Any, weight: Any) -> tuple[Any, Any]:
     """Common-pressure volume roots; shared Newton solver then analytic lifting."""
     tp, dp, wp = scalar_value(tr), scalar_value(dr), scalar_value(weight)
 
-    def equations(q: Sequence[Any], t: Any, d: Any, w: Any) -> tuple[Any, Any]:
+    def equations(q: Sequence[Any] | np.ndarray, t: Any, d: Any, w: Any) -> tuple[Any, Any]:
         z0 = lee_kesler_basis(t, d / q[0])[1]
         z1 = lee_kesler_basis(t, d / q[1], True)[1]
         return z0 / q[0] - z1 / q[1], (1 - w) * q[0] + w * q[1] - 1
 
-    def jacobian(q: Sequence[Any], t: Any, d: Any, w: Any) -> list[list[Any]]:
+    def jacobian(q: Sequence[Any] | np.ndarray, t: Any, d: Any, w: Any) -> list[list[Any]]:
         s0 = lee_kesler_basis(t, d / q[0])[2]
         s1 = lee_kesler_basis(t, d / q[1], True)[2]
         return [[-s0 / q[0] ** 2, s1 / q[1] ** 2], [1 - w, w]]

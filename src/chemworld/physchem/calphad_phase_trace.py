@@ -436,12 +436,15 @@ def split_windows(evaluate: Any, branches: Any, composition: float) -> dict[str,
                         cache[t] = margin(point)
                     return np.array([cache[t]])
 
+                def residual_jacobian(
+                    v: np.ndarray, low: float = low, high: float = high,
+                ) -> np.ndarray:
+                    return finite_jacobian(residual, v, [100.0], lower=[low], upper=[high])
+
                 root = solve_root(
                     residual,
                     [(low + high) / 2],
-                    jacobian=lambda v, low=low, high=high: finite_jacobian(
-                        residual, v, [100.0], lower=[low], upper=[high]
-                    ),
+                    jacobian=residual_jacobian,
                     variables=(ResidualVariable("T", "K", scale=100.0, lower=low, upper=high),),
                     residual_scales=np.ones(1),
                     policy=spec.equilibrium.policy.root,

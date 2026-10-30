@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from itertools import pairwise
 from math import isfinite
 from numbers import Real
+from typing import cast
 
 import numpy as np
 
@@ -698,7 +699,8 @@ def soh_parameter_response(spec, solution, *, policy=DEFAULT_ISOLATION_POLICY):
             "rank": rank,
             "failure_reason": response.root.failure_reason,
         }
-    derivatives = response.parameter_response
+    # Successful sensitivity=True solves retain the implicit response matrix.
+    derivatives = cast(np.ndarray, response.parameter_response)
     if half:
         dq = spec.working_capacity_C * (derivatives[0] - derivatives[1])
         dq[0] += solution["y_0"] - solution["y_100"]

@@ -397,7 +397,7 @@ def _polarized_moments(
     alpha = [m.alpha_parallel_m3 * 1e30 for m in spec.moments]
 
     def residual(
-        values: Sequence[Any],
+        values: Sequence[Any] | np.ndarray,
         temperature: Any,
         density: Any,
         fractions: Sequence[Any],
@@ -421,7 +421,7 @@ def _polarized_moments(
     pp = {k: scalar_value(v) for k, v in pair.items()}
     kp = {k: scalar_value(v) for k, v in triple.items()}
 
-    def jacobian(values: Sequence[float]) -> np.ndarray:
+    def jacobian(values: Sequence[float] | np.ndarray) -> np.ndarray:
         columns = []
         for j in range(len(active)):
             lifted: list[FirstDerivative[float, float]] = [

@@ -7,13 +7,42 @@ missing analytic parameter/time derivatives never silently become differences.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from math import isfinite
+from typing import Any, Generic, Literal, TypeAlias, TypedDict, TypeVar, cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scipy import sparse
 from scipy.sparse.linalg import splu
+
+VectorInput = Sequence[float] | np.ndarray
+MatrixInput: TypeAlias = ArrayLike | sparse.spmatrix | sparse.sparray
+Matrix: TypeAlias = np.ndarray | sparse.csc_matrix
+ResidualFunction = Callable[
+    [float, NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]], ArrayLike,
+]
+ResidualJacobian = Callable[
+    [float, NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]], MatrixInput,
+]
+RootFunction = Callable[[NDArray[np.float64]], ArrayLike]
+
+
+class RootProgress(TypedDict):
+    event: str
+    iteration: int
+    maximum_iterations: int
+    root_evaluations: int
+    backtracks: int
+    scaled_residual_norm: float
+
+
+class _DifferenceOptions(TypedDict):
+    lower: VectorInput | None
+    upper: VectorInput | None
+    relative_step: float
+    indices: Sequence[int] | np.ndarray | None
 
 
 class ResidualDomainError(ValueError):
@@ -24,13 +53,13 @@ class ResidualNumericalError(RuntimeError):
     """A singular or failed numerical solve; callers retain their original state."""
 
 
-def readonly(values):
+def readonly(values: ArrayLike) -> NDArray[np.float64]:
     result = np.asarray(values, dtype=float).copy()
     result.setflags(write=False)
     return result
 
 
-def vector(values, size, name):
+def vector(values: ArrayLike, size: int, name: str) -> NDArray[np.float64]:
     result = np.asarray(values, dtype=float)
     if result.shape != (size,):
         raise ValueError(f"{name} must have shape ({size},)")
@@ -39,7 +68,7 @@ def vector(values, size, name):
     return result.copy()
 
 
-def matrix(values, shape, name):
+def matrix(values: MatrixInput, shape: tuple[int, int], name: str) -> Matrix:
     result = (
         sparse.csc_matrix(values, copy=True)
         if sparse.issparse(values)
@@ -52,10 +81,15 @@ def matrix(values, shape, name):
     return result
 
 
-def linear_solve(jacobian, rhs):
+def linear_solve(
+    jacobian: np.ndarray | sparse.spmatrix | sparse.sparray | Sequence[Sequence[complex]],
+    rhs: np.ndarray | sparse.spmatrix | sparse.sparray | Sequence[complex]
+    | Sequence[Sequence[complex]],
+) -> Matrix:
     """Retain sparse factorization; do not hide singularity with least squares."""
     try:
         if sparse.issparse(jacobian):
+            jacobian = cast(sparse.spmatrix | sparse.sparray, jacobian)
             # Frequency-domain consumers have complex forcing or coefficients;
             # never discard a quadrature component at this shared boundary.
             dtype = np.result_type(jacobian.dtype, getattr(rhs, "dtype", np.asarray(rhs).dtype),
@@ -77,7 +111,11 @@ def linear_solve(jacobian, rhs):
             else:
                 answer = factor.solve(np.asarray(rhs, dtype=dtype))
         else:
-            answer = np.linalg.solve(jacobian, rhs.toarray() if sparse.issparse(rhs) else rhs)
+            answer = np.linalg.solve(
+                jacobian,
+                cast(sparse.spmatrix | sparse.sparray, rhs).toarray()
+                if sparse.issparse(rhs) else rhs,
+            )
     except (np.linalg.LinAlgError, RuntimeError) as exc:
         raise ResidualNumericalError("singular_jacobian") from exc
     if not np.all(np.isfinite(answer.data if sparse.issparse(answer) else answer)):
@@ -116,21 +154,25 @@ class ResidualEquation:
             raise ValueError("equations require identity, units and positive finite scale")
 
 
-def bounds(variables):
+def bounds(
+    variables: Sequence[ResidualVariable],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     return (
         np.asarray([-np.inf if v.lower is None else v.lower for v in variables]),
         np.asarray([np.inf if v.upper is None else v.upper for v in variables]),
     )
 
 
-def in_bounds(point, variables):
+def in_bounds(point: NDArray[np.float64], variables: Sequence[ResidualVariable]) -> bool:
     low, high = bounds(variables)
     return bool(np.all(np.isfinite(point)) and np.all(point >= low) and np.all(point <= high))
 
 
 def finite_jacobian(
-    function, point, scales, *, lower=None, upper=None, relative_step=6e-6, indices=None
-):
+    function: RootFunction, point: VectorInput, scales: VectorInput, *,
+    lower: VectorInput | None = None, upper: VectorInput | None = None,
+    relative_step: float = 6e-6, indices: Sequence[int] | np.ndarray | None = None,
+) -> NDArray[np.float64]:
     """Central differences, or an explicitly numerical one-sided boundary stencil."""
     point = np.asarray(point, dtype=float)
     baseline = np.asarray(function(point), dtype=float)
@@ -145,9 +187,9 @@ def finite_jacobian(
         # Prefer a central stencil; near a bound use the roomier one-sided
         # direction instead of a vanishing, cancellation-prone central step.
         if min(room.values()) >= step:
-            signs = (-1, 1)
+            signs: tuple[int, ...] = (-1, 1)
         else:
-            signs = tuple(sorted(room, key=room.get, reverse=True))
+            signs = tuple(sorted(room, key=room.__getitem__, reverse=True))
         samples = {}
         for sign in signs:
             offset = min(step, room[sign])
@@ -192,10 +234,10 @@ class ResidualDerivatives:
     values that happen to be zero at one point. Existing defaults stay dense.
     """
     mode: str
-    state: Callable | None = None
-    rate: Callable | None = None
-    parameter: Callable | None = None
-    time: Callable | None = None
+    state: ResidualJacobian | None = None
+    rate: ResidualJacobian | None = None
+    parameter: ResidualJacobian | None = None
+    time: ResidualFunction | None = None
     relative_step: float = 6e-6
     state_sparsity: tuple[tuple[int, ...], ...] | None = None
 
@@ -225,7 +267,7 @@ class ResidualSystem:
     system_id: str
     variables: tuple[ResidualVariable, ...]
     equations: tuple[ResidualEquation, ...]
-    residual: Callable
+    residual: ResidualFunction
     derivatives: ResidualDerivatives
     parameters: tuple[ResidualVariable, ...] = ()
     parameter_values: tuple[float, ...] = ()
@@ -258,37 +300,39 @@ class ResidualSystem:
                                      len(self.variables), len(self.equations))
 
     @property
-    def differential(self):
+    def differential(self) -> NDArray[np.int_]:
         return np.asarray(
             [i for i, v in enumerate(self.variables) if v.role == "differential"], dtype=int
         )
 
     @property
-    def algebraic(self):
+    def algebraic(self) -> NDArray[np.int_]:
         return np.asarray(
             [i for i, v in enumerate(self.variables) if v.role == "algebraic"], dtype=int
         )
 
     @property
-    def scales(self):
+    def scales(self) -> NDArray[np.float64]:
         return np.asarray([v.scale for v in self.variables])
 
     @property
-    def residual_scales(self):
+    def residual_scales(self) -> NDArray[np.float64]:
         return np.asarray([e.scale for e in self.equations])
 
 
 class ResidualEvaluator:
     """Per-solve counters and differentiation; never retained in a world snapshot."""
 
-    def __init__(self, system):
+    def __init__(self, system: ResidualSystem) -> None:
         self.system = system
         self.calls = 0
         self.derivative_calls = dict.fromkeys(("state", "rate", "parameter", "time"), 0)
         self.directional_calls = 0
         self.p = readonly(system.parameter_values)
 
-    def value(self, t, y, rate, p=None):
+    def value(
+        self, t: float, y: ArrayLike, rate: ArrayLike, p: ArrayLike | None = None,
+    ) -> NDArray[np.float64]:
         if not isfinite(t):
             raise ValueError("residual time must be finite")
         self.calls += 1
@@ -296,7 +340,10 @@ class ResidualEvaluator:
         n = len(self.system.variables)
         return vector(self.system.residual(float(t), readonly(y), readonly(rate), p), n, "residual")
 
-    def derivative(self, kind, t, y, rate, *, columns=None):
+    def derivative(
+        self, kind: str, t: float, y: VectorInput, rate: VectorInput, *,
+        columns: Sequence[int] | np.ndarray | None = None,
+    ) -> Matrix:
         self.derivative_calls[kind] += 1
         system, providers = self.system, self.system.derivatives
         n = len(system.variables)
@@ -327,50 +374,51 @@ class ResidualEvaluator:
                 else matrix(answer, (n, width), f"{kind} Jacobian")
             )
             return checked if columns is None else checked[:, columns]
+        point: VectorInput
+        scales: VectorInput
+        low: VectorInput | None
+        high: VectorInput | None
         if kind == "state":
             point, scales = y, system.scales
             low, high = bounds(system.variables)
 
-            def function(v):
+            def function(v: NDArray[np.float64]) -> NDArray[np.float64]:
                 return self.value(t, v, rate)
         elif kind == "rate":
             point, scales = rate, system.scales / system.time_scale_s
             low = high = None
 
-            def function(v):
+            def function(v: NDArray[np.float64]) -> NDArray[np.float64]:
                 return self.value(t, y, v)
         elif kind == "parameter":
             point, scales = self.p, [p.scale for p in system.parameters]
             low, high = bounds(system.parameters)
 
-            def function(v):
+            def function(v: NDArray[np.float64]) -> NDArray[np.float64]:
                 return self.value(t, y, rate, v)
         else:
             point, scales = [t], [system.time_scale_s]
             low = high = None
 
-            def function(v):
+            def function(v: NDArray[np.float64]) -> NDArray[np.float64]:
                 return self.value(v[0], y, rate)
 
-        numerical = finite_jacobian
-        options = {}
+        options: _DifferenceOptions = {
+            "lower": low, "upper": high, "relative_step": providers.relative_step,
+            "indices": columns,
+        }
         if kind == "state" and providers.state_sparsity is not None:
             from chemworld.physchem.residual_sparse_difference import sparse_finite_jacobian
-            numerical = sparse_finite_jacobian
-            options["sparsity"] = providers.state_sparsity
-        answer = numerical(
-            function,
-            point,
-            scales,
-            lower=low,
-            upper=high,
-            relative_step=providers.relative_step,
-            indices=columns,
-            **options,
-        )
+            answer = sparse_finite_jacobian(
+                function, point, scales, sparsity=providers.state_sparsity, **options,
+            )
+        else:
+            answer = finite_jacobian(function, point, scales, **options)
         return answer[:, 0] if kind == "time" else answer
 
-    def state_directional(self, t, y, rate, direction):
+    def state_directional(
+        self, t: float, y: VectorInput, rate: VectorInput, direction: ArrayLike,
+    ) -> NDArray[np.float64]:
         """Compute F_y @ direction without materializing a numerical Jacobian."""
         direction = vector(direction, len(self.system.variables), "state direction")
         if self.system.derivatives.state is not None:
@@ -399,7 +447,7 @@ class ResidualEvaluator:
             relative_step=self.system.derivatives.relative_step,
         )[:, 0]
 
-    def diagnostics(self):
+    def diagnostics(self) -> dict[str, Any]:
         return {
             "residual_evaluations": self.calls,
             "derivative_evaluations": dict(self.derivative_calls),
@@ -435,11 +483,14 @@ class RootPolicy:
 
 DEFAULT_ROOT_POLICY = RootPolicy()
 
+_RootSuccess = TypeVar("_RootSuccess", bound=bool)
+_RootValue = TypeVar("_RootValue", bound=np.ndarray | None)
+
 
 @dataclass(frozen=True)
-class RootResult:
-    value: np.ndarray | None
-    success: bool
+class RootResult(Generic[_RootSuccess, _RootValue]):
+    value: _RootValue
+    success: _RootSuccess
     failure_reason: str
     diagnostics: dict
 
@@ -448,10 +499,18 @@ class RootResult:
             object.__setattr__(self, "value", readonly(self.value))
 
 
+RootOutcome: TypeAlias = (
+    RootResult[Literal[True], NDArray[np.float64]] | RootResult[Literal[False], None]
+)
+
+
 def solve_root(
-    function, initial, *, jacobian, variables, residual_scales, policy=DEFAULT_ROOT_POLICY,
-    progress=None,
-):
+    function: RootFunction, initial: ArrayLike, *,
+    jacobian: Callable[[NDArray[np.float64]], MatrixInput],
+    variables: Sequence[ResidualVariable], residual_scales: ArrayLike,
+    policy: RootPolicy = DEFAULT_ROOT_POLICY,
+    progress: Callable[[RootProgress], None] | None = None,
+) -> RootOutcome:
     """Projected Newton with a scaled gradient fallback and residual merit test.
 
     Projection constructs a numerical trial, never repairs an accepted state.
@@ -470,13 +529,14 @@ def solve_root(
     calls, backtracks, iteration, norm = 0, 0, 0, None
     projected_steps, gradient_steps = 0, 0
 
-    def evaluate(point):
+    def evaluate(point: NDArray[np.float64]) -> NDArray[np.float64]:
         nonlocal calls
         calls += 1
         return vector(function(readonly(point)), n, "root residual") / rows
 
-    def finish(success, reason=""):
-        return RootResult(
+    def finish(success: bool, reason: str = "") -> RootOutcome:
+        # The constructed result has a point exactly when success is true.
+        return cast(RootOutcome, RootResult(
             x if success else None,
             success,
             reason,
@@ -490,7 +550,7 @@ def solve_root(
                 "scaled_residual_norm": norm,
                 "tolerance": policy.tolerance,
             },
-        )
+        ))
 
     if not in_bounds(x, variables):
         return finish(False, "initial_outside_bounds")
@@ -567,7 +627,7 @@ def solve_root(
 
 @dataclass(frozen=True)
 class SteadyResidualResult:
-    root: RootResult
+    root: RootOutcome
     parameter_response: np.ndarray | None = None
     diagnostics: dict = field(default_factory=dict)
 
@@ -577,8 +637,10 @@ class SteadyResidualResult:
 
 
 def solve_steady_residual(
-    system, initial, *, time_s=0.0, policy=DEFAULT_ROOT_POLICY, sensitivity=False, progress=None
-):
+    system: ResidualSystem, initial: ArrayLike, *, time_s: float = 0.0,
+    policy: RootPolicy = DEFAULT_ROOT_POLICY, sensitivity: bool = False,
+    progress: Callable[[RootProgress], None] | None = None,
+) -> SteadyResidualResult:
     evaluator = ResidualEvaluator(system)
     zero = np.zeros(len(system.variables))
     root = solve_root(
@@ -592,9 +654,11 @@ def solve_steady_residual(
     )
     response = None
     if root.success and sensitivity:
-        j = evaluator.derivative("state", time_s, root.value, zero)
-        dp = evaluator.derivative("parameter", time_s, root.value, zero)
-        response = linear_solve(j, -dp.toarray() if sparse.issparse(dp) else -dp)
+        point = cast(NDArray[np.float64], root.value)  # Successful roots always retain their point.
+        j = evaluator.derivative("state", time_s, point, zero)
+        dp = evaluator.derivative("parameter", time_s, point, zero)
+        response = linear_solve(j, -cast(sparse.csc_matrix, dp).toarray()
+                                if sparse.issparse(dp) else -dp)
     return SteadyResidualResult(root, response, evaluator.diagnostics())
 
 

@@ -7,7 +7,7 @@ parameters are synthetic; explicit source projections retain their input binding
 Optional caloric closure derives from the same OCV state function.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
 from functools import cached_property, partial
 from math import asinh, isfinite, pi, sqrt
@@ -913,7 +913,7 @@ def battery_control_current(spec, state, program):
 
         def electrical_residual(
             t: float, y: NDArray[np.float64], rate: NDArray[np.float64],
-            p: Mapping[str, float],
+            p: NDArray[np.float64],
         ) -> Sequence[float]:
             view = CoupledStateView(
                 state.amounts_mol, state.temperature_K, state.volume_L, state.time_s,

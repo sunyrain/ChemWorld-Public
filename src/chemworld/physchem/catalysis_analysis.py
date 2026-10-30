@@ -311,7 +311,7 @@ def solve_catalytic_steady_state(
             "derivative_diagnostic": {},
         }
         values = root_initial
-        jacobian = np.empty((0, 0))
+        jacobian: np.ndarray | None = np.empty((0, 0))
         eigenvalues = np.array([], dtype=complex)
     else:
         system = ResidualSystem(
