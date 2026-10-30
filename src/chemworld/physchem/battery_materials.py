@@ -4,14 +4,18 @@ Terms are mathematical data, not executable callbacks. One expression supplies
 voltages and analytic derivatives in all native battery models.
 """
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import exp, expm1, inf, isfinite, log, log1p, nextafter, tanh
 from numbers import Real
+from typing import Any, Self, TypedDict, Unpack, cast, overload
 
-from chemworld.data.scientific_inputs import InputSource, InputValue
+from chemworld.data.scientific_inputs import InputSource, InputValue, ScientificTable
 from chemworld.physchem.analytic_functions import smooth_function
 from chemworld.physchem.caloric_math import (
+    FirstDerivative,
     Interval,
     derivative_depth,
     derivative_values,
@@ -22,9 +26,10 @@ from chemworld.physchem.caloric_math import (
 OCV_VERSION = "polynomial-exp-tanh-ocv-v1"
 OCV_ENDPOINT_VERSION = "polynomial-exp-tanh-clipped-endpoint-ocv-v2"
 OCV_ENDPOINT_POLICY_VERSION = "clipped-rational-ocv-endpoint-v1"
+OCVScalar = float | FirstDerivative
 
 
-def _number(value):
+def _number(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
         raise ValueError("OCV coefficients must be finite real numbers")
     return float(value)
@@ -52,7 +57,7 @@ class ElectrodeOCVEndpointPolicy:
         object.__setattr__(self, "barrier_V", barrier)
         object.__setattr__(self, "stoichiometry_clip", clip)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model_version": OCV_ENDPOINT_POLICY_VERSION,
             "source": self.source.to_dict(),
@@ -61,7 +66,7 @@ class ElectrodeOCVEndpointPolicy:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         if (
             not isinstance(value, Mapping)
             or set(value) != {"model_version", "source", "barrier_V", "stoichiometry_clip"}
@@ -70,6 +75,12 @@ class ElectrodeOCVEndpointPolicy:
             raise ValueError("unsupported OCV endpoint policy version or fields")
         return cls(InputSource.from_dict(value["source"]), value["barrier_V"],
                    value["stoichiometry_clip"])
+
+
+class _OCVOptions(TypedDict, total=False):
+    stoichiometry_domain: tuple[float, float]
+    supported_models: tuple[str, ...]
+    endpoint_policy: ElectrodeOCVEndpointPolicy | None
 
 
 @dataclass(frozen=True)
@@ -129,7 +140,7 @@ class ElectrodeOCV:
         ):
             raise ValueError("OCV endpoint policy requires an explicit declaration")
 
-    def _check(self, theta, trial):
+    def _check(self, theta: OCVScalar, trial: bool) -> None:
         if not isfinite(scalar_value(theta)):
             raise ValueError("OCV stoichiometry must be finite")
         if (
@@ -140,7 +151,13 @@ class ElectrodeOCV:
         ):
             raise ValueError("OCV stoichiometry is outside its declared domain")
 
-    def _expression(self, theta):
+    @overload
+    def _expression(self, theta: float) -> float: ...
+
+    @overload
+    def _expression(self, theta: OCVScalar) -> OCVScalar: ...
+
+    def _expression(self, theta: OCVScalar) -> OCVScalar:
         if self.endpoint_policy is None:
             return self._raw_expression(theta)
         policy = self.endpoint_policy
@@ -153,8 +170,14 @@ class ElectrodeOCV:
         x = low if primal < low else high if primal > high else theta
         return self._raw_expression(x) + policy.barrier_V * (1 / x + 1 / (x - 1))
 
-    def _raw_expression(self, theta):
-        value = 0.0
+    @overload
+    def _raw_expression(self, theta: float) -> float: ...
+
+    @overload
+    def _raw_expression(self, theta: OCVScalar) -> OCVScalar: ...
+
+    def _raw_expression(self, theta: OCVScalar) -> OCVScalar:
+        value: OCVScalar = 0.0
         for coefficient in reversed(self.polynomial_V):
             value = value * theta + coefficient
         for amplitude, scale, shift in self.exponential_terms:
@@ -163,19 +186,27 @@ class ElectrodeOCV:
             value += amplitude * smooth_function("tanh", scale * (theta - shift))
         return value
 
-    def value(self, theta, *, trial=False):
+    @overload
+    def value(self, theta: float, *, trial: bool = False) -> float: ...
+
+    @overload
+    def value(self, theta: OCVScalar, *, trial: bool = False) -> OCVScalar: ...
+
+    def value(self, theta: OCVScalar, *, trial: bool = False) -> OCVScalar:
         self._check(theta, trial)
         value = self._expression(theta)
         if not isfinite(scalar_value(value)):
             raise ValueError("nonfinite OCV")
         return value
 
-    def derivatives(self, theta, *, order=1, trial=False):
+    def derivatives(
+        self, theta: float, *, order: int = 1, trial: bool = False,
+    ) -> tuple[float, ...]:
         """Classical analytic derivatives; clip breakpoints reject positive orders."""
         self._check(theta, trial)
         return derivative_values(self._expression, theta, order=order)
 
-    def integral(self, lower, upper, *, trial=False):
+    def integral(self, lower: float, upper: float, *, trial: bool = False) -> float:
         """Exact integral in V; theta is dimensionless. No sampled fit or quadrature."""
         self._check(lower, trial)
         self._check(upper, trial)
@@ -200,8 +231,8 @@ class ElectrodeOCV:
             raise ValueError("nonfinite OCV integral")
         return result
 
-    def _raw_integral(self, lower, upper):
-        def logcosh(x):
+    def _raw_integral(self, lower: float, upper: float) -> float:
+        def logcosh(x: float) -> float:
             return abs(x) + log1p(exp(-2 * abs(x))) - log(2)
 
         result = sum(
@@ -228,7 +259,9 @@ class ElectrodeOCV:
             raise ValueError("nonfinite OCV integral")
         return result
 
-    def enclosure(self, lower, upper, *, derivative=False, trial=False):
+    def enclosure(
+        self, lower: float, upper: float, *, derivative: bool = False, trial: bool = False,
+    ) -> Interval:
         """Outward interval on a closed declared sub-domain.
 
         With a policy, derivative bounds enclose both one-sided slopes at a
@@ -254,7 +287,7 @@ class ElectrodeOCV:
             result += policy.barrier_V * (1 / clipped + 1 / (clipped - 1))
         return result
 
-    def _raw_enclosure(self, theta, *, derivative):
+    def _raw_enclosure(self, theta: Interval, *, derivative: bool) -> Interval:
         result = Interval(0.0, 0.0)
         polynomial = (
             tuple(i * c for i, c in enumerate(self.polynomial_V) if i)
@@ -279,7 +312,7 @@ class ElectrodeOCV:
                 )
                 furthest = max(abs(argument.lower), abs(argument.upper))
 
-                def sech_squared(x):
+                def sech_squared(x: float) -> float:
                     q = exp(-2 * x)
                     return 4 * q / (1 + q) ** 2
 
@@ -294,8 +327,8 @@ class ElectrodeOCV:
                 )
         return result
 
-    def to_dict(self):
-        result = {
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "model_version": OCV_VERSION,
             "material_id": self.material_id,
             "source": self.source.to_dict(),
@@ -313,7 +346,7 @@ class ElectrodeOCV:
         return result
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         keys = {
             "model_version",
             "material_id",
@@ -334,8 +367,8 @@ class ElectrodeOCV:
         if set(value) != keys or version not in (OCV_VERSION, OCV_ENDPOINT_VERSION):
             raise ValueError("unsupported OCV model version or fields")
         endpoint = (
-            {} if version == OCV_VERSION else
-            {"endpoint_policy": ElectrodeOCVEndpointPolicy.from_dict(value["endpoint_policy"])}
+            None if version == OCV_VERSION else
+            ElectrodeOCVEndpointPolicy.from_dict(value["endpoint_policy"])
         )
         return cls(
             **{
@@ -347,21 +380,21 @@ class ElectrodeOCV:
             parameter_inputs=tuple(
                 (k, InputValue.from_dict(v)) for k, v in value["parameter_inputs"].items()
             ),
-            **endpoint,
+            endpoint_policy=endpoint,
         )
 
     @classmethod
     def from_parameter_row(
         cls,
-        table,
-        row_id,
+        table: ScientificTable,
+        row_id: str,
         *,
-        material_id,
-        polynomial=(),
-        exponential_terms=(),
-        tanh_terms=(),
-        **kwargs,
-    ):
+        material_id: str,
+        polynomial: Sequence[str] = (),
+        exponential_terms: Sequence[tuple[str, str, str]] = (),
+        tanh_terms: Sequence[tuple[str, str, str]] = (),
+        **kwargs: Unpack[_OCVOptions],
+    ) -> Self:
         """Bind explicitly named, unit-checked columns from an existing parameter table."""
         if table.kind != "parameters":
             raise ValueError("OCV requires a parameter table")
@@ -369,25 +402,25 @@ class ElectrodeOCV:
         if len(rows) != 1:
             raise ValueError("OCV requires one unambiguous parameter row")
         row = rows[0]
-        used = {}
+        used: dict[str, InputValue] = {}
 
-        def coefficient(name, unit):
+        def coefficient(name: str, unit: str) -> float:
             if name not in row.values:
                 raise ValueError("missing OCV parameter column: " + name)
             cell = row.values[name]
             if cell.quality != "valid":
                 raise ValueError("OCV coefficients must be valid parameters")
             used[name] = cell
-            return cell.to(unit).value
+            return cast(float, cell.to(unit).value)
 
-        def terms(names):
+        def terms(names: Sequence[tuple[str, str, str]]) -> tuple[tuple[float, float, float], ...]:
             return tuple(
-                tuple(
+                cast(tuple[float, float, float], tuple(
                     coefficient(name, unit)
                     for name, unit in zip(
                         term, ("V", "dimensionless", "dimensionless"), strict=True
                     )
-                )
+                ))
                 for term in names
             )
 

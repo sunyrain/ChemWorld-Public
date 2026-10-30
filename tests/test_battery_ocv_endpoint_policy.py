@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import replace
-from math import factorial, log
+from math import exp, factorial, log, tanh
 
 import pytest
 
@@ -229,7 +229,7 @@ def test_invalid_policies_reject(kwargs):
         replace(curve(), endpoint_policy={})
 
 
-def test_none_policy_preserves_legacy_codec_layout_and_arithmetic_exactly():
+def test_none_policy_preserves_legacy_codec_and_exact_roundtrip_arithmetic():
     c = ElectrodeOCV(
         "legacy-exact",
         InputSource(DataSourceProvenance(
@@ -247,10 +247,22 @@ def test_none_policy_preserves_legacy_codec_layout_and_arithmetic_exactly():
     assert list(c.to_dict()) == list(expected)
     restored = ElectrodeOCV.from_dict(json.loads(json.dumps(expected)))
     assert restored == c and restored.endpoint_policy is None
-    assert tuple(v.hex() for v in c.derivatives(0.3, order=4)) == (
-        "0x1.776a349e4e90bp-3", "-0x1.86d8194564a98p-3", "-0x1.4eaf126854411p-2",
-        "0x1.4da1c0e54d638p+0", "0x1.8ddb45675ddc4p+5",
+    # Closed derivatives check the mathematics independently of nested jets.
+    # A fixed hexadecimal snapshot of exp/tanh-derived values is not a portable
+    # accuracy reference; serialization on the same runtime must remain exact.
+    x = 0.3
+    e = 0.01 * exp(-3 * x)
+    t = tanh(5 * (x - 0.4))
+    expected_derivatives = (
+        0.2 - 0.1 * x + e - 0.02 * t,
+        -0.1 - 3 * e - 0.02 * 5 * (1 - t * t),
+        9 * e + 0.02 * 25 * 2 * t * (1 - t * t),
+        -27 * e - 0.02 * 125 * (-2 + 8 * t**2 - 6 * t**4),
+        81 * e - 0.02 * 625 * (16 * t - 40 * t**3 + 24 * t**5),
     )
+    actual_derivatives = c.derivatives(x, order=4)
+    assert actual_derivatives == pytest.approx(expected_derivatives, rel=2e-14, abs=1e-14)
+    assert restored.derivatives(x, order=4) == actual_derivatives
     assert c.integral(0.1, 0.9).hex() == "0x1.e504e310a6d9fp-4"
     assert c.integral(0.9, 0.1).hex() == "-0x1.e504e310a6d9fp-4"
     bounds = c.enclosure(0.1, 0.9)
