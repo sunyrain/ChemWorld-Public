@@ -1,26 +1,29 @@
 """Explicit B3 constants to the original virial correlation/input-card contract."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from typing import Any
 
+from chemworld.data.constants import ConstantDatabase
 from chemworld.data.scientific_inputs import InputSource
 from chemworld.physchem.property_inputs import PropertyInputCard
 from chemworld.physchem.property_packages import ComponentPropertyPackage
-from chemworld.physchem.specs import ComponentUncertainty
+from chemworld.physchem.specs import ComponentSpec, ComponentUncertainty
 from chemworld.physchem.virial_correlations import virial_correlation
 from chemworld.physchem.virial_kernels import VIRIAL_METHODS
 
 
 def sourced_virial_input(
-    database,
-    identity,
-    component,
+    database: ConstantDatabase,
+    identity: object,
+    component: ComponentSpec,
     *,
-    method,
-    constant_source,
-    temperature_range_K,
-    parameters=None,
-    polar=None,
-):
+    method: str,
+    constant_source: str,
+    temperature_range_K: Sequence[float],
+    parameters: Mapping[str, float] | None = None,
+    polar: Mapping[str, Any] | None = None,
+) -> PropertyInputCard:
     if method not in VIRIAL_METHODS:
         raise ValueError("unknown pure virial method")
     record = database.record(identity, method=constant_source)

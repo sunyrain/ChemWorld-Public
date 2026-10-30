@@ -5,8 +5,12 @@ corrections and response derivatives use that same potential. No material
 accuracy, mixture cross rule, phase equilibrium or open-flow model is inferred.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
+from typing import TYPE_CHECKING, Any, Self, TypedDict, cast
 
 from chemworld.physchem.fluid_response import (
     compressibility_factor,
@@ -25,14 +29,31 @@ from chemworld.physchem.property_reports import (
     PropertyEvaluation,
     StatePropertyReport,
 )
+from chemworld.physchem.specs import PropertyCorrelation
 from chemworld.physchem.virial_correlations import virial_temperature_report
 from chemworld.physchem.virial_gas import density_virial_state, virial_pressure
 
+if TYPE_CHECKING:
+    from chemworld.physchem.coupled_system import (
+        CoupledStateView,
+        CoupledSystem,
+        HeatFlux,
+        ProcessContribution,
+    )
+    from chemworld.physchem.solver_backend import ODESolverPolicy
 
-def _coefficient_groups(package):
-    groups = []
+
+class _BatchOptions(TypedDict, total=False):
+    heat_flux: Callable[[CoupledStateView], HeatFlux]
+    policy: ODESolverPolicy
+
+
+def _coefficient_groups(package: ComponentPropertyPackage) -> list[tuple[PropertyCorrelation, ...]]:
+    groups: list[tuple[PropertyCorrelation, ...]] = []
     for prefix in ("second", "third"):
-        candidates = package.by_property(prefix + "_virial_coefficient")
+        # Piecewise heat capacities cannot carry a virial coefficient property ID.
+        candidates = cast(tuple[PropertyCorrelation, ...],
+                          package.by_property(prefix + "_virial_coefficient"))
         if prefix == "third" and not candidates:
             groups.append(())
             continue
@@ -46,14 +67,17 @@ def _coefficient_groups(package):
     return groups
 
 
-def _coefficients(package, temperature_K):
-    results, curves = [], []
+def _coefficients(
+    package: ComponentPropertyPackage, temperature_K: float,
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[PropertyCorrelation, ...]]:
+    results: list[tuple[float, ...]] = []
+    curves: list[PropertyCorrelation] = []
     for group, unit in zip(_coefficient_groups(package), ("m^3/mol", "m^6/mol^2"), strict=True):
         if not group:
             results.append((0.0,) * 4)
             continue
-        curve = package.select_correlation(group[0].property_id,
-                                           temperature_K=temperature_K, candidates=group)
+        curve = cast(PropertyCorrelation, package.select_correlation(group[0].property_id,
+                                           temperature_K=temperature_K, candidates=group))
         curves.append(curve)
         evaluations = virial_temperature_report(curve, temperature_K=temperature_K)
         results.append(
@@ -62,18 +86,19 @@ def _coefficients(package, temperature_K):
                 for i, value in enumerate(evaluations)
             )
         )
-    return (*results, tuple(curves))
+    return cast(tuple[tuple[float, ...], tuple[float, ...], tuple[PropertyCorrelation, ...]],
+                (*results, tuple(curves)))
 
 
 def _state_values(
-    package,
-    temperature_K,
+    package: ComponentPropertyPackage,
+    temperature_K: float,
     *,
-    pressure_Pa=None,
-    molar_volume_m3_mol=None,
-    ideal_caloric=None,
-    entropy=False,
-):
+    pressure_Pa: float | None = None,
+    molar_volume_m3_mol: float | None = None,
+    ideal_caloric: SpeciesCaloricModel | None = None,
+    entropy: bool = False,
+) -> tuple[dict[str, float], float, dict[str, object]]:
     b, c, curves = _coefficients(package, temperature_K)
     t = temperature_K
     if (pressure_Pa is None) == (molar_volume_m3_mol is None):
@@ -83,7 +108,7 @@ def _state_values(
         root = density_virial_state(t, pressure_Pa, (b[0], c[0]))
         v = root.molar_volume_m3_mol
     else:
-        v = molar_volume_m3_mol
+        v = cast(float, molar_volume_m3_mol)
         pressure_Pa = virial_pressure(t, v, (b[0], c[0]))
     p = pressure_Pa
     stiffness = 1 + 2 * b[0] / v + 3 * c[0] / v**2
@@ -91,9 +116,11 @@ def _state_values(
         raise ValueError("virial state has nonpositive or singular mechanical stiffness")
     pv = -R * t / v**2 * stiffness
     pt = R / v * (1 + (b[0] + t * b[1]) / v + (c[0] + t * c[1]) / v**2)
+    # ComponentSpec fills and validates molecular weight from its formula at construction.
+    molecular_weight = cast(float, package.component.molecular_weight_g_mol)
     values = {
         "molar_volume": v,
-        "density": density_molar_volume(v, package.component.molecular_weight_g_mol),
+        "density": density_molar_volume(v, molecular_weight),
         "compressibility_factor": compressibility_factor(t, p, v),
         "dV_dT_P": -pt / pv,
         "dV_dP_T": 1 / pv,
@@ -157,8 +184,9 @@ _UNITS = {
 
 
 def evaluate_virial_gas_state(
-    package, *, temperature_K, pressure_Pa, quantities, ideal_caloric=None
-):
+    package: ComponentPropertyPackage, *, temperature_K: float, pressure_Pa: float,
+    quantities: Sequence[str], ideal_caloric: SpeciesCaloricModel | None = None,
+) -> StatePropertyReport:
     """Unit-bearing original state report; no silent ideal-gas caloric fallback."""
     requested = set(quantities)
     if not requested or requested - _UNITS.keys():
@@ -218,10 +246,10 @@ class VirialGasThermodynamics:
         _coefficient_groups(self.package)
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str]:
         return (self.package.component.identifier,)
 
-    def _at(self, state):
+    def _at(self, state: CoupledStateView) -> tuple[float, dict[str, float], float]:
         (key,) = self.inventory_keys
         if set(state.amounts_mol) != {key} or state.amounts_mol[key] <= 0:
             raise ValueError("pure virial thermal state requires one positive component amount")
@@ -234,21 +262,24 @@ class VirialGasThermodynamics:
         )
         return n, values, p
 
-    def heat_capacity_j_k(self, state):
+    def heat_capacity_j_k(self, state: CoupledStateView) -> float:
         n, values, _ = self._at(state)
         return n * values["cv"]
 
-    def internal_energy_j(self, state):
+    def internal_energy_j(self, state: CoupledStateView) -> float:
         n, values, _ = self._at(state)
         return n * values["internal_energy"]
 
-    def pressure_pa(self, state):
+    def pressure_pa(self, state: CoupledStateView) -> float:
         return self._at(state)[2]
 
-    def validate_state(self, state):
+    def validate_state(self, state: CoupledStateView) -> None:
         self._at(state)
 
-    def chemical_energy_rate_w(self, state, derivatives, contributions):
+    def chemical_energy_rate_w(
+        self, state: CoupledStateView, derivatives: Mapping[str, float],
+        contributions: Sequence[ProcessContribution],
+    ) -> float:
         if any(derivatives.values()) or any(
             item.legacy_reaction_energy_W is not None
             or item.amount_rates_mol_s
@@ -260,7 +291,7 @@ class VirialGasThermodynamics:
             raise ValueError("pure closed virial thermal model does not support material changes")
         return 0.0
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": "pure-virial-thermal-v1",
             "package": self.package.to_dict(),
@@ -268,7 +299,7 @@ class VirialGasThermodynamics:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         if set(payload) != {"model", "package", "ideal_caloric"} or (
             payload["model"] != "pure-virial-thermal-v1"
         ):
@@ -280,11 +311,15 @@ class VirialGasThermodynamics:
         )
 
 
-def virial_gas_batch_system(thermodynamics, *, heat_flux=None, policy=None):
+def virial_gas_batch_system(
+    thermodynamics: VirialGasThermodynamics, *,
+    heat_flux: Callable[[CoupledStateView], HeatFlux] | None = None,
+    policy: ODESolverPolicy | None = None,
+) -> CoupledSystem:
     """Compile a closed fixed-volume heating/cooling block on CoupledSystem."""
     from chemworld.physchem.coupled_system import CoupledSystem
 
-    options = {}
+    options: _BatchOptions = {}
     if heat_flux is not None:
         options["heat_flux"] = heat_flux
     if policy is not None:

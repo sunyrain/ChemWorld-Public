@@ -1,9 +1,11 @@
 """Native virial declarations, explicit polar choices and unit-bearing reports."""
 
+from collections.abc import Mapping, Sequence
 from math import isfinite
+from typing import Any, cast
 
 from chemworld.physchem.property_equations import evaluate_correlation
-from chemworld.physchem.property_reports import PropertyEvaluation
+from chemworld.physchem.property_reports import PropertyEvaluation, ValidityPolicy
 from chemworld.physchem.specs import PropertyCorrelation
 from chemworld.physchem.virial_kernels import (
     VIRIAL_METHODS,
@@ -14,8 +16,9 @@ from chemworld.physchem.virial_kernels import (
 
 
 def virial_correlation(
-    method, *, parameters, temperature_range_K, source_note, correlation_id=None, polar=None
-):
+    method: str, *, parameters: Mapping[str, float], temperature_range_K: Sequence[float],
+    source_note: str, correlation_id: str | None = None, polar: Mapping[str, Any] | None = None,
+) -> PropertyCorrelation:
     if method not in VIRIAL_METHODS:
         raise ValueError("unknown pure virial method")
     if not isinstance(source_note, str) or not source_note.strip():
@@ -65,9 +68,12 @@ def virial_correlation(
     )
 
 
-def virial_temperature_report(correlation, *, temperature_K, order=3, validity_policy="raise"):
+def virial_temperature_report(
+    correlation: PropertyCorrelation, *, temperature_K: float, order: int = 3,
+    validity_policy: ValidityPolicy = "raise",
+) -> tuple[PropertyEvaluation, ...]:
     """Existing PropertyEvaluation records for the value and T derivatives."""
-    from chemworld.physchem.correlation_families import CORRELATION_FAMILIES
+    from chemworld.physchem.correlation_families import CORRELATION_FAMILIES, CorrelationFamily
 
     family = CORRELATION_FAMILIES.get(correlation.equation_id)
     sourced_crc = correlation.equation_id == "crc_second_virial"
@@ -91,7 +97,8 @@ def virial_temperature_report(correlation, *, temperature_K, order=3, validity_p
         )
     else:
         values = virial_derivatives(
-            family.virial_method, temperature_K, correlation.coefficients, order=order
+            cast(CorrelationFamily, family).virial_method,
+            temperature_K, correlation.coefficients, order=order,
         )
     return (
         value,
