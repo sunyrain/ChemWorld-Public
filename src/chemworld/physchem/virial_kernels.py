@@ -7,12 +7,16 @@ checked on holdouts; they are not claimed to be original-paper verified.
 T, Tc: K; Pc: Pa; Vc: m3/mol; dipole: debye. No reference runtime dependency.
 """
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from math import isfinite, log
 from types import MappingProxyType
+from typing import Any, TypeAlias
 
-from chemworld.physchem.caloric_math import derivative_values, exponential
+from chemworld.physchem.caloric_math import FirstDerivative, derivative_values, exponential
 from chemworld.physchem.property_reports import R_J_PER_MOL_K as R
+
+Scalar: TypeAlias = float | FirstDerivative[Any, Any]
 
 
 @dataclass(frozen=True)
@@ -22,11 +26,11 @@ class VirialMethod:
     integrals: bool = False
 
     @property
-    def property_id(self):
+    def property_id(self) -> str:
         return ("third" if self.third else "second") + "_virial_coefficient"
 
     @property
-    def unit(self):
+    def unit(self) -> str:
         return "m^6/mol^2" if self.third else "m^3/mol"
 
 
@@ -57,7 +61,9 @@ _LIU = (
 )
 
 
-def _real(value, name, *, positive=False, nonnegative=False):
+def _real(
+    value: object, name: str, *, positive: bool = False, nonnegative: bool = False,
+) -> float:
     if (
         isinstance(value, bool)
         or not isinstance(value, int | float)
@@ -69,7 +75,7 @@ def _real(value, name, *, positive=False, nonnegative=False):
     return value
 
 
-def _parameters(method, parameters):
+def _parameters(method: str, parameters: Mapping[str, float]) -> dict[str, float]:
     if method not in VIRIAL_METHODS:
         raise ValueError("unknown pure virial method")
     required = set(VIRIAL_METHODS[method].required.split())
@@ -81,7 +87,7 @@ def _parameters(method, parameters):
     }
 
 
-def _terms(method, p):
+def _terms(method: str, p: Mapping[str, float]) -> tuple[tuple[float, float], ...]:
     w = p["omega"]
     if method == "Abbott":
         return ((0, 0.083 + 0.139 * w), (-1.6, -0.422), (-4.2, -0.172 * w))
@@ -118,7 +124,7 @@ def _terms(method, p):
     raise ValueError("method does not have a power-series representation")
 
 
-def _formula(method, T, p):
+def _formula(method: str, T: Scalar, p: Mapping[str, float]) -> Scalar:
     tr = T / p["Tc"]
     if method == "Xiang":
         theta = (p["Pc"] * p["Vc"] / (R * p["Tc"]) - 0.29) ** 2
@@ -134,7 +140,9 @@ def _formula(method, T, p):
     return scale * sum(c * tr**n for n, c in _terms(method, p))
 
 
-def virial_derivatives(method, temperature_K, parameters, *, order=3):
+def virial_derivatives(
+    method: str, temperature_K: float, parameters: Mapping[str, float], *, order: int = 3,
+) -> tuple[float, ...]:
     """Value and first through requested (at most third) analytic T derivatives.
 
     All supplied parameters, including polar fits, remain fixed. Negative and
@@ -150,7 +158,9 @@ def virial_derivatives(method, temperature_K, parameters, *, order=3):
     return values
 
 
-def virial_value(method, temperature_K, *, order=0, **parameters):
+def virial_value(
+    method: str, temperature_K: float, *, order: int = 0, **parameters: float,
+) -> float:
     """One value/derivative or documented -1/-2 indefinite integral.
 
     Integral constants are zero in the dimensional-T basis, with log(T/1 K).
@@ -181,17 +191,23 @@ def virial_value(method, temperature_K, *, order=0, **parameters):
     return value
 
 
-def virial_fast(method, temperature_K, parameters):
+def virial_fast(
+    method: str, temperature_K: float, parameters: Mapping[str, float],
+) -> tuple[float, ...]:
     """Fused value/three-derivative result from the same analytic kernel."""
     return virial_derivatives(method, temperature_K, parameters)
 
 
-def virial_vector(method, temperature_K, parameter_sets):
+def virial_vector(
+    method: str, temperature_K: float, parameter_sets: Iterable[Mapping[str, float]],
+) -> tuple[tuple[float, ...], ...]:
     """One tuple of four outputs per explicit parameter set; no broadcasting."""
     return tuple(virial_fast(method, temperature_K, p) for p in parameter_sets)
 
 
-def virial_matrix(method, temperature_K, parameter_rows):
+def virial_matrix(
+    method: str, temperature_K: float, parameter_rows: Iterable[Iterable[Mapping[str, float]]],
+) -> tuple[tuple[tuple[float, ...], ...], ...]:
     """Rectangular grid of explicit pure/pseudo-component parameters.
 
     This does not infer cross parameters or perform a mixture rule.
@@ -221,7 +237,10 @@ TSONOPOULOS_CLASSES = (
 )
 
 
-def tsonopoulos_polar_parameters(*, Tc, Pc, species_type, dipole=None, convention="documented"):
+def tsonopoulos_polar_parameters(
+    *, Tc: float, Pc: float, species_type: str, dipole: float | None = None,
+    convention: str = "documented",
+) -> dict[str, float]:
     """Explicit class, no chemical-name inference; dipole is in debye.
 
     Documented methanol constants and the alkanol zero-dipole limit differ
@@ -258,7 +277,7 @@ def tsonopoulos_polar_parameters(*, Tc, Pc, species_type, dipole=None, conventio
     return {"a": a, "b": 0.0}
 
 
-def meng_polar_parameter(*, Tc, Pc, dipole, haloalkane):
+def meng_polar_parameter(*, Tc: float, Pc: float, dipole: float, haloalkane: bool) -> float:
     _real(Tc, "Tc", positive=True)
     _real(Pc, "Pc", positive=True)
     _real(dipole, "dipole", nonnegative=True)

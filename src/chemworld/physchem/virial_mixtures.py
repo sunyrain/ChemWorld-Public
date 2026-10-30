@@ -5,23 +5,28 @@ n-1 independent fractions (the last component closes the simplex). Parameters
 are held fixed during differentiation. No upstream implementation is imported.
 """
 
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from itertools import product
 from math import factorial, isclose, isfinite, log, sqrt
-from typing import Any
+from typing import Any, TypeAlias, cast
 
 from chemworld.physchem.caloric_math import FirstDerivative, scalar_value
 from chemworld.physchem.virial_kernels import _real, virial_derivatives
 
+Scalar: TypeAlias = float | FirstDerivative[Any, Any]
+Matrix: TypeAlias = tuple[tuple[float, ...], ...]
+Tensor3: TypeAlias = tuple[Matrix, ...]
 
-def _vector(values, name, *, positive=False):
+
+def _vector(values: Iterable[float], name: str, *, positive: bool = False) -> tuple[float, ...]:
     result = tuple(_real(v, name, positive=positive) for v in values)
     if not result:
         raise ValueError(f"{name} must not be empty")
     return result
 
 
-def _square(values, n, name):
+def _square(values: Iterable[Iterable[float]], n: int, name: str) -> Matrix:
     rows = tuple(tuple(_real(v, name) for v in row) for row in values)
     if len(rows) != n or any(len(row) != n for row in rows):
         raise ValueError(f"{name} must be square and aligned")
@@ -33,12 +38,12 @@ def _square(values, n, name):
     return rows
 
 
-def lee_kesler_cross_volumes(critical_volumes):
+def lee_kesler_cross_volumes(critical_volumes: Iterable[float]) -> Matrix:
     v = _vector(critical_volumes, "critical volume", positive=True)
     return tuple(tuple((a ** (1 / 3) + b ** (1 / 3)) ** 3 / 8 for b in v) for a in v)
 
 
-def tarakad_danner_interactions(critical_volumes):
+def tarakad_danner_interactions(critical_volumes: Iterable[float]) -> Matrix:
     v = _vector(critical_volumes, "critical volume", positive=True)
     cross = lee_kesler_cross_volumes(v)
     return tuple(
@@ -47,7 +52,9 @@ def tarakad_danner_interactions(critical_volumes):
     )
 
 
-def meng_duan_interactions(species, *, unknown="raise"):
+def meng_duan_interactions(
+    species: Iterable[tuple[str, int]], *, unknown: str = "raise",
+) -> Matrix:
     """Explicit (class, carbon count) inputs, not structural inference from CAS.
 
     Classes: alkane, carbon_dioxide, nitrogen, other. The alkane caller must
@@ -57,7 +64,7 @@ def meng_duan_interactions(species, *, unknown="raise"):
     """
     if unknown not in {"raise", "zero"}:
         raise ValueError("unknown-pair policy must be raise or zero")
-    species = tuple(tuple(s) for s in species)
+    species = tuple(cast(tuple[str, int], tuple(s)) for s in species)
     if not species:
         raise ValueError("species must not be empty")
     for kind, count in species:
@@ -68,7 +75,7 @@ def meng_duan_interactions(species, *, unknown="raise"):
                 "alkane requires positive integer carbon count; other classes use zero"
             )
 
-    def pair(a, b):
+    def pair(a: tuple[str, int], b: tuple[str, int]) -> float:
         ka, na = a
         kb, nb = b
         if ka == kb == "alkane":
@@ -93,13 +100,13 @@ def meng_duan_interactions(species, *, unknown="raise"):
 
 
 def virial_cross_parameters(
-    critical_temperatures,
-    critical_pressures,
-    critical_volumes,
-    acentric_factors,
+    critical_temperatures: Iterable[float],
+    critical_pressures: Iterable[float],
+    critical_volumes: Iterable[float],
+    acentric_factors: Iterable[float],
     *,
-    interactions=None,
-):
+    interactions: Iterable[Iterable[float]] | None = None,
+) -> tuple[tuple[dict[str, float], ...], ...]:
     """Tarakad-Danner Tc/Pc/omega and Lee-Kesler Vc, with explicit optional kij."""
     t = _vector(critical_temperatures, "critical temperature", positive=True)
     p = _vector(critical_pressures, "critical pressure", positive=True)
@@ -129,7 +136,9 @@ def virial_cross_parameters(
     return tuple(result)
 
 
-def virial_coefficient_matrices(method, temperature_K, parameter_rows):
+def virial_coefficient_matrices(
+    method: str, temperature_K: float, parameter_rows: Iterable[Iterable[Mapping[str, float]]],
+) -> tuple[Matrix, ...]:
     """Return four symmetric coefficient matrices, ordered by T derivative."""
     rows = tuple(
         tuple(virial_derivatives(method, temperature_K, p) for p in row) for row in parameter_rows
@@ -147,7 +156,9 @@ def virial_coefficient_matrices(method, temperature_K, parameter_rows):
     )
 
 
-def _partial(function, values, axes):
+def _partial(
+    function: Callable[[Sequence[Scalar]], Scalar], values: Sequence[Scalar], axes: Sequence[int],
+) -> Scalar:
     """Seed the existing first-order algebra; no second derivative engine."""
     if not axes:
         return function(values)
@@ -159,13 +170,13 @@ def _partial(function, values, axes):
     return result.slope if isinstance(result, FirstDerivative) else 0.0
 
 
-def _zero(value):
+def _zero(value: Scalar) -> bool:
     if isinstance(value, FirstDerivative):
         return _zero(value.value) and _zero(value.slope)
     return value == 0
 
 
-def _cube_root(value):
+def _cube_root(value: Scalar) -> Scalar:
     primal = scalar_value(value)
     if primal == 0:
         if _zero(value):
@@ -176,26 +187,27 @@ def _cube_root(value):
 
 @dataclass(frozen=True)
 class VirialCoefficientResponse:
-    temperature_derivatives: tuple
-    gradient: tuple
-    hessian: tuple
-    third: tuple
-    temperature_gradient: tuple
-    temperature_hessian: tuple
-    second_temperature_gradient: tuple
+    temperature_derivatives: tuple[float, ...]
+    gradient: tuple[float, ...]
+    hessian: Matrix
+    third: Tensor3
+    temperature_gradient: tuple[float, ...]
+    temperature_hessian: Matrix
+    second_temperature_gradient: tuple[float, ...]
     coordinates: str
 
     @property
-    def value(self):
+    def value(self) -> float:
         return self.temperature_derivatives[0]
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 def virial_mixture_response(
-    fractions, coefficient_derivatives, *, kind="B", coordinates="unconstrained"
-):
+    fractions: Iterable[float], coefficient_derivatives: Iterable[Iterable[Iterable[float]]], *,
+    kind: str = "B", coordinates: str = "unconstrained",
+) -> VirialCoefficientResponse:
     """B quadratic or signed-real Orentlicher-Prausnitz C cubic mixing.
 
     coefficient_derivatives contains value, dT, dT2, dT3 matrices at one T.
@@ -215,7 +227,7 @@ def virial_mixture_response(
     count = n if coordinates == "unconstrained" else n - 1
     point = (0.0, *z[:count])
 
-    def formula(q):
+    def formula(q: Sequence[Scalar]) -> Scalar:
         t, *ys = q
         if coordinates == "independent":
             ys.append(1 - sum(ys))
@@ -237,8 +249,8 @@ def virial_mixture_response(
             for i, j, k in product(range(n), repeat=3)
         )
 
-    def d(*axes):
-        value = float(_partial(formula, point, axes))
+    def d(*axes: int) -> float:
+        value = float(cast(float, _partial(formula, point, axes)))
         if not isfinite(value):
             raise ValueError("nonfinite mixture derivative")
         return value

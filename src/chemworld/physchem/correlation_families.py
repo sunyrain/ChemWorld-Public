@@ -433,8 +433,9 @@ def family_value_and_slope(
         return volume_derivatives(family.volume_method, T, parameters,
                                   order=1, output=family.volume_output)
     if CORRELATION_FAMILIES[equation_id].virial_method:
-        return virial_derivatives(CORRELATION_FAMILIES[equation_id].virial_method,
-                                  T, coefficients, order=1)
+        return cast(tuple[float, float],
+                    virial_derivatives(CORRELATION_FAMILIES[equation_id].virial_method,
+                                       T, coefficients, order=1))
     if equation_id.startswith("dippr"):
         return cast(tuple[float, float],
                     derivative_values(lambda t: dippr_expression(equation_id, t, coefficients), T))
