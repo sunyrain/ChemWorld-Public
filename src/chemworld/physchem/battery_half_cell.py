@@ -8,13 +8,18 @@ separate stationary impedance API consumes this original residual. No dynamic
 electrolyte, thermal, side-reaction or equilibrium-energy model is implied.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from functools import cached_property
 from itertools import pairwise
 from math import asinh, isclose, isfinite, sqrt
 from types import MappingProxyType
+from typing import Any, Self, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import sparse
 
 from chemworld.data.scientific_inputs import ScientificTable, _keys, _text
@@ -27,6 +32,7 @@ from chemworld.physchem.battery_models import (
     particle_surface_fraction,
 )
 from chemworld.physchem.coupled_system import (
+    CoupledAdvanceResult,
     CoupledAlgebraic,
     CoupledCoordinate,
     CoupledEvent,
@@ -70,7 +76,7 @@ class LithiumMetalCounterElectrodeSpec:
     parameters: ScientificTable
     parameter_row_id: str
     convention: str = METAL_CONVENTION
-    _native: object = field(init=False, repr=False, compare=False)
+    _native: Mapping[str, float] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.parameters, ScientificTable) or self.parameters.kind != "parameters":
@@ -84,7 +90,7 @@ class LithiumMetalCounterElectrodeSpec:
             raise ValueError("lithium metal parameters must exactly match its declared equation")
         if any(v.quality != "valid" or v.value is None for v in cells.values()):
             raise ValueError("lithium metal parameters must be valid finite measurements or inputs")
-        native = {k: convert_value(cells[k].value, cells[k].unit, u)
+        native = {k: convert_value(cast(float, cells[k].value), cells[k].unit, u)
                   for k, u in METAL_UNITS.items()}
         if any(not isfinite(v) or v <= 0 for v in native.values()):
             raise ValueError("lithium metal parameters must be positive and finite")
@@ -94,28 +100,28 @@ class LithiumMetalCounterElectrodeSpec:
             raise ValueError("derived lithium metal geometry/inventory/resistance is nonfinite")
 
     @property
-    def native_parameters(self):
+    def native_parameters(self) -> Mapping[str, float]:
         return self._native
 
     @property
-    def volume_m3(self):
+    def volume_m3(self) -> float:
         return self._native["area_m2"] * self._native["thickness_m"]
 
     @property
-    def initial_amount_mol(self):
+    def initial_amount_mol(self) -> float:
         return self.volume_m3 / self._native["partial_molar_volume_m3_mol"]
 
     @property
-    def resistance_ohm(self):
+    def resistance_ohm(self) -> float:
         return self._native["thickness_m"] / (
             self._native["conductivity_S_m"] * self._native["area_m2"])
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"parameters": self.parameters.to_dict(), "parameter_row_id": self.parameter_row_id,
                 "convention": self.convention}
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         _keys(value, ("parameters", "parameter_row_id", "convention"))
         return cls(ScientificTable.from_dict(value["parameters"]), value["parameter_row_id"],
                    value["convention"])
@@ -139,8 +145,9 @@ class BatteryHalfCellSPMSpec:
         if isinstance(self.metal, dict):
             object.__setattr__(self, "metal",
                                LithiumMetalCounterElectrodeSpec.from_dict(self.metal))
-        if isinstance(self.positive, dict):
-            object.__setattr__(self, "positive", ParticleSpec(**self.positive))
+        positive: object = self.positive
+        if isinstance(positive, dict):
+            object.__setattr__(self, "positive", ParticleSpec(**positive))
         if isinstance(self.positive_ocv, dict):
             object.__setattr__(self, "positive_ocv", ElectrodeOCV.from_dict(self.positive_ocv))
         if (not isinstance(self.metal, LithiumMetalCounterElectrodeSpec)
@@ -170,11 +177,11 @@ class BatteryHalfCellSPMSpec:
                     "metal kinetics require their declared temperature and salt condition")
 
     @property
-    def model_family(self):
+    def model_family(self) -> str:
         return HALF_CELL_FAMILY
 
     @property
-    def model_id(self):
+    def model_id(self) -> str:
         return HALF_CELL_FAMILY
 
     @property
@@ -198,39 +205,39 @@ class BatteryHalfCellSPMSpec:
         return False
 
     @property
-    def hysteresis_keys(self):
+    def hysteresis_keys(self) -> tuple[()]:
         return ()
 
     @property
-    def coordinate_keys(self):
+    def coordinate_keys(self) -> tuple[str, ...]:
         return BATTERY_COORDINATES
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str, ...]:
         return (METAL_KEY, *self.positive.keys("positive"))
 
     @property
-    def inventory_species(self):
+    def inventory_species(self) -> dict[str, str]:
         return dict.fromkeys(self.inventory_keys, "Li")
 
     @property
-    def volume_l(self):
+    def volume_l(self) -> float:
         return (self.metal.volume_m3 + self.positive.active_volume_m3) * 1000
 
     @property
-    def usable_charge_c(self):
+    def usable_charge_c(self) -> float:
         return F * min(self.metal.initial_amount_mol, self.positive.capacity_mol * (
             1-self.surface_margin-self.initial_positive_fraction))
 
-    def current_at_c_rate(self, rate):
+    def current_at_c_rate(self, rate: float) -> float:
         if not isfinite(rate):
             raise ValueError("half-cell C rate must be finite")
         return rate * self.usable_charge_c / 3600
 
-    def initial_coordinates(self):
+    def initial_coordinates(self) -> dict[str, float]:
         return dict.fromkeys(self.coordinate_keys, 0.0)
 
-    def initial_state(self):
+    def initial_state(self) -> CoupledState:
         n = {METAL_KEY: self.metal.initial_amount_mol,
              **dict(zip(self.positive.keys("positive"), self.positive.mesh.cell_volumes_m3
                         * self.positive.maximum_concentration_mol_m3
@@ -238,7 +245,7 @@ class BatteryHalfCellSPMSpec:
         return CoupledState(n, self.temperature_K, self.volume_l,
                             coordinates=self.initial_coordinates())
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"model_family": self.model_family, "metal": self.metal.to_dict(),
                 "positive": asdict(self.positive), "positive_ocv": self.positive_ocv.to_dict(),
                 **{key: getattr(self, key) for key in (
@@ -248,14 +255,14 @@ class BatteryHalfCellSPMSpec:
                     "maximum_current_A", "provenance")}}
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         data = dict(value)
         if data.pop("model_family", None) != HALF_CELL_FAMILY:
             raise ValueError("unsupported half-cell family")
         return cls(**data)
 
     @cached_property
-    def cv_monotone_certified(self):
+    def cv_monotone_certified(self) -> bool:
         # Nonpositive dU/dtheta plus passive BV gives a unique current at fixed
         # inventories. Include the full current-limit trial extrapolation, not
         # just the accepted source domain. Accepted states still stop at its bounds.
@@ -303,7 +310,7 @@ class HalfCellReadout:
             if not finite:
                 raise ValueError(f"half-cell readout {name} must be finite")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str | float]:
         """Return a JSON-safe diagnostic payload without persistent state."""
         return {
             "model_family": HALF_CELL_FAMILY,
@@ -319,7 +326,7 @@ class HalfCellReadout:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         """Decode a readout payload, rejecting a different battery family."""
         payload = dict(value)
         if payload.pop("model_family", HALF_CELL_FAMILY) != HALF_CELL_FAMILY:
@@ -327,7 +334,9 @@ class HalfCellReadout:
         return cls(**{key: float(item) for key, item in payload.items()})
 
 
-def _half_cell_voltage(spec, state, current):
+def _half_cell_voltage(
+    spec: BatteryHalfCellSPMSpec, state: CoupledStateView, current: float,
+) -> tuple[HalfCellReadout, tuple[float, float, float]]:
     """Port and its actual partial derivatives, including the surface FV closure."""
     if not isfinite(current) or abs(current) > spec.maximum_current_A:
         raise ValueError("current is outside half-cell source capability")
@@ -358,11 +367,15 @@ def _half_cell_voltage(spec, state, current):
     return reading, (float(vi), float(vn), float(vt))
 
 
-def half_cell_readout(spec, state, current_A):
+def half_cell_readout(
+    spec: BatteryHalfCellSPMSpec, state: CoupledStateView, current_A: float,
+) -> HalfCellReadout:
     return _half_cell_voltage(spec, state, current_A)[0]
 
 
-def half_cell_control_mode(spec, state, program):
+def half_cell_control_mode(
+    spec: BatteryHalfCellSPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> tuple[str, float]:
     target = program.value_at(state.time_s)
     if program.unit == "A":
         return "constant_current", target
@@ -376,7 +389,9 @@ def half_cell_control_mode(spec, state, program):
     return "constant_voltage", target
 
 
-def half_cell_algebraic(spec, program):
+def half_cell_algebraic(
+    spec: BatteryHalfCellSPMSpec, program: ScalarControlProgram,
+) -> CoupledAlgebraic:
     if program.unit == "V" and not spec.cv_monotone_certified:
         raise ValueError("half-cell CV requires a certified monotone working OCV")
     ik, vk = BATTERY_ALGEBRAIC
@@ -386,12 +401,12 @@ def half_cell_algebraic(spec, program):
     equations = (ResidualEquation("half-cell:control", "1"),
                  ResidualEquation("half-cell:terminal-voltage", "V"))
 
-    def initial(state):
+    def initial(state: CoupledStateView) -> dict[str, float]:
         mode, value = half_cell_control_mode(spec, state, program)
         current = 0.0 if mode == "constant_voltage" else value
         return {ik: current, vk: half_cell_readout(spec, state, current).voltage_V}
 
-    def residual(state):
+    def residual(state: CoupledStateView) -> list[float]:
         current, voltage = (state.algebraic_values[k] for k in BATTERY_ALGEBRAIC)
         mode, target = half_cell_control_mode(spec, state, program)
         control = voltage-target if mode == "constant_voltage" else (
@@ -401,7 +416,9 @@ def half_cell_algebraic(spec, program):
     return CoupledAlgebraic(variables, equations, initial, residual)
 
 
-def half_cell_control_current(spec, state, program):
+def half_cell_control_current(
+    spec: BatteryHalfCellSPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> float:
     if BATTERY_ALGEBRAIC[0] in state.algebraic_values:
         return state.algebraic_values[BATTERY_ALGEBRAIC[0]]
     mode, target = half_cell_control_mode(spec, state, program)
@@ -412,13 +429,17 @@ def half_cell_control_current(spec, state, program):
     closure = half_cell_algebraic(spec, program)
     guess = closure.initial_values(state)
 
-    def residual(t, y, rate, params):
+    def residual(
+        t: float, y: NDArray[np.float64], rate: NDArray[np.float64], params: NDArray[np.float64],
+    ) -> Sequence[float] | NDArray[np.float64]:
         view = CoupledStateView(state.amounts_mol, state.temperature_K, state.volume_L,
             state.time_s, coordinates=state.coordinates,
             algebraic_values=dict(zip(BATTERY_ALGEBRAIC, y, strict=True)))
         return closure.residual(view)
 
-    def jacobian(t, y, rate, params):
+    def jacobian(
+        t: float, y: NDArray[np.float64], rate: NDArray[np.float64], params: NDArray[np.float64],
+    ) -> list[list[float]]:
         return [[0.0, 1.0], [-_half_cell_voltage(spec, state, y[0])[1][0], 1.0]]
 
     system = ResidualSystem("half-cell:electrical-closure", closure.variables, closure.equations,
@@ -430,7 +451,7 @@ def half_cell_control_current(spec, state, program):
     return float(answer.root.value[0])
 
 
-def validate_half_cell_state(spec, state):
+def validate_half_cell_state(spec: BatteryHalfCellSPMSpec, state: CoupledStateView) -> None:
     if (set(state.amounts_mol) != set(spec.inventory_keys)
             or set(state.coordinates) != set(spec.coordinate_keys)):
         raise ValueError("half-cell state must use its unique metal/working inventory and Q/W")
@@ -454,20 +475,26 @@ def validate_half_cell_state(spec, state):
 
 
 class _HalfCellThermodynamics:
-    def __init__(self, spec):
+    def __init__(self, spec: BatteryHalfCellSPMSpec) -> None:
         self.inventory_keys = spec.inventory_keys
 
-    def heat_capacity_j_k(self, state):
+    def heat_capacity_j_k(self, state: CoupledStateView) -> float:
         return 1.0
 
-    def internal_energy_j(self, state):
+    def internal_energy_j(self, state: CoupledStateView) -> None:
         return None
 
-    def chemical_energy_rate_w(self, state, rates, contributions):
+    def chemical_energy_rate_w(
+        self, state: CoupledStateView, rates: Mapping[str, float],
+        contributions: Sequence[ProcessContribution],
+    ) -> float:
         return 0.0
 
 
-def _half_cell_rhs_jacobian(spec, state, program, identities):
+def _half_cell_rhs_jacobian(
+    spec: BatteryHalfCellSPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+    identities: Sequence[str],
+) -> sparse.csc_matrix:
     index = {key: i for i, key in enumerate(identities)}
     jac = np.zeros((len(identities), len(identities)))
     keys = spec.positive.keys("positive")
@@ -496,7 +523,10 @@ def _half_cell_rhs_jacobian(spec, state, program, identities):
     return sparse.csc_matrix(jac)
 
 
-def half_cell_system(spec, program, *, thermal_device=None, control_events=()):
+def half_cell_system(
+    spec: BatteryHalfCellSPMSpec, program: ScalarControlProgram, *,
+    thermal_device: object | None = None, control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     if not isinstance(spec, BatteryHalfCellSPMSpec):
         raise ValueError("half-cell advance requires its explicit specification")
     if thermal_device is not None:
@@ -511,7 +541,7 @@ def half_cell_system(spec, program, *, thermal_device=None, control_events=()):
     diffusion = ConservativeDiffusion(p.mesh, p.diffusivity_m2_s).couple(
         keys, process_id="half-cell:working-diffusion", owner_id="positive").process
 
-    def transfer(state):
+    def transfer(state: CoupledStateView) -> ProcessContribution:
         current = half_cell_control_current(spec, state, program)
         read = half_cell_readout(spec, state, current)
         source, target = (METAL_KEY, keys[-1]) if current >= 0 else (keys[-1], METAL_KEY)
@@ -520,10 +550,10 @@ def half_cell_system(spec, program, *, thermal_device=None, control_events=()):
             coordinate_rates={"discharged_charge_C": current,
                               "delivered_work_J": current*read.voltage_V})
 
-    def current(state):
+    def current(state: CoupledStateView) -> float:
         return half_cell_control_current(spec, state, program)
 
-    def surface(state):
+    def surface(state: CoupledStateView) -> float:
         return particle_surface_fraction(p, "positive", state, -current(state)/F)
 
     events = [
@@ -539,8 +569,14 @@ def half_cell_system(spec, program, *, thermal_device=None, control_events=()):
                      spec.maximum_voltage_V-half_cell_readout(spec, s, current(s)).voltage_V),
     ]
     if program.unit == "V":
-        events.extend(CoupledEvent(f"half-cell:cv:{label}-limit", lambda s, value=value:
-            half_cell_readout(spec, s, value).voltage_V-program.value_at(s.time_s),
+        def voltage_event(value: float) -> Callable[[CoupledStateView], float]:
+            def event(state: CoupledStateView) -> float:
+                return (half_cell_readout(spec, state, value).voltage_V
+                        - program.value_at(state.time_s))
+
+            return event
+
+        events.extend(CoupledEvent(f"half-cell:cv:{label}-limit", voltage_event(value),
             direction=0, terminal=False) for label, value in (
                 ("negative", -spec.maximum_current_A), ("positive", spec.maximum_current_A)))
     return CoupledSystem(
@@ -562,8 +598,11 @@ def half_cell_system(spec, program, *, thermal_device=None, control_events=()):
     )
 
 
-def advance_half_cell(spec, state, program, duration_s, *, evaluation_times_s=None,
-                      thermal_device=None, control_events=()):
+def advance_half_cell(
+    spec: BatteryHalfCellSPMSpec, state: CoupledState, program: ScalarControlProgram,
+    duration_s: float, *, evaluation_times_s: Sequence[float] | None = None,
+    thermal_device: object | None = None, control_events: Sequence[CoupledEvent] = (),
+) -> CoupledAdvanceResult:
     result = half_cell_system(spec, program, thermal_device=thermal_device,
         control_events=control_events).advance(state, duration_s,
                                                evaluation_times_s=evaluation_times_s)
