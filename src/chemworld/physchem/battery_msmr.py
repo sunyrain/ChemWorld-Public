@@ -116,7 +116,7 @@ class BatteryMSMRSPMSpec:
         return MSMR_FAMILY
 
     @property
-    def numerical_form(self):
+    def numerical_form(self) -> str:
         return "residual"
 
     @property
@@ -132,7 +132,7 @@ class BatteryMSMRSPMSpec:
         return None
 
     @property
-    def has_directional_ocp(self):
+    def has_directional_ocp(self) -> bool:
         return False
 
     @property

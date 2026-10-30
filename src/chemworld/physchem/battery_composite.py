@@ -141,7 +141,7 @@ class BatteryCompositeSPMSpec:
     model_id = model_family
 
     @property
-    def numerical_form(self):
+    def numerical_form(self) -> str:
         return "residual"
 
     @property
@@ -151,7 +151,7 @@ class BatteryCompositeSPMSpec:
     sei = electrolyte = negative_ocp = positive_ocp = thermal
 
     @property
-    def has_directional_ocp(self):
+    def has_directional_ocp(self) -> bool:
         return False
 
     @property
@@ -195,7 +195,7 @@ class BatteryCompositeSPMSpec:
         return tuple(self.inventory_species)
 
     @property
-    def counts(self):
+    def counts(self) -> tuple[int, int]:
         return (2, 1)
 
     @cached_property
@@ -210,7 +210,7 @@ class BatteryCompositeSPMSpec:
                          self.current_coordinates, strict=True) for i in free)
 
     @property
-    def electrolyte_potential_key(self):
+    def electrolyte_potential_key(self) -> str:
         return "battery:composite:electrolyte-potential_V"
 
     @cached_property
@@ -226,11 +226,11 @@ class BatteryCompositeSPMSpec:
         return tuple(f"battery:bv:{identity}" for *_, identity in self.particle_bins)
 
     @property
-    def closure_id(self):
+    def closure_id(self) -> str:
         return "battery:composite-closure"
 
     @property
-    def intercalation_id(self):
+    def intercalation_id(self) -> str:
         return "battery:composite-intercalation"
 
     def population_ocp_derivatives(self, population, theta, current, state):

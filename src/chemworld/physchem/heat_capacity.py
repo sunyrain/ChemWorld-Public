@@ -97,7 +97,7 @@ class PiecewiseHeatCapacity:
         object.__setattr__(self, "segments", segments)
 
     @property
-    def equation_id(self):
+    def equation_id(self) -> str:
         return "piecewise_heat_capacity"
 
     @property
@@ -109,7 +109,7 @@ class PiecewiseHeatCapacity:
         return {"temperature": "K"}
 
     @property
-    def output_unit(self):
+    def output_unit(self) -> str:
         return "J/(mol*K)"
 
     @property

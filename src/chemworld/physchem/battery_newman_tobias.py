@@ -174,7 +174,7 @@ class BatteryNewmanTobiasSpec:
         return NT_FAMILY
 
     @property
-    def numerical_form(self):
+    def numerical_form(self) -> str:
         return "residual"
 
     @property
@@ -190,7 +190,7 @@ class BatteryNewmanTobiasSpec:
         return None
 
     @property
-    def has_directional_ocp(self):
+    def has_directional_ocp(self) -> bool:
         return False
 
     @property
@@ -202,7 +202,7 @@ class BatteryNewmanTobiasSpec:
         return BATTERY_COORDINATES
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str, str]:
         return ("negative:Li", "positive:Li")
 
     @property

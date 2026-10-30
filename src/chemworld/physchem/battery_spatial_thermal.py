@@ -167,11 +167,11 @@ class BatterySpatialThermalSPMSpec:
     model_id = model_family
 
     @property
-    def numerical_form(self):
+    def numerical_form(self) -> str:
         return "residual"
 
     @property
-    def series_resistance_ohm(self):
+    def series_resistance_ohm(self) -> float:
         return 0.0
 
     @property
@@ -181,7 +181,7 @@ class BatterySpatialThermalSPMSpec:
     electrolyte = negative_ocp = positive_ocp = sei
 
     @property
-    def has_directional_ocp(self):
+    def has_directional_ocp(self) -> bool:
         return False
 
     @property

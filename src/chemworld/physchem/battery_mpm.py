@@ -157,11 +157,11 @@ class BatteryMPMSpec(BatterySPMSpec):
         return PHI_E
 
     @property
-    def closure_id(self):
+    def closure_id(self) -> str:
         return "battery:mpm-closure"
 
     @property
-    def intercalation_id(self):
+    def intercalation_id(self) -> str:
         return "battery:mpm-intercalation"
 
     @property

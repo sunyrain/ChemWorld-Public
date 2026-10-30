@@ -113,7 +113,7 @@ class CoupledConcentrationSpec:
         return self.pot_capacity_J_K, self.bottle_capacity_J_K
 
     @property
-    def cell_count(self):
+    def cell_count(self) -> int:
         return 2
 
     @cached_property

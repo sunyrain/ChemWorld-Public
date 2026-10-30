@@ -135,7 +135,7 @@ class MQMQAPhaseModel(GibbsPhaseModel):
         return self._phase.constituents
 
     @property
-    def constraint_labels(self):
+    def constraint_labels(self) -> tuple[str, str]:
         return "site_sum:0", "charge"
 
     def _composition(self, fractions):

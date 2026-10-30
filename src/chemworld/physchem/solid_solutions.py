@@ -134,7 +134,7 @@ class SolidSolutionSpec:
         return self
 
     @property
-    def component_ids(self):
+    def component_ids(self) -> tuple[str, str]:
         return ("A", "B")
 
     def to_dict(self):

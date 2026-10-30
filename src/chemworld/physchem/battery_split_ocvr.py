@@ -144,7 +144,7 @@ class BatterySplitOCVRSpec:
         return None
 
     @property
-    def has_directional_ocp(self):
+    def has_directional_ocp(self) -> bool:
         return False
 
     @property

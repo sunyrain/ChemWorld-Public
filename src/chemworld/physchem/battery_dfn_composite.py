@@ -157,7 +157,7 @@ class BatteryCompositeDFNSpec:
     model_id = model_family
 
     @property
-    def numerical_form(self):
+    def numerical_form(self) -> str:
         return "residual"
 
     @property
@@ -167,7 +167,7 @@ class BatteryCompositeDFNSpec:
     sei = plating = negative_ocp = positive_ocp = thermal
 
     @property
-    def has_directional_ocp(self):
+    def has_directional_ocp(self) -> bool:
         return False
 
     @property

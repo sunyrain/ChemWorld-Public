@@ -253,7 +253,7 @@ class BatteryLeadAcidSpec:
         return LOQS_FAMILY
 
     @property
-    def numerical_form(self):
+    def numerical_form(self) -> str:
         return "residual"
 
     @property
@@ -291,11 +291,11 @@ class BatteryLeadAcidSpec:
         return None
 
     @property
-    def has_directional_ocp(self):
+    def has_directional_ocp(self) -> bool:
         return False
 
     @property
-    def series_resistance_ohm(self):
+    def series_resistance_ohm(self) -> float:
         return 0.0
 
     @property
