@@ -5,6 +5,7 @@ from dataclasses import fields, replace
 
 import numpy as np
 import pytest
+from scipy import sparse
 
 from chemworld.physchem.coupled_system import (
     ConstantCvThermodynamics,
@@ -163,6 +164,40 @@ def test_processes_and_events_consume_consistent_algebraic_values_without_persis
     for point in result.trajectory:
         assert not point.algebraic_values
         assert point.amounts_mol["A"] == pytest.approx(1 / (1 + 0.4 * point.time_s), rel=3e-7)
+
+
+@pytest.mark.parametrize("sparse_jacobian", [False, True])
+@pytest.mark.parametrize("method", ["BDF", "Radau"])
+def test_analytic_coupled_jacobian_preserves_conversion_and_algebraic_stop(
+    sparse_jacobian, method,
+):
+    calls = []
+
+    def jacobian(state, identities):
+        calls.append(state.time_s)
+        a, b, z = (identities.index(key) for key in ("A", "B", "squared_A"))
+        result = np.zeros((len(identities), len(identities)))
+        result[a, z], result[b, z] = -0.4, 0.4
+        result[z, a], result[z, z] = 2 * state.amounts_mol["A"], -1
+        return sparse.csc_matrix(result) if sparse_jacobian else result
+
+    system = replace(
+        algebraic_reaction(), residual_rhs_jacobian=jacobian,
+        policy=ODESolverPolicy("analytic-coupled-test", method=method),
+    )
+    before = CoupledState({"A": 1, "B": 0}, 300, 1)
+    result = system.advance(before, 5, evaluation_times_s=[0, 1, 4])
+    assert calls
+    assert result.solver_diagnostic["residual"]["derivative_modes"]["state"] == "analytic"
+    assert result.stopping_event == "half-A"
+    assert result.actual_duration_s == pytest.approx(2.5, rel=3e-7)
+    assert result.final_state.amounts_mol == pytest.approx({"A": 0.5, "B": 0.5}, abs=1e-9)
+    for point in (*result.trajectory, result.final_state):
+        a = 1 / (1 + 0.4 * point.time_s)
+        assert point.amounts_mol["A"] == pytest.approx(a, rel=3e-7)
+        assert sum(point.amounts_mol.values()) == pytest.approx(1, abs=1e-10)
+        assert point.temperature_K == 300
+    assert before.amounts_mol == {"A": 1, "B": 0}
 
 
 @pytest.mark.parametrize("duration", [0, 1])

@@ -108,7 +108,7 @@ def solve_coupled_residual(
 
     def physical_jacobian(t: float, y: NDArray[np.float64], p: NDArray[np.float64]) -> Matrix:
         # This callback is supplied only when the system declares a Jacobian.
-        jacobian = cast(Callable[[CoupledStateView, tuple[str, ...]], Matrix],
+        jacobian = cast("Callable[[CoupledStateView, tuple[str, ...]], Matrix]",
                         system.residual_rhs_jacobian)(
             view(t, y[:count], values(y)), (*identities, *names)
         )
