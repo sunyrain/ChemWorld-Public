@@ -254,9 +254,28 @@ def test_spme_shares_the_actual_clock_and_earliest_cutoff_with_other_domains(noi
         advancer = runtime.runtime.domain_services.reaction_thermal.advancer
         for key, local in local_states(runtime._state).items():
             expected = advancer.batch(before[key], {"duration_s": elapsed}, heat=False)
-            assert local.state_slots == expected.state.state_slots
+            for actual_slot, expected_slot in zip(
+                local.state_slots.slots, expected.state.state_slots.slots, strict=True,
+            ):
+                if actual_slot.spec.state_type == "battery-lithium-and-charge-v1":
+                    assert actual_slot.spec == expected_slot.spec
+                    assert actual_slot.initial_values == expected_slot.initial_values
+                    # Event location and integration directly to that time use
+                    # different adaptive meshes. Use the solver's 1e-8 rtol;
+                    # identical-input replay is checked separately above.
+                    assert actual_slot.values == pytest.approx(
+                        expected_slot.values, rel=1e-8, abs=0,
+                    )
+                else:
+                    assert actual_slot == expected_slot
             assert local.species_amounts == expected.state.species_amounts
         battery = unpack_battery(local_states(runtime._state)["cell"])
+        assert battery_readout(spec, battery[3], 0.02).voltage_V == pytest.approx(
+            spec.minimum_voltage_V, abs=1e-8,
+        )
+        assert battery[3].coordinates["discharged_charge_C"] == pytest.approx(
+            0.02 * elapsed, rel=1e-10, abs=0,
+        )
         assert abs(spec.electrolyte.concentrations(battery[3])[0] - 1000) > 0
     finally:
         runtime.close()

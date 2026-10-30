@@ -22,6 +22,11 @@ def model():
     return BatterySPMSpec(thermal=BatteryThermalSpec(), sei=SEISpec())
 
 
+def test_film_energy_requires_the_declared_side_reaction():
+    with pytest.raises(ValueError, match="SEI specification"):
+        _ = BatterySPMSpec().film_chemical_energy_j_mol
+
+
 @pytest.mark.parametrize("current", [0, 0.3, -0.3])
 def test_finite_sei_balances_species_main_side_currents_and_heat(current):
     spec = model()

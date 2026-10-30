@@ -7,12 +7,14 @@ parameters are synthetic; explicit source projections retain their input binding
 Optional caloric closure derives from the same OCV state function.
 """
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
-from functools import cached_property
+from functools import cached_property, partial
 from math import asinh, isfinite, pi, sqrt
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.optimize import brentq
 
 from chemworld.physchem.battery_degradation import SEI_SPECIES, SEISpec
@@ -33,6 +35,7 @@ from chemworld.physchem.coupled_system import (
     CoupledEvent,
     CoupledProcess,
     CoupledState,
+    CoupledStateView,
     CoupledSystem,
     EnergyPort,
     HeatFlux,
@@ -108,7 +111,7 @@ class ParticleSpec:
         _ = self.mesh
 
     @cached_property
-    def mesh(self):
+    def mesh(self) -> DiffusionMesh:
         count = self.active_volume_m3 / (4 * pi / 3 * self.radius_m**3)
         uniform = DiffusionMesh.spherical(self.radius_m, self.cells, particle_count=count)
         faces = self.radius_m * (
@@ -117,14 +120,14 @@ class ParticleSpec:
         return DiffusionMesh("spherical", tuple(faces), particle_count=count)
 
     @property
-    def area_m2(self):
+    def area_m2(self) -> float:
         return 3 * self.active_volume_m3 / self.radius_m
 
     @property
-    def capacity_mol(self):
+    def capacity_mol(self) -> float:
         return self.maximum_concentration_mol_m3 * self.active_volume_m3
 
-    def keys(self, electrode):
+    def keys(self, electrode: str) -> tuple[str, ...]:
         return tuple(f"{electrode}:Li:{i}" for i in range(self.cells))
 
 
@@ -161,17 +164,22 @@ class BatterySPMSpec:
     def __post_init__(self) -> None:
         if self.numerical_form not in {"ode", "residual"}:
             raise ValueError("battery numerical form must be ode or residual")
-        if isinstance(self.sei, dict):
-            object.__setattr__(self, "sei", SEISpec(**self.sei))
-        if isinstance(self.thermal, dict):
-            object.__setattr__(self, "thermal", BatteryThermalSpec(**self.thermal))
+        # Deserialization supplies raw dictionaries; stored fields are the
+        # concrete specifications after this compatibility boundary.
+        raw_sei: object = self.sei
+        if isinstance(raw_sei, dict):
+            object.__setattr__(self, "sei", SEISpec(**raw_sei))
+        raw_thermal: object = self.thermal
+        if isinstance(raw_thermal, dict):
+            object.__setattr__(self, "thermal", BatteryThermalSpec(**raw_thermal))
         if not isfinite(self.series_resistance_ohm) or self.series_resistance_ohm < 0:
             raise ValueError("series resistance must be finite and nonnegative")
         for name in ("negative", "positive"):
             if isinstance(getattr(self, name), dict):
                 object.__setattr__(self, name, ParticleSpec(**getattr(self, name)))
-        if isinstance(self.electrolyte, dict):
-            object.__setattr__(self, "electrolyte", BatteryElectrolyteSpec(**self.electrolyte))
+        raw_electrolyte: object = self.electrolyte
+        if isinstance(raw_electrolyte, dict):
+            object.__setattr__(self, "electrolyte", BatteryElectrolyteSpec(**raw_electrolyte))
         family = ("MPM" if getattr(self, "model_family", None) == "mpm-isothermal-v1"
                   else "DFN" if getattr(self, "model_family", None) == "dfn-isothermal-v1"
                   else "SPM" if self.electrolyte is None else "SPMe")
@@ -188,7 +196,9 @@ class BatterySPMSpec:
                             or self.sei is not None or self.numerical_form != "residual"):
                         raise ValueError(
                             "directional OCP requires isothermal no-side SPM/MPM residual physics")
-                    for curve in (ocp.lithiation, ocp.delithiation):
+                    # ElectrodeOCPSpec validates both branches for non-single modes.
+                    for curve in (cast(ElectrodeOCV, ocp.lithiation),
+                                  cast(ElectrodeOCV, ocp.delithiation)):
                         if (family not in curve.supported_models
                                 or curve.stoichiometry_domain[0] > self.surface_margin
                                 or curve.stoichiometry_domain[1] < 1 - self.surface_margin):
@@ -255,8 +265,9 @@ class BatterySPMSpec:
                 "thermal SPM requires a valid initial temperature and convex chemical energy"
             )
 
-        if isinstance(self.plating, dict):
-            object.__setattr__(self, "plating", LithiumPlatingSpec.from_dict(self.plating))
+        raw_plating: object = self.plating
+        if isinstance(raw_plating, dict):
+            object.__setattr__(self, "plating", LithiumPlatingSpec.from_dict(raw_plating))
         if self.plating is not None:
             from chemworld.physchem.battery_plating import validate_plating_configuration
 
@@ -293,7 +304,7 @@ class BatterySPMSpec:
             binding.validate_projection(self)
 
     @property
-    def volume_l(self):
+    def volume_l(self) -> float:
         if self.cell_envelope_volume_m3 is not None:
             return self.cell_envelope_volume_m3 * 1000
         if self.plating is not None:
@@ -304,7 +315,7 @@ class BatterySPMSpec:
         return (self.negative.active_volume_m3 + self.positive.active_volume_m3) * 1000
 
     @property
-    def model_id(self):
+    def model_id(self) -> str:
         if self.parameter_binding is not None:
             binding = self.parameter_binding
             return (f"source-SPM:{binding.parameter_set_id}@{binding.source_version}:"
@@ -314,11 +325,11 @@ class BatterySPMSpec:
         return "synthetic-SPM-v1" if self.electrolyte is None else self.electrolyte.model_version
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str, ...]:
         return tuple(self.inventory_species)
 
     @property
-    def inventory_species(self):
+    def inventory_species(self) -> dict[str, str]:
         return {
             **dict.fromkeys(
                 (*self.negative.keys("negative"), *self.positive.keys("positive")), "Li"
@@ -330,7 +341,9 @@ class BatterySPMSpec:
         }
 
     @property
-    def film_chemical_energy_j_mol(self):
+    def film_chemical_energy_j_mol(self) -> float:
+        if self.sei is None:
+            raise ValueError("film chemical energy requires an SEI specification")
         return (
             2
             * -F
@@ -342,18 +355,18 @@ class BatterySPMSpec:
         )
 
     @property
-    def usable_charge_c(self):
+    def usable_charge_c(self) -> float:
         return F * min(
             self.negative.capacity_mol * self.initial_negative_fraction,
             self.positive.capacity_mol * (1 - self.initial_positive_fraction),
         )
 
-    def current_at_c_rate(self, rate):
+    def current_at_c_rate(self, rate: float) -> float:
         if not isfinite(rate):
             raise ValueError("C-rate must be finite")
         return rate * self.usable_charge_c / 3600
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         # OCP tables contain immutable mappings; serialize their declared codec,
         # not dataclasses' private implementation caches.
         result = asdict(replace(
@@ -389,26 +402,28 @@ class BatterySPMSpec:
         return result
 
     @property
-    def has_directional_ocp(self):
+    def has_directional_ocp(self) -> bool:
         return any(c is not None and c.mode != "single"
                    for c in (self.negative_ocp, self.positive_ocp))
 
     @property
-    def hysteresis_keys(self):
+    def hysteresis_keys(self) -> tuple[str, ...]:
         return tuple(hysteresis_key(name) for name in ("negative", "positive")
                      if (c := getattr(self, name + "_ocp")) is not None and c.mode == "axen")
 
     @property
-    def coordinate_keys(self):
+    def coordinate_keys(self) -> tuple[str, ...]:
         return (*BATTERY_COORDINATES, *self.hysteresis_keys)
 
-    def initial_coordinates(self):
+    def initial_coordinates(self) -> dict[str, float]:
         return {**dict.fromkeys(BATTERY_COORDINATES, 0.0),
                 **{hysteresis_key(name): c.native_parameters["initial_h"]
                    for name in ("negative", "positive")
                    if (c := getattr(self, name + "_ocp")) is not None and c.mode == "axen"}}
 
-    def ocp_derivatives(self, electrode, theta, current_A, state):
+    def ocp_derivatives(
+        self, electrode: str, theta: float, current_A: float, state: CoupledStateView,
+    ) -> tuple[float, float, float, float]:
         if electrode not in {"negative", "positive"}:
             raise ValueError("unknown electrode")
         ocp = getattr(self, electrode + "_ocp")
@@ -417,10 +432,13 @@ class BatterySPMSpec:
         return ocp.derivatives(electrode, theta, current_A,
                                state.coordinates.get(hysteresis_key(electrode)))
 
-    def operational_ocp(self, electrode, theta, current_A, state, *, derivative=False):
+    def operational_ocp(
+        self, electrode: str, theta: float, current_A: float, state: CoupledStateView,
+        *, derivative: bool = False,
+    ) -> float:
         return self.ocp_derivatives(electrode, theta, current_A, state)[int(derivative)]
 
-    def ocv(self, electrode, theta, *, derivative=False):
+    def ocv(self, electrode: str, theta: float, *, derivative: bool = False) -> float:
         if electrode not in {"negative", "positive"}:
             raise ValueError("unknown electrode")
         curve = getattr(self, electrode + "_ocv")
@@ -433,8 +451,8 @@ class BatterySPMSpec:
         return (slope if derivative else
                 getattr(self, electrode + "_ocv_intercept_V") + slope * theta)
 
-    def initial_state(self):
-        amounts = {}
+    def initial_state(self) -> CoupledState:
+        amounts: dict[str, float] = {}
         for name, particle, theta in (
             ("negative", self.negative, self.initial_negative_fraction),
             ("positive", self.positive, self.initial_positive_fraction),
@@ -478,7 +496,9 @@ class BatteryReadout:
     solid_ohmic_V: float = 0.0
 
 
-def particle_surface_fraction(particle, name, state, outward_mol_s):
+def particle_surface_fraction(
+    particle: ParticleSpec, name: str, state: CoupledStateView, outward_mol_s: float,
+) -> float:
     cell = state.amounts_mol[particle.keys(name)[-1]] / particle.mesh.cell_volumes_m3[-1]
     half_cell = particle.mesh.spherical_surface_distance_m
     surface = cell - outward_mol_s * half_cell / (particle.area_m2 * particle.diffusivity_m2_s)
@@ -811,12 +831,12 @@ def battery_algebraic(spec, program):
     equations = (ResidualEquation("battery:control", "1"),
                  ResidualEquation("battery:terminal-voltage", "V"))
 
-    def initial_values(state):
+    def initial_values(state: CoupledStateView) -> dict[str, float]:
         current = program.value_at(state.time_s) if program.unit == "A" else 0.0
         return {current_key: current,
                 voltage_key: battery_readout(spec, state, current).voltage_V}
 
-    def residual(state):
+    def residual(state: CoupledStateView) -> list[float]:
         current, voltage = (state.algebraic_values[key] for key in BATTERY_ALGEBRAIC)
         mode, target = battery_control_mode(spec, state, program)
         control = voltage - target if mode == "constant_voltage" else (
@@ -888,12 +908,13 @@ def battery_control_current(spec, state, program):
 
         return float(dfn_fields(spec, state, program=program)["current_A"])
     if spec.numerical_form == "residual":
-        from chemworld.physchem.coupled_system import CoupledStateView
-
         closure = battery_algebraic(spec, program)
         guess = closure.initial_values(state)
 
-        def residual(t, y, rate, p):
+        def electrical_residual(
+            t: float, y: NDArray[np.float64], rate: NDArray[np.float64],
+            p: Mapping[str, float],
+        ) -> Sequence[float]:
             view = CoupledStateView(
                 state.amounts_mol, state.temperature_K, state.volume_L, state.time_s,
                 coordinates=state.coordinates,
@@ -902,7 +923,7 @@ def battery_control_current(spec, state, program):
             return closure.residual(view)
 
         system = ResidualSystem(
-            "battery:electrical-closure", closure.variables, closure.equations, residual,
+            "battery:electrical-closure", closure.variables, closure.equations, electrical_residual,
             ResidualDerivatives("finite_difference"),
         )
         answer = solve_steady_residual(system, [guess[key] for key in BATTERY_ALGEBRAIC],
@@ -912,7 +933,7 @@ def battery_control_current(spec, state, program):
         return float(answer.root.value[0])
     low, high = -spec.maximum_current_A, spec.maximum_current_A
 
-    def residual(current):
+    def residual(current: float) -> float:
         return battery_readout(spec, state, current).voltage_V - target
 
     # A finite source remains at its declared current limit when the requested
@@ -1261,7 +1282,7 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
     ]
     nk, pk = spec.negative.keys("negative"), spec.positive.keys("positive")
 
-    def transfer(state):
+    def transfer(state: CoupledStateView) -> ProcessContribution:
         current = battery_control_current(spec, state, program)
         reading = battery_readout(spec, state, current)
         source, target = (nk[-1], pk[-1]) if current >= 0 else (pk[-1], nk[-1])
@@ -1277,7 +1298,7 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
             else {},
         )
 
-    def validate(state):
+    def validate(state: CoupledStateView) -> None:
         validate_hysteresis(spec, state)
         if (spec.thermal is None and abs(state.temperature_K - spec.temperature_K) > 1e-8) or abs(
             state.volume_L - spec.volume_l
@@ -1304,7 +1325,7 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
     processes.append(CoupledProcess("battery:intercalation", transfer, validate_state=validate))
     if spec.sei is not None:
 
-        def grow_sei(state):
+        def grow_sei(state: CoupledStateView) -> ProcessContribution:
             rate = battery_side_rate(spec, state)
             return ProcessContribution(
                 amount_rates_mol_s={
@@ -1327,12 +1348,13 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
             - electrolyte.minimum_concentration_mol_m3,
         ))
     if program.unit == "V" and spec.numerical_form == "residual":
+        def voltage_limit(state: CoupledStateView, current: float) -> float:
+            return battery_readout(spec, state, current).voltage_V - program.value_at(state.time_s)
+
         events.extend(
             CoupledEvent(
                 f"battery:cv:{label}-limit",
-                lambda state, current=current: (
-                    battery_readout(spec, state, current).voltage_V - program.value_at(state.time_s)
-                ),
+                partial(voltage_limit, current=current),
                 direction=0, terminal=False,
             )
             for label, current in (("negative", -spec.maximum_current_A),
@@ -1349,7 +1371,9 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
         )
     for name, particle in (("negative", spec.negative), ("positive", spec.positive)):
 
-        def surface(state, p=particle, n=name):
+        def surface(
+            state: CoupledStateView, p: ParticleSpec = particle, n: str = name,
+        ) -> float:
             return particle_surface_fraction(
                 p,
                 n,
@@ -1359,15 +1383,25 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
                 ),
             )
 
+        def depleted(
+            state: CoupledStateView, read: Callable[[CoupledStateView], float] = surface,
+        ) -> float:
+            return read(state) - spec.surface_margin
+
+        def saturated(
+            state: CoupledStateView, read: Callable[[CoupledStateView], float] = surface,
+        ) -> float:
+            return 1 - spec.surface_margin - read(state)
+
         events.extend(
             (
                 CoupledEvent(
                     f"battery:{name}:depleted",
-                    lambda s, read=surface: read(s) - spec.surface_margin,
+                    depleted,
                 ),
                 CoupledEvent(
                     f"battery:{name}:saturated",
-                    lambda s, read=surface: 1 - spec.surface_margin - read(s),
+                    saturated,
                 ),
             )
         )
@@ -1408,7 +1442,7 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
             )
         )
 
-    def heat(state):
+    def heat(state: CoupledStateView) -> HeatFlux:
         return HeatFlux(
             0 if thermal_device is None else thermal_device.delivered_power_w(state.temperature_K),
             0
@@ -1417,7 +1451,7 @@ def battery_system(spec, program, *, thermal_device=None, control_events=()):
             * (state.temperature_K - spec.thermal.environment_temperature_K),
         )
 
-    laws = {
+    laws: dict[str, dict[str, float]] = {
         "lithium_mol": dict.fromkeys((*nk, *pk), 1),
         "negative_faradaic_C": {**dict.fromkeys(nk, F), "discharged_charge_C": 1},
         "positive_faradaic_C": {**dict.fromkeys(pk, F), "discharged_charge_C": -1},

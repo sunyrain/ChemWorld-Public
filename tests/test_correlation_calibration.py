@@ -103,6 +103,29 @@ def test_changing_holdout_responses_does_not_change_training_or_consume_them_dur
     assert all(r["split"] == "train" for r in result["runs"] if r["stage"] != "heldout")
 
 
+@pytest.mark.parametrize("fixed", [False, True])
+def test_export_without_validation_keeps_the_training_result_and_holdout_unread(fixed):
+    fit = calibration()
+    result = fit.fit(
+        max_nfev=100,
+        evaluate_validation=False,
+        fixed_parameters={"A": 30., "B": .02} if fixed else None,
+    )
+    assert result["status"] == "fitted"
+    assert result["estimate"] == pytest.approx({"A": 30., "B": .02}, abs=1e-8)
+    assert result["validation_evaluation"] == "not_requested"
+    assert "validation" not in result
+    assert all(run["split"] == "train" for run in result["runs"])
+    assert all(run["split"] == "train" for run in result["jacobian_runs"])
+    curve = PropertyCorrelation.from_dict(json.loads(json.dumps(result["fitted_correlation"])))
+    metadata = curve.metadata["calibration"]
+    assert metadata["training"] == result["training"]
+    assert metadata["validation_evaluation"] == "not_requested"
+    assert "validation" not in metadata
+    energy = caloric_correlation_change(curve, initial_temperature_K=250, final_temperature_K=400)
+    assert energy.value == pytest.approx(5475., rel=1e-10)
+
+
 def test_rank_deficiency_is_not_hidden_by_a_small_residual():
     result = calibration(confounded=True).fit(max_nfev=100)
     assert result["status"] == "fitted"

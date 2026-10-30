@@ -321,7 +321,7 @@ class CorrelationCalibration(MeasurementCalibration[CorrelationFitParameter]):
         )
         if result["status"] == "fitted":
             card = self.candidate(result["estimate"])
-            metadata = {
+            metadata: dict[str, Any] = {
                 "source": {"source_id": "fit:" + self.fitted_correlation_id},
                 "parent_correlation": self.correlation.to_dict(),
                 "calibration": {
@@ -330,7 +330,8 @@ class CorrelationCalibration(MeasurementCalibration[CorrelationFitParameter]):
                     "parameter_basis": result["coefficient_basis"],
                     "selected_coefficients": [p.name for p in self.parameters],
                     "training": result["training"],
-                    "validation": result["validation"],
+                    **{key: result[key] for key in ("validation", "validation_evaluation")
+                       if key in result},
                     "identifiability": result["identifiability"],
                     "boundary": (
                         "local regression; no automatic material or full-domain qualification"
