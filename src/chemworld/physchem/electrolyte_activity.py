@@ -433,7 +433,9 @@ class ElectrolyteActivityModel:
         energy = self.excess_gibbs_RT_mol_kg(m, temperature_K, pressure_Pa)
         coefficients = {}
         for key in m:
-            values = {k: FirstDerivative(v, int(k == key)) for k, v in m.items()}
+            values: dict[str, FirstDerivative[float, float]] = {
+                k: FirstDerivative(v, int(k == key)) for k, v in m.items()
+            }
             out = self.excess_gibbs_RT_mol_kg(values, temperature_K, pressure_Pa)
             coefficients[key] = float(out.slope if isinstance(out, FirstDerivative) else 0)
         total = sum(m.values())

@@ -6,6 +6,7 @@ correlations, not phase equilibrium. No upstream implementation is imported.
 
 from dataclasses import replace
 from math import isclose, isfinite
+from typing import Any
 
 from chemworld.physchem.caloric_math import FirstDerivative, derivative_values, scalar_value
 from chemworld.physchem.property_reports import R_J_PER_MOL_K, PropertyEvaluation
@@ -142,7 +143,8 @@ def mixture_volume_composition_jacobian(method, T, xs, parameters, *, output="mo
     _validate(method, T, xs, parameters)
     result = []
     for i in range(len(xs) - 1):
-        dual = [FirstDerivative(x, 1.0 if j == i else -1.0 if j == len(xs) - 1 else 0.0)
+        dual: list[FirstDerivative[Any, float]] = [
+                FirstDerivative(x, 1.0 if j == i else -1.0 if j == len(xs) - 1 else 0.0)
                 for j, x in enumerate(xs)]
         value = _value(method, T, dual, parameters, output)
         result.append(scalar_value(value.slope))

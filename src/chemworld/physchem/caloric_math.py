@@ -4,59 +4,88 @@ Jets apply analytic chain rules, not finite differences. Intervals enclose
 algebraic terms during capacity validation; they own no model or runtime state.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from math import exp, expm1, fsum, inf, isfinite, log, nextafter, tanh
+from typing import Any, Generic, TypeAlias, TypeVar, cast, overload
+
+import numpy as np
+from numpy.typing import NDArray
 
 from chemworld.physchem.precise_scalar import PreciseScalar
 from chemworld.physchem.second_order_pair import SecondOrderPair
 
+JetCoefficient: TypeAlias = (
+    "float | PreciseScalar | SecondOrderPair | NDArray[np.float64] | FirstDerivative[Any, Any]"
+)
+_Value = TypeVar("_Value", bound=JetCoefficient)
+_Slope = TypeVar("_Slope", bound=JetCoefficient)
+_Base = TypeVar("_Base", float, PreciseScalar)
+_Sum = TypeVar("_Sum")
+
 
 @dataclass(frozen=True)
-class FirstDerivative:
-    value: float
-    slope: float = 0.0
+class FirstDerivative(Generic[_Value, _Slope]):
+    value: _Value
+    slope: _Slope | float = 0.0
 
-    def __add__(self, other):
+    def __add__(self, other: JetCoefficient) -> FirstDerivative[Any, Any]:
+        # Coefficient promotion/broadcasting is owned by its numeric type. Keep
+        # this dispatch dynamic while preserving each seed's value/slope types.
+        left: Any = self
         other = _jet(other)
-        return FirstDerivative(self.value + other.value, self.slope + other.slope)
+        return FirstDerivative(left.value + other.value, left.slope + other.slope)
 
     __radd__ = __add__
 
-    def __neg__(self):
+    def __neg__(self) -> FirstDerivative[Any, Any]:
         return FirstDerivative(-self.value, -self.slope)
 
-    def __sub__(self, other):
+    def __sub__(self, other: JetCoefficient) -> FirstDerivative[Any, Any]:
         return self + -_jet(other)
 
-    def __rsub__(self, other):
+    def __rsub__(self, other: JetCoefficient) -> FirstDerivative[Any, Any]:
         return _jet(other) + -self
 
-    def __mul__(self, other):
+    def __mul__(self, other: JetCoefficient) -> FirstDerivative[Any, Any]:
+        left: Any = self
         other = _jet(other)
-        return FirstDerivative(self.value * other.value,
-                               self.slope * other.value + self.value * other.slope)
+        return FirstDerivative(left.value * other.value,
+                               left.slope * other.value + left.value * other.slope)
 
     __rmul__ = __mul__
 
-    def __truediv__(self, other):
+    def __truediv__(self, other: JetCoefficient) -> FirstDerivative[Any, Any]:
+        left: Any = self
         other = _jet(other)
-        value = self.value / other.value
-        return FirstDerivative(value, (self.slope - value * other.slope) / other.value)
+        value = left.value / other.value
+        return FirstDerivative(value, (left.slope - value * other.slope) / other.value)
 
-    def __rtruediv__(self, other):
+    def __rtruediv__(self, other: JetCoefficient) -> FirstDerivative[Any, Any]:
         return _jet(other) / self
 
-    def __pow__(self, power):
+    def __pow__(self, power: float) -> FirstDerivative[Any, Any]:
         if power == 0:
             return FirstDerivative(1)
-        return FirstDerivative(self.value**power, power * self.value**(power - 1) * self.slope)
+        left: Any = self
+        return FirstDerivative(left.value**power, power * left.value**(power - 1) * left.slope)
 
 
-def _jet(value):
+def _jet(value: JetCoefficient) -> FirstDerivative[Any, Any]:
     return value if isinstance(value, FirstDerivative) else FirstDerivative(value)
 
 
-def compensated_sum(values):
+@overload
+def compensated_sum(values: Iterable[float]) -> float: ...
+
+
+@overload
+def compensated_sum(values: Iterable[_Sum]) -> _Sum | float: ...
+
+
+def compensated_sum(values: Iterable[Any]) -> Any:
     """Accurately sum a shared jet's scalar coefficients without losing derivatives.
 
     Dense Helmholtz pressure subtracts large residual terms. Compensating only
@@ -70,23 +99,23 @@ def compensated_sum(values):
         return FirstDerivative(compensated_sum(v.value for v in jets),
                                compensated_sum(v.slope for v in jets))
     if any(isinstance(value, SecondOrderPair) for value in values):
-        jets = tuple(value if isinstance(value, SecondOrderPair) else SecondOrderPair(value)
+        pairs = tuple(value if isinstance(value, SecondOrderPair) else SecondOrderPair(value)
                      for value in values)
-        return SecondOrderPair(*(compensated_sum(getattr(v, field) for v in jets)
+        return SecondOrderPair(*(compensated_sum(getattr(v, field) for v in pairs)
                                  for field in ("value", "dx", "dy", "dxx", "dxy", "dyy")))
     if all(isinstance(value, (int, float)) for value in values):
         return fsum(values)
     return sum(values)
 
 
-def scalar_value(value):
-    """The primal number of a possibly nested chain-rule derivative."""
+def scalar_value(value: object) -> Any:
+    """Unwrap any nesting depth, retaining the leaf's numeric type and precision."""
     while isinstance(value, (FirstDerivative, SecondOrderPair)):
         value = value.value
     return value
 
 
-def derivative_depth(value):
+def derivative_depth(value: object) -> int:
     """Number of nested analytic derivative levels."""
     depth = 0
     while isinstance(value, FirstDerivative):
@@ -95,7 +124,24 @@ def derivative_depth(value):
     return depth + (2 if isinstance(value, SecondOrderPair) else 0)
 
 
-def nonnegative_power(value, exponent):
+_Power = TypeVar("_Power", float, PreciseScalar, FirstDerivative[Any, Any], SecondOrderPair)
+
+
+@overload
+def nonnegative_power(value: _Power, exponent: float) -> _Power | float: ...
+
+
+@overload
+def nonnegative_power(
+    value: float | PreciseScalar | FirstDerivative[Any, Any] | SecondOrderPair,
+    exponent: FirstDerivative[Any, Any] | SecondOrderPair,
+) -> float | PreciseScalar | FirstDerivative[Any, Any] | SecondOrderPair: ...
+
+
+def nonnegative_power(
+    value: float | PreciseScalar | FirstDerivative[Any, Any] | SecondOrderPair,
+    exponent: float | FirstDerivative[Any, Any] | SecondOrderPair,
+) -> float | PreciseScalar | FirstDerivative[Any, Any] | SecondOrderPair:
     """Real power with explicit finite, one-sided derivatives at zero.
 
     A variable exponent uses the same chain rules through exp/log. At zero
@@ -112,7 +158,7 @@ def nonnegative_power(value, exponent):
             raise ValueError("requested critical derivative does not exist")
         if exponent > depth:
             return 0.0
-        result = 1.0
+        result: float | PreciseScalar | FirstDerivative[Any, Any] | SecondOrderPair = 1.0
         for _ in range(int(exponent)):
             result *= value
         return result
@@ -121,7 +167,9 @@ def nonnegative_power(value, exponent):
     return value**exponent
 
 
-def derivative_values(function, value, *, order=1):
+def derivative_values(
+    function: Callable[[Any], Any], value: _Base, *, order: int = 1
+) -> tuple[_Base | float, ...]:
     """Value through fourth derivative from nested first-order chain rules.
 
     The small fixed order is sufficient for pressure/Arrhenius derivatives;
@@ -143,21 +191,27 @@ def derivative_values(function, value, *, order=1):
     return tuple(derivatives)
 
 
-def _derivative_constant(number, depth):
+def _derivative_constant(number: _Base, depth: int) -> _Base | FirstDerivative[Any, Any]:
     if not depth:
         return number
     return FirstDerivative(_derivative_constant(number, depth-1),
                            _derivative_constant(0, depth-1))
 
 
-def _derivative_seed(number, active_levels):
+def _derivative_seed(
+    number: _Base, active_levels: Sequence[bool]
+) -> _Base | FirstDerivative[Any, Any]:
     if not active_levels:
         return number
     return FirstDerivative(_derivative_seed(number, active_levels[:-1]),
                            _derivative_constant(int(active_levels[-1]), len(active_levels)-1))
 
 
-def partial_derivative(function, values, coordinates):
+def partial_derivative(
+    function: Callable[[dict[str, Any]], Any],
+    values: Mapping[str, _Base],
+    coordinates: Iterable[str],
+) -> _Base | float:
     """A named mixed partial through total order three, using the same chain rules.
 
     ``function`` consumes a mapping. Repeated coordinates request repeated
@@ -189,22 +243,22 @@ class Interval:
         if not isfinite(self.lower) or not isfinite(self.upper) or self.lower > self.upper:
             raise ValueError("caloric interval must have ordered finite bounds")
 
-    def __add__(self, other):
+    def __add__(self, other: float | Interval) -> Interval:
         other = _interval(other)
         return _outward(self.lower + other.lower, self.upper + other.upper)
 
     __radd__ = __add__
 
-    def __neg__(self):
+    def __neg__(self) -> Interval:
         return Interval(-self.upper, -self.lower)
 
-    def __sub__(self, other):
+    def __sub__(self, other: float | Interval) -> Interval:
         return self + -_interval(other)
 
-    def __rsub__(self, other):
+    def __rsub__(self, other: float | Interval) -> Interval:
         return _interval(other) + -self
 
-    def __mul__(self, other):
+    def __mul__(self, other: float | Interval) -> Interval:
         other = _interval(other)
         if self.lower == self.upper == 0 or other.lower == other.upper == 0:
             return Interval(0, 0)
@@ -213,16 +267,16 @@ class Interval:
 
     __rmul__ = __mul__
 
-    def __truediv__(self, other):
+    def __truediv__(self, other: float | Interval) -> Interval:
         other = _interval(other)
         if other.lower <= 0 <= other.upper:
             raise ValueError("caloric interval crosses a denominator zero")
         return self * _outward(1 / other.upper, 1 / other.lower)
 
-    def __rtruediv__(self, other):
+    def __rtruediv__(self, other: float | Interval) -> Interval:
         return _interval(other) / self
 
-    def __pow__(self, power):
+    def __pow__(self, power: float) -> Interval:
         if power == 0:
             return Interval(1, 1)
         if power < 0:
@@ -235,15 +289,29 @@ class Interval:
         return _outward(min(values), max(values))
 
 
-def _outward(lower, upper):
+def _outward(lower: float, upper: float) -> Interval:
     return Interval(nextafter(lower, -inf), nextafter(upper, inf))
 
 
-def _interval(value):
+def _interval(value: float | Interval) -> Interval:
     return value if isinstance(value, Interval) else Interval(value, value)
 
 
-def exponential(value):
+_MathValue: TypeAlias = (
+    float | PreciseScalar | SecondOrderPair | FirstDerivative[Any, Any] | Interval
+)
+_Math = TypeVar("_Math", bound=_MathValue)
+
+
+@overload
+def exponential(value: float) -> float: ...
+
+
+@overload
+def exponential(value: _Math) -> _Math: ...
+
+
+def exponential(value: _MathValue) -> _MathValue:
     if isinstance(value, PreciseScalar):
         return value.exponential()
     if isinstance(value, SecondOrderPair):
@@ -257,7 +325,15 @@ def exponential(value):
     return exp(value)
 
 
-def exponential_minus_one(value):
+@overload
+def exponential_minus_one(value: float) -> float: ...
+
+
+@overload
+def exponential_minus_one(value: _Math) -> _Math: ...
+
+
+def exponential_minus_one(value: _MathValue) -> _MathValue:
     """Accurate near-zero exp(x)-1 on the same nested chain-rule arithmetic."""
     if isinstance(value, PreciseScalar):
         return value.exponential_minus_one()
@@ -272,7 +348,15 @@ def exponential_minus_one(value):
     return expm1(value)
 
 
-def hyperbolic_tangent(value):
+@overload
+def hyperbolic_tangent(value: float) -> float: ...
+
+
+@overload
+def hyperbolic_tangent(value: _Math) -> _Math: ...
+
+
+def hyperbolic_tangent(value: _MathValue) -> _MathValue:
     """Stable tanh and analytic chain rule, including saturated derivatives."""
     if isinstance(value, Interval):
         return _outward(tanh(value.lower), tanh(value.upper))
@@ -292,7 +376,15 @@ def hyperbolic_tangent(value):
     return tanh(value)
 
 
-def logarithm(value):
+@overload
+def logarithm(value: float) -> float: ...
+
+
+@overload
+def logarithm(value: _Math) -> _Math: ...
+
+
+def logarithm(value: _MathValue) -> _MathValue:
     if isinstance(value, PreciseScalar):
         return value.logarithm()
     if isinstance(value, SecondOrderPair):
@@ -305,17 +397,25 @@ def logarithm(value):
     return log(value)
 
 
-def positive_part(value):
+@overload
+def positive_part(value: float) -> float: ...
+
+
+@overload
+def positive_part(value: _Math) -> _Math | float: ...
+
+
+def positive_part(value: _MathValue) -> _MathValue:
     if isinstance(value, SecondOrderPair):
         return value if value.value > 0 else SecondOrderPair(0.0)
     if isinstance(value, FirstDerivative):
         return value if scalar_value(value) > 0 else FirstDerivative(0)
     if isinstance(value, Interval):
         return Interval(max(0, value.lower), max(0, value.upper))
-    return max(0, value)
+    return cast(float | PreciseScalar, max(0, value))
 
 
-def oscillator_expression(x, *, cosh=False):
+def oscillator_expression(x: _Power, *, cosh: bool = False) -> _Power | float:
     """Stable squared hyperbolic ratio, including analytic parameter derivatives."""
     if scalar_value(x) < 0:
         x = -x
@@ -328,7 +428,9 @@ def oscillator_expression(x, *, cosh=False):
     return (2*x*exponential(-x)/denominator)**2
 
 
-def oscillator_value_slope(x, temperature, *, cosh=False):
+def oscillator_value_slope(
+    x: float, temperature: float, *, cosh: bool = False
+) -> tuple[float, float]:
     """(x/sinh(x))² or (x/cosh(x))², with x=theta/T; slope is d/dT."""
     x = abs(x)
     if x > 745:
@@ -342,9 +444,12 @@ def oscillator_value_slope(x, temperature, *, cosh=False):
     return value, 2 * value * (logarithmic_slope - 1) / temperature
 
 
-def einstein(theta, temperature):
+_Einstein = TypeVar("_Einstein", float, FirstDerivative[Any, Any], Interval)
+
+
+def einstein(theta: float, temperature: _Einstein) -> _Einstein:
     """Einstein vibration contribution and its monotone temperature bounds."""
-    def evaluate(T):
+    def evaluate(T: float) -> tuple[float, float]:
         return oscillator_value_slope(theta / (2 * T), T)
 
     if isinstance(temperature, FirstDerivative):

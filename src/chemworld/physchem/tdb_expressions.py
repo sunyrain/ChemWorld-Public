@@ -17,9 +17,11 @@ from chemworld.physchem.second_order_pair import SecondOrderPair
 # The SGTE/TDB convention used by the selected pycalphad reference. This does
 # not replace the gas constant of another declared native thermodynamic model.
 TDB_GAS_CONSTANT_J_MOL_K = 8.3145
-_FUNCTIONS = {"LN": logarithm, "LOG": logarithm, "EXP": exponential}
 _BINARY = {ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow}
 TdbScalar = float | FirstDerivative | SecondOrderPair | PreciseScalar
+_FUNCTIONS: dict[str, Callable[[TdbScalar], TdbScalar]] = {
+    "LN": logarithm, "LOG": logarithm, "EXP": exponential,
+}
 
 
 def scalar_value(value: object) -> float:

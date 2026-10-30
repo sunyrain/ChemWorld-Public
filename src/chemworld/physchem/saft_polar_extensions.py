@@ -424,7 +424,9 @@ def _polarized_moments(
     def jacobian(values: Sequence[float]) -> np.ndarray:
         columns = []
         for j in range(len(active)):
-            lifted = [FirstDerivative(v, int(j == k)) for k, v in enumerate(values)]
+            lifted: list[FirstDerivative[float, float]] = [
+                FirstDerivative(v, int(j == k)) for k, v in enumerate(values)
+            ]
             out = residual(
                 lifted,
                 _lift(tp),

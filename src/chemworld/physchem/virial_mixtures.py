@@ -8,6 +8,7 @@ are held fixed during differentiation. No upstream implementation is imported.
 from dataclasses import asdict, dataclass
 from itertools import product
 from math import factorial, isclose, isfinite, log, sqrt
+from typing import Any
 
 from chemworld.physchem.caloric_math import FirstDerivative, scalar_value
 from chemworld.physchem.virial_kernels import _real, virial_derivatives
@@ -151,7 +152,9 @@ def _partial(function, values, axes):
     if not axes:
         return function(values)
     axis, *rest = axes
-    seeded = tuple(FirstDerivative(value, float(i == axis)) for i, value in enumerate(values))
+    seeded: tuple[FirstDerivative[Any, float], ...] = tuple(
+        FirstDerivative(value, float(i == axis)) for i, value in enumerate(values)
+    )
     result = _partial(function, seeded, rest)
     return result.slope if isinstance(result, FirstDerivative) else 0.0
 

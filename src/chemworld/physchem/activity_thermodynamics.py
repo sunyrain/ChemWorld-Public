@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields
+from functools import partial
 from math import exp, isfinite
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
@@ -282,7 +283,7 @@ def activity_parameter_jacobian(
     return {
         quantity: {
             name: partial_derivative(
-                lambda p, quantity=quantity: observable(spec, xs, temperature_K, quantity, p),
+                partial(observable, spec, xs, temperature_K, quantity),
                 spec.parameters,
                 (name,),
             )

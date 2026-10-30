@@ -104,14 +104,18 @@ def _curvature(
         elif eigenvalues[1] > 1e-8:
             couplings = []
             for transverse in vectors[:, 1:].T:
+
+                def transverse_energy(
+                    v: dict[str, Any], transverse: NDArray[np.float64] = transverse,
+                ) -> Any:
+                    return energy(tuple(
+                        a + v["s"] * b + v["y"] * d
+                        for a, b, d in zip(base, mode, transverse, strict=True)
+                    ))
+
                 couplings.append(
                     partial_derivative(
-                        lambda v, transverse=transverse: energy(
-                            tuple(
-                                a + v["s"] * b + v["y"] * d
-                                for a, b, d in zip(base, mode, transverse, strict=True)
-                            )
-                        ),
+                        transverse_energy,
                         {"s": 0.0, "y": 0.0},
                         ("s", "s", "y"),
                     )

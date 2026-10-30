@@ -5,6 +5,7 @@ a local Taylor match. All parameter derivatives use the declared source units.
 """
 
 from dataclasses import asdict, dataclass
+from functools import partial
 from math import exp, isfinite, log, ulp
 
 from chemworld.foundation.units import convert_value
@@ -91,8 +92,7 @@ def dippr_parameter_jacobian(correlation, temperatures_K, *, parameters=None,
         raise ValueError("Jacobian needs at least one temperature")
     for T in temperatures:
         equation, result = _point(correlation, T, validity_policy)
-        row = tuple(partial_derivative(lambda p, equation=equation, T=T:
-                                      dippr_expression(equation, T, p),
+        row = tuple(partial_derivative(partial(dippr_expression, equation, T),
                     correlation.coefficients, (name,)) for name in names)
         rows.append(row)
         warnings.append(result.warnings)

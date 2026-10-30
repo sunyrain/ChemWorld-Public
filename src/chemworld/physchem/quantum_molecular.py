@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
-from functools import lru_cache
+from functools import lru_cache, partial
 from math import factorial, isfinite, pi, sqrt
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from scipy.optimize import brentq
@@ -113,8 +113,9 @@ class QuantumMiePair:
         coefficients = (_geometry_coefficients(self, float(t), depth) if use_cache else
                         _geometry_coefficients.__wrapped__(self, float(t), depth))
         delta = temperature-t
-        return tuple(compensated_sum(row[k]*delta**k/factorial(k) for k in range(depth+1))
-                     for row in coefficients)
+        return cast(tuple[Any, Any, Any], tuple(
+            compensated_sum(row[k]*delta**k/factorial(k) for k in range(depth+1))
+            for row in coefficients))
 
 
 def _pair_geometry(pair: QuantumMiePair, temperature: Any) -> tuple[Any, Any, Any]:
@@ -141,8 +142,12 @@ def _pair_geometry(pair: QuantumMiePair, temperature: Any) -> tuple[Any, Any, An
 def _geometry_coefficients(pair: QuantumMiePair, temperature: float,
                            depth: int) -> tuple[tuple[float, ...], ...]:
     values = _pair_geometry(pair, temperature)
+
+    def geometry_component(v: dict[str, Any], index: int) -> Any:
+        return _pair_geometry(pair, v["T"])[index]
+
     return tuple((float(values[i]), *(float(partial_derivative(
-        lambda v, index=i: _pair_geometry(pair, v["T"])[index],
+        partial(geometry_component, index=i),
         {"T": temperature}, ("T",)*k))
         for k in range(1, depth+1))) for i in range(3))
 

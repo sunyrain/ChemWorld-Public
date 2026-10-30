@@ -118,7 +118,7 @@ class SBMLTriggerRoots:
                 if derivative:
                     rates = frame.rates(state.coordinates, state.time_s).coordinate_rates
                     values = {k: FirstDerivative(v, rates[k]) for k, v in state.coordinates.items()}
-                    time = FirstDerivative(state.time_s, 1.)
+                    time: float | FirstDerivative[float, float] = FirstDerivative(state.time_s, 1.)
                 else:
                     values, time = state.coordinates, state.time_s
                 scope = frame.context(values, time, targets=symbols)

@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from math import exp, isfinite, tanh
 from types import MappingProxyType
+from typing import cast
 
 import numpy as np
 from scipy.optimize import brentq
@@ -387,7 +388,8 @@ def family_value_and_slope(
     if equation_id == "permittivity_crc":
         from chemworld.physchem.electro_optics import relative_permittivity_crc
 
-        return derivative_values(lambda t:relative_permittivity_crc(t,**coefficients),T)
+        return cast(tuple[float, float],
+                    derivative_values(lambda t:relative_permittivity_crc(t,**coefficients),T))
     if CORRELATION_FAMILIES[equation_id].reference_method:
         return caloric_value_slope(equation_id, T, coefficients)
     if CORRELATION_FAMILIES[equation_id].pressure_method:
@@ -423,7 +425,8 @@ def family_value_and_slope(
         return virial_derivatives(CORRELATION_FAMILIES[equation_id].virial_method,
                                   T, coefficients, order=1)
     if equation_id.startswith("dippr"):
-        return derivative_values(lambda t: dippr_expression(equation_id, t, coefficients), T)
+        return cast(tuple[float, float],
+                    derivative_values(lambda t: dippr_expression(equation_id, t, coefficients), T))
     A, B, C, D, E = (coefficients[key] for key in "ABCDE")
     try:
         if equation_id == "chemsep16":
