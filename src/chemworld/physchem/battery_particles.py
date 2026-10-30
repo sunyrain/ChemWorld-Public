@@ -1,13 +1,18 @@
 """Sourced particle-size quadrature, with explicit number/area/volume bases."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
 from math import isfinite, log, sqrt
 from numbers import Real
+from typing import Any, Self, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
-from chemworld.data.scientific_inputs import InputSource, InputValue
+from chemworld.data.scientific_inputs import InputSource, InputValue, ScientificTable
 
 PSD_VERSION = "finite-particle-size-distribution-v1"
 
@@ -23,12 +28,13 @@ class ParticleSizeDistribution:
 
     def __post_init__(self) -> None:
         radii, weights = tuple(self.radii_m), tuple(self.volume_weights)
+        inputs: tuple[object, ...] = (*radii, *weights)
         if (
             not 1 <= len(radii) <= 64
             or len(weights) != len(radii)
             or any(
                 isinstance(v, bool) or not isinstance(v, Real) or not isfinite(v) or v <= 0
-                for v in (*radii, *weights)
+                for v in inputs
             )
             or any(a >= b for a, b in pairwise(radii))
             or abs(sum(weights) - 1) > 1e-12
@@ -61,7 +67,7 @@ class ParticleSizeDistribution:
             raise ValueError("PSD distribution parameters need unique names and common InputValue")
         object.__setattr__(self, "distribution_parameters", parameters)
 
-    def weights(self, basis):
+    def weights(self, basis: str) -> tuple[float, ...]:
         if basis not in {"number", "area", "volume"}:
             raise ValueError("unknown PSD weighting basis")
         exponent = {"number": -3, "area": -1, "volume": 0}[basis]
@@ -72,7 +78,7 @@ class ParticleSizeDistribution:
         )
         return tuple(float(v) for v in weights / weights.sum())
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model_version": PSD_VERSION,
             "radii_m": list(self.radii_m),
@@ -87,7 +93,7 @@ class ParticleSizeDistribution:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         if (
             set(value)
             != {
@@ -117,29 +123,40 @@ class ParticleSizeDistribution:
         )
 
     @classmethod
-    def from_weights(cls, radii_m, weights, *, source, basis, parameter_rows=()):
+    def from_weights(
+        cls,
+        radii_m: Sequence[float] | NDArray[np.float64],
+        weights: Sequence[float] | NDArray[np.float64],
+        *,
+        source: InputSource,
+        basis: str,
+        parameter_rows: tuple[tuple[str, InputValue, InputValue], ...] = (),
+    ) -> Self:
         """Explicit conversion and normalization of positive relative input weights."""
         if any(isinstance(v, bool) for v in (*radii_m, *weights)):
             raise ValueError("PSD radius/weight inputs must be numeric, not booleans")
-        radii, weights = np.asarray(radii_m, dtype=float), np.asarray(weights, dtype=float)
+        radii = np.asarray(radii_m, dtype=float)
+        input_weights = np.asarray(weights, dtype=float)
         if (
             basis not in {"number", "area", "volume"}
             or radii.ndim != 1
-            or radii.shape != weights.shape
+            or radii.shape != input_weights.shape
             or not len(radii)
             or not np.all(np.isfinite(radii))
-            or not np.all(np.isfinite(weights))
+            or not np.all(np.isfinite(input_weights))
             or np.any(radii <= 0)
-            or np.any(weights <= 0)
+            or np.any(input_weights <= 0)
         ):
             raise ValueError("PSD basis conversion requires positive finite radius/weight pairs")
         power = {"number": 3, "area": 1, "volume": 0}[basis]
-        converted = weights * (radii / radii[0]) ** power
+        converted = input_weights * (radii / radii[0]) ** power
         converted /= converted.sum()
         return cls(tuple(radii), tuple(converted), source, parameter_rows, basis)
 
     @classmethod
-    def from_parameter_table(cls, table, *, radius_column, weight_column, basis):
+    def from_parameter_table(
+        cls, table: ScientificTable, *, radius_column: str, weight_column: str, basis: str,
+    ) -> Self:
         if table.kind != "parameters" or not table.rows:
             raise ValueError("PSD requires a nonempty common parameter table")
         sources = {row.source_id for row in table.rows}
@@ -151,8 +168,8 @@ class ParticleSizeDistribution:
         if any(cell.quality != "valid" for _, radius, weight in pairs for cell in (radius, weight)):
             raise ValueError("PSD requires valid source parameters")
         return cls.from_weights(
-            [r.to("m").value for _, r, _ in pairs],
-            [w.to("dimensionless").value for _, _, w in pairs],
+            [cast(float, r.to("m").value) for _, r, _ in pairs],
+            [cast(float, w.to("dimensionless").value) for _, _, w in pairs],
             basis=basis,
             source=next(s for s in table.sources if s.provenance.source_id in sources),
             parameter_rows=pairs,
@@ -161,14 +178,14 @@ class ParticleSizeDistribution:
 
 def lognormal_size_distribution(
     *,
-    median_radius_m,
-    log_standard_deviation,
-    lower_radius_m,
-    upper_radius_m,
-    nodes,
-    source,
-    basis="area",
-):
+    median_radius_m: float,
+    log_standard_deviation: float,
+    lower_radius_m: float,
+    upper_radius_m: float,
+    nodes: int,
+    source: InputSource,
+    basis: str = "area",
+) -> ParticleSizeDistribution:
     """Gauss-Legendre quadrature of a declared truncated lognormal density.
 
     median and log-standard-deviation describe the INPUT basis, not an

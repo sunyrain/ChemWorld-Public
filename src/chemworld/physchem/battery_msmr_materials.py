@@ -4,9 +4,13 @@ These are the PyBaMM 25.4.2 MSMR constitutive equations, evaluated from immutabl
 authored parameters, not a fitted OCV. The state owner remains total particle Li.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import lru_cache
 from math import exp, fsum, isclose, isfinite, log, log1p
+from typing import Any, Self, cast
 
 import numpy as np
 from scipy.special import logsumexp
@@ -23,6 +27,9 @@ from chemworld.physchem.residual_system import (
 )
 
 MSMR_MATERIAL_VERSION = "msmr-occupancy-kinetics-v1"
+# Authored capacity weight, reference potential, width, exchange scale, alpha.
+ReactionParameters = tuple[float, float, float, float, float]
+ReactionRows = tuple[ReactionParameters, ...]
 MSMR_UNITS = {
     "X": "dimensionless",
     "U0_V": "V",
@@ -32,7 +39,7 @@ MSMR_UNITS = {
 }
 
 
-def _temperature(temperature):
+def _temperature(temperature: float) -> float:
     if isinstance(temperature, bool) or not isfinite(temperature) or temperature <= 0:
         raise ValueError("MSMR temperature must be positive and finite")
     factor = F / (R * temperature)
@@ -41,11 +48,13 @@ def _temperature(temperature):
     return factor
 
 
-def _fractions(rows, potential, factor):
+def _fractions(rows: ReactionRows, potential: float, factor: float) -> tuple[float, ...]:
     return _fractions_and_vacancies(rows, potential, factor)[0]
 
 
-def _fractions_and_vacancies(rows, potential, factor):
+def _fractions_and_vacancies(
+    rows: ReactionRows, potential: float, factor: float,
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
     if not isfinite(potential):
         raise ValueError("MSMR potential must be finite")
     arguments = tuple(factor * (potential - u0) / width for _, u0, width, _, _ in rows)
@@ -58,7 +67,9 @@ def _fractions_and_vacancies(rows, potential, factor):
     )
 
 
-def _response(rows, potential, factor):
+def _response(
+    rows: ReactionRows, potential: float, factor: float,
+) -> tuple[float, float, float]:
     fractions, vacancies = _fractions_and_vacancies(rows, potential, factor)
     x = fsum(row[0] * q for row, q in zip(rows, fractions, strict=True))
     first = -fsum(
@@ -75,7 +86,7 @@ def _response(rows, potential, factor):
 
 
 @lru_cache(maxsize=32768)
-def _inverse(rows, fraction, factor):
+def _inverse(rows: ReactionRows, fraction: float, factor: float) -> float:
     if not isfinite(fraction) or not 0 < fraction < 1:
         raise ValueError("MSMR inverse needs a strictly interior total stoichiometry")
     total_weight = fsum(row[0] for row in rows)
@@ -97,7 +108,7 @@ def _inverse(rows, fraction, factor):
     use_vacancy = fraction > 0.5 * total_weight
     target_log = log(vacancy if use_vacancy else fraction)
 
-    def tail_response(potential):
+    def tail_response(potential: float) -> tuple[float, float]:
         args = tuple(factor * (potential - u0) / width for _, u0, width, _, _ in rows)
         terms = np.array(
             [
@@ -134,7 +145,7 @@ class MSMRMaterialSpec:
     reaction_row_ids: tuple[str, ...]
     material_id: str
     reference_electrolyte_concentration_mol_m3: float = 1000.0
-    _rows: tuple = field(init=False, repr=False, compare=False)
+    _rows: ReactionRows = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         _text(self.material_id, "MSMR material_id")
@@ -153,10 +164,10 @@ class MSMRMaterialSpec:
                 v.quality != "valid" or v.value is None for v in values.values()
             ):
                 raise ValueError("MSMR row needs exactly five valid constitutive parameters")
-            row = tuple(
-                convert_value(values[k].value, values[k].unit, unit)
+            row = cast(ReactionParameters, tuple(
+                convert_value(cast(float, values[k].value), values[k].unit, unit)
                 for k, unit in MSMR_UNITS.items()
-            )
+            ))
             weight, _, width, exchange, alpha = row
             if (
                 any(not isfinite(v) for v in row)
@@ -176,25 +187,29 @@ class MSMRMaterialSpec:
         object.__setattr__(self, "_rows", tuple(native))
 
     @property
-    def reaction_parameters(self):
+    def reaction_parameters(self) -> ReactionRows:
         return self._rows
 
-    def occupancies(self, potential_V, temperature_K):
+    def occupancies(self, potential_V: float, temperature_K: float) -> tuple[float, ...]:
         q = _fractions(self._rows, potential_V, _temperature(temperature_K))
         return tuple(row[0] * v for row, v in zip(self._rows, q, strict=True))
 
-    def stoichiometry(self, potential_V, temperature_K):
+    def stoichiometry(self, potential_V: float, temperature_K: float) -> float:
         return self.stoichiometry_derivatives(potential_V, temperature_K)[0]
 
-    def stoichiometry_derivatives(self, potential_V, temperature_K):
+    def stoichiometry_derivatives(
+        self, potential_V: float, temperature_K: float,
+    ) -> tuple[float, float, float]:
         return _response(self._rows, potential_V, _temperature(temperature_K))
 
-    def potential(self, fraction, temperature_K):
+    def potential(self, fraction: float, temperature_K: float) -> float:
         if isinstance(fraction, bool):
             raise ValueError("MSMR stoichiometry cannot be boolean")
         return _inverse(self._rows, float(fraction), _temperature(temperature_K))
 
-    def exchange_current_densities(self, potential_V, temperature_K, electrolyte_concentration):
+    def exchange_current_densities(
+        self, potential_V: float, temperature_K: float, electrolyte_concentration: float,
+    ) -> tuple[float, ...]:
         factor = _temperature(temperature_K)
         ce = electrolyte_concentration
         if isinstance(ce, bool) or not isfinite(ce) or ce <= 0:
@@ -217,8 +232,9 @@ class MSMRMaterialSpec:
         return tuple(result)
 
     def reaction_currents(
-        self, potential_V, overpotential_V, temperature_K, electrolyte_concentration
-    ):
+        self, potential_V: float, overpotential_V: float, temperature_K: float,
+        electrolyte_concentration: float,
+    ) -> tuple[float, ...]:
         factor = _temperature(temperature_K)
         if not isfinite(overpotential_V):
             raise ValueError("MSMR overpotential must be finite")
@@ -233,8 +249,9 @@ class MSMRMaterialSpec:
         )
 
     def kinetic_response(
-        self, potential_V, applied_current_density, temperature_K, electrolyte_concentration
-    ):
+        self, potential_V: float, applied_current_density: float, temperature_K: float,
+        electrolyte_concentration: float,
+    ) -> tuple[float, tuple[float, ...], float, float]:
         factor = _temperature(temperature_K)
         target = applied_current_density
         if not isfinite(target):
@@ -242,7 +259,7 @@ class MSMRMaterialSpec:
         j0s = self.exchange_current_densities(potential_V, temperature_K, electrolyte_concentration)
         fractions = _fractions(self._rows, potential_V, factor)
 
-        def response(eta):
+        def response(eta: float) -> tuple[tuple[float, ...], float, float]:
             currents, slopes, potential_slopes = [], [], []
             for row, j0, q in zip(self._rows, j0s, fractions, strict=True):
                 alpha = row[4]
@@ -279,7 +296,7 @@ class MSMRMaterialSpec:
             raise ValueError("MSMR inverse kinetic derivative is not representable")
         return eta, currents, inverse_slope, potential_derivative
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model_version": MSMR_MATERIAL_VERSION,
             "parameters": self.parameters.to_dict(),
@@ -291,7 +308,7 @@ class MSMRMaterialSpec:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         _keys(
             value,
             (
