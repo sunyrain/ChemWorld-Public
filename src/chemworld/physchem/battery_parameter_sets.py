@@ -5,6 +5,9 @@ The six released functions are finite named mathematical laws. No external
 Python, callback, or reference simulator is loaded by the production reader.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import cached_property, lru_cache
 from hashlib import sha256
@@ -12,6 +15,7 @@ from importlib.resources import files
 from math import exp, isfinite, sqrt
 from numbers import Real
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Self, cast
 
 from chemworld.data.scientific_inputs import (
     InputSource,
@@ -20,8 +24,11 @@ from chemworld.data.scientific_inputs import (
     _keys,
     strict_json_loads,
 )
-from chemworld.physchem.battery_materials import ElectrodeOCV
+from chemworld.physchem.battery_materials import ElectrodeOCV, ElectrodeOCVEndpointPolicy
 from chemworld.physchem.data_conflicts import DataSourceProvenance
+
+if TYPE_CHECKING:
+    from chemworld.physchem.battery_models import BatterySPMSpec
 
 PARAMETER_SET_VERSION = "chemworld-battery-parameter-set-1"
 BINDING_VERSION = "chemworld-battery-parameter-binding-1"
@@ -45,7 +52,7 @@ _FUNCTIONS = {
 }
 
 
-def _json(value):
+def _json(value: object) -> str:
     import json
 
     return json.dumps(
@@ -53,14 +60,14 @@ def _json(value):
     )
 
 
-def _number(value, name):
+def _number(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
         raise ValueError(name + " requires a finite real number")
     return float(value)
 
 
 @lru_cache(maxsize=1)
-def _released_json():
+def _released_json() -> str:
     text = files("chemworld.data").joinpath("parameters", DATA_FILENAME).read_text("utf-8")
     payload = strict_json_loads(text)
     _keys(
@@ -88,7 +95,7 @@ def _released_json():
     return _json(payload)
 
 
-def pybamm_endpoint_source():
+def pybamm_endpoint_source() -> InputSource:
     """The numerical endpoint convention is independently attributed."""
     return InputSource(
         DataSourceProvenance(
@@ -119,7 +126,7 @@ class BatteryParameterField:
         ):
             raise ValueError("invalid battery source-field classification")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str]:
         return {k: getattr(self, k) for k in ("source_field", "kind", "usage", "scope")}
 
 
@@ -146,22 +153,23 @@ class BatteryParameterFunction:
             raise ValueError("battery function requires one sourced parameter row")
 
     @property
-    def inputs(self):
+    def inputs(self) -> Mapping[str, InputValue]:
         return self.parameters.rows[0].values
 
-    def value(self, name, unit):
-        return self.inputs[name].to(unit).value
+    def value(self, name: str, unit: str) -> float:
+        # ScientificTable requires valid, nonmissing cells in a parameter table.
+        return cast(float, self.inputs[name].to(unit).value)
 
-    def as_ocv(self, *, endpoint_policy=None):
+    def as_ocv(self, *, endpoint_policy: ElectrodeOCVEndpointPolicy | None = None) -> ElectrodeOCV:
         if self.kind != "polynomial-exp-tanh":
             raise ValueError("this battery source function is not an OCV")
         cells = self.inputs
         polynomial = tuple(k for k in cells if k.startswith("p") and k[1:].isdigit())
 
-        def terms(prefix):
+        def terms(prefix: str) -> tuple[tuple[str, str, str], ...]:
             count = sum(k.startswith(prefix) and k.endswith("_amplitude") for k in cells)
             return tuple(
-                tuple(f"{prefix}{i}_{part}" for part in ("amplitude", "scale", "shift"))
+                (f"{prefix}{i}_amplitude", f"{prefix}{i}_scale", f"{prefix}{i}_shift")
                 for i in range(count)
             )
 
@@ -182,7 +190,7 @@ class BatteryParameterFunction:
         # source object's tuple so sorted JSON retains exact dataclass equality.
         return replace(curve, parameter_inputs=tuple(sorted(curve.parameter_inputs)))
 
-    def evaluate(self, **arguments):
+    def evaluate(self, **arguments: float) -> float:
         """Evaluate the declared source mathematics, without a validity claim."""
         if set(arguments) != set(self.arguments):
             raise ValueError("battery source function requires its exact declared arguments")
@@ -227,7 +235,7 @@ class BatteryParameterFunction:
             raise ValueError("nonfinite battery source function result")
         return result
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "source_field": self.source_field,
             "function_id": self.function_id,
@@ -238,7 +246,7 @@ class BatteryParameterFunction:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         _keys(
             payload,
             ("source_field", "function_id", "kind", "arguments", "parameters", "validity_note"),
@@ -278,81 +286,79 @@ class BatteryParameterSet:
         ):
             raise ValueError("incomplete released battery parameter catalog")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return strict_json_loads(self._payload_json)
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         return cls(_json(payload))
 
     @property
-    def name(self):
+    def name(self) -> str:
         return "Chen2020"
 
     @property
-    def version(self):
+    def version(self) -> str:
         return SOURCE_VERSION
 
     @property
-    def catalog_reference(self):
+    def catalog_reference(self) -> str:
         return CATALOG_REFERENCE
 
     @property
-    def catalog_sha256(self):
+    def catalog_sha256(self) -> str:
         return sha256(self._payload_json.encode("utf-8")).hexdigest()
 
     @cached_property
-    def parameters(self):
+    def parameters(self) -> ScientificTable:
         return ScientificTable.from_dict(self.to_dict()["parameters"])
 
     @property
-    def scalar_inputs(self):
+    def scalar_inputs(self) -> Mapping[str, InputValue]:
         return self.parameters.rows[0].values
 
     @cached_property
-    def functions(self):
+    def functions(self) -> tuple[BatteryParameterFunction, ...]:
         return tuple(BatteryParameterFunction.from_dict(p) for p in self.to_dict()["functions"])
 
     @cached_property
-    def fields(self):
+    def fields(self) -> tuple[BatteryParameterField, ...]:
         return tuple(BatteryParameterField(**p) for p in self.to_dict()["fields"])
 
     @property
-    def metadata(self):
+    def metadata(self) -> Mapping[str, str | tuple[str, ...]]:
         raw = self.to_dict()["metadata"]
         return MappingProxyType(
             {"chemistry": raw["chemistry"], "citations": tuple(raw["citations"])}
         )
 
     @property
-    def sources(self):
+    def sources(self) -> tuple[InputSource, ...]:
         return tuple(InputSource.from_dict(s) for s in self.to_dict()["sources"])
 
-    def scalar(self, source_field, unit):
+    def scalar(self, source_field: str, unit: str) -> float:
         if source_field not in self.scalar_inputs:
             raise ValueError("unknown battery source scalar: " + source_field)
-        return self.scalar_inputs[source_field].to(unit).value
+        return cast(float, self.scalar_inputs[source_field].to(unit).value)
 
-    def function(self, source_field):
+    def function(self, source_field: str) -> BatteryParameterFunction:
         matches = [f for f in self.functions if f.source_field == source_field]
         if len(matches) != 1:
             raise ValueError("unknown battery source function: " + source_field)
         return matches[0]
 
     @property
-    def nominal_capacity_Ah(self):  # noqa: N802 - explicit physical unit in public API
+    def nominal_capacity_Ah(self) -> float:  # noqa: N802 - explicit physical unit in public API
         return self.scalar("Nominal cell capacity [A.h]", "Ah")
 
     @property
-    def source_nominal_capacity_Ah(self):  # noqa: N802 - explicit physical unit in public API
+    def source_nominal_capacity_Ah(self) -> float:  # noqa: N802 - explicit physical unit in public API
         return self.nominal_capacity_Ah
 
-    def current_at_nominal_c_rate(self, rate):
+    def current_at_nominal_c_rate(self, rate: float) -> float:
         return _number(rate, "nominal C-rate") * self.nominal_capacity_Ah
 
-    def electrode_curve(self, electrode):
-        from chemworld.physchem.battery_materials import ElectrodeOCVEndpointPolicy
-
+    def electrode_curve(self, electrode: str) -> ElectrodeOCV:
         if electrode not in {"negative", "positive"}:
             raise ValueError("unknown source electrode")
         return self.function(electrode.capitalize() + " electrode OCP [V]").as_ocv(
@@ -362,14 +368,14 @@ class BatteryParameterSet:
     def build_spm(
         self,
         *,
-        maximum_current_A,
-        radial_cells=64,
-        surface_margin=0.01,
-        numerical_form="residual",
-        temperature_K=298.15,
-        model="SPM",
-        electrolyte_concentration_mol_m3=1000.0,
-    ):
+        maximum_current_A: float,
+        radial_cells: int = 64,
+        surface_margin: float = 0.01,
+        numerical_form: str = "residual",
+        temperature_K: float = 298.15,
+        model: str = "SPM",
+        electrolyte_concentration_mol_m3: float = 1000.0,
+    ) -> BatterySPMSpec:
         """Project source physics; grid, stopping margin and Imax are explicit policy."""
         from chemworld.physchem.battery_models import BatterySPMSpec, ParticleSpec
 
@@ -385,25 +391,29 @@ class BatteryParameterSet:
             raise ValueError("source SPM equipment maximum current must be positive")
         if _number(surface_margin, "surface margin") <= 1e-8:
             raise ValueError("source stopping surfaces must be inside the kinetics clip")
-        projection = {d.target: d.value.value for d in self._derivations()}
-        particles = {}
+        # Each derivation validates a nonmissing numeric value at construction.
+        projection = {d.target: cast(float, d.value.value) for d in self._derivations()}
+        particles: dict[str, ParticleSpec] = {}
         for electrode in ("negative", "positive"):
             particles[electrode] = ParticleSpec(
                 cells=radial_cells,
-                **{
-                    field: projection[f"{electrode}.{field}"]
-                    for field in (
-                        "radius_m",
-                        "diffusivity_m2_s",
-                        "maximum_concentration_mol_m3",
-                        "active_volume_m3",
-                        "exchange_current_scale_A_m2",
-                    )
-                },
+                radius_m=projection[f"{electrode}.radius_m"],
+                diffusivity_m2_s=projection[f"{electrode}.diffusivity_m2_s"],
+                maximum_concentration_mol_m3=projection[f"{electrode}.maximum_concentration_mol_m3"],
+                active_volume_m3=projection[f"{electrode}.active_volume_m3"],
+                exchange_current_scale_A_m2=projection[f"{electrode}.exchange_current_scale_A_m2"],
             )
         return BatterySPMSpec(
-            **particles,
-            **{k: v for k, v in projection.items() if "." not in k},
+            negative=particles["negative"],
+            positive=particles["positive"],
+            initial_negative_fraction=projection["initial_negative_fraction"],
+            initial_positive_fraction=projection["initial_positive_fraction"],
+            temperature_K=projection["temperature_K"],
+            minimum_voltage_V=projection["minimum_voltage_V"],
+            maximum_voltage_V=projection["maximum_voltage_V"],
+            series_resistance_ohm=projection["series_resistance_ohm"],
+            cell_envelope_volume_m3=projection["cell_envelope_volume_m3"],
+            kinetics_stoichiometry_clip=projection["kinetics_stoichiometry_clip"],
             negative_ocv=self.electrode_curve("negative"),
             positive_ocv=self.electrode_curve("positive"),
             maximum_current_A=maximum_current_A,
@@ -413,10 +423,13 @@ class BatteryParameterSet:
             parameter_binding=BatteryParameterBinding.from_parameter_set(self),
         )
 
-    def _derivations(self):
-        result = []
+    def _derivations(self) -> tuple[BatteryParameterDerivation, ...]:
+        result: list[BatteryParameterDerivation] = []
 
-        def add(target, unit, names, formula, value, extra=()):
+        def add(
+            target: str, unit: str, names: Sequence[str], formula: str, value: float,
+            extra: Sequence[tuple[str, InputValue]] = (),
+        ) -> None:
             inputs = tuple((name, self.scalar_inputs[name]) for name in names) + tuple(extra)
             result.append(
                 BatteryParameterDerivation(
@@ -505,7 +518,9 @@ class BatteryParameterSet:
 
 
 @lru_cache(maxsize=1)
-def battery_parameter_set(name="Chen2020", *, version=SOURCE_VERSION):
+def battery_parameter_set(
+    name: str = "Chen2020", *, version: str = SOURCE_VERSION,
+) -> BatteryParameterSet:
     if name != "Chen2020" or version != SOURCE_VERSION:
         raise ValueError("unknown battery parameter set or source version")
     return BatteryParameterSet(_released_json())
@@ -533,7 +548,7 @@ class BatteryParameterDerivation:
         ):
             raise ValueError("invalid sourced battery parameter derivation")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "target": self.target,
             "source_fields": list(self.source_fields),
@@ -543,7 +558,7 @@ class BatteryParameterDerivation:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         _keys(payload, ("target", "source_fields", "formula", "value", "inputs"))
         return cls(
             payload["target"],
@@ -577,7 +592,7 @@ class BatteryParameterBinding:
             )
 
     @classmethod
-    def from_parameter_set(cls, source):
+    def from_parameter_set(cls, source: BatteryParameterSet) -> Self:
         if not isinstance(source, BatteryParameterSet):
             raise ValueError("binding requires a released BatteryParameterSet")
         return cls(
@@ -590,13 +605,13 @@ class BatteryParameterBinding:
         )
 
     @property
-    def source_nominal_capacity_Ah(self):  # noqa: N802 - explicit physical unit in public API
+    def source_nominal_capacity_Ah(self) -> float:  # noqa: N802 - explicit physical unit in public API
         return battery_parameter_set(self.parameter_set_id).nominal_capacity_Ah
 
-    def current_at_nominal_c_rate(self, rate):
+    def current_at_nominal_c_rate(self, rate: float) -> float:
         return _number(rate, "nominal C-rate") * self.source_nominal_capacity_Ah
 
-    def validate_projection(self, spec):
+    def validate_projection(self, spec: object) -> bool:
         from chemworld.physchem.battery_models import BatterySPMSpec
 
         if type(spec) is not BatterySPMSpec:
@@ -613,7 +628,7 @@ class BatteryParameterBinding:
         if _number(spec.maximum_current_A, "maximum current") <= 0:
             raise ValueError("source SPM equipment maximum current must be positive")
         for item in self.derivations:
-            value = spec
+            value: object = spec
             for part in item.target.split("."):
                 value = getattr(value, part)
             if _number(value, item.target) != item.value.value:
@@ -640,7 +655,7 @@ class BatteryParameterBinding:
                 raise ValueError("source electrode volumes are incompatible")
         return True
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": BINDING_VERSION,
             "parameter_set_id": self.parameter_set_id,
@@ -652,7 +667,7 @@ class BatteryParameterBinding:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         _keys(
             payload,
             (
