@@ -5,21 +5,43 @@ EOS. In particular no cv, acoustic speed, chemical equilibrium or measured
 mixing enthalpy follows from these fits. No reference backend is imported.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from math import isfinite
+from typing import Any, Protocol, Self, TypeAlias, cast, overload
 
 from chemworld.physchem.caloric_math import exponential, logarithm, scalar_value
 from chemworld.physchem.second_order_pair import SecondOrderPair
 
+Scalar: TypeAlias = float | SecondOrderPair
 
-def _finite(value, label):
+
+class _FloatDerivatives(Protocol):
+    """Readout of pair arithmetic seeded only with ordinary floating values."""
+
+    value: float
+    dx: float
+    dy: float
+
+
+def _finite(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
         raise ValueError(f"{label} must be a finite real number")
     return value
 
 
-def _horner(coefficients, value):
-    result = 0.0
+@overload
+def _horner(coefficients: Sequence[float], value: float) -> float: ...
+
+
+@overload
+def _horner(coefficients: Sequence[Scalar], value: Scalar) -> Scalar: ...
+
+
+def _horner(coefficients: Sequence[Scalar], value: Scalar) -> Scalar:
+    result: Scalar = 0.0
     for coefficient in reversed(coefficients):
         result = result * value + coefficient
     return result
@@ -54,7 +76,19 @@ class IncompressibleCorrelation:
             raise ValueError("offset polynomial requires an offset and a nonempty vector")
         object.__setattr__(self, "coefficients", coefficients)
 
-    def evaluate(self, y, x, *, y_center=0.0, x_center=0.0):
+    @overload
+    def evaluate(
+        self, y: float, x: float, *, y_center: float = 0.0, x_center: float = 0.0,
+    ) -> float: ...
+
+    @overload
+    def evaluate(
+        self, y: Scalar, x: Scalar, *, y_center: float = 0.0, x_center: float = 0.0,
+    ) -> Scalar: ...
+
+    def evaluate(
+        self, y: Scalar, x: Scalar, *, y_center: float = 0.0, x_center: float = 0.0,
+    ) -> Scalar:
         for value in (y, x, y_center, x_center):
             _finite(scalar_value(value), "correlation coordinate")
         coefficients = self.coefficients
@@ -86,14 +120,19 @@ class IncompressibleCorrelation:
             raise ValueError("nonfinite incompressible correlation")
         return result
 
-    def temperature_derivative(self, temperature, fraction, *, y_center, x_center):
+    def temperature_derivative(
+        self, temperature: Scalar, fraction: Scalar, *, y_center: float, x_center: float,
+    ) -> Scalar:
         if self.family != "polynomial":
             raise ValueError("caloric density derivative requires the declared polynomial")
         coefficients = tuple(i*_horner(row, fraction-x_center)
                              for i, row in enumerate(self.coefficients) if i)
         return _horner(coefficients, temperature-y_center)
 
-    def caloric_integrals(self, temperature, fraction, reference, *, y_center, x_center):
+    def caloric_integrals(
+        self, temperature: Scalar, fraction: Scalar, reference: float, *,
+        y_center: float, x_center: float,
+    ) -> tuple[Scalar, Scalar]:
         """Definite integrals of cp and cp/T; algebraic even outside the fit domain.
 
         The latter permission is only for the declared reference datum. State
@@ -104,11 +143,12 @@ class IncompressibleCorrelation:
         y, r = temperature-y_center, reference-y_center
         coefficients = tuple(_horner(row, fraction-x_center) for row in self.coefficients)
 
-        def difference(power):
+        def difference(power: int) -> Scalar:
             # Factor the difference of powers to retain small temperature changes.
             return (temperature-reference)*sum(y**j*r**(power-1-j) for j in range(power))
 
-        h, s = 0.0, 0.0
+        h: Scalar = 0.0
+        s: Scalar = 0.0
         integral = logarithm(temperature/reference)
         for i, coefficient in enumerate(coefficients):
             h += coefficient*difference(i+1)/(i+1)
@@ -117,11 +157,11 @@ class IncompressibleCorrelation:
             s += coefficient*integral
         return h, s
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"family": self.family, "coefficients": [list(row) for row in self.coefficients]}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         return cls(**payload)
 
 
@@ -138,7 +178,7 @@ class IncompressibleReference:
         if self.temperature_K <= 0 or self.pressure_Pa <= 0:
             raise ValueError("incompressible reference requires positive T/P")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -170,7 +210,7 @@ class IncompressibleState:
     caloric_scope: str = "same_composition_reference; mixing_heat_not_measured"
     stability_scope: str = "incompressible_correlation; no_cv_sound_or_stability_claim"
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -214,25 +254,27 @@ class IncompressibleFluid:
         for value in (self.temperature_center_K, self.fraction_center,
                       self.minimum_saturation_temperature_K):
             _finite(value, "correlation center/bound")
-        pairs = tuple(tuple(pair) for pair in self.correlations)
+        pairs = tuple(cast(tuple[str, IncompressibleCorrelation | None], tuple(pair))
+                      for pair in self.correlations)
         mapping = dict(pairs)
         if len(pairs) != len(mapping) or set(mapping) != set(_CORRELATIONS):
             raise ValueError("incompressible correlations must declare each known field once")
         if any(c is not None and not isinstance(c, IncompressibleCorrelation)
                for c in mapping.values()):
             raise TypeError("incompressible correlations require validated declarations")
-        if any(mapping[key] is None or mapping[key].family != "polynomial"
-               for key in ("density", "specific_heat")):
+        if any(value is None or value.family != "polynomial"
+               for value in (mapping[key] for key in ("density", "specific_heat"))):
             raise ValueError("incompressible calorics requires polynomial density and cp")
         if self.fraction_basis == "pure" and any(
-            len(mapping[key].coefficients[0]) != 1 for key in ("density", "specific_heat")
+            len(cast(IncompressibleCorrelation, mapping[key]).coefficients[0]) != 1
+            for key in ("density", "specific_heat")
         ):
             raise ValueError("pure fluid density/cp cannot depend on concentration")
         if not isinstance(self.reference, IncompressibleReference):
             raise TypeError("incompressible reference must be explicitly validated")
         object.__setattr__(self, "correlations", pairs)
 
-    def correlation(self, name):
+    def correlation(self, name: str) -> IncompressibleCorrelation:
         if name not in _CORRELATIONS:
             raise ValueError("unknown incompressible property")
         result = dict(self.correlations)[name]
@@ -240,7 +282,7 @@ class IncompressibleFluid:
             raise ValueError(f"{self.fluid_id}: {name} is unavailable in the source card")
         return result
 
-    def concentration(self, fraction, *, basis):
+    def concentration(self, fraction: float, *, basis: str) -> float:
         _finite(fraction, "concentration")
         if basis != self.fraction_basis:
             raise ValueError("concentration conversion lacks a qualified definition")
@@ -251,11 +293,17 @@ class IncompressibleFluid:
             raise ValueError("concentration outside source interval")
         return fraction
 
-    def _value(self, name, T, x):
+    @overload
+    def _value(self, name: str, T: float, x: float) -> float: ...
+
+    @overload
+    def _value(self, name: str, T: Scalar, x: Scalar) -> Scalar: ...
+
+    def _value(self, name: str, T: Scalar, x: Scalar) -> Scalar:
         return self.correlation(name).evaluate(
             T, x, y_center=self.temperature_center_K, x_center=self.fraction_center)
 
-    def freezing_temperature(self, pressure_Pa, fraction):
+    def freezing_temperature(self, pressure_Pa: float, fraction: float) -> float:
         _finite(pressure_Pa, "pressure")
         if pressure_Pa <= 0:
             raise ValueError("positive pressure required")
@@ -265,7 +313,7 @@ class IncompressibleFluid:
             return fit.evaluate(fraction, 0.0)
         return fit.evaluate(pressure_Pa, fraction, y_center=0.0, x_center=self.fraction_center)
 
-    def saturation_pressure(self, temperature_K, fraction):
+    def saturation_pressure(self, temperature_K: float, fraction: float) -> float:
         self._check_coordinates(temperature_K, 1.0, fraction)
         if temperature_K <= self.minimum_saturation_temperature_K:
             raise ValueError("saturation pressure unavailable at/below source TminPsat")
@@ -274,14 +322,14 @@ class IncompressibleFluid:
             raise ValueError("nonpositive saturation-pressure fit")
         return value
 
-    def _check_coordinates(self, T, p, x):
+    def _check_coordinates(self, T: float, p: float, x: float) -> None:
         _finite(T, "temperature")
         _finite(p, "pressure")
         self.concentration(x, basis=self.fraction_basis)
         if p <= 0 or not self.temperature_bounds_K[0] <= T <= self.temperature_bounds_K[1]:
             raise ValueError("temperature/pressure outside incompressible coordinate domain")
 
-    def validate_state(self, T, p, x):
+    def validate_state(self, T: float, p: float, x: float) -> None:
         self._check_coordinates(T, p, x)
         fits = dict(self.correlations)
         if fits["T_freeze"] is not None and self.freezing_temperature(p, x) > T:
@@ -291,7 +339,9 @@ class IncompressibleFluid:
                 and p < self.saturation_pressure(T, x)):
             raise ValueError("pressure below source saturation boundary")
 
-    def property_value(self, name, temperature_K, pressure_Pa, fraction):
+    def property_value(
+        self, name: str, temperature_K: float, pressure_Pa: float, fraction: float,
+    ) -> float:
         """A source correlation; missing or nonpositive transport is not fabricated."""
         if name not in {"density", "specific_heat", "viscosity", "conductivity"}:
             raise ValueError("use explicit methods for phase boundaries and caloric state")
@@ -301,7 +351,7 @@ class IncompressibleFluid:
             raise ValueError(f"nonpositive source {name} fit")
         return value
 
-    def _volume(self, T, x):
+    def _volume(self, T: Scalar, x: Scalar) -> tuple[Scalar, Scalar]:
         rho = self._value("density", T, x)
         if scalar_value(rho) <= 0:
             raise ValueError("nonpositive density at state or declared reference")
@@ -309,7 +359,7 @@ class IncompressibleFluid:
             T, x, y_center=self.temperature_center_K, x_center=self.fraction_center)
         return 1/rho, -rho_T/rho**2
 
-    def _caloric(self, T, p, x):
+    def _caloric(self, T: Scalar, p: float, x: Scalar) -> tuple[Scalar, Scalar]:
         ref = self.reference
         h, s = self.correlation("specific_heat").caloric_integrals(
             T, x, ref.temperature_K,
@@ -320,15 +370,18 @@ class IncompressibleFluid:
                 - ref.pressure_Pa*(vr-ref.temperature_K*vrT),
                 ref.entropy_J_kg_K+s-p*vT+ref.pressure_Pa*vrT)
 
-    def state(self, temperature_K, pressure_Pa, fraction):
+    def state(
+        self, temperature_K: float, pressure_Pa: float, fraction: float,
+    ) -> IncompressibleState:
         self.validate_state(temperature_K, pressure_Pa, fraction)
         T, p, x = temperature_K, pressure_Pa, fraction
         tjet = SecondOrderPair(T, dx=1.0)
         xjet = SecondOrderPair(x, dy=0.0 if self.fraction_basis == "pure" else 1.0)
-        rho = self._value("density", tjet, xjet)
+        rho = cast(_FloatDerivatives, self._value("density", tjet, xjet))
         source_cp = self.property_value("specific_heat", T, p, x)
-        v, vT = self._volume(tjet, xjet)
-        h, s = self._caloric(tjet, p, xjet)
+        # Polynomial density/cp and float seeds give float-valued pair results.
+        v, vT = (cast(_FloatDerivatives, value) for value in self._volume(tjet, xjet))
+        h, s = (cast(_FloatDerivatives, value) for value in self._caloric(tjet, p, xjet))
         result = IncompressibleState(
             self.fluid_id, T, p, x, self.fraction_basis, rho.value, v.value,
             source_cp, h.dx, h.value, s.value, h.value-p*v.value, h.value-T*s.value,
@@ -342,13 +395,16 @@ class IncompressibleFluid:
             raise ValueError("nonfinite incompressible caloric response")
         return result
 
-    def temperature_from_enthalpy(self, pressure_Pa, enthalpy_J_kg, fraction, *, bounds_K):
+    def temperature_from_enthalpy(
+        self, pressure_Pa: float, enthalpy_J_kg: float, fraction: float, *,
+        bounds_K: tuple[float, float],
+    ) -> float:
         """Explicit single branch/interval PH closure using the shared residual solver."""
         from chemworld.physchem.enthalpy import caloric_temperature
 
         _finite(enthalpy_J_kg, "enthalpy")
 
-        def state(T):
+        def state(T: float) -> IncompressibleState:
             return self.state(T, pressure_Pa, fraction)
 
         return caloric_temperature(
@@ -357,7 +413,7 @@ class IncompressibleFluid:
             heat_capacity_at_temperature=lambda T: state(T).cp_J_kg_K,
             xtol=1e-9, rtol=1e-12)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"model": "incompressible-fluid-v1", "fluid_id": self.fluid_id,
                 "description": self.description, "citation": self.citation, "source": self.source,
                 "fraction_basis": self.fraction_basis,
@@ -371,7 +427,7 @@ class IncompressibleFluid:
                 "reference": self.reference.to_dict()}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         data = dict(payload)
         if data.pop("model") != "incompressible-fluid-v1":
             raise ValueError("unknown incompressible fluid schema")

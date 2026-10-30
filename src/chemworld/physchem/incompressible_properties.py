@@ -5,12 +5,19 @@ alone never supplies that identity or qualifies a solid/slurry as a liquid.
 The checked convenience bindings live in data.incompressible_bindings.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import fsum, isfinite
+from typing import TYPE_CHECKING, Any, Self, cast
 
 from chemworld.physchem.incompressible import IncompressibleFluid
 from chemworld.physchem.property_reports import PropertyEvaluation, StatePropertyReport
 from chemworld.physchem.specs import ComponentSpec, resolve_component_identifier
+
+if TYPE_CHECKING:
+    from chemworld.physchem.property_packages import ComponentPropertyPackage
 
 _FIELDS = {
     "pressure": ("pressure_Pa", "Pa", False),
@@ -42,7 +49,7 @@ INCOMPRESSIBLE_PROPERTY_QUANTITIES = (
 )
 
 
-def _identity(component):
+def _identity(component: ComponentSpec) -> tuple[str, str, str, int | None, float | None, str, str]:
     return (
         component.identifier,
         component.formula,
@@ -108,17 +115,19 @@ class IncompressibleMaterialModel:
             raise ValueError("preparation volumes apply only to a volume-fraction source fit")
 
     @property
-    def component_ids(self):
+    def component_ids(self) -> tuple[str, ...]:
         return tuple(c.identifier for c in self.components)
 
-    def validate_components(self, components):
+    def validate_components(self, components: Sequence[ComponentSpec]) -> None:
         supplied = {_identity(c) for c in components}
         if len(supplied) != len(components) or supplied != {_identity(c) for c in self.components}:
             raise ValueError(
                 "incompressible model/component identities or molecular weights differ"
             )
 
-    def inventory_coordinates(self, amounts):
+    def inventory_coordinates(
+        self, amounts: Mapping[str, float],
+    ) -> tuple[dict[str, float], float, float, float, dict[str, float]]:
         """Return the caller inventory's mass and declared x(n), never a new stock."""
         values = dict.fromkeys(self.component_ids, 0.0)
         for alias, value in amounts.items():
@@ -126,7 +135,9 @@ class IncompressibleMaterialModel:
                 raise ValueError("incompressible amounts must be finite and nonnegative")
             key = resolve_component_identifier(self.components, alias)
             values[key] += value
-        masses = {c.identifier: c.molecular_weight_g_mol / 1000 for c in self.components}
+        # ComponentSpec has already derived and validated each molecular weight.
+        masses = {c.identifier: cast(float, c.molecular_weight_g_mol) / 1000
+                  for c in self.components}
         total = fsum(values.values())
         mass = fsum(values[k] * masses[k] for k in values)
         if not 0 < total < float("inf") or not 0 < mass < float("inf"):
@@ -139,24 +150,27 @@ class IncompressibleMaterialModel:
             if basis == "mass"
             else dict.fromkeys(values, 1.0)
             if basis == "mole"
-            else (dict(zip(self.component_ids, self.preparation_molar_volumes_m3_mol, strict=True)))
+            else dict(zip(self.component_ids,
+                          cast(tuple[float, ...], self.preparation_molar_volumes_m3_mol),
+                          strict=True))
         )
         denominator = fsum(values[k] * weights[k] for k in values)
         if not 0 < denominator < float("inf"):
             raise ValueError("nonfinite concentration basis inventory")
-        x = values[self.solute_id] * weights[self.solute_id] / denominator
+        solute_id = cast(str, self.solute_id)  # Validated for every non-pure binding.
+        x = values[solute_id] * weights[solute_id] / denominator
         self.fluid.concentration(x, basis=basis)
         slopes = {k: weights[k] * (float(k == self.solute_id) - x) / denominator for k in values}
         return values, total, mass, x, slopes
 
-    def available_quantities(self):
+    def available_quantities(self) -> dict[str, bool]:
         result = dict.fromkeys(INCOMPRESSIBLE_PROPERTY_QUANTITIES, True)
         fits = dict(self.fluid.correlations)
         result["viscosity"] = fits["viscosity"] is not None
         result["thermal_conductivity"] = fits["conductivity"] is not None
         return result
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": "incompressible-material-v1",
             "fluid": self.fluid.to_dict(),
@@ -173,7 +187,7 @@ class IncompressibleMaterialModel:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         data = dict(payload)
         if data.pop("model") != "incompressible-material-v1":
             raise ValueError("unknown incompressible material schema")
@@ -183,8 +197,10 @@ class IncompressibleMaterialModel:
 
 
 def evaluate_incompressible_property_state(
-    packages, model, component_amounts_mol, *, temperature_K, pressure_Pa, quantities
-):
+    packages: Sequence[ComponentPropertyPackage], model: IncompressibleMaterialModel,
+    component_amounts_mol: Mapping[str, float], *, temperature_K: float, pressure_Pa: float,
+    quantities: Sequence[str],
+) -> StatePropertyReport:
     if not isinstance(model, IncompressibleMaterialModel):
         raise TypeError("incompressible property evaluation requires a material binding")
     model.validate_components(tuple(p.component for p in packages))
@@ -221,7 +237,7 @@ def evaluate_incompressible_property_state(
         if key in requested:
             values[key] = (model.fluid.property_value(field, T, p, x), unit)
 
-    def evaluation(key, value, unit):
+    def evaluation(key: str, value: float, unit: str) -> PropertyEvaluation:
         return PropertyEvaluation(
             key,
             model.fluid.fluid_id,
@@ -233,17 +249,19 @@ def evaluate_incompressible_property_state(
 
     partials = {}
     for key in requested & _PARTIALS.keys():
-        field, derivative, unit = _PARTIALS[key]
+        partial_field, derivative, unit = _PARTIALS[key]
         if key == "partial_volume":
             value, slope = volume, volume_x
         elif key == "partial_internal_energy":
             value, slope = state.internal_energy_J_kg, state.dh_dx_J_kg - p * volume_x
         else:
-            value, slope = getattr(state, field), getattr(state, derivative)
+            value, slope = (
+                getattr(state, cast(str, partial_field)), getattr(state, cast(str, derivative)))
         partials[key] = {
             c.identifier: evaluation(
                 key,
-                c.molecular_weight_g_mol / 1000 * value + mass * slope * slopes[c.identifier],
+                cast(float, c.molecular_weight_g_mol) / 1000 * value
+                + mass * slope * slopes[c.identifier],
                 unit,
             )
             for c in model.components

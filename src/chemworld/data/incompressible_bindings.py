@@ -7,6 +7,7 @@ including the evidence for its liquid identity and concentration convention.
 from chemworld.data.incompressible import incompressible_fluid
 from chemworld.physchem.elements import parse_formula
 from chemworld.physchem.incompressible_properties import IncompressibleMaterialModel
+from chemworld.physchem.specs import ComponentSpec
 
 _IDENTITIES = {
     "MEG": ("C2H6O2", "107-21-1", "https://webbook.nist.gov/cgi/cbook.cgi?ID=C107211"),
@@ -18,7 +19,9 @@ _IDENTITIES = {
 }
 
 
-def bind_incompressible_liquid(name, *, water, solute=None):
+def bind_incompressible_liquid(
+    name: str, *, water: ComponentSpec, solute: ComponentSpec | None = None,
+) -> IncompressibleMaterialModel:
     """Bind supplied original component IDs to an identified aqueous/pure fit.
 
     Salt n denotes neutral anhydrous formula units, not a dissociation model.
