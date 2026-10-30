@@ -185,7 +185,10 @@ class CoolingTowerGeometry:
     def diameter(self, height_m: float) -> float:
         if not isfinite(height_m) or not 0 <= height_m <= self.outlet_height_m:
             raise ValueError("height outside tower")
-        assert self.throat_height_m is not None and self.throat_diameter_m is not None
+        if self.throat_height_m is None or self.throat_diameter_m is None:
+            raise AssertionError(
+                "invariant violated: self.throat_height_m or self.throat_diameter_m is None"
+            )
         offset = height_m - self.throat_height_m
         scale = self._lower if offset <= 0 else self._upper
         return self.throat_diameter_m * sqrt(1 + (offset / scale) ** 2)

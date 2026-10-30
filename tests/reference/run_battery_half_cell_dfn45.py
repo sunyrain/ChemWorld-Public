@@ -502,21 +502,40 @@ def _layout_values(record, contract, name, *, rate=False):
 
 
 @lru_cache(maxsize=2)
-def _source_evaluator(variant, ns, np_, nr, metal_length, case_json):
+def _source_evaluator(
+    variant,
+    ns,
+    np_,
+    nr,
+    metal_length,
+    case_json,
+    numerical_policy="legacy",
+    gradient_policy=None,
+    radial_exponent=None,
+):
     """Fresh actual source expression DAG; no root, solver set-up or integration."""
     import battery_half_cell_dfn45_pybamm as source
 
+    grid = {"x": (ns, np_), "r": nr}
+    if radial_exponent is not None:
+        from battery_half_cell_dfn45_meshes import development_mesh_bounds
+
+        grid["radial_exponent"] = radial_exponent
+        development_mesh_bounds(grid)
     if (
         variant not in SOURCE_VARIANTS
-        or not (3 <= min(ns, np_) <= max(ns, np_) <= 32)
-        or not 3 <= nr <= 64
+        or min(ns, np_) < 3
+        or nr < 3
+        or (radial_exponent is None and (max(ns, np_) > 32 or nr > 64))
         or not math.isfinite(metal_length)
         or metal_length <= 0
     ):
         raise ValueError("source evaluator outside the declared bounded mesh/geometry domain")
     data = json.loads(case_json)
     data["metal_thickness_m"] = metal_length
-    built = source.build_reference(data, {"x": (ns, np_), "r": nr}, variant)
+    built = source.build_reference(
+        data, grid, variant, numerical_policy=numerical_policy, gradient_policy=gradient_policy
+    )
     return built, source.source_contract(built)
 
 
@@ -613,8 +632,16 @@ def _source_complete(record, contract, *, boundary=False, inputs=None, data=None
             nr,
             metal_length,
             json.dumps(json_value(evaluation_case), sort_keys=True),
+            contract.get("numerical_policy", "legacy"),
+            contract.get("gradient_policy", {}).get("name"),
+            contract.get("declared_development_grid", {}).get("radial_exponent"),
         )
         if json_value(contract["state_layout"]) != json_value(expected_contract["state_layout"]):
+            return False
+        if any(
+            json_value(contract.get(key)) != json_value(expected_contract.get(key))
+            for key in ("gradient_policy", "declared_development_grid", "mesh")
+        ):
             return False
         if json_value(contract["algebraic_conditioning"]) != json_value(
             expected_contract["algebraic_conditioning"]
@@ -924,7 +951,7 @@ def _physical_checks(record, contract, data):
 
 
 @lru_cache(maxsize=2)
-def _native_evaluator(spec_json, stage_json):
+def _native_evaluator(spec_json, stage_json, development_grid_json=None):
     from chemworld.physchem.battery_half_cell_dfn import (
         BatteryHalfCellDFNSpec,
         half_cell_dfn_system,
@@ -934,8 +961,29 @@ def _native_evaluator(spec_json, stage_json):
 
     encoded, stage = json.loads(spec_json), json.loads(stage_json)
     ns, np_ = encoded["electrolyte"]["cells"]
-    if not 3 <= min(ns, np_) <= max(ns, np_) <= 32 or not 3 <= encoded["positive"]["cells"] <= 64:
-        raise ValueError("native raw layout outside bounded declared mesh domain")
+    nr = encoded["positive"]["cells"]
+    if development_grid_json is None:
+        if not 3 <= min(ns, np_) <= max(ns, np_) <= 32 or not 3 <= nr <= 64:
+            raise ValueError("native raw layout outside bounded declared mesh domain")
+    else:
+        from battery_half_cell_dfn45_meshes import development_mesh_bounds
+
+        declaration = json.loads(development_grid_json)
+        if not isinstance(declaration, Mapping) or "radial_exponent" not in declaration:
+            raise ValueError("native development mesh requires explicit radial_exponent")
+        declared = development_mesh_bounds(declaration)
+        exponent = encoded["positive"].get("mesh_exponent", 1.0)
+        if (
+            any(type(value) is not int for value in (ns, np_, nr))
+            or min(ns, np_, nr) < 3
+            or tuple(declared["x"]) != (ns, np_)
+            or declared["r"] != nr
+            or isinstance(exponent, bool)
+            or not isinstance(exponent, (int, float))
+            or not math.isfinite(exponent)
+            or float(declared["radial_exponent"]) != float(exponent)
+        ):
+            raise ValueError("native development mesh differs from the actual encoded spec")
     spec = BatteryHalfCellDFNSpec.from_dict(encoded)
     program = ScalarControlProgram(((0.0, stage["target"]),), stage["unit"])
     system = half_cell_dfn_system(spec, program)
@@ -981,10 +1029,13 @@ def _native_raw_complete(view, contract):
     from chemworld.physchem.reactor_shared import ScalarControlProgram
 
     raw = view["raw"]
-    spec, system, material, variables, equations, differential = _native_evaluator(
+    arguments = (
         json.dumps(json_value(contract["spec"]), sort_keys=True),
         json.dumps(json_value(raw["request"]), sort_keys=True),
     )
+    if "radial_exponent" in contract.get("grid", {}):
+        arguments += (json.dumps(json_value(contract["grid"]), sort_keys=True),)
+    spec, system, material, variables, equations, differential = _native_evaluator(*arguments)
     reports = raw["original_residual_reports"]
     if not reports:
         return False
@@ -1368,6 +1419,9 @@ def _route_assessment(route, trace):
     try:
         mesh = _mesh(contract)
         ns, np_ = route["grid"]["x"]
+        from battery_half_cell_dfn45_meshes import radial_edges
+
+        particle_edges = radial_edges(route["grid"], RADIUS)
         checks["mesh"] = all(
             len(mesh[name][0]) == count and np.max(abs(mesh[name][1] - expected)) <= 1e-16
             for name, count, expected in (
@@ -1376,7 +1430,7 @@ def _route_assessment(route, trace):
                 (
                     "positive particle",
                     route["grid"]["r"],
-                    np.linspace(0, RADIUS, route["grid"]["r"] + 1),
+                    particle_edges,
                 ),
             )
         )
@@ -1741,8 +1795,25 @@ def _worker(request_path, directory):
                 return built
 
             with patch.object(source, "build_reference", observe_build):
+                numerical_options = (
+                    {"numerical_policy": route["numerical_policy"]}
+                    if "numerical_policy" in route
+                    else {}
+                )
+                if "solver_options" in route:
+                    numerical_options["solver_options"] = deepcopy(route["solver_options"])
+                if "linear_policy" in route:
+                    numerical_options["linear_policy"] = deepcopy(route["linear_policy"])
+                if "observation_policy" in route:
+                    numerical_options["observation_policy"] = route["observation_policy"]
+                if "gradient_policy" in route:
+                    numerical_options["gradient_policy"] = route["gradient_policy"]
                 trace = source.reference_time(
-                    data, route["grid"], route["implementation"], progress_callback=checkpoint
+                    data,
+                    route["grid"],
+                    route["implementation"],
+                    progress_callback=checkpoint,
+                    **numerical_options,
                 )
     except Exception as exc:
         trace = {
@@ -1762,7 +1833,7 @@ def _worker(request_path, directory):
     return 0 if "exception" not in trace else 1
 
 
-def execute_route(route, directory, budget_s, *, progress):
+def execute_route(route, directory, budget_s, *, progress, worker_entrypoint=None):
     """Own worker binding; reuse the delivered full process-tree termination policy."""
     if os.name != "posix":
         raise RuntimeError("route process-group budgets require POSIX")
@@ -1772,7 +1843,7 @@ def execute_route(route, directory, budget_s, *, progress):
     command = [
         sys.executable,
         "-u",
-        str(Path(__file__).resolve()),
+        str(Path(__file__ if worker_entrypoint is None else worker_entrypoint).resolve()),
         "--worker-request",
         str(request_path),
         "--worker-directory",
@@ -1854,7 +1925,15 @@ def _provenance(protocol, execution_label="prospective-half-cell-dfn45"):
     paths = [Path(__file__), Path(transport.__file__), protocol]
     paths += [
         Path(__file__).with_name(name)
-        for name in ("battery_half_cell_dfn45_cases.py", "battery_half_cell_dfn45_pybamm.py")
+        for name in (
+            "battery_half_cell_dfn45_cases.py",
+            "battery_half_cell_dfn45_pybamm.py",
+            "battery_half_cell_dfn45_numerics.py",
+            "battery_half_cell_dfn45_linear.py",
+            "battery_half_cell_dfn45_observation.py",
+            "battery_half_cell_dfn45_centered.py",
+            "battery_half_cell_dfn45_meshes.py",
+        )
     ]
     paths += [
         repo / "src/chemworld/physchem" / name

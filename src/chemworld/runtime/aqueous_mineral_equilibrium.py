@@ -139,7 +139,8 @@ def equilibrate_aqueous_mineral_inventory(
         return AqueousMineralInventoryResult(
             False, ledger, result, before, failure_reason=result.failure_reason
         )
-    assert result.amounts_mol is not None and result.properties is not None
+    if not (result.amounts_mol is not None and result.properties is not None):
+        raise ValueError("successful mineral equilibrium requires amounts and properties")
     after = result.properties
     if after.volume_m3 * 1000 + other_volume > vessel.max_volume_L:
         return AqueousMineralInventoryResult(

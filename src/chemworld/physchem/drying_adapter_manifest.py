@@ -18,7 +18,7 @@ from chemworld.physchem.maturity import (
     ModelExecutionRole,
     ModelProviderContract,
 )
-from chemworld.runtime.kernel_contracts import ModelProviderResult
+from chemworld.physchem.model_provider import ModelProviderResult
 
 OWNER_WORKSTREAM = "wf-30-drying-sorbent"
 OWNED_PATHS = (

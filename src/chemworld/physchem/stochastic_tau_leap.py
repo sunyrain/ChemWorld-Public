@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from math import fsum, isfinite, log
+from math import fsum, isfinite, log, sqrt
 from typing import Any
 
 import numpy as np
@@ -66,10 +66,13 @@ class TauLeapPolicy:
 
 
 def _critical(channels: tuple[EventChannel, ...], counts: dict[str, int],
-              propensities: list[float], policy: TauLeapPolicy) -> list[bool]:
+              propensities: list[float], policy: TauLeapPolicy,
+              critical_reaction_ids: frozenset[str] = frozenset()) -> list[bool]:
     result = []
     for channel, a in zip(channels, propensities, strict=True):
-        if channel.has_regenerated_reactants:
+        if channel.reaction_id in critical_reaction_ids:
+            result.append(a > 0)
+        elif channel.has_regenerated_reactants:
             limit = channel.firing_limit(counts)
             # Protect the last feasible firing even at critical_threshold=1.
             result.append(a > 0 and (limit <= 1 or limit < policy.critical_threshold))
@@ -112,7 +115,8 @@ def _species_factors(channels: tuple[EventChannel, ...], counts: dict[str, int]
 
 
 def _select_tau(channels: tuple[EventChannel, ...], counts: dict[str, int],
-                propensities: list[float], critical: list[bool], policy: TauLeapPolicy) -> float:
+                propensities: list[float], critical: list[bool], policy: TauLeapPolicy,
+                fluctuation_scaled_tau: bool = False) -> float:
     factors = _species_factors(channels, counts)
     drift = dict.fromkeys(factors, 0.)
     variance = dict.fromkeys(factors, 0.)
@@ -124,7 +128,10 @@ def _select_tau(channels: tuple[EventChannel, ...], counts: dict[str, int],
                     variance[key] += change * change * a
     tau = policy.max_tau_s
     for key, factor in factors.items():
-        bound = max(policy.epsilon * counts[key] / factor, 1.)
+        # Source-boundary profiles also limit changes on the particle noise
+        # scale. This is a stricter upper bound, not a global error guarantee.
+        population = sqrt(counts[key]) if fluctuation_scaled_tau else counts[key]
+        bound = max(policy.epsilon * population / factor, 1.)
         if not isfinite(drift[key]) or not isfinite(variance[key]):
             raise ArithmeticError("tau selection overflow")
         if drift[key]:
@@ -147,7 +154,8 @@ def _updated(counts: dict[str, int], channels: tuple[EventChannel, ...],
 
 def _validate_packet(packet: Any, channels: tuple[EventChannel, ...],
                      counts: dict[str, int], state: dict[str, Any], spec: StochasticSpec,
-                     signature: str) -> int:
+                     signature: str, critical_reaction_ids: frozenset[str] = frozenset(),
+                     fluctuation_scaled_tau: bool = False) -> int:
     policy = spec.tau_policy
     if not isinstance(policy, TauLeapPolicy):
         raise ValueError("tau policy was not compiled")
@@ -183,11 +191,14 @@ def _validate_packet(packet: Any, channels: tuple[EventChannel, ...],
         raise ValueError("tau pending firing has zero initial propensity")
     if not _full_reactant_batch_available(channels, counts, numbers):
         raise ValueError("tau pending exceeds full-reactant availability")
-    critical = _critical(channels, counts, propensities, policy)
+    critical = _critical(channels, counts, propensities, policy, critical_reaction_ids)
     if packet["mode"] == "leap":
+        if critical_reaction_ids and all(a == 0 or flag for a, flag in
+                                         zip(propensities, critical, strict=True)):
+            raise ValueError("tau pending leap violates the source critical-channel policy")
         if sum(n for n, flag in zip(numbers, critical, strict=True) if flag) > 1:
             raise ValueError("tau pending has multiple critical firings")
-        tau = _select_tau(channels, counts, propensities, critical, policy)
+        tau = _select_tau(channels, counts, propensities, critical, policy, fluctuation_scaled_tau)
         if end > origin + tau:
             raise ValueError("tau pending exceeds selected step")
     validate_counts(_updated(counts, channels, numbers))
@@ -197,18 +208,31 @@ def _validate_packet(packet: Any, channels: tuple[EventChannel, ...],
 def advance_tau_leap(channels: tuple[EventChannel, ...], counts: dict[str, int],
                      state: dict[str, Any], spec: StochasticSpec, rng: np.random.Generator,
                      duration_s: float, signature: str, *,
-                     stop_after_boundary: bool = False) -> StochasticAdvance:
+                     stop_after_boundary: bool = False,
+                     critical_reaction_ids: frozenset[str] = frozenset(),
+                     calendar_deadline_s: float | None = None,
+                     fluctuation_scaled_tau: bool = False) -> StochasticAdvance:
     """Work only on the caller's copied candidate and its original process RNG."""
     policy = spec.tau_policy
     if not isinstance(policy, TauLeapPolicy):
         raise ValueError("tau policy was not compiled")
     start = float(state["time_s"])
     end = start + duration_s
+    if calendar_deadline_s is not None:
+        end = min(end, calendar_deadline_s)
     packet = state["pending"]
     validation_evaluations = 0
     if packet is not None:
-        validation_evaluations = _validate_packet(packet, channels, counts, state, spec, signature)
+        validation_evaluations = _validate_packet(
+            packet, channels, counts, state, spec, signature, critical_reaction_ids,
+            fluctuation_scaled_tau)
     if state["signature"] != signature:
+        packet = None
+    calendar_replanned = bool(packet is not None and packet["mode"] == "leap"
+        and calendar_deadline_s is not None and packet["end_time_s"] > calendar_deadline_s)
+    if calendar_replanned:
+        # A real new calendar intervention can shorten a previously unknown
+        # future interval. Validate first, then discard its uncommitted draws.
         packet = None
     events: list[tuple[float, str]] = []
     batches: list[StochasticLeap] = []
@@ -216,6 +240,8 @@ def advance_tau_leap(channels: tuple[EventChannel, ...], counts: dict[str, int],
                           "uniform_draws", "steps_attempted", "rejected_leaps", "accepted_leaps",
                           "ssa_steps", "firings_planned", "firings_committed", "leap_firings"), 0)
     work["propensity_evaluations"] = validation_evaluations
+    if calendar_deadline_s is not None:
+        work["calendar_replanned_packets"] = int(calendar_replanned)
     time = start
 
     def attempted() -> None:
@@ -231,8 +257,13 @@ def advance_tau_leap(channels: tuple[EventChannel, ...], counts: dict[str, int],
             raise ValueError("nonfinite total tau propensity")
         if total == 0:
             return None
-        critical = _critical(channels, counts, propensities, policy)
-        tau = _select_tau(channels, counts, propensities, critical, policy)
+        critical = _critical(channels, counts, propensities, policy, critical_reaction_ids)
+        tau = _select_tau(channels, counts, propensities, critical, policy, fluctuation_scaled_tau)
+        if calendar_deadline_s is not None:
+            remaining = calendar_deadline_s-time
+            if remaining <= 0:
+                raise ValueError("source calendar boundary must settle before another tau proposal")
+            tau = min(tau, remaining)
         critical_total = fsum(a for a, flag in zip(propensities, critical, strict=True) if flag)
         rejections = 0
         while True:
@@ -253,6 +284,8 @@ def advance_tau_leap(channels: tuple[EventChannel, ...], counts: dict[str, int],
                         raise ArithmeticError("tau critical waiting time cannot be represented")
                 step = min(tau, critical_wait)
                 when = time + step
+                if calendar_deadline_s is not None:
+                    when = min(when, calendar_deadline_s)
                 if not isfinite(when) or when <= time:
                     raise ArithmeticError("tau endpoint cannot be represented")
                 if critical_wait <= tau:

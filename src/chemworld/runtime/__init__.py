@@ -29,6 +29,10 @@ __all__ = [
     "CompiledMechanism",
     "DomainServiceContract",
     "DomainServiceRegistry",
+    "FlowsheetCostTerm",
+    "FlowsheetDesignBinding",
+    "FlowsheetDesignResult",
+    "FlowsheetDesignSpec",
     "KernelPlan",
     "KernelResult",
     "MechanismManifest",
@@ -54,6 +58,8 @@ __all__ = [
     "OperationExecutor",
     "OperationKernel",
     "OperationKernelRegistry",
+    "ProcessFlowsheetAdapter",
+    "RecedingHorizonResult",
     "RuntimeContext",
     "RuntimeStepResult",
     "ScoreSpec",
@@ -62,10 +68,19 @@ __all__ = [
     "SessionSnapshot",
     "StatePatch",
     "TaskRuntimeProfile",
+    "TrajectoryAction",
+    "TrajectoryDesignResult",
+    "TrajectoryDesignSpec",
+    "TrajectoryExecutionResult",
+    "TrajectoryPeriod",
+    "TrajectoryPolicy",
+    "TrajectoryStep",
+    "TrajectoryTrace",
     "TransactionManager",
     "TransactionResult",
     "WorldEvent",
     "advance_molecular_process_receiver",
+    "advance_thermal_fixed_bed",
     "analyze_energy_grain_world_state",
     "analyze_gas_network_steady_world",
     "analyze_gas_network_world_state",
@@ -86,7 +101,11 @@ __all__ = [
     "equilibrate_calphad_phase_inventory",
     "equilibrate_molecular_multiphase_inventory",
     "equilibrate_molecular_phase_inventory",
+    "evaluate_flowsheet_design",
     "evaluate_molecular_design",
+    "execute_first_period",
+    "flowsheet_metric_units",
+    "flowsheet_observations",
     "install_thermal_feedback",
     "make_chemworld_constitution",
     "mechanism_hash",
@@ -98,9 +117,12 @@ __all__ = [
     "molecular_multiphase_inventory_state",
     "molecular_multiphase_stream",
     "molecular_phase_stream",
+    "optimize_flowsheet",
     "optimize_molecular_process",
+    "optimize_trajectory",
     "optimized_process_receiver",
     "read_membrane_distillation",
+    "run_receding_horizon",
     "select_calphad_diagram_inventory_point",
     "select_calphad_ternary_inventory_point",
     "validate_calphad_thermal_state",
@@ -123,6 +145,27 @@ _MECHANISM_EXPORTS = {
 
 
 def __getattr__(name: str) -> Any:
+    if name == "ProcessFlowsheetAdapter":
+        from chemworld.runtime.process_flowsheet import ProcessFlowsheetAdapter
+
+        return ProcessFlowsheetAdapter
+    if name in {
+        "FlowsheetDesignBinding", "FlowsheetCostTerm", "FlowsheetDesignSpec",
+        "FlowsheetDesignResult", "flowsheet_metric_units", "flowsheet_observations",
+        "evaluate_flowsheet_design", "optimize_flowsheet",
+    }:
+        from chemworld.runtime import flowsheet_design
+
+        return getattr(flowsheet_design, name)
+    if name in {
+        "TrajectoryAction", "TrajectoryPeriod", "TrajectoryPolicy", "TrajectoryDesignSpec",
+        "TrajectoryDesignResult", "TrajectoryTrace", "TrajectoryStep", "TrajectoryExecutionResult",
+        "RecedingHorizonResult", "optimize_trajectory", "execute_first_period",
+        "run_receding_horizon",
+    }:
+        from chemworld.runtime import trajectory_design
+
+        return getattr(trajectory_design, name)
     if name == "analyze_sbml_design_world":
         from chemworld.runtime.sbml_design import analyze_sbml_design_world
 
@@ -358,6 +401,10 @@ def __getattr__(name: str) -> Any:
         from chemworld.runtime import observation_services
 
         return getattr(observation_services, name)
+    if name == "advance_thermal_fixed_bed":
+        from chemworld.runtime import fixed_bed_thermal
+
+        return getattr(fixed_bed_thermal, name)
     if name == "make_chemworld_constitution":
         from chemworld.runtime import constitution_factory
 

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from chemworld.eval.suite import run_suite
+from chemworld.legacy.agent_registry import make_agent
 from chemworld.legacy.leaderboard import aggregate_leaderboard
 
 
@@ -17,6 +18,7 @@ def main() -> None:
     for agent in agents:
         results.extend(
             run_suite(
+                agent_factory=make_agent,
                 agent_name=agent,
                 env_id="ChemWorld",
                 world_splits=["public-test", "private-eval"],

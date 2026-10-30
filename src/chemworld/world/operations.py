@@ -7,7 +7,8 @@ from typing import Any
 import numpy as np
 
 from chemworld.foundation import Operation
-from chemworld.world.action_layout import (
+from chemworld.foundation.action_layout import (
+    EXTENDED_INSTRUMENT_ORDER,
     LEGACY_INSTRUMENT_ORDER,
     LEGACY_OBSERVATION_ORDER,
     LEGACY_OPERATION_ORDER,
@@ -81,7 +82,7 @@ PROCESS_OPERATIONS = (
 OPERATION_TYPES = LEGACY_OPERATION_ORDER
 CAMPAIGN_OPERATION_TYPES = (*OPERATION_TYPES, *CAMPAIGN_CONTROL_OPERATIONS)
 INSTRUMENTS = LEGACY_INSTRUMENT_ORDER
-EXTENDED_INSTRUMENTS = (*INSTRUMENTS, "particle_size")
+EXTENDED_INSTRUMENTS = EXTENDED_INSTRUMENT_ORDER
 
 # Operation-specific input contracts are the single source of truth for values
 # whose effective runtime domain is narrower than the shared Gym field space.

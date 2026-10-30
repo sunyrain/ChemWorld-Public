@@ -269,6 +269,8 @@ class SBMLIntegerKinetics:
         event_budget: int,
         tau_policy: Any,
         *, stop_after_boundary: bool = False,
+        critical_reaction_ids: frozenset[str] = frozenset(),
+        calendar_deadline_s: float | None = None,
     ) -> tuple[dict[str, float], dict[str, Any], StochasticAdvance]:
         if self.requires_boundaries and duration_s > 0 and not stop_after_boundary:
             raise ValueError("source rule/event profiles require original boundary coordination")
@@ -326,6 +328,9 @@ class SBMLIntegerKinetics:
             self.counts(coordinates, time_s),
             memory["process"],
             duration_s, stop_after_boundary=stop_after_boundary,
+            critical_reaction_ids=critical_reaction_ids,
+            calendar_deadline_s=calendar_deadline_s,
+            fluctuation_scaled_tau=self.requires_boundaries,
         )
         values = dict(coordinates)
         values.update(

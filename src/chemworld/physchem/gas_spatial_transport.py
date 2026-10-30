@@ -8,7 +8,12 @@ from math import fsum, isfinite, sqrt
 from typing import Any
 
 from chemworld.physchem.finite_volume import DiffusionMesh
-from chemworld.physchem.gas_transport import GasTransportSpec, gas_transport_response
+from chemworld.physchem.gas_polynomial_transport import GasTransportPolynomialSpec
+from chemworld.physchem.gas_transport import (
+    GasTransportSpec,
+    gas_transport_from_dict,
+    gas_transport_response,
+)
 from chemworld.physchem.gas_transport_fluxes import gas_transport_fluxes
 from chemworld.physchem.reaction_network import R_J_PER_MOL_K as R
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
@@ -18,7 +23,7 @@ from chemworld.physchem.reaction_network import ReactionNetworkSpec
 class GasSpatialTransportSpec:
     mesh: DiffusionMesh
     cell_vessel_ids: tuple[str, ...]
-    transport: GasTransportSpec
+    transport: GasTransportSpec | GasTransportPolynomialSpec
     flux_model: str = "stefan-maxwell"
     maximum_mach: float = 0.05
     boundary_mode: str = "sealed"
@@ -40,6 +45,11 @@ class GasSpatialTransportSpec:
             raise ValueError("unsupported spatial gas boundary mode")
         if type(self.energy_equation) is not bool:
             raise ValueError("spatial energy equation must be explicitly boolean")
+        if self.transport.thermal_diffusion != "off":
+            raise ValueError(
+                "dynamic spatial transport requires thermal_diffusion='off'; "
+                "Soret is not connected to this consumer"
+            )
         if (
             isinstance(self.maximum_mach, bool)
             or not isfinite(self.maximum_mach)
@@ -88,7 +98,7 @@ class GasSpatialTransportSpec:
         return cls(
             DiffusionMesh(**value["mesh"]),
             tuple(value["cell_vessel_ids"]),
-            GasTransportSpec.from_dict(value["transport"]),
+            gas_transport_from_dict(value["transport"]),
             value["flux_model"],
             value["maximum_mach"],
             "sealed" if model.startswith("sealed-") else "finite-flow",

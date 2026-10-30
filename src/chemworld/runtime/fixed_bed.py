@@ -8,8 +8,14 @@ from math import fsum, isclose, isfinite
 from typing import Any, cast
 
 from chemworld.foundation.state import WorldState
-from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, VesselLedger
-from chemworld.foundation.state_ownership import StateSlots
+from chemworld.foundation.state_ledgers import (
+    EquipmentLedger,
+    PhaseLedger,
+    PhaseRecord,
+    VesselLedger,
+    VesselRecord,
+)
+from chemworld.foundation.state_ownership import StateSlot, StateSlots
 from chemworld.physchem.coupled_system import CoupledState, CoupledStateView
 from chemworld.physchem.fixed_bed import (
     FIXED_BED_POLICY,
@@ -26,6 +32,74 @@ from chemworld.physchem.sorbent_kinetics import (
 )
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.kernel_contracts import ModelProviderResult
+
+
+def _fixed_bed_world_layout(
+    state: WorldState, spec: FixedBedSpec, duration_s: float, *,
+    inlet_phase_id: str | None, outlet_phase_id: str | None,
+) -> tuple[PhaseLedger, VesselRecord, tuple[str, ...], dict[str, PhaseRecord],
+           tuple[StateSlot, ...], dict[str, float], float]:
+    """Validate original ownership and geometry without advancing any model."""
+    if (
+        state.terminated
+        or state.quenched
+        or state.inactive_vessels
+        or not isfinite(duration_s)
+        or duration_s < 0
+    ):
+        raise ValueError("fixed bed requires an active assembly World and valid duration")
+    phases = cast(PhaseLedger, state.phases)
+    vessels = cast(VesselLedger, state.vessels)
+    equipment = cast(EquipmentLedger, state.equipment)
+    if (
+        spec.bed_id not in equipment.equipment
+        or equipment.equipment[spec.bed_id].attached_vessel_id != state.vessel_id
+        or equipment.equipment[spec.bed_id].equipment_type != "fixed_bed"
+        or equipment.equipment[spec.bed_id].batch_reset != "preserve"
+    ):
+        raise ValueError("fixed bed requires its original persistent equipment owner")
+    phase_ids = (
+        *spec.cell_phase_ids,
+        *(() if inlet_phase_id is None else (inlet_phase_id,)),
+        *(() if outlet_phase_id is None else (outlet_phase_id,)),
+    )
+    if len(set(phase_ids)) != len(phase_ids) or any(p not in phases.phases for p in phase_ids):
+        raise ValueError("fixed-bed cell and boundary identities must be existing and distinct")
+    records = {p: phases.phases[p] for p in phase_ids}
+    for p, record in records.items():
+        if (
+            record.phase_id != p
+            or record.vessel_id != state.vessel_id
+            or record.phase_type != "gas"
+            or record.solvents.volume_L > 0
+            or not isfinite(record.volume_L)
+            or record.volume_L <= 0
+            or set(record.species_amounts_mol) != set(spec.component_ids)
+            or any(
+                isinstance(n, bool) or not isfinite(n) or n < 0
+                for n in record.species_amounts_mol.values()
+            )
+        ):
+            raise ValueError("fixed bed requires finite owned gas stock in every cell/tank")
+    local_phases = [p for p in phases.phases.values() if p.vessel_id == state.vessel_id]
+    hardware = vessels.vessels[state.vessel_id]
+    if state.temperature_K > hardware.max_temperature_K or not isclose(
+        state.volume_L, fsum(p.volume_L for p in local_phases), rel_tol=1e-12
+    ):
+        raise ValueError("assembly volume or bath temperature disagrees with original hardware")
+    occupied = (
+        state.volume_L + (1 - spec.void_fraction) * spec.area_m2 * spec.faces_m[-1] * 1000
+    )
+    if occupied > hardware.max_volume_L:
+        raise ValueError("gas compartments plus solid bed exceed original hardware volume")
+    if state.species_amounts != phases.total_amounts_mol():
+        raise ValueError("World aggregate must be derived from its original phase inventories")
+    all_slots = {s.spec.slot_id: s for s in state.state_slots.slots}
+    slots = tuple(all_slots[spec.slot_id(i)] for i in range(len(spec.cell_phase_ids)))
+    if any(s.location_id != state.vessel_id for s in slots):
+        raise ValueError("bed sorbent slot belongs to another location")
+    volumes = {p: record.volume_L for p, record in records.items()}
+    return phases, hardware, phase_ids, records, slots, volumes, occupied
 
 
 def advance_fixed_bed(
@@ -51,65 +125,8 @@ def advance_fixed_bed(
         "boundary_scope": "selected_original_finite_gas_compartments",
     }
     try:
-        if (
-            state.terminated
-            or state.quenched
-            or state.inactive_vessels
-            or not isfinite(duration_s)
-            or duration_s < 0
-        ):
-            raise ValueError("fixed bed requires an active assembly World and valid duration")
-        phases = cast(PhaseLedger, state.phases)
-        vessels = cast(VesselLedger, state.vessels)
-        equipment = cast(EquipmentLedger, state.equipment)
-        if (
-            spec.bed_id not in equipment.equipment
-            or equipment.equipment[spec.bed_id].attached_vessel_id != state.vessel_id
-            or equipment.equipment[spec.bed_id].equipment_type != "fixed_bed"
-            or equipment.equipment[spec.bed_id].batch_reset != "preserve"
-        ):
-            raise ValueError("fixed bed requires its original persistent equipment owner")
-        phase_ids = (
-            *spec.cell_phase_ids,
-            *(() if inlet_phase_id is None else (inlet_phase_id,)),
-            *(() if outlet_phase_id is None else (outlet_phase_id,)),
-        )
-        if len(set(phase_ids)) != len(phase_ids) or any(p not in phases.phases for p in phase_ids):
-            raise ValueError("fixed-bed cell and boundary identities must be existing and distinct")
-        records = {p: phases.phases[p] for p in phase_ids}
-        for p, record in records.items():
-            if (
-                record.phase_id != p
-                or record.vessel_id != state.vessel_id
-                or record.phase_type != "gas"
-                or record.solvents.volume_L > 0
-                or not isfinite(record.volume_L)
-                or record.volume_L <= 0
-                or set(record.species_amounts_mol) != set(spec.component_ids)
-                or any(
-                    isinstance(n, bool) or not isfinite(n) or n < 0
-                    for n in record.species_amounts_mol.values()
-                )
-            ):
-                raise ValueError("fixed bed requires finite owned gas stock in every cell/tank")
-        local_phases = [p for p in phases.phases.values() if p.vessel_id == state.vessel_id]
-        hardware = vessels.vessels[state.vessel_id]
-        if state.temperature_K > hardware.max_temperature_K or not isclose(
-            state.volume_L, fsum(p.volume_L for p in local_phases), rel_tol=1e-12
-        ):
-            raise ValueError("assembly volume or bath temperature disagrees with original hardware")
-        occupied = (
-            state.volume_L + (1 - spec.void_fraction) * spec.area_m2 * spec.faces_m[-1] * 1000
-        )
-        if occupied > hardware.max_volume_L:
-            raise ValueError("gas compartments plus solid bed exceed original hardware volume")
-        if state.species_amounts != phases.total_amounts_mol():
-            raise ValueError("World aggregate must be derived from its original phase inventories")
-        all_slots = {s.spec.slot_id: s for s in state.state_slots.slots}
-        slots = tuple(all_slots[spec.slot_id(i)] for i in range(len(spec.cell_phase_ids)))
-        if any(s.location_id != state.vessel_id for s in slots):
-            raise ValueError("bed sorbent slot belongs to another location")
-        volumes = {p: record.volume_L for p, record in records.items()}
+        phases, hardware, phase_ids, records, slots, volumes, occupied = _fixed_bed_world_layout(
+            state, spec, duration_s, inlet_phase_id=inlet_phase_id, outlet_phase_id=outlet_phase_id)
         system, momentum = build_fixed_bed_system(
             spec,
             volumes,

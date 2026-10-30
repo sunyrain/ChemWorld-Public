@@ -83,7 +83,7 @@ def advance_integer_events(model, state, memory, duration_s):
     segments = 0
     initial_firings = process["events_committed"]
 
-    def step(duration, *, boundary):
+    def step(duration, *, boundary, calendar_deadline_s=None):
         nonlocal candidate, process
         values, updated, result = integer.advance(
             candidate.coordinates,
@@ -94,6 +94,8 @@ def advance_integer_events(model, state, memory, duration_s):
             model.maximum_events,
             model.tau_policy,
             stop_after_boundary=boundary,
+            critical_reaction_ids=model.guard_critical_reactions,
+            calendar_deadline_s=calendar_deadline_s,
         )
         process = updated["process"]
         candidate = replace(candidate, coordinates=values, time_s=process["time_s"])
@@ -115,19 +117,22 @@ def advance_integer_events(model, state, memory, duration_s):
             )
             source_events.extend(settled.events)
             candidate, queue = settled.state, settled.memory
+            guard = model.roots.next_boundary(candidate)
+            calendar = [pending.due_time_s for pending in queue.pending]
+            if guard is not None:
+                calendar.append(guard)
+            deadline = min(calendar) if calendar else None
             # Real source assignments/controls invalidate incompatible plans via
             # the existing signature; a zero-duration rebind never draws anew.
-            step(0.0, boundary=False)
+            step(0.0, boundary=False, calendar_deadline_s=deadline)
             if candidate.time_s >= target:
                 break
             if segments >= model.maximum_segments:
                 raise ValueError("integer source-event segment budget exceeded")
-            deadline = min((pending.due_time_s for pending in queue.pending), default=target)
-            guard = model.roots.next_boundary(candidate)
-            endpoint = min(target, deadline, target if guard is None else guard)
+            endpoint = min(target, target if deadline is None else deadline)
             if endpoint <= candidate.time_s:
                 raise ValueError("integer source boundary has no resolvable clock progress")
-            result = step(endpoint - candidate.time_s, boundary=True)
+            result = step(endpoint - candidate.time_s, boundary=True, calendar_deadline_s=deadline)
             segments += 1
             if result.actual_duration_s <= 0:
                 raise ValueError("integer kernel returned no positive source-boundary progress")

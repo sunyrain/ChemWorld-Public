@@ -1,0 +1,64 @@
+{
+  "schema_version": "chemworld-score-replay-protocol-0.1",
+  "protocol_id": "chemworld-vnext-score-replay-candidate-0.1",
+  "status": "candidate_controls_only",
+  "benchmark_claim_allowed": false,
+  "result_schema_version": "chemworld-evaluation-result-0.3",
+  "binding_schema_version": "chemworld-score-replay-binding-0.1",
+  "policies": {
+    "source_binding": "exact_trajectory_bytes_sha256",
+    "record_source_match": "required_before_evaluation",
+    "trajectory_schema_validation": "required",
+    "deterministic_replay": "required",
+    "leaderboard_metric_source": "recomputed_from_trajectory",
+    "nonfinite_numeric": "fail",
+    "normalized_objective_range": [
+      0.0,
+      1.0
+    ],
+    "terminal_selector": "successful_final_assay_only",
+    "online_reward_is_primary": false,
+    "missing_primary": "fail"
+  },
+  "tasks": {
+    "partition-discovery": {
+      "primary_metric": "product_in_organic",
+      "direction": "maximize"
+    },
+    "reaction-to-crystallization": {
+      "primary_metric": "crystal_yield",
+      "direction": "maximize"
+    },
+    "reaction-to-distillation": {
+      "primary_metric": "distillate_purity",
+      "direction": "maximize"
+    },
+    "flow-reaction-optimization": {
+      "primary_metric": "flow_conversion",
+      "direction": "maximize"
+    },
+    "electrochemical-conversion": {
+      "primary_metric": "selective_product_yield",
+      "direction": "maximize"
+    },
+    "equilibrium-characterization": {
+      "primary_metric": "equilibrium_confidence",
+      "direction": "maximize"
+    }
+  },
+  "required_adversarial_probes": [
+    "record_source_mismatch",
+    "trajectory_byte_tamper",
+    "reported_metric_tamper",
+    "binding_tamper",
+    "nonfinite_objective",
+    "missing_terminal_primary",
+    "online_reward_decoy"
+  ],
+  "remaining_release_gates": [
+    "complete the public subprocess harness",
+    "complete the expanded exploit matrix",
+    "run all formal methods under the vNext result schema",
+    "independently reproduce frozen result digests"
+  ]
+}

@@ -23,7 +23,7 @@ from chemworld.physchem.maturity import (
     ModelExecutionRole,
     ModelProviderContract,
 )
-from chemworld.runtime.kernel_contracts import ModelProviderResult
+from chemworld.physchem.model_provider import ModelProviderResult
 
 OWNED_PATHS = (
     "src/chemworld/physchem/crystallization_validation.py",

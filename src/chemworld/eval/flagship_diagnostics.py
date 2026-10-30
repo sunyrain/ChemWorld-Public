@@ -740,8 +740,8 @@ def run_two_phase_campaign(
         "task_id": task_id,
         "method_id": adapter.method_id,
         "seed": seed,
-        "iid": summarize_phase(iid_history, path=iid_path),
-        "shifted": summarize_phase(shifted_history, path=shifted_path),
+        "iid": summarize_phase(iid_history, path=iid_path, artifact_root=root),
+        "shifted": summarize_phase(shifted_history, path=shifted_path, artifact_root=root),
         "shifted_interventions": [dict(item) for item in shifted_interventions],
         "agent_memory_reset_between_phases": False,
         "environment_instance_reset_between_phases": True,
@@ -875,6 +875,7 @@ def summarize_phase(
     history: Sequence[HistoryRecord],
     *,
     path: Path,
+    artifact_root: Path,
 ) -> dict[str, Any]:
     terminal = [record for record in history if record.event_type == "experiment_end"]
     scores = [
@@ -882,12 +883,8 @@ def summarize_phase(
         for record in terminal
         if record.info.get("leaderboard_score") is not None
     ]
-    try:
-        trajectory_reference = repository_relative_reference(path)
-        trajectory_reference_kind = "repository_relative"
-    except ValueError:
-        trajectory_reference = str(path)
-        trajectory_reference_kind = "external_ephemeral"
+    trajectory_reference = repository_relative_reference(path, repository_root=artifact_root)
+    trajectory_reference_kind = "artifact_relative"
     return {
         "trajectory_path": trajectory_reference,
         "trajectory_reference_kind": trajectory_reference_kind,

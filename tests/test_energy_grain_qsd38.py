@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 
 from chemworld.examples.rrkm_gas_network import example_inputs
-from chemworld.physchem.energy_grain_binding import energy_grain_world
 from chemworld.physchem.energy_grain_reduction import energy_grain_qsd, energy_grain_qsd_table
 from chemworld.physchem.energy_grain_specs import (
     EnergyGrainBathGas,
@@ -20,9 +19,10 @@ from chemworld.physchem.energy_grain_specs import (
     R,
 )
 from chemworld.physchem.gas_reactor_network import GasReactorNetworkSpec, GasReactorNodeSpec
-from chemworld.physchem.rrkm_grain_binding import compile_rrkm_grains, rrkm_grain_world
+from chemworld.physchem.rrkm_grain_binding import compile_rrkm_grains
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.runtime.energy_grain_analysis import analyze_energy_grain_world_state
+from chemworld.world.energy_grain import energy_grain_world, rrkm_grain_world
 
 
 def two_grain():

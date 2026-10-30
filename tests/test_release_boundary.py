@@ -52,4 +52,5 @@ def test_research_only_interfaces_and_inputs_stay_out_of_public_tree() -> None:
         text=True,
     )
     assert "paper/preprint" not in completed.stdout
-    assert "lab" in completed.stdout
+    assert "capabilities" in completed.stdout
+    assert "render" in completed.stdout

@@ -821,6 +821,9 @@ class CoupledSystem:
                 *(item.scale for item in self.coordinates),
             ]
         )
+        inventory_tolerances = np.asarray([
+            max(1e-24, 1e-10 * scale) for scale in scales[:count]
+        ])
         initial = np.asarray(
             [
                 *(state.amounts_mol[key] for key in keys),
@@ -841,7 +844,7 @@ class CoupledSystem:
             result = {}
             for index, key in enumerate(keys):
                 value = float(vector[index])
-                tolerance = max(1e-24, 1e-10 * scales[index])
+                tolerance = inventory_tolerances[index]
                 if not isfinite(value) or (record and value < -tolerance):
                     raise RuntimeError(f"coupled inventory outside nonnegative domain: {key}")
                 result[key] = max(value, 0.0)
@@ -1077,7 +1080,12 @@ class CoupledSystem:
                         def feasible(time, scaled):
                             raw = scaled * scales
                             return (
-                                np.all(np.isfinite(raw)) and np.all(raw[:count] >= 0)
+                                np.all(np.isfinite(raw))
+                                # Unrelated zero stocks can have the same tiny
+                                # roundoff as ordinary accepted snapshots. The
+                                # selected signed event and coordinate bounds
+                                # below remain strictly on their feasible side.
+                                and np.all(raw[:count] >= -inventory_tolerances)
                                 and all(
                                     (item.minimum is None or value >= item.minimum)
                                     and (item.maximum is None or value <= item.maximum)

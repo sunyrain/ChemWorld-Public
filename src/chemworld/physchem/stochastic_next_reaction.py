@@ -156,7 +156,8 @@ def advance_next_reaction(
                         hazard = draw_hazard()
                 when = None
                 if value > 0:
-                    assert hazard is not None
+                    if not (hazard is not None):
+                        raise ValueError("positive propensity requires a sampled hazard")
                     when = scheduled(time, hazard, value)
                 propensities[index] = value
                 times[index] = when

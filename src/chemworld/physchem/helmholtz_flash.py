@@ -130,7 +130,8 @@ def _temperature_bounds(model: HelmholtzPhaseModel) -> tuple[float, float]:
 def _two_phase(saturation: HelmholtzSaturationReport, quality: float) -> HelmholtzTwoPhaseState:
     if not saturation.success:
         raise ResidualDomainError("saturation:"+saturation.failure_reason)
-    assert saturation.liquid is not None and saturation.gas is not None
+    if saturation.liquid is None or saturation.gas is None:
+        raise AssertionError("invariant violated: saturation.liquid or saturation.gas is None")
     return HelmholtzTwoPhaseState(saturation.liquid, saturation.gas, quality)
 
 
@@ -323,7 +324,8 @@ def flash_at_pressure(model: HelmholtzPhaseModel, *, pressure_Pa: float,
         if not saturation.success:
             return HelmholtzFlashReport(None, False, failure_reason=saturation.failure_reason,
                                         diagnostics=saturation.diagnostics)
-        assert saturation.liquid is not None and saturation.gas is not None
+        if saturation.liquid is None or saturation.gas is None:
+            raise AssertionError("invariant violated: saturation.liquid or saturation.gas is None")
         liquid, gas = saturation.liquid, saturation.gas
         lv, gv = _values(liquid)[coordinate], _values(gas)[coordinate]
         if min(lv, gv) <= value <= max(lv, gv):
@@ -342,7 +344,8 @@ def flash_at_pressure(model: HelmholtzPhaseModel, *, pressure_Pa: float,
     if not report.success:
         return HelmholtzFlashReport(None, False, failure_reason=report.failure_reason,
                                     diagnostics=report.diagnostics)
-    assert report.state is not None
+    if report.state is None:
+        raise AssertionError("invariant violated: report.state is not None")
     final = report.state
     if final.temperature_K < model.critical_temperature_K:
         stable = model.solve_tp(temperature_K=final.temperature_K, pressure_Pa=pressure_Pa,

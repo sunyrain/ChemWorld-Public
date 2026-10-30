@@ -9,6 +9,7 @@ import numpy as np
 from gymnasium.utils import RecordConstructorArgs
 
 from chemworld.agent_interface import (
+    action_failure_feedback,
     action_schema,
     observation_view,
     rl_observation_spec,
@@ -783,9 +784,5 @@ class ActionSuggestionWrapper(gym.Wrapper[Any, Any, Any, Any], RecordConstructor
         payload = dict(info)
         suggestions = base.available_actions()
         payload["action_suggestions"] = suggestions
-        if payload.get("constraint_flags", {}).get("precondition_failed", False):
-            operation_names = [entry["operation"] for entry in suggestions[:4]]
-            payload["recovery_suggestion"] = "Try one of the currently valid operations: " + (
-                ", ".join(operation_names) if operation_names else "none"
-            )
+        payload.update(action_failure_feedback(base, info))
         return payload

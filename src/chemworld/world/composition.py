@@ -386,7 +386,6 @@ class WorldCompositionSpec:
     def from_dict(
         cls, payload: Mapping[str, Any], *, modules: DomainModuleRegistry | None = None
     ) -> WorldCompositionSpec:
-        modules = modules or DomainModuleRegistry.default()
         _require_exact_keys(payload, _TOP_LEVEL_KEYS, "world composition")
         schema_version = str(payload.get("schema_version", ""))
         if schema_version != WORLD_COMPOSITION_SCHEMA_VERSION:
@@ -400,6 +399,16 @@ class WorldCompositionSpec:
         components_value = payload.get("components")
         if not isinstance(components_value, list) or not components_value:
             raise WorldCompositionError("components must be a non-empty list")
+        if modules is None:
+            modules = DomainModuleRegistry.default()
+            # This apparatus is opt-in: its operation layout and execution
+            # declaration must not alter existing worlds or saved sessions.
+            if any(isinstance(component, Mapping)
+                   and component.get("kind") == "thermal_fixed_bed"
+                   for component in components_value):
+                from chemworld.world.thermal_fixed_bed_module import THERMAL_FIXED_BED_MODULE
+
+                modules = DomainModuleRegistry((*modules.modules, THERMAL_FIXED_BED_MODULE))
         components = tuple(
             WorldComponentRequest.from_dict(component, modules=modules)
             for component in components_value
@@ -627,6 +636,29 @@ def physical_instruments(spec: WorldCompositionSpec, vessel: str | None = None) 
             for component in spec.components
             if (vessel is None or component.vessel == vessel) and component.kind == "observation"
             for name in component.parameters.get("instruments", ())
+        )
+    )
+
+
+def component_instruments(
+    spec: WorldCompositionSpec,
+    vessel: str,
+    *,
+    fallback: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    """Return the instrument surface bound to one generic composition vessel.
+
+    An observation component with no explicit list inherits the compiled task
+    surface. Keeping that fallback in one helper makes compatibility preflight
+    and runtime network construction agree for multi-vessel graphs.
+    """
+
+    return tuple(
+        dict.fromkeys(
+            instrument
+            for component in spec.components
+            if component.vessel == vessel and component.kind == "observation"
+            for instrument in component.parameters.get("instruments", fallback)
         )
     )
 
@@ -1036,6 +1068,7 @@ def _bind_operation_bounds(
         ("continuous_flow", "flow_rate_range_mL_min"): (("set_flow_rate", "flow_rate_mL_min"),),
         ("continuous_flow", "residence_time_range_s"): (("set_flow_rate", "residence_time_s"),),
         ("continuous_flow", "temperature_range_K"): (("run_flow", "target_temperature_K"),),
+        ("finite_transport", "duration_range_s"): (("run_flow", "duration_s"),),
         ("electrochemistry", "potential_range_V"): (("set_potential", "potential_V"),),
         ("electrochemistry", "current_range_mA"): (("set_potential", "current_mA"),),
         ("electrochemistry", "duration_range_s"): (("electrolyze", "duration_s"),),
@@ -1238,6 +1271,18 @@ def check_world_composition_compatibility(
                 "every executable v1 composition requires the observation component",
             )
         )
+    if spec.physics is None:
+        for component in spec.components:
+            capability = spec.modules.components()[component.kind]
+            if capability.requires_physics:
+                diagnostics.append(
+                    _diagnostic(
+                        "missing_physics_binding",
+                        f"components.{component.id}",
+                        f"component {component.kind!r} requires an explicit physics binding",
+                        component.kind,
+                    )
+                )
     if ("reaction" in component_set
             and not component_set.intersection(_REACTION_PROCESS_DRIVERS)
             and not reactive_transport_vessels):
@@ -1355,7 +1400,13 @@ def check_world_composition_compatibility(
     template = _surface_template(spec, pattern)
     request = spec.task
     operations = request.operations or template.allowed_operations
-    instruments = request.instruments or template.allowed_instruments
+    # Preserve an explicitly authored empty instrument subset. Compatibility
+    # must inspect the same subset that compile_world_composition will bind;
+    # otherwise preflight can accept a terminal workflow that the compiled
+    # task cannot measure.
+    instruments = (
+        template.allowed_instruments if request.instruments is None else request.instruments
+    )
     invalid_operations = sorted(set(operations) - set(template.allowed_operations))
     if invalid_operations:
         diagnostics.append(
@@ -1443,8 +1494,25 @@ def check_world_composition_compatibility(
         else None
     )
     if len(spec.vessels) > 1:
-        observation_instruments = None
-    if isinstance(observation_instruments, (list, tuple)):
+        available_by_vessel = {
+            vessel["id"]: component_instruments(
+                spec, vessel["id"], fallback=tuple(instruments)
+            )
+            for vessel in spec.vessels
+        }
+        available_instruments = set().union(*map(set, available_by_vessel.values()))
+        outside_observation = sorted(set(instruments) - available_instruments)
+        if outside_observation:
+            diagnostics.append(
+                _diagnostic(
+                    "interface_mismatch",
+                    "task.instruments",
+                    "task instruments are not provided by any observation component: "
+                    f"{outside_observation}",
+                    "observation",
+                )
+            )
+    elif isinstance(observation_instruments, (list, tuple)):
         outside_observation = sorted(set(instruments) - set(observation_instruments))
         if outside_observation:
             diagnostics.append(

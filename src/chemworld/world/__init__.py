@@ -150,6 +150,7 @@ __all__ = [
     "build_molecular_cascade_world",
     "build_molecular_flash_separator_world",
     "build_nonideal_mechanism_world",
+    "build_process_flowsheet_world",
     "build_seawater_ro_world",
     "check_world_composition_compatibility",
     "compile_recipe",
@@ -181,6 +182,10 @@ __all__ = [
 
 
 def __getattr__(name: str):
+    if name == "build_process_flowsheet_world":
+        from chemworld.world.process_flowsheet_world import build_process_flowsheet_world
+
+        return build_process_flowsheet_world
     if name == "build_seawater_ro_world":
         from chemworld.world.seawater_ro_world import seawater_ro_world_spec
 

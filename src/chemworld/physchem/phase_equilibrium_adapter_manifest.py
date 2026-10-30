@@ -11,6 +11,7 @@ from chemworld.physchem.maturity import (
     ModelExecutionRole,
     ModelProviderContract,
 )
+from chemworld.physchem.model_provider import ModelProviderResult
 from chemworld.physchem.phase_equilibrium_units import (
     PHASE_EQUILIBRIUM_MODEL_ID,
     PHASEPY_COMMIT,
@@ -19,7 +20,6 @@ from chemworld.physchem.phase_equilibrium_units import (
     StabilityAwareExtractionRequest,
     simulate_stability_aware_extraction,
 )
-from chemworld.runtime.kernel_contracts import ModelProviderResult
 
 OWNER_WORKSTREAM = "wf-40-lle-stability-coupling"
 OWNED_PATHS = (

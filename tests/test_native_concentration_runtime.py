@@ -159,6 +159,12 @@ def test_solver_failure_rolls_back_material_enthalpy_time_and_receipts(monkeypat
         result = session.execute({"operation": "concentrate", "duration_s": 5})
         assert result.info["transaction_status"] == "rolled_back"
         assert result.info["operation_outcome"] == "numerical_failure"
+        assert result.info["failure_summary"]["transaction_status"] == "rolled_back"
+        assert result.info["failure_summary"]["rollback_reason"]
+        assert "rolled back" in result.info["recovery_suggestion"]
+        report = session.observation_view("lab_report")
+        assert result.info["failure_summary"] == report["failure_summary"]
+        assert result.info["recovery_suggestion"] == report["recovery_suggestion"]
         assert session._state.phases == before.phases
         assert session._state.state_slots == before.state_slots
         assert session._state.ledger.time_s == before.ledger.time_s

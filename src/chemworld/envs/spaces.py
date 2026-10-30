@@ -35,6 +35,9 @@ class DeclaredChoices(spaces.Space):
     def contains(self, value):
         return not isinstance(value, (bool, np.bool_)) and value in self.choices
 
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, DeclaredChoices) and self.choices == other.choices
+
 
 def _native_field_space(field):
     if field.choices:

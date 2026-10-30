@@ -330,6 +330,145 @@ def test_resource_and_lifecycle_impossibilities_fail_before_execution() -> None:
     )
 
 
+def test_explicit_empty_instrument_subset_is_rejected_by_preflight() -> None:
+    request = _request()
+    request["task"] = {
+        "description": "An explicit empty instrument surface must not regain defaults.",
+        "instruments": [],
+    }
+
+    report = chemworld.check_world_composition_compatibility(request)
+
+    assert not report.compatible
+    assert any(
+        item.code == "lifecycle_hole" and "final_assay" in item.message
+        for item in report.diagnostics
+    )
+    with pytest.raises(WorldCompositionError, match="lifecycle_hole"):
+        chemworld.compile_world_composition(request)
+
+
+def test_multi_vessel_instrument_surface_must_have_a_provider() -> None:
+    request = _request()
+    request["components"] = [
+        {
+            "id": f"{vessel}-{kind}",
+            "kind": kind,
+            "vessel": vessel,
+            "parameters": (
+                {"instruments": ["hplc"]}
+                if vessel == "a" and kind == "observation"
+                else {"instruments": ["gc"]}
+                if vessel == "b" and kind == "observation"
+                else {}
+            ),
+        }
+        for vessel in ("a", "b")
+        for kind in ("reaction", "thermal", "observation")
+    ]
+    request["connections"] = [
+        {
+            "id": "a-to-b",
+            "source": {"component": "a-reaction", "port": "out"},
+            "target": {"component": "b-reaction", "port": "in"},
+            "unit": "mol",
+        }
+    ]
+
+    report = chemworld.check_world_composition_compatibility(request)
+
+    assert not report.compatible
+    assert any(
+        item.code == "interface_mismatch"
+        and item.path == "task.instruments"
+        and "final_assay" in item.message
+        for item in report.diagnostics
+    )
+    with pytest.raises(WorldCompositionError, match="interface_mismatch"):
+        chemworld.compile_world_composition(request)
+
+
+def test_multi_vessel_instrument_union_binds_local_runtime_surfaces() -> None:
+    request = _request()
+    request["components"] = [
+        {
+            "id": f"{vessel}-{kind}",
+            "kind": kind,
+            "vessel": vessel,
+            "parameters": (
+                {"instruments": ["hplc", "final_assay"]}
+                if vessel == "a" and kind == "observation"
+                else {"instruments": ["gc"]}
+                if vessel == "b" and kind == "observation"
+                else {}
+            ),
+        }
+        for vessel in ("a", "b")
+        for kind in ("reaction", "thermal", "observation")
+    ]
+    request["connections"] = [
+        {
+            "id": "a-to-b",
+            "source": {"component": "a-reaction", "port": "out"},
+            "target": {"component": "b-reaction", "port": "in"},
+            "unit": "mol",
+        }
+    ]
+    request["task"] = {
+        "budget": 40,
+        "instruments": ["hplc", "gc", "final_assay"],
+    }
+
+    compiled = chemworld.compile_world_composition(request)
+    env = gym.make("ChemWorld", composition=compiled, seed=0)
+    try:
+        env.reset(seed=0)
+        state = env.unwrapped._state
+        assert state.metadata["component_network"]["instruments"] == {
+            "a": ["hplc", "final_assay"],
+            "b": ["gc"],
+        }
+    finally:
+        env.close()
+
+
+def test_specialized_membrane_requires_native_physics_binding() -> None:
+    request = _request()
+    request["components"] = [
+        {"kind": kind, "role": kind, "parameters": {}}
+        for kind in ("reaction", "thermal", "continuous_flow", "ro_membrane", "observation")
+    ]
+
+    report = chemworld.check_world_composition_compatibility(request)
+
+    assert not report.compatible
+    assert any(
+        item.code == "missing_physics_binding" and item.components == ("ro_membrane",)
+        for item in report.diagnostics
+    )
+    with pytest.raises(WorldCompositionError, match="missing_physics_binding"):
+        chemworld.compile_world_composition(request)
+
+
+@pytest.mark.parametrize("component_kind", ("battery_spm", "battery_cell", "battery_thevenin"))
+def test_specialized_battery_requires_native_physics_binding(component_kind: str) -> None:
+    request = _request()
+    request["components"] = [
+        {"kind": component_kind, "role": component_kind, "parameters": {}},
+        {"kind": "observation", "role": "observation", "parameters": {}},
+    ]
+
+    report = chemworld.check_world_composition_compatibility(request)
+
+    assert not report.compatible
+    assert any(
+        item.code == "missing_physics_binding" and item.components == (component_kind,)
+        for item in report.diagnostics
+    )
+    with pytest.raises(WorldCompositionError, match="missing_physics_binding"):
+        chemworld.compile_world_composition(request)
+
+
 def test_authored_units_are_converted_and_bounds_reach_runtime_validator() -> None:
     request = _request()
     request["components"] = [

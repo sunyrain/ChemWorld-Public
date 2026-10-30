@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from chemworld.agents.base import Agent
 from chemworld.data.logging import load_jsonl
 from chemworld.eval.result_artifacts import build_verified_evaluation_result
 from chemworld.eval.runner import EvaluationPolicy, run_agent
-from chemworld.legacy.agent_registry import make_agent
 
 
 def run_suite(
     *,
     agent_name: str,
+    agent_factory: Callable[[str], Agent],
     env_id: str,
     world_splits: list[str],
     seeds: list[int],
@@ -41,7 +43,7 @@ def run_suite(
             trajectory_path = trajectory_dir / (
                 f"{agent_name}_{env_id}_{split}_{objective}_seed{seed}.jsonl"
             )
-            agent = make_agent(agent_name)
+            agent = agent_factory(agent_name)
             run_wall_start = time.perf_counter()
             process_start = time.process_time()
             run_agent(

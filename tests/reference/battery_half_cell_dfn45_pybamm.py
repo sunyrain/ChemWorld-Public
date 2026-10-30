@@ -7,6 +7,7 @@ as different routes. No OCP/barrier compensation or native equation is imported.
 """
 
 import inspect
+from collections.abc import Mapping
 from copy import deepcopy
 from importlib.metadata import version
 
@@ -26,6 +27,16 @@ from battery_half_cell_dfn45_cases import (
     validate_case,
     validate_grid,
 )
+from battery_half_cell_dfn45_linear import (
+    linear_kernel_contract,
+    linear_options,
+    validate_linear_policy,
+)
+from battery_half_cell_dfn45_numerics import (
+    install_row_policy,
+    make_source_solver,
+    validate_numerical_policy,
+)
 
 PREFIX = "half-cell-dfn45:"
 SOURCE_ROOT_METHOD = "casadi"
@@ -44,6 +55,18 @@ def _dependencies():
     if version("pybammsolvers") != PYBAMMSOLVERS_VERSION:
         raise RuntimeError("half-cell source requires actual pybammsolvers0.3.3")
     return pybamm
+
+
+def _validated_solver_options(solver_options):
+    if solver_options is None:
+        return None
+    allowed = {"calc_ic", "suppress_algebraic_error", "print_stats"}
+    if not isinstance(solver_options, Mapping) or any(
+        key not in allowed or type(value) is not bool for key, value in solver_options.items()
+    ):
+        raise ValueError("source solver_options only accept declared boolean IDAKLU options")
+    # IDAKLU fills this dictionary with defaults. Preserve the caller's request.
+    return deepcopy(dict(solver_options))
 
 
 def stage_inputs(stage, variant):
@@ -81,9 +104,31 @@ def _manifest(released):
     }
 
 
-def build_reference(data, grid, variant="modular-full-Xu2019"):
+def build_reference(
+    data,
+    grid,
+    variant="modular-full-Xu2019",
+    *,
+    numerical_policy="legacy",
+    solver_options=None,
+    linear_policy=None,
+    gradient_policy=None,
+):
     """Construct/discretize one source route; this function does not integrate."""
+    if gradient_policy is not None:
+        from battery_half_cell_dfn45_centered import validate_gradient_policy
+
+        validate_gradient_policy(gradient_policy)
+        if numerical_policy != "legacy":
+            raise ValueError("gradient development preserves the original legacy row policy")
     pybamm = _dependencies()
+    validate_numerical_policy(numerical_policy)
+    explicit_options = _validated_solver_options(solver_options)
+    linear_policy = validate_linear_policy(linear_policy)
+    if linear_policy is not None:
+        if numerical_policy != "legacy":
+            raise ValueError("linear solver development keeps the original legacy equations")
+        explicit_options = {**(explicit_options or {}), **linear_options(linear_policy)}
     validate_case(data)
     validate_grid(grid)
     if min(grid["x"]) < 3:
@@ -405,16 +450,47 @@ def build_reference(data, grid, variant="modular-full-Xu2019"):
         )
         for var in model.default_var_pts
     }
+    spatial_options = {}
+    if "radial_exponent" in grid:
+        from battery_half_cell_dfn45_meshes import development_mesh_bounds, radial_edges
+
+        development_mesh_bounds(grid)
+        submeshes = dict(model.default_submesh_types)
+        submeshes["positive particle"] = pybamm.MeshGenerator(
+            pybamm.UserSupplied1DSubMesh,
+            {"edges": radial_edges(grid, parameters["Positive particle radius [m]"])},
+        )
+        spatial_options["submesh_types"] = submeshes
+    if gradient_policy is not None:
+        from battery_half_cell_dfn45_centered import make_spatial_methods
+
+        spatial_options["spatial_methods"] = make_spatial_methods(pybamm, model, gradient_policy)
     simulation = pybamm.Simulation(
         model,
         parameter_values=parameters,
         var_pts=var_pts,
-        solver=pybamm.IDAKLUSolver(
-            rtol=RTOL, atol=ATOL, root_tol=ROOT_TOL, root_method=SOURCE_ROOT_METHOD
+        solver=make_source_solver(
+            pybamm,
+            numerical_policy,
+            rtol=RTOL,
+            atol=ATOL,
+            root_tol=ROOT_TOL,
+            root_method=SOURCE_ROOT_METHOD,
+            **({"options": explicit_options} if explicit_options is not None else {}),
         ),
+        **spatial_options,
     )
     simulation.build()
-    return {
+    legacy_algebraic, numerical_contract = install_row_policy(
+        pybamm,
+        simulation.built_model,
+        simulation.mesh,
+        parameters,
+        conditioning,
+        numerical_policy,
+        data["maximum_current_A"],
+    )
+    built = {
         "simulation": simulation,
         "model": simulation.built_model,
         "parameter_values": parameters,
@@ -435,6 +511,12 @@ def build_reference(data, grid, variant="modular-full-Xu2019"):
         "initial_condition_updates": initial_updates,
         "metal_initial_mol": n_m0,
         "algebraic_conditioning": conditioning,
+        "numerical_policy": numerical_policy,
+        "numerical_policy_contract": numerical_contract,
+        "legacy_algebraic": legacy_algebraic,
+        "alias_prefix": PREFIX,
+        "solver_options_explicit": solver_options is not None or linear_policy is not None,
+        "linear_policy": linear_policy,
         "metal_argument_contract": {
             "raw_basic_argument_mol_m3": working_cmax,
             "modular_pure_metal_argument_mol_m3": pure_metal_concentration,
@@ -447,6 +529,59 @@ def build_reference(data, grid, variant="modular-full-Xu2019"):
             "route_uses_raw_basic_argument": basic and not normalized,
         },
     }
+    if numerical_policy != "legacy":
+        simulation.solver.source_numerical_context = (built, (MODE, CURRENT))
+    if gradient_policy is not None:
+        # Keep a genuine unmodified source DAG for the original residual audit.
+        # It is only built/discretized, never initialized or integrated here.
+        baseline = _original_gradient_builder(
+            data,
+            grid,
+            variant,
+            numerical_policy="legacy",
+            solver_options=solver_options,
+            linear_policy=linear_policy,
+        )
+        if _layout_signature(built) != _layout_signature(baseline):
+            raise ValueError("centered gradient changed the actual raw-state coordinates")
+        methods = spatial_options["spatial_methods"]
+        receipts, seen = [], set()
+        for method in methods.values():
+            if id(method) not in seen:
+                receipts.extend(deepcopy(getattr(method, "centered_gradient_receipts", [])))
+                seen.add(id(method))
+        if not receipts:
+            raise ValueError("centered gradient policy did not transform an actual source gradient")
+        built["original_gradient_audit_model"] = baseline["model"]
+        built["legacy_algebraic"] = baseline["legacy_algebraic"]
+        built["gradient_policy_contract"] = {
+            "name": gradient_policy,
+            "actual_transformations": receipts,
+            "raw_state_layout_identical_to_original": True,
+            "original_residual_audit": "unmodified original source gradient arithmetic; "
+            "old1e-8 conditioned residual gate retained independently",
+            "scope": "constant-reference cancellation in positive Neumann gradient only; "
+            "no accepted state, IC, boundary value, material law or threshold replacement",
+        }
+    return built
+
+
+_original_gradient_builder = build_reference
+
+
+def _layout_signature(built):
+    model, parameters = built["model"], built["parameter_values"]
+    return [
+        (
+            v.name,
+            v.domains,
+            [(s.start, s.stop) for s in parts],
+            float(parameters.evaluate(v.scale)),
+            float(parameters.evaluate(v.reference)),
+        )
+        for v, parts in model.y_slices.items()
+        if parts
+    ]
 
 
 def _read(expression, time_s, state, inputs):
@@ -543,8 +678,9 @@ def source_contract(built):
     total_length = origin + salt_length
     conditioning = []
     for declaration in built["algebraic_conditioning"]:
-        original = model.variables[declaration["original_alias"]]
-        conditioned = model.variables[declaration["conditioned_alias"]]
+        audit_model = built.get("original_gradient_audit_model", model)
+        original = audit_model.variables[declaration["original_alias"]]
+        conditioned = audit_model.variables[declaration["conditioned_alias"]]
         conditioning.append(
             {
                 **declaration,
@@ -565,6 +701,26 @@ def source_contract(built):
         "pybamm_version": PYBAMM_VERSION,
         "pybammsolvers_version": PYBAMMSOLVERS_VERSION,
         "casadi_version": CASADI_VERSION,
+        **(
+            {"declared_development_grid": deepcopy(built["grid"])}
+            if "radial_exponent" in built["grid"]
+            else {}
+        ),
+        **(
+            {"gradient_policy": deepcopy(built["gradient_policy_contract"])}
+            if "gradient_policy_contract" in built
+            else {}
+        ),
+        **(
+            {"linear_policy": deepcopy(built["linear_policy"])}
+            if built["linear_policy"] is not None
+            else {}
+        ),
+        **(
+            {"actual_solver_options": deepcopy(sim.solver._options)}
+            if built["solver_options_explicit"]
+            else {}
+        ),
         "source_name": "Xu2019",
         "source_parameter_manifest": built["source_parameter_manifest"],
         "released_parameter_factory_source": built["released_parameter_factory_source"],
@@ -586,9 +742,15 @@ def source_contract(built):
             "policy": "all charge rows multiply [(Ls+Lp)/(Lm+Ls+Lp)]^2; all other rows 1",
             "positive_factors_preserve_zero_set": True,
             "root_method": SOURCE_ROOT_METHOD,
-            "root_tol_applies_to": "conditioned source residual; raw original always retained",
+            "root_tol_applies_to": (
+                "legacy source_algebraic is an independent audit; root_tol applies solver_algebraic"
+                if built["numerical_policy_contract"]["fv_current_rows"]
+                else "conditioned source residual; raw original always retained"
+            ),
             "blocks": conditioning,
         },
+        "numerical_policy": built["numerical_policy"],
+        "numerical_policy_contract": deepcopy(built["numerical_policy_contract"]),
         "mesh": mesh,
         "actual_FV_options": {
             domain: deepcopy(sim._disc.spatial_methods[domain].options)
@@ -725,12 +887,23 @@ def state_record(built, time_s, state, inputs):
         "row": [scalar[name] for name in RESPONSE_ORDER],
         "source_y": raw.ravel().tolist(),
         "source_rhs": _read(model.concatenated_rhs, time_s, raw, inputs).ravel().tolist(),
-        "source_algebraic": _read(model.concatenated_algebraic, time_s, raw, inputs)
+        "source_algebraic": _read(built["legacy_algebraic"], time_s, raw, inputs).ravel().tolist(),
+        "solver_algebraic": _read(model.concatenated_algebraic, time_s, raw, inputs)
         .ravel()
         .tolist(),
+        "solver_row_weights": built["numerical_policy_contract"]["solver_row_weights"],
+        "source_algebraic_units": built["numerical_policy_contract"]["source_algebraic_units"],
+        "solver_algebraic_units": built["numerical_policy_contract"]["solver_algebraic_units"],
         "source_algebraic_original": np.concatenate(
             [
-                _read(model.variables[block["original_alias"]], time_s, raw, inputs).ravel()
+                _read(
+                    built.get("original_gradient_audit_model", model).variables[
+                        block["original_alias"]
+                    ],
+                    time_s,
+                    raw,
+                    inputs,
+                ).ravel()
                 for block in built["algebraic_conditioning"]
             ]
         ).tolist(),
@@ -821,18 +994,113 @@ def initial_state_record(built, stage, *, time_s=0.0, previous_state=None):
         np.array_equal(result[: model.len_rhs], initial.reshape(-1, 1)[: model.len_rhs])
     )
     record["boundary_operation"] = "actual source algebraic consistency only; no integration"
+    record["independent_initialization_observation"] = {
+        "actual_independent_root_guess_y": initial.ravel().tolist(),
+        "actual_independent_root_result_y": result.ravel().tolist(),
+        "guess_scope": (
+            "original source IC or previous actual endpoint; no rest seed injection here"
+        ),
+        "normal_solver_initialization_runs_later": True,
+        "cpp_internal_initialization": "unavailable in pinned public IDAKLU interface",
+    }
     return record
 
 
-def reference_time(data, grid, variant="modular-full-Xu2019", *, progress_callback=None):
+def _source_observation_snapshot(built, policy, records, status, inputs):
+    """Derive fields only from genuine negative-return saved points, never repair y."""
+    diagnostics = []
+    model = built["model"]
+    n = model.len_rhs + model.len_alg
+    for event in records:
+        if event.get("event") != "public-cpp-negative-flag-return":
+            continue
+        diagnostic = {"call_id": event["call_id"], "records": []}
+        diagnostics.append(diagnostic)
+        try:
+            fields = event["fields"]
+            times = np.asarray(fields["t"]["data"])
+            raw = np.asarray(fields["y"]["data"])
+            derivative = np.asarray(fields["yp"]["data"])
+            if times.ndim != 1 or raw.size != n * times.size:
+                raise ValueError("public negative-return t/y layout is incomplete")
+            if derivative.size not in (0, raw.size):
+                raise ValueError("public negative-return yp layout is incomplete")
+            if (
+                not np.isfinite(times).all()
+                or not np.isfinite(raw).all()
+                or not np.isfinite(derivative).all()
+                or np.any(np.diff(times) <= 0)
+            ):
+                raise ValueError("public saved points are nonfinite or not increasing")
+            states = raw.reshape(times.size, n)
+            derivatives = derivative.reshape(times.size, n) if derivative.size else None
+            diagnostic.update(
+                actual_times_s=times.tolist(),
+                derivative_available=derivatives is not None,
+                scope="actual saved outputs before failure; not failed internal state "
+                "or direct C++ post-IC storage",
+            )
+            for index, time_s in enumerate(times):
+                record = state_record(built, time_s, states[index].reshape(-1, 1), inputs)
+                if derivatives is not None:
+                    residual = np.r_[record["source_rhs"], record["solver_algebraic"]]
+                    residual -= model.mass_matrix.entries @ derivatives[index]
+                    record["source_dae_residual_with_saved_yp"] = residual.tolist()
+                diagnostic["records"].append(record)
+        except Exception as exc:
+            # The complete public buffers remain in records even if field
+            # derivation fails. This observation must not replace the SolverError.
+            diagnostic["extraction_error"] = {"type": type(exc).__name__, "message": str(exc)}
+    return {
+        "policy": policy,
+        "records": deepcopy(records),
+        "status": deepcopy(status),
+        "actual_solver_options": deepcopy(built["simulation"].solver._options),
+        "negative_saved_state_diagnostics": diagnostics,
+    }
+
+
+def reference_time(
+    data,
+    grid,
+    variant="modular-full-Xu2019",
+    *,
+    progress_callback=None,
+    numerical_policy="legacy",
+    solver_options=None,
+    linear_policy=None,
+    observation_policy=None,
+    gradient_policy=None,
+):
     """Execute one requested route only; a separate coordinator owns formal GO."""
-    built = build_reference(data, grid, variant)
+    if observation_policy is not None and (
+        not isinstance(observation_policy, str)
+        or observation_policy not in {"requested-samples", "adaptive-steps"}
+    ):
+        raise ValueError("unknown source observation policy")
+    built = build_reference(
+        data,
+        grid,
+        variant,
+        numerical_policy=numerical_policy,
+        solver_options=solver_options,
+        linear_policy=linear_policy,
+        gradient_policy=gradient_policy,
+    )
     contract = source_contract(built)
     sim, segments = built["simulation"], []
+    observations, observation_status = [], None
+    if observation_policy is not None:
+        from battery_half_cell_dfn45_observation import install_failure_observer
+
+        observation_status = install_failure_observer(sim.solver, observations)
+        contract["source_observation_policy"] = observation_policy
     previous_time, previous_state = 0.0, None
     for index, stage in enumerate(data["stages"]):
         boundary = None
         pending_source = None
+        linear_kernel = None
+        ic_start = len(getattr(sim.solver, "source_ic_observations", []))
         try:
             boundary = initial_state_record(
                 built, stage, time_s=previous_time, previous_state=previous_state
@@ -853,11 +1121,14 @@ def reference_time(data, grid, variant="modular-full-Xu2019", *, progress_callba
             # only its two boundaries belong there. Observations use t_interp
             # and must not introduce extra consistency solves or restarts.
             restart_times = times[[0, -1]]
+            interpolation_times = (
+                np.asarray([]) if observation_policy == "adaptive-steps" else times
+            )
             solution = sim.step(
                 stage["duration_s"],
                 save=False,
                 t_eval=restart_times,
-                t_interp=times,
+                t_interp=interpolation_times,
                 inputs=inputs,
             )
             actual_t, actual_y = np.asarray(solution.t), np.asarray(solution.y, dtype=float)
@@ -888,6 +1159,8 @@ def reference_time(data, grid, variant="modular-full-Xu2019", *, progress_callba
                 )
             if actual_y.shape != (built["model"].len_rhs + built["model"].len_alg, actual_t.size):
                 raise ValueError("source original returned y/t layout is incomplete")
+            if built["linear_policy"] is not None:
+                linear_kernel = linear_kernel_contract(sim.solver)
             record = {
                 "index": index,
                 "request": deepcopy(stage),
@@ -921,8 +1194,26 @@ def reference_time(data, grid, variant="modular-full-Xu2019", *, progress_callba
                     "root_tol": ROOT_TOL,
                     "root_method": SOURCE_ROOT_METHOD,
                     "stage_relative_restart_times_s": restart_times.tolist(),
-                    "stage_relative_interpolation_times_s": times.tolist(),
+                    "stage_relative_interpolation_times_s": interpolation_times.tolist(),
+                    **(
+                        {"observation_policy": observation_policy}
+                        if observation_policy is not None
+                        else {}
+                    ),
+                    **(
+                        {"options": deepcopy(sim.solver._options)}
+                        if built["solver_options_explicit"]
+                        else {}
+                    ),
+                    **(
+                        {"linear_kernel_contract": linear_kernel}
+                        if built["linear_policy"] is not None
+                        else {}
+                    ),
                 },
+                "initialization_observations": deepcopy(
+                    getattr(sim.solver, "source_ic_observations", [])[ic_start:]
+                ),
             }
             segments.append(record)
             previous_time, previous_state = float(actual_t[-1]), actual_y[:, -1:]
@@ -933,6 +1224,11 @@ def reference_time(data, grid, variant="modular-full-Xu2019", *, progress_callba
             if solution.termination != "final time":
                 break
         except Exception as exc:
+            if built["linear_policy"] is not None and linear_kernel is None:
+                try:
+                    linear_kernel = linear_kernel_contract(sim.solver)
+                except Exception as observation_error:
+                    linear_kernel = {"unavailable": str(observation_error)}
             exc.partial_history = {
                 "contract": contract,
                 "case": deepcopy(data),
@@ -942,7 +1238,28 @@ def reference_time(data, grid, variant="modular-full-Xu2019", *, progress_callba
                 "failed_boundary_t0": boundary,
                 "failed_source_boundary_attempt": getattr(exc, "source_boundary_attempt", None),
                 "failed_source_return": pending_source,
+                "failed_initialization_observations": deepcopy(
+                    getattr(sim.solver, "source_ic_observations", [])[ic_start:]
+                ),
                 "last_completed_time_s": previous_time,
+                **(
+                    {"failed_linear_kernel_contract": linear_kernel}
+                    if built["linear_policy"] is not None
+                    else {}
+                ),
+                **(
+                    {
+                        "source_observation": _source_observation_snapshot(
+                            built,
+                            observation_policy,
+                            observations,
+                            observation_status,
+                            stage_inputs(stage, variant),
+                        )
+                    }
+                    if observation_policy is not None
+                    else {}
+                ),
             }
             raise
     return {
@@ -951,4 +1268,17 @@ def reference_time(data, grid, variant="modular-full-Xu2019", *, progress_callba
         "segments": segments,
         "requested_stages": len(data["stages"]),
         "actual_stages": len(segments),
+        **(
+            {
+                "source_observation": _source_observation_snapshot(
+                    built,
+                    observation_policy,
+                    observations,
+                    observation_status,
+                    stage_inputs(stage, variant),
+                )
+            }
+            if observation_policy is not None
+            else {}
+        ),
     }

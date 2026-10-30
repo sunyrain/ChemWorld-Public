@@ -147,19 +147,25 @@ def solve_isothermal_gas_pipe(
             else:
                 _positive(value, key)
     if mass_flow_kg_s is None:
-        assert upstream_pressure_Pa is not None and downstream_pressure_Pa is not None
-        assert diameter_m is not None and length_m is not None
+        if upstream_pressure_Pa is None or downstream_pressure_Pa is None:
+            raise AssertionError(
+                "invariant violated: upstream_pressure_Pa or downstream_pressure_Pa is None"
+            )
+        if diameter_m is None or length_m is None:
+            raise AssertionError("invariant violated: diameter_m or length_m is None")
         return isothermal_gas_pipe(gas, upstream_pressure_Pa=upstream_pressure_Pa,
             downstream_pressure_Pa=downstream_pressure_Pa, diameter_m=diameter_m,
             length_m=length_m, darcy_friction_factor=darcy_friction_factor)
     mass = mass_flow_kg_s
     if unknown in {"upstream_pressure_Pa", "downstream_pressure_Pa"}:
-        assert diameter_m is not None and length_m is not None
+        if diameter_m is None or length_m is None:
+            raise AssertionError("invariant violated: diameter_m or length_m is None")
         fixed_diameter, fixed_length = diameter_m, length_m
         ratio = isothermal_critical_pressure_ratio(darcy_friction_factor=darcy_friction_factor,
             length_m=length_m, diameter_m=diameter_m)
         if upstream_pressure_Pa is None:
-            assert downstream_pressure_Pa is not None
+            if downstream_pressure_Pa is None:
+                raise AssertionError("invariant violated: downstream_pressure_Pa is None")
             p2 = downstream_pressure_Pa
             low, high = p2, p2 / ratio
 
@@ -191,13 +197,17 @@ def solve_isothermal_gas_pipe(
         else:
             downstream_pressure_Pa = high - fraction * (high - low)
     else:
-        assert upstream_pressure_Pa is not None and downstream_pressure_Pa is not None
+        if upstream_pressure_Pa is None or downstream_pressure_Pa is None:
+            raise AssertionError(
+                "invariant violated: upstream_pressure_Pa or downstream_pressure_Pa is None"
+            )
         if mass <= 0 or upstream_pressure_Pa <= downstream_pressure_Pa:
             raise ValueError("pipe dimensions need positive mass flow and pressure difference")
         p1, p2 = upstream_pressure_Pa, downstream_pressure_Pa
         logarithm = log(p1 / p2)
         if length_m is None:
-            assert diameter_m is not None
+            if diameter_m is None:
+                raise AssertionError("invariant violated: diameter_m is not None")
             area = pi * diameter_m**2 / 4
             resistance = (area * p1 / mass)**2 * -expm1(-2 * logarithm) / (
                 gas.pressure_over_density_j_kg) - 2 * logarithm
@@ -224,8 +234,12 @@ def solve_isothermal_gas_pipe(
                     name="log_pipe_diameter", unit="dimensionless", scale=1.0,
                 )
                 diameter_m = exp(diameter_log)
-    assert upstream_pressure_Pa is not None and downstream_pressure_Pa is not None
-    assert diameter_m is not None and length_m is not None
+    if upstream_pressure_Pa is None or downstream_pressure_Pa is None:
+        raise AssertionError(
+            "invariant violated: upstream_pressure_Pa or downstream_pressure_Pa is None"
+        )
+    if diameter_m is None or length_m is None:
+        raise AssertionError("invariant violated: diameter_m or length_m is None")
     result = isothermal_gas_pipe(gas, upstream_pressure_Pa=upstream_pressure_Pa,
         downstream_pressure_Pa=downstream_pressure_Pa, diameter_m=diameter_m,
         length_m=length_m, darcy_friction_factor=darcy_friction_factor)

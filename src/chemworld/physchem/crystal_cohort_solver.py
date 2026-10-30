@@ -8,7 +8,7 @@ before using the common CoupledSystem rate assembler and ODE backend.
 from math import isfinite
 
 import numpy as np
-from scipy.sparse import lil_matrix
+from scipy.sparse import csc_matrix
 
 from chemworld.physchem import solver_backend
 from chemworld.physchem.coupled_system import (
@@ -93,6 +93,20 @@ def solve_crystal_interval(
             )
         geometry.append((index, seed, grown, impurity, cohort.particle_count))
     geometry_positions = {p for _, a, b, c, _ in geometry for p in (a, b, c) if p is not None}
+    molecular_positions = tuple((key, index) for key, index in position.items()
+                                if index not in geometry_positions)
+    from chemworld.physchem.crystal_thermal_kinetics import CrystalThermalSpec
+
+    if type(model) is CrystalThermalSpec:
+        # Preserve particle_moles' multiplication/division order exactly.
+        from math import pi
+        particle_factor = model.kinetics.crystal_density_kg_m3 * pi / 6
+        molecular_weight = model.kinetics.target_molecular_weight_kg_mol
+
+        def particle_moles(diameter):
+            return particle_factor * diameter**3 / molecular_weight
+    else:
+        particle_moles = model.particle_moles
     inactive = set()
     corrections = {}
     deaths = []
@@ -102,12 +116,16 @@ def solve_crystal_interval(
     stopping = None
 
     def amounts(raw, *, accepted=False):
-        result = {k: float(raw[i]) for k, i in position.items()}
+        # Keep the canonical key order while avoiding float conversions that
+        # would immediately be overwritten by the geometry reconstruction.
+        result = dict.fromkeys(keys)
+        for key, index in molecular_positions:
+            result[key] = float(raw[index])
         for index, diameter, seed_fraction, impurity_ratio, particles in geometry:
             d = float(raw[diameter])
             theta = float(raw[seed_fraction])
             loading = 0 if impurity_ratio is None else float(raw[impurity_ratio])
-            n = 0 if index in inactive else particles * model.particle_moles(max(d, 0))
+            n = 0 if index in inactive else particles * particle_moles(max(d, 0))
             if accepted and (
                 d < -1e-12
                 or max(-theta, theta - 1, 0) * n > 1e-24 + 1e-10 * seed_stock
@@ -133,10 +151,9 @@ def solve_crystal_interval(
             result[fields["grown"]] = (1 - theta) * n
             if impurity_ratio is not None:
                 result[fields["impurity"]] = loading * n
-        for key, value in result.items():
-            if position[key] in geometry_positions:
-                continue
-            tolerance = 1e-10 * scales[position[key]] + 1e-24
+        for key, index in molecular_positions:
+            value = result[key]
+            tolerance = 1e-10 * scales[index] + 1e-24
             if not isfinite(value) or (accepted and value < -tolerance):
                 raise RuntimeError(
                     f"crystal molecular stock outside nonnegative domain: {key}={value!r}; "
@@ -223,7 +240,18 @@ def solve_crystal_interval(
         raw = scaled * scales
         state = view(time, raw)
         base = rhs(time, scaled)
-        matrix = lil_matrix((len(scaled), len(scaled)))
+        # Each cohort column touches only its local coordinates and the shared
+        # liquid/energy rows. Store those entries directly: assigning a dense
+        # vector to a LIL column scans the entire population for every cohort.
+        rows, columns, values = [], [], []
+
+        def append_column(column, entries):
+            for row, value in entries:
+                if value != 0.0:
+                    rows.append(row)
+                    columns.append(column)
+                    values.append(value)
+
         for column in (*[i for i in range(count) if i not in geometry_positions], count):
             step = np.sqrt(np.finfo(float).eps) * max(abs(scaled[column]), 1.0)
             if (
@@ -236,7 +264,8 @@ def solve_crystal_interval(
                 )
             shifted = scaled.copy()
             shifted[column] += step
-            matrix[:, column] = ((rhs(time, shifted) - base) / step).reshape(-1, 1)
+            difference = (rhs(time, shifted) - base) / step
+            append_column(column, ((row, difference[row]) for row in np.flatnonzero(difference)))
 
         velocity, _, capture = kinetic_terms(model, state, liquid_keys)
         fluid_target = liquid_keys[model.target_component]
@@ -286,7 +315,7 @@ def solve_crystal_interval(
             for column in (diameter, seed_fraction, impurity_ratio):
                 if column is None:
                     continue
-                derivative = np.zeros(len(scaled))
+                derivative = {}
                 host_rate, seed_rate, impurity_rate, capacity_derivative = 0.0, 0.0, 0.0, 0.0
                 if column == diameter:
                     host_rate = radial_rate_derivative
@@ -330,8 +359,14 @@ def solve_crystal_interval(
                 )
                 derivative[count + 1] = chemical if system.isothermal else 0.0
                 derivative[count + 2] = chemical
-                matrix[:, column] = (derivative * scales[column] / scales).reshape(-1, 1)
-        return matrix.tocsc()
+                append_column(
+                    column,
+                    (
+                        (row, value * scales[column] / scales[row])
+                        for row, value in derivative.items()
+                    ),
+                )
+        return csc_matrix((values, (rows, columns)), shape=(len(scaled), len(scaled)))
 
     while elapsed < duration_s:
         # Several numerically coincident disappearance roots can be reported
@@ -349,10 +384,23 @@ def solve_crystal_interval(
                     }
                 )
         callbacks, names = [], []
+        event_candidate = None
+        event_time = None
+        event_view = None
+
+        def event_state(time, scaled):
+            nonlocal event_candidate, event_time, event_view
+            # All event callbacks at one candidate inspect the same immutable
+            # state. Reset at every topology restart; never cache callbacks.
+            if event_time != time or not np.array_equal(event_candidate, scaled):
+                event_candidate, event_time = scaled.copy(), time
+                event_view = view(time, scaled * scales)
+            return event_view
+
         for spec in system.all_events:
 
             def root(time, scaled, spec=spec):
-                return spec.value(view(time, scaled * scales))
+                return spec.value(event_state(time, scaled))
 
             root.terminal, root.direction = True, spec.direction
             callbacks.append(root)
@@ -392,7 +440,7 @@ def solve_crystal_interval(
             time_span_s=(elapsed, duration_s),
             evaluation_times_s=grid,
             events=callbacks or None,
-            jac_sparsity=system.jacobian_sparsity(),
+            jac_sparsity=(None if inventory_independent_heat_flux else system.jacobian_sparsity()),
             jac=jacobian if inventory_independent_heat_flux else None,
             policy=ODESolverPolicy(
                 "chemworld_crystal_geometry_radau_v1",

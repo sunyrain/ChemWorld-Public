@@ -70,21 +70,25 @@ No terminal-velocity or particle-density default is inferred. All dimensions SI.
         speed = a*flux**b*diameter**c*gas.viscosity_Pa_s**.055*gas.density_kg_m3**-.42
         branch = "Gs/D <= 47000" if low else "Gs/D > 47000"
     elif method == "Rizk":
-        assert dp is not None
+        if dp is None:
+            raise AssertionError("invariant violated: dp is not None")
         alpha, beta = 1440*dp+1.96, 1100*dp+2.5
         # Log form avoids forming a tiny empirical power before taking its root.
         speed = exp((log(gas_scale)+alpha*log(10)+beta*log(speed_scale))/(1+beta))
     elif method == "Schade":
-        assert dp is not None and density_ratio is not None
+        if dp is None or density_ratio is None:
+            raise AssertionError("invariant violated: dp or density_ratio is None")
         speed = (gas_scale**.11*(diameter/dp)**.025*density_ratio**.34*speed_scale)**(1/1.11)
     elif method == "Weber_saltation":
-        assert dp is not None
+        if dp is None:
+            raise AssertionError("invariant violated: dp is not None")
         terminal = _positive(terminal_velocity_m_s, "terminal velocity")
         factor = 7+8*terminal/3 if terminal <= 3 else 15.
         speed = (factor*(dp/diameter)**.1*speed_scale*gas_scale**.25)**.8
         branch = "terminal <= 3 m/s" if terminal <= 3 else "terminal > 3 m/s"
     else:
-        assert dp is not None and density_ratio is not None
+        if dp is None or density_ratio is None:
+            raise AssertionError("invariant violated: dp or density_ratio is None")
         terminal = _positive(terminal_velocity_m_s, "terminal velocity")
         fine = method == "Matsumoto_1977" and dp <= 1.39*diameter*density_ratio**-.74
         if fine:

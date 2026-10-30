@@ -336,7 +336,8 @@ def solve_differential_meter(
     p1, p2, mass = upstream_pressure_Pa, downstream_pressure_Pa, mass_flow_kg_s
     ratio_min = spec.minimum_pressure_ratio if heat_capacity_ratio is not None else 1e-10
     if mass is None:
-        assert p1 is not None and p2 is not None
+        if p1 is None or p2 is None:
+            raise AssertionError("invariant violated: p1 or p2 is None")
         fixed_p1, fixed_p2 = p1, p2
         bounds = spec.reynolds_bounds or (1e-6, 1e10)
         if (
@@ -359,7 +360,8 @@ def solve_differential_meter(
 
         mass = exp(_meter_root(residual, log(bounds[0]), log(bounds[1]))) * factor
     elif solve_secondary_dimension:
-        assert p1 is not None and p2 is not None
+        if p1 is None or p2 is None:
+            raise AssertionError("invariant violated: p1 or p2 is None")
         fixed_p1, fixed_p2 = p1, p2
         low, high = secondary_bounds_m or (
             spec.pipe_diameter_m * 1e-4,
@@ -381,7 +383,8 @@ def solve_differential_meter(
         )
         spec = replace(spec, secondary_dimension_m=value * spec.pipe_diameter_m)
     elif p2 is None:
-        assert p1 is not None
+        if p1 is None:
+            raise AssertionError("invariant violated: p1 is not None")
         fixed_p1 = p1
         p2 = p1 * _meter_root(
             lambda ratio: (
@@ -395,7 +398,8 @@ def solve_differential_meter(
             1,
         )
     else:
-        assert p2 is not None
+        if p2 is None:
+            raise AssertionError("invariant violated: p2 is not None")
         p1 = p2 / _meter_root(
             lambda ratio: (
                 _meter_evaluate(spec, fluid, mass, p2 / ratio, p2, heat_capacity_ratio)[0] / mass
@@ -404,7 +408,8 @@ def solve_differential_meter(
             ratio_min,
             1,
         )
-    assert p1 is not None and p2 is not None
+    if p1 is None or p2 is None:
+        raise AssertionError("invariant violated: p1 or p2 is None")
     prediction, reynolds, coefficient, epsilon = _meter_evaluate(
         spec, fluid, mass, p1, p2, heat_capacity_ratio
     )

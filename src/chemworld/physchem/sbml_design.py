@@ -248,7 +248,8 @@ class _SBMLDesignEvaluation:
                 previous = 0.0
                 for offset in sorted({m.sample_offset_s for m in self.spec.metrics}):
                     if offset > previous:
-                        assert self.system is not None
+                        if self.system is None:
+                            raise AssertionError("invariant violated: self.system is not None")
                         advanced = self.system.advance(candidate_state, offset - previous)
                         diagnostics["continuous_solves"].append(dict(advanced.solver_diagnostic))
                         if advanced.outcome != "success" or not isclose(

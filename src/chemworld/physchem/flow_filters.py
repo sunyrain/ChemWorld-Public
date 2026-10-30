@@ -140,7 +140,10 @@ def filter_loss_coefficient(
         else:
             value *= _curve_value(angle_curve, angle, "angle_degrees")
     if thickness_m is not None:
-        assert hydraulic_diameter_m is not None and darcy_friction_factor is not None
+        if hydraulic_diameter_m is None or darcy_friction_factor is None:
+            raise AssertionError(
+                "invariant violated: hydraulic_diameter_m or darcy_friction_factor is None"
+            )
         if thickness_m > 50*hydraulic_diameter_m:
             value += darcy_friction_factor*thickness_m/(alpha*alpha*hydraulic_diameter_m)
     return value

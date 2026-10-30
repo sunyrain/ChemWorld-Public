@@ -272,10 +272,13 @@ def advance_stochastic(network, counts, continuation, duration_s):
 
 
 def advance_event_channels(channels, species_ids, spec, counts, continuation, duration_s, *,
-                           stop_after_boundary=False):
+                           stop_after_boundary=False, critical_reaction_ids=frozenset(),
+                           calendar_deadline_s=None, fluctuation_scaled_tau=False):
     """Shared pure direct/next/tau kernel; callers retain state and source units."""
     if type(stop_after_boundary) is not bool:
         raise ValueError("event boundary selection must be an explicit Boolean")
+    if type(fluctuation_scaled_tau) is not bool:
+        raise ValueError("tau fluctuation selection must be an explicit Boolean")
     if not isinstance(spec, (StochasticSpec, EventProcessSpec)):
         raise ValueError("compiled channels require an explicit event policy")
     counts = validate_counts(counts)
@@ -297,6 +300,20 @@ def advance_event_channels(channels, species_ids, spec, counts, continuation, du
     end = start + duration_s
     if not isfinite(end) or (duration_s > 0 and end <= start):
         raise ValueError("SSA endpoint cannot be represented")
+    if (not isinstance(critical_reaction_ids, frozenset)
+            or any(not isinstance(identity, str) for identity in critical_reaction_ids)
+            or (critical_reaction_ids and critical_reaction_ids -
+                {channel.reaction_id for channel in channels})):
+        raise ValueError("critical source reactions must be a frozen set of known channel IDs")
+    if calendar_deadline_s is not None:
+        from math import ulp
+
+        if (type(calendar_deadline_s) not in {int, float} or not isfinite(calendar_deadline_s)
+                or calendar_deadline_s < start):
+            raise ValueError("source calendar deadline must be finite and not precede the clock")
+        tolerance = 8*max(ulp(end), ulp(calendar_deadline_s))
+        if end > calendar_deadline_s+tolerance:
+            raise ValueError("requested advance must not cross the source calendar deadline")
     rng = np.random.Generator(np.random.PCG64())
     rng.bit_generator.state = state["rng_state"]
     signature = _signature(counts, channels, spec)
@@ -304,7 +321,10 @@ def advance_event_channels(channels, species_ids, spec, counts, continuation, du
         from chemworld.physchem.stochastic_tau_leap import advance_tau_leap
 
         return advance_tau_leap(channels, counts, state, spec, rng, duration_s, signature,
-                                stop_after_boundary=stop_after_boundary)
+                                stop_after_boundary=stop_after_boundary,
+                                critical_reaction_ids=critical_reaction_ids,
+                                calendar_deadline_s=calendar_deadline_s,
+                                fluctuation_scaled_tau=fluctuation_scaled_tau)
     if state["signature"] != signature:
         # A genuine instantaneous inventory/rate intervention invalidates the
         # old exponential event, but preserves the independent process stream.

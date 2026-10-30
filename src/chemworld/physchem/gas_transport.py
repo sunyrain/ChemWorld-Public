@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from math import fsum, isfinite
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from chemworld.physchem.conductivity_kernels import conductivity_value
 from chemworld.physchem.conductivity_mixtures import wassiljewa_herning_zipperer_conductivity
@@ -25,10 +25,20 @@ from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.specs import ComponentSpec
 from chemworld.physchem.viscosity_mixtures import wilke_viscosity
 
+if TYPE_CHECKING:
+    from chemworld.physchem.gas_polynomial_transport import GasTransportPolynomialSpec
+
 
 def _positive(value: float, name: str) -> None:
     if isinstance(value, bool) or not isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be finite and positive")
+
+
+def _finite_transport_number(record: Mapping[str, Any], key: str) -> float:
+    value = record[key]
+    if isinstance(value, bool) or not isinstance(value, int | float) or not isfinite(value):
+        raise ValueError(f"CHEMKIN transport {key} must be finite numeric")
+    return float(value)
 
 
 def _plain(value: Any) -> Any:
@@ -171,6 +181,194 @@ def gas_transport_from_network(
     )
 
 
+def gas_transport_from_chemkin(
+    network: ReactionNetworkSpec,
+    *,
+    thermal_diffusion: str,
+    collision_method: str = "Neufeld_Janzen_Aziz",
+    conductivity_model: str = "Eucken",
+) -> GasTransportSpec:
+    """Build the bounded neutral CHEMKIN transport consumer.
+
+    ``convert_chemkin`` retains the fixed-width ``TRANSPORT`` records in
+    network metadata because they are not Cantera declarations.  This adapter
+    is the only consumer for that source shape: it requires one exact record
+    for every original gas species, preserves all source fields in the
+    resulting :class:`LennardJonesSpec`, and converts only epsilon/k (K) and
+    sigma (angstrom) to the existing first-order Lennard-Jones model.
+
+    The current Chapman--Enskog closure is neutral and non-polar.  CHEMKIN
+    dipole values other than zero therefore fail closed; polarizability and
+    rotational relaxation are retained as provenance but are not guessed into
+    Eucken, Wilke, or binary-diffusion corrections.  Pressure, temperature,
+    composition, and collision-integral domains remain enforced by
+    :func:`gas_transport_response` and the underlying kernels.
+    """
+
+    if not isinstance(network, ReactionNetworkSpec):
+        raise TypeError("CHEMKIN transport requires a ReactionNetworkSpec")
+    if network.metadata.get("import_format") != "chemkin-gas-mechanism-v1":
+        raise ValueError("network is not a strict CHEMKIN gas import")
+    if network.metadata.get("transport_section_present") is not True:
+        raise ValueError("CHEMKIN transport consumer requires a TRANSPORT section")
+    records = network.metadata.get("transport_records")
+    if not isinstance(records, list | tuple):
+        raise ValueError("CHEMKIN transport metadata records are missing")
+
+    expected = {
+        "species",
+        "geometry",
+        "geometry_name",
+        "epsilon_over_k_K",
+        "sigma_A",
+        "dipole_D",
+        "polarizability_A3",
+        "rotational_relaxation",
+    }
+    geometry_names = {0: "atom", 1: "linear", 2: "nonlinear"}
+    species_by_id = {item.species_id: item for item in network.species}
+    if len(species_by_id) != len(network.species) or not species_by_id:
+        raise ValueError("CHEMKIN transport requires unique original species")
+    if any(item.phase != "gas" or item.charge for item in network.species):
+        raise ValueError("CHEMKIN transport supports only original neutral gas species")
+    if len(records) != len(species_by_id):
+        raise ValueError("CHEMKIN TRANSPORT must provide exactly one record per species")
+
+    parameters: list[LennardJonesSpec] = []
+    geometry: dict[str, str] = {}
+    seen: set[str] = set()
+    for raw in records:
+        if not isinstance(raw, Mapping) or set(raw) != expected:
+            raise ValueError("CHEMKIN transport record has missing or extra fields")
+        species_id = raw["species"]
+        if not isinstance(species_id, str) or species_id not in species_by_id:
+            raise ValueError("CHEMKIN transport record references unknown species")
+        if species_id in seen:
+            raise ValueError(f"duplicate CHEMKIN transport record: {species_id}")
+        geometry_value = raw["geometry"]
+        if isinstance(geometry_value, bool) or not isinstance(geometry_value, int):
+            raise ValueError("CHEMKIN transport geometry must be integer 0, 1, or 2")
+        if geometry_value not in geometry_names:
+            raise ValueError("CHEMKIN transport geometry must be integer 0, 1, or 2")
+        if raw["geometry_name"] != geometry_names[geometry_value]:
+            raise ValueError("CHEMKIN transport geometry name disagrees with geometry")
+
+        epsilon = _finite_transport_number(raw, "epsilon_over_k_K")
+        sigma = _finite_transport_number(raw, "sigma_A")
+        dipole = _finite_transport_number(raw, "dipole_D")
+        polarizability = _finite_transport_number(raw, "polarizability_A3")
+        rotational_relaxation = _finite_transport_number(raw, "rotational_relaxation")
+        if epsilon <= 0 or sigma <= 0:
+            raise ValueError("CHEMKIN transport epsilon and sigma must be positive")
+        if dipole < 0 or polarizability < 0 or rotational_relaxation < 0:
+            raise ValueError("CHEMKIN transport optional properties must be nonnegative")
+        if dipole != 0:
+            raise ValueError("CHEMKIN transport dipole is outside the neutral nonpolar LJ consumer")
+        record = dict(raw)
+        parameters.append(
+            LennardJonesSpec(
+                species_id,
+                epsilon,
+                sigma * 1.0e-10,
+                "Original CHEMKIN TRANSPORT record; neutral nonpolar first-order LJ",
+                sources={
+                    "source_declaration": record,
+                    "source_units": {
+                        "epsilon_over_k_K": "K",
+                        "sigma_A": "angstrom",
+                        "dipole_D": "debye",
+                        "polarizability_A3": "angstrom^3",
+                        "rotational_relaxation": "1",
+                    },
+                    "ignored_fields": ["polarizability_A3", "rotational_relaxation"],
+                },
+            )
+        )
+        geometry[species_id] = geometry_names[geometry_value]
+        seen.add(species_id)
+    if seen != set(species_by_id):
+        raise ValueError("CHEMKIN TRANSPORT records do not cover every species")
+    return GasTransportSpec(
+        tuple(parameters),
+        geometry,
+        thermal_diffusion,
+        collision_method=collision_method,
+        conductivity_model=conductivity_model,
+    )
+
+
+def gas_transport_capabilities() -> dict[str, Any]:
+    """Return the auditable model and source-consumer boundary.
+
+    A CHEMKIN ``TRANSPORT`` record includes the inputs used by a Stockmayer
+    potential, but the native coefficient table currently contains only the
+    nonpolar Lennard-Jones fits.  In particular, no validated
+    Monchick--Mason polar collision-integral table or fit is bundled here.
+    Advertising that gap makes the nonzero-dipole rejection an explicit
+    capability boundary instead of allowing callers to infer a correction.
+    """
+
+    from chemworld.physchem.gas_polynomial_transport import gas_polynomial_transport_capabilities
+
+    return {
+        "model": "dilute-gas-transport-v1",
+        "source_consumers": {
+            "cantera": {
+                "consumer": "gas_transport_from_network",
+                "status": "supported",
+                "potential": "neutral-nonpolar Lennard-Jones 12-6",
+            },
+            "chemkin": {
+                "consumer": "gas_transport_from_chemkin",
+                "status": "supported",
+                "potential": "neutral-nonpolar Lennard-Jones 12-6",
+                "required_source_fields": [
+                    "geometry",
+                    "epsilon_over_k_K",
+                    "sigma_A",
+                    "dipole_D",
+                    "polarizability_A3",
+                    "rotational_relaxation",
+                ],
+            },
+        },
+        "supported": {
+            "collision_integrals": ["Neufeld_Janzen_Aziz", "Kim_Monroe"],
+            "mixture_viscosity": "Wilke",
+            "mixture_conductivity": "Wassiljewa-Herning-Zipperer",
+            "binary_combining_rule": "Lorentz-Berthelot",
+            "thermal_diffusion": ["off"],
+            "maximum_pressure_Pa": 200000.0,
+        },
+        "polar_stockmayer": {
+            "status": "unsupported-fail-closed",
+            "reason": (
+                "validated Monchick-Mason polar collision-integral table or fit is not bundled"
+            ),
+            "required_for_enablement": [
+                "validated Omega(1,1)* and Omega(2,2)* Stockmayer data or fit",
+                "reproducible reduced-dipole and polarizability unit conversion",
+                "independent polar mixture qualification",
+            ],
+            "policy": "reject any nonzero dipole_D; do not infer polar corrections",
+        },
+        "ignored_source_fields": ["polarizability_A3", "rotational_relaxation"],
+        "scope": "neutral nonpolar first-order dilute gas; no high-order kinetic transport",
+        "explicit_alternative_models": [gas_polynomial_transport_capabilities()],
+    }
+
+
+def gas_transport_from_dict(
+    value: Mapping[str, Any],
+) -> GasTransportSpec | GasTransportPolynomialSpec:
+    """Select a declared codec; never fall back from a failed alternative."""
+    if value.get("model") in ("gas-transport-polynomial-v1", "gas-transport-polynomial-soret-v2"):
+        from chemworld.physchem.gas_polynomial_transport import GasTransportPolynomialSpec
+
+        return GasTransportPolynomialSpec.from_dict(value)
+    return GasTransportSpec.from_dict(value)
+
+
 @dataclass(frozen=True)
 class GasTransportResponse:
     species_ids: tuple[str, ...]
@@ -189,30 +387,59 @@ class GasTransportResponse:
     viscosity_Pa_s: float
     conductivity_W_m_K: float
     models: Mapping[str, str]
+    thermal_diffusion_coefficients_kg_m_s: Mapping[str, float] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "species_ids", tuple(self.species_ids))
+        soret = self.thermal_diffusion_coefficients_kg_m_s
+        enabled = self.models.get("thermal_diffusion") == "cantera-3.2-mixture-soret"
+        if enabled != (soret is not None):
+            raise ValueError("Soret response mode requires its explicit coefficient vector")
+        if soret is not None and (
+            not isinstance(soret, Mapping)
+            or set(soret) != set(self.species_ids)
+            or any(
+                isinstance(v, bool) or not isinstance(v, int | float) or not isfinite(v)
+                for v in soret.values()
+            )
+        ):
+            raise ValueError(
+                "Soret response coefficients must be finite signed values for every species"
+            )
         for item in fields(self):
             value = getattr(self, item.name)
             if isinstance(value, Mapping):
                 object.__setattr__(self, item.name, _frozen(value))
 
     def to_dict(self) -> dict[str, Any]:
+        enabled = self.thermal_diffusion_coefficients_kg_m_s is not None
         return {
-            "model": "dilute-gas-transport-response-v1",
-            **{f.name: _plain(getattr(self, f.name)) for f in fields(self)},
+            "model": "dilute-gas-transport-response-v2"
+            if enabled
+            else "dilute-gas-transport-response-v1",
+            **{
+                f.name: _plain(getattr(self, f.name))
+                for f in fields(self)
+                if f.name != "thermal_diffusion_coefficients_kg_m_s" or enabled
+            },
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> GasTransportResponse:
         payload = dict(value)
-        if payload.pop("model") != "dilute-gas-transport-response-v1":
+        model = payload.pop("model")
+        enabled = model == "dilute-gas-transport-response-v2"
+        if model not in {"dilute-gas-transport-response-v1", "dilute-gas-transport-response-v2"}:
             raise ValueError("unknown transport response")
+        if enabled != ("thermal_diffusion_coefficients_kg_m_s" in payload):
+            raise ValueError("response schema and Soret field differ")
+        if enabled and payload["thermal_diffusion_coefficients_kg_m_s"] is None:
+            raise ValueError("enabled Soret response requires its coefficient vector")
         return cls(**payload)
 
 
 def gas_transport_response(
-    spec: GasTransportSpec,
+    spec: GasTransportSpec | GasTransportPolynomialSpec,
     network: ReactionNetworkSpec,
     *,
     temperature_K: float,
@@ -226,6 +453,21 @@ def gas_transport_response(
     coefficient is direction-dependent and is None; the binary diagonal still
     reports its well-defined tracer self-diffusivity.
     """
+    if not isinstance(spec, GasTransportSpec):
+        from chemworld.physchem.gas_polynomial_transport import (
+            GasTransportPolynomialSpec,
+            gas_polynomial_transport_response,
+        )
+
+        if not isinstance(spec, GasTransportPolynomialSpec):
+            raise ValueError("declare a supported gas transport model")
+        return gas_polynomial_transport_response(
+            spec,
+            network,
+            temperature_K=temperature_K,
+            pressure_Pa=pressure_Pa,
+            mole_fractions=mole_fractions,
+        )
     _positive(temperature_K, "temperature")
     _positive(pressure_Pa, "pressure")
     if pressure_Pa > spec.maximum_pressure_Pa:
@@ -248,7 +490,8 @@ def gas_transport_response(
     masses = {}
     for s in ids:
         molecular_weight = components[s].molecular_weight_g_mol
-        assert molecular_weight is not None
+        if not (molecular_weight is not None):
+            raise ValueError("gas transport requires a molecular weight for every species")
         masses[s] = molecular_weight / 1000
     mean_mass = fsum(x[s] * masses[s] for s in ids)
     y = {s: x[s] * masses[s] / mean_mass for s in ids}

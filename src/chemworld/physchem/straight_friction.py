@@ -207,7 +207,8 @@ def friction_transmission_factor(
     if darcy_friction_factor is not None:
         _positive(darcy_friction_factor, "Darcy friction factor")
         return 2 / sqrt(darcy_friction_factor)
-    assert transmission_factor is not None
+    if transmission_factor is None:
+        raise AssertionError("invariant violated: transmission_factor is None")
     _positive(transmission_factor, "transmission factor")
     return 4 / transmission_factor**2
 

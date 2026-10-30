@@ -18,6 +18,7 @@ from typing import Any
 
 import yaml
 
+from chemworld.foundation.discrete_inventory import AVOGADRO
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.reaction_network_specs import RateLawSpec, ReactionSpec, SpeciesSpec
 from chemworld.physchem.reaction_rate_contracts import audit_reaction_rate_contract
@@ -96,7 +97,7 @@ def _units(values: Mapping[str, str]) -> dict[str, str]:
     result.update(values)
     for key, allowed in (
         ("length", {"m", "cm", "mm"}),
-        ("quantity", {"mol", "kmol"}),
+        ("quantity", {"mol", "kmol", "molecule"}),
         ("energy", {"J", "kJ", "cal", "kcal"}),
         ("time", {"s", "min"}),
         ("temperature", {"K"}),
@@ -128,7 +129,7 @@ def _coefficient_factor(units: Mapping[str, str], order: float) -> float:
         if "volume" in units
         else {"m": 1000, "cm": 0.001, "mm": 1e-6}[units["length"]]
     )
-    amount_mol = {"mol": 1, "kmol": 1000}[units["quantity"]]
+    amount_mol = {"mol": 1, "kmol": 1000, "molecule": 1 / AVOGADRO}[units["quantity"]]
     return (volume_L / amount_mol) ** (order - 1) / {"s": 1, "min": 60}[units["time"]]
 
 
@@ -145,6 +146,7 @@ def _pre_exponential(value: Any, units: Mapping[str, str], order: float) -> floa
         "L": (1, (1, 0, 0)),
         "mol": (1, (0, 1, 0)),
         "kmol": (1000, (0, 1, 0)),
+        "molecule": (1 / AVOGADRO, (0, 1, 0)),
         "s": (1, (0, 0, 1)),
         "min": (60, (0, 0, 1)),
     }
@@ -218,6 +220,7 @@ def _reaction(
         "id",
         "units",
         "orders",
+        "reverse-orders",
         "negative-orders",
         "nonreactant-orders",
         "negative-A",
@@ -279,6 +282,16 @@ def _reaction(
         raise ValueError("nonreactant orders need a known species and explicit permission")
     if "orders" in node and reversible:
         raise ValueError("custom reaction orders require an irreversible reaction")
+    reverse_orders = {
+        **right,
+        **{s: _number(n, "reverse order") for s, n in node.get("reverse-orders", {}).items()},
+    }
+    if set(reverse_orders) - known or (
+        set(reverse_orders) - set(right) and not node.get("nonreactant-orders")
+    ):
+        raise ValueError("nonreactant reverse orders need a known species and explicit permission")
+    if "reverse-orders" in node and not reversible:
+        raise ValueError("custom reverse orders require a reversible reaction")
     order = sum(orders.values())
     stoich = {key: right.get(key, 0) - left.get(key, 0) for key in left.keys() | right.keys()}
     stoich = {key: value for key, value in stoich.items() if value}
@@ -412,9 +425,10 @@ def _reaction(
             "source_units": units,
             "negative_orders": bool(node.get("negative-orders", False)),
             "custom_orders": "orders" in node,
+            "custom_reverse_orders": "reverse-orders" in node,
         },
         forward_orders=orders,
-        reverse_orders=right if reversible else {},
+        reverse_orders=reverse_orders if reversible else {},
     )
     report = audit_reaction_rate_contract(result)
     if not report.passed:
@@ -597,6 +611,76 @@ def import_mechanism(
     return network
 
 
+def mechanism_to_cantera_document(network: ReactionNetworkSpec) -> dict[str, Any]:
+    """Restore a complete imported gas network as a Cantera YAML/JSON document.
+
+    Only networks produced by :func:`convert_mechanism` or
+    :func:`import_mechanism` are exportable.  The importer deliberately keeps
+    the original source declarations on every species and reaction; exporting
+    anything else would require inventing thermo or kinetic parameters.  The
+    all-or-reject policy therefore applies in both directions and makes the
+    returned document safe for JSON/YAML serialization and re-import.
+    """
+
+    if not isinstance(network, ReactionNetworkSpec):
+        raise TypeError("Cantera export requires a ReactionNetworkSpec")
+    metadata = network.metadata
+    if metadata.get("import_format") != "cantera-gas-mechanism-v2":
+        raise ValueError("network has no complete imported Cantera gas source")
+    phase = metadata.get("selected_phase")
+    source_units = metadata.get("source_units")
+    if not isinstance(phase, Mapping) or not isinstance(source_units, Mapping):
+        raise ValueError("imported network is missing selected phase or source units")
+    phase = copy.deepcopy(dict(phase))
+    phase_species = phase.get("species")
+    if phase.get("name") != network.network_id or phase_species != list(network.species_ids):
+        raise ValueError("selected Cantera phase no longer matches the native network")
+    if phase.get("reactions", "all") not in {"all", "none"}:
+        raise ValueError("selected Cantera phase has an unsupported reaction selector")
+    if bool(network.reactions) != (phase.get("reactions", "all") == "all"):
+        raise ValueError("selected Cantera phase/reaction declarations disagree")
+
+    species: list[dict[str, Any]] = []
+    for item in network.species:
+        source = item.metadata.get("source_declaration")
+        if not isinstance(source, Mapping) or source.get("name") != item.species_id:
+            raise ValueError(f"species source declaration is incomplete: {item.species_id}")
+        source = copy.deepcopy(dict(source))
+        thermo = source.get("thermo")
+        if not isinstance(thermo, Mapping) or thermo.get("model") not in {
+            "NASA7", "NASA9", "Shomate", "constant-cp", "piecewise-Gibbs"
+        }:
+            raise ValueError(f"species thermo source is incomplete: {item.species_id}")
+        species.append(source)
+
+    reactions: list[dict[str, Any]] = []
+    for item in network.reactions:
+        source = item.metadata.get("source_declaration")
+        if not isinstance(source, Mapping):
+            raise ValueError(f"reaction source declaration is incomplete: {item.reaction_id}")
+        source = copy.deepcopy(dict(source))
+        if "equation" not in source:
+            raise ValueError(f"reaction source declaration is incomplete: {item.reaction_id}")
+        reactions.append(source)
+
+    document: dict[str, Any] = {
+        "description": metadata.get("source_description", ""),
+        "generator": "chemworld.mechanism_import.export",
+        "units": copy.deepcopy(dict(source_units)),
+        "phases": [phase],
+        "species": species,
+        "reactions": reactions,
+    }
+    # Validate the complete exported source before returning it.  This catches
+    # stale/tampered source declarations while preserving the caller's network.
+    restored = _convert_mechanism(
+        document, phase_name=str(phase["name"]), source="Cantera export validation"
+    )
+    if restored.species_ids != network.species_ids or restored.reaction_ids != network.reaction_ids:
+        raise ValueError("Cantera export changed the native species/reaction identity order")
+    return document
+
+
 def mechanism_import_capabilities() -> dict[str, Any]:
     """Machine-readable source coverage; preserved metadata is not executed physics."""
     return {
@@ -633,8 +717,21 @@ def mechanism_import_capabilities() -> dict[str, Any]:
             "named species/reaction sections with source unit scopes",
             "all/none/declared-species reaction selection with omission provenance",
             "explicit skip-undeclared-elements and skip-undeclared-third-bodies",
+            "strict imported-network export to Cantera YAML/JSON document",
         ],
         "metadata_only": ["transport", "state", "equation-of-state", "unselected phases"],
+        "interoperability": {
+            "gas_to_ideal_surface": {
+                "status": "supported",
+                "consumer": "surface_mechanism_import.convert_surface_mechanism",
+                "requirements": [
+                    "one complete exported ideal-gas phase",
+                    "one adjacent ideal-surface phase",
+                    "explicit local gas and surface reaction sections",
+                ],
+                "qualification": "tests/test_mechanism34_surface_interop.py",
+            }
+        },
         "unsupported": [
             "CHEMKIN input",
             "automatic source downloads or implicit Cantera data paths",

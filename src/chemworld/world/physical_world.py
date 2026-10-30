@@ -431,11 +431,14 @@ class CompositionPhysics:
         if vessel in carrier_sources:
             operations = tuple(op for op in operations if op in {"select_vessel", "terminate"})
         if any(s.spec.state_type == "competitive-sorbent-v1" for s in state.state_slots.slots):
+            from chemworld.runtime.thermal_fixed_bed_world import bed_record
+
+            bed_controls = {"configure_thermal_bed"} if bed_record(state) is not None else set()
             operations = tuple(
                 op
                 for op in operations
                 if op
-                in {
+                in bed_controls | {
                     "dry",
                     "reconnect_heater",
                     "heat",

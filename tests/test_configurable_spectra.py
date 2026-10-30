@@ -206,7 +206,7 @@ def test_fixed_64_replicates_match_declared_fit_uncertainty(instrument):
 
 def test_spectral_measurement_resource_rejection_and_public_boundary():
     from chemworld.campaign_resources import CampaignResourceCard
-    from chemworld.physchem.spectroscopy_adapter_manifest import FORBIDDEN_PACKET_KEYS
+    from chemworld.world.spectroscopy_provider import FORBIDDEN_PACKET_KEYS
 
     card = CampaignResourceCard(
         card_id="spectral-resource",

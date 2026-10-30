@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -37,14 +38,18 @@ def main():
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--package-attempt", action="append", default=[])
+    parser.add_argument("--science-attempt", action="append", default=[])
+    parser.add_argument("--source-validity-attempt", action="append", default=[])
+    parser.add_argument("--functional-attempt", action="append", default=[])
+    parser.add_argument("--legacy-phase", action="append", default=[])
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
     def save(name, data):
-        (args.output / name).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        (args.output / name).write_bytes(json.dumps(data, indent=2).encode("utf-8"))
 
     attempts = {}
-    for label in (
+    for label in (*(
         "boundaries-first",
         "boundaries-second",
         "events-first",
@@ -55,24 +60,27 @@ def main():
         "events-fourth",
         "post-merge-functional-first",
         "events-fifth",
-    ):
+    ), *args.functional_attempt):
         directory = args.evidence / ("conv51k-" + label)
         data = read(directory / "summary.json")
         attempts[label] = {
             **data,
             **junit(directory / "junit.xml"),
             "raw_directory": str(directory),
-            "complete_new_module_source_capture": label
-            in {
+            "complete_new_module_source_capture": label in args.functional_attempt
+            or label in {
                 "integrated-second",
                 "events-fourth",
                 "post-merge-functional-first",
                 "events-fifth",
             },
         }
+        origin = args.evidence / ("conv51k-" + label + "-origin.json")
+        if origin.is_file():
+            attempts[label]["package_origin_check_before_pytest"] = read(origin)
     save("FUNCTIONAL_RESULTS.json", attempts)
     histories = {}
-    for phase in ("before", "after", "post-merge"):
+    for phase in ("before", "after", "post-merge", *args.legacy_phase):
         rows = []
         for kind, planned in (
             ("formal", 24),
@@ -85,7 +93,7 @@ def main():
                 label = "integer-legacy-boundaries"
             directory = args.evidence / ("conv51k-" + label)
             data = read(directory / "summary.json")
-            suffixes = data.get("exact_suffixes", len(data["units"]))
+            suffixes = data.get("exact_suffixes", sum(row["passed"] for row in data["units"]))
             rows.append(
                 {
                     "kind": kind,
@@ -94,6 +102,9 @@ def main():
                     "exact_suffixes": suffixes,
                     "passed": data["passed"] and suffixes == planned,
                     "elapsed_s": data["elapsed_s"],
+                    "elapsed_s_measured": data.get("elapsed_s_measured", True),
+                    "unstarted_suffixes": data.get("unstarted_suffixes", 0),
+                    "error": data.get("error"),
                     "raw_directory": str(directory),
                     "failures": [r for r in data["units"] if not r["passed"]],
                 }
@@ -120,6 +131,42 @@ def main():
             **read(directory / "summary.json"),
             "raw_directory": str(directory),
         }
+    policy = args.evidence / "conv51k-guard-policy-first/junit.xml"
+    if policy.is_file():
+        diagnostics["guard-policy-first"] = {**junit(policy), "raw_junit": str(policy),
+            "scope": "pure candidate dependency helper; not connected to advancing kernels"}
+    inspection_directory = args.evidence / "conv51k-pending-inspection-first"
+    if (inspection_directory / "summary.json").is_file():
+        inspection = read(inspection_directory / "summary.json")
+        diagnostics["pending-inspection-first"] = {
+            **{k: v for k, v in inspection.items() if k != "cells"},
+            "raw_directory": str(inspection_directory),
+            "positive_pending_leap_cells": [{
+                "id": row["id"], "encoding": row["encoding"], "strategy": row["strategy"],
+                "source_events_executed": row["source_events_executed"],
+                "observed_A": row["observed_A"],
+                "pending_after_horizon_count": len(row["positive_leap_packets_after_horizon"]),
+                "pending_end_times_s": sorted({p["end_time_s"] for p in
+                                               row["positive_leap_packets_after_horizon"]})}
+                for row in inspection["cells"] if row["positive_leap_packets_after_horizon"]]}
+    for label in ("event-tau-candidate-first", "event-tau-candidate-second",
+                  "event-tau-candidate-third"):
+        directory = args.evidence / ("conv51k-" + label)
+        if (directory / "summary.json").is_file():
+            diagnostics[label] = {
+                **read(directory / "summary.json"), **junit(directory / "junit.xml"),
+                "raw_directory": str(directory)}
+    for label in ("event-tau-accuracy-first", "event-tau-accuracy-second"):
+        directory = args.evidence / ("conv51k-" + label)
+        if (directory / "summary.json").is_file():
+            data = read(directory / "summary.json")
+            diagnostics[label] = {
+                **{k: v for k, v in data.items() if k != "cells"},
+                "raw_directory": str(directory),
+                "cells": [{**{k: v for k, v in cell.items() if k != "engine"},
+                           "engine": {k: v for k, v in cell["engine"].items()
+                                      if k not in {"normalized_grids"}}}
+                          for cell in data["cells"]]}
     save("DIAGNOSTIC_RESULTS.json", diagnostics)
     if args.package_attempt:
         packages = {}
@@ -163,9 +210,67 @@ def main():
                 "elapsed_s": data["elapsed_s"],
             }
         save("PACKAGE_RESULTS.json", packages)
+    if args.science_attempt:
+        science = {}
+        for label in args.science_attempt:
+            directory = args.evidence / ("conv51k-" + label)
+            data = read(directory / "summary.json")
+            cells = []
+            for unit in data["units"]:
+                for cell in unit["cells"]:
+                    engines = {}
+                    for name, engine in cell["engines"].items():
+                        engines[name] = {k: v for k, v in engine.items() if k not in {
+                            "normalized_grids", "failures", "invalid_trajectories"}}
+                        engines[name]["failures"] = [{k: row.get(k) for k in (
+                            "id", "seed", "stage", "simulation_attempted", "simulation_completed",
+                            "process_returned", "method_name", "error")}
+                            for row in engine["failures"]]
+                        engines[name]["invalid_trajectories"] = [
+                            {"id": row["id"], "issues": [
+                                {k: value for k, value in issue.items() if k != "raw"}
+                                if isinstance(issue, dict) else issue for issue in row["issues"]]}
+                            for row in engine["invalid_trajectories"]]
+                    cells.append({"id": unit["id"], "family": unit["family"],
+                        "encoding": cell["encoding"], "strategy": cell["strategy"],
+                        "generator": cell["generator"], "passed": cell["passed"],
+                        "engines": engines})
+            science[label] = {k: v for k, v in data.items() if k not in {"units"}}
+            science[label].update(raw_directory=str(directory), cells=cells,
+                passed_generator_cells=sum(c["generator"]["passed"] for c in cells),
+                passed_reference_laws=sum(u["reference_passed"] for u in data["units"]),
+                reference_laws=[{"id": u["id"], "passed": u["reference_passed"],
+                    "diagnostics": u["reference_diagnostics"], "process": u["reference_process"]}
+                    for u in data["units"]])
+            if data["mode"] == "wiring" and not data["passed"]:
+                science[label]["original_downstream_blocks_not_started"] = {
+                    "native_distribution": 163840, "source_distribution": 163840,
+                    "native_resource_trials": 800,
+                    "reason": "complete combined source wiring gate failed"}
+        save("SCIENCE_RESULTS.json", science)
+    if args.source_validity_attempt:
+        validity = {}
+        for label in args.source_validity_attempt:
+            directory = args.evidence / ("conv51k-" + label)
+            data = read(directory / "summary.json")
+            probes = []
+            for row in data["probes"]:
+                probes.append({k: v for k, v in row.items() if k != "messages"})
+                probes[-1]["trajectory_message_codes"] = re.findall(
+                    r"CTrajectoryMethod \((\d+)\)", row.get("messages", ""))
+            validity[label] = {**data, "probes": probes, "raw_directory": str(directory),
+                "source_code_directory": str(args.evidence / "conv51k-source-code-inspection"),
+                "primary_references": [
+                    "https://raw.githubusercontent.com/copasi/COPASI/Build-309/copasi/trajectory/"
+                    + name + ".cpp" for name in (
+                        "CStochMethod", "CTauLeapMethod", "CStochDirectMethod")],
+                "accepted": sum(r.get("valid_problem") is True for r in data["probes"]),
+                "rejected": sum(r.get("valid_problem") is False for r in data["probes"])}
+        save("SOURCE_VALIDITY_RESULTS.json", validity)
     print(
         json.dumps(
-            {"written": 3 + bool(args.package_attempt), "output": str(args.output),
+            {"written": 3 + bool(args.package_attempt) + bool(args.science_attempt)
+                + bool(args.source_validity_attempt), "output": str(args.output),
              "scope": "development checks; independent science/source qualification separate"}
         )
     )

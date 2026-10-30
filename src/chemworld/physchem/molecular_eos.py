@@ -13,7 +13,7 @@ from math import exp, isfinite, log
 from typing import Any, Protocol
 
 from chemworld.physchem.caloric_math import partial_derivative
-from chemworld.physchem.residual_system import ResidualVariable, RootPolicy, solve_root
+from chemworld.physchem.residual_system import ResidualVariable, RootPolicy, RootResult, solve_root
 from chemworld.physchem.second_order_pair import SecondOrderPair
 
 
@@ -143,6 +143,26 @@ def molecular_density_from_pressure(
     Bounds and starting density select the basin; this is not global phase
     selection. Unstable roots fail instead of being labelled equilibrium.
     """
+    root = _molecular_density_root(
+        model, temperature_K, pressure_Pa, mole_fractions,
+        initial_density_mol_m3=initial_density_mol_m3,
+        density_bounds_mol_m3=density_bounds_mol_m3, policy=RootPolicy(tolerance=2e-12),
+    )
+    if not root.success or root.value is None:
+        raise ValueError("molecular pressure-density solve failed: "+root.failure_reason)
+    return molecular_eos_state(model, temperature_K, exp(root.value[0]), mole_fractions)
+
+
+def _molecular_density_root(
+    model: ResidualHelmholtzModel, temperature_K: float, pressure_Pa: float,
+    mole_fractions: Sequence[float], *, initial_density_mol_m3: float,
+    density_bounds_mol_m3: tuple[float, float], policy: RootPolicy,
+) -> RootResult:
+    """Shared log-density equation solve; caller must validate the final full state.
+
+    Keeping the original result exposes root costs and failure diagnostics to a
+    flowsheet without duplicating its EOS equation or hiding the caller's budget.
+    """
     low, high = density_bounds_mol_m3
     if (any(isinstance(v, bool) or not isfinite(v) or v <= 0 for v in (
         pressure_Pa, low, high, initial_density_mol_m3
@@ -166,13 +186,10 @@ def molecular_density_from_pressure(
             raise ValueError("nonfinite molecular pressure-density response")
         return pressure, stiffness*rho
 
-    root = solve_root(
+    return solve_root(
         lambda v: [pressure_response(v)[0]-pressure_Pa], [log(initial_density_mol_m3)],
         jacobian=lambda v: [[pressure_response(v)[1]]],
         variables=(ResidualVariable("log_density", "dimensionless", role="algebraic",
                                     lower=log(low), upper=log(high)),),
-        residual_scales=(pressure_Pa,), policy=RootPolicy(tolerance=2e-12),
+        residual_scales=(pressure_Pa,), policy=policy,
     )
-    if not root.success:
-        raise ValueError("molecular pressure-density solve failed: "+root.failure_reason)
-    return molecular_eos_state(model, temperature_K, exp(root.value[0]), mole_fractions)

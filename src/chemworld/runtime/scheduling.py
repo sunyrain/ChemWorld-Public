@@ -38,6 +38,10 @@ def _fixed_isothermal_bath(record):
 def shared_operation_allowed(operation, state, modules, action=None):
     if operation in ALLOWED:
         return True
+    if operation == "configure_thermal_bed":
+        from chemworld.runtime.thermal_fixed_bed_world import bed_record
+
+        return bed_record(state) is not None
     from chemworld.foundation.discrete_inventory import (
         CONTINUOUS_REACTION_ALGORITHMS,
         CONTINUOUS_SDE_ALGORITHM,

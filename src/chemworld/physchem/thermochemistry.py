@@ -26,12 +26,14 @@ def species_thermo_from_cantera_yaml(
     composition: Mapping[str, float] | None = None,
     reference_pressure_Pa: float = 101_325.0,
     units: Mapping[str, str] | None = None,
+    boundary_policy: str = "source",
 ) -> Any:
     """Load all selected gas thermo families into the common native state contract."""
     if thermo.get("model") == "NASA7":
         return NASA7SpeciesThermo.from_cantera_yaml_thermo(
             species_id=species_id, thermo=thermo, composition=composition,
             reference_pressure_Pa=reference_pressure_Pa,
+            boundary_policy=boundary_policy,
         )
     from chemworld.physchem.mechanism_thermochemistry import GasSpeciesThermo
 
@@ -57,6 +59,7 @@ def species_thermo_from_dict(payload: Mapping[str, Any]) -> Any:
             reference_pressure_Pa=float(payload.get("reference_pressure_Pa", 101325)),
             composition=dict(payload.get("composition", {})),
             source_note=str(payload.get("source_note", "")),
+            boundary_policy=str(payload.get("boundary_policy", "source")),
         )
     return CorrelationSpeciesThermo.from_dict(payload)
 
@@ -201,6 +204,7 @@ class NASA7SpeciesThermo:
     reference_pressure_Pa: float = 101_325.0
     composition: dict[str, float] = field(default_factory=dict)
     source_note: str = ""
+    boundary_policy: str = "source"
 
     @property
     def min_temperature_K(self) -> float:  # noqa: N802 - shared unit-explicit contract
@@ -216,10 +220,14 @@ class NASA7SpeciesThermo:
         if not self.segments:
             raise ValueError("NASA7SpeciesThermo requires at least one segment")
         _positive(self.reference_pressure_Pa, "reference_pressure_Pa")
+        if self.boundary_policy not in {"source", "continuous-energy"}:
+            raise ValueError("unsupported NASA7 boundary policy")
         ordered = tuple(sorted(self.segments, key=lambda segment: segment.min_temperature_K))
         for left, right in pairwise(ordered):
             if left.max_temperature_K > right.min_temperature_K:
                 raise ValueError("NASA7 segments must not overlap")
+        if self.boundary_policy == "continuous-energy":
+            ordered = self._continuous_energy_segments(ordered)
         object.__setattr__(self, "segments", ordered)
         object.__setattr__(
             self,
@@ -235,6 +243,7 @@ class NASA7SpeciesThermo:
         thermo: Mapping[str, Any],
         composition: Mapping[str, float] | None = None,
         reference_pressure_Pa: float = 101_325.0,
+        boundary_policy: str = "source",
     ) -> NASA7SpeciesThermo:
         """Build a species thermo object from a Cantera-style NASA7 YAML node."""
 
@@ -262,7 +271,36 @@ class NASA7SpeciesThermo:
             reference_pressure_Pa=reference_pressure_Pa,
             composition={} if composition is None else dict(composition),
             source_note=str(thermo.get("note", "")),
+            boundary_policy=boundary_policy,
         )
+
+    @staticmethod
+    def _continuous_energy_segments(
+        segments: tuple[NASA7TemperatureSegment, ...],
+    ) -> tuple[NASA7TemperatureSegment, ...]:
+        """Preserve source Cp while matching H/S at shared NASA7 boundaries."""
+
+        corrected: list[NASA7TemperatureSegment] = []
+        for segment in segments:
+            if not corrected:
+                corrected.append(segment)
+                continue
+            left = corrected[-1]
+            if abs(left.max_temperature_K - segment.min_temperature_K) > 1.0e-9:
+                corrected.append(segment)
+                continue
+            boundary = left.max_temperature_K
+            left_state = left.evaluate(boundary)
+            right_state = segment.evaluate(boundary)
+            coefficients = list(segment.coefficients)
+            coefficients[5] += (
+                left_state.enthalpy_J_mol - right_state.enthalpy_J_mol
+            ) / R_J_PER_MOL_K
+            coefficients[6] += (
+                left_state.entropy_J_mol_K - right_state.entropy_J_mol_K
+            ) / R_J_PER_MOL_K
+            corrected.append(replace(segment, coefficients=tuple(coefficients)))
+        return tuple(corrected)
 
     def select_segment(self, temperature_K: float) -> NASA7TemperatureSegment:
         _positive(temperature_K, "temperature_K")
@@ -329,7 +367,7 @@ class NASA7SpeciesThermo:
         }
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "species_id": self.species_id,
             "model": "NASA7",
             "reference_pressure_Pa": self.reference_pressure_Pa,
@@ -337,6 +375,9 @@ class NASA7SpeciesThermo:
             "segments": [segment.to_dict() for segment in self.segments],
             "source_note": self.source_note,
         }
+        if self.boundary_policy != "source":
+            payload["boundary_policy"] = self.boundary_policy
+        return payload
 
 
 @dataclass(frozen=True)

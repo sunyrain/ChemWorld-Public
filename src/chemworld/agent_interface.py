@@ -478,7 +478,8 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
                 "required": False,
                 "type": "number",
                 "bounds": {"low": 0.005, "high": 0.9},
-                "description": "Requested fraction of feed distilled; independent of "
+                "description": "Requested fraction of total feed moles (including carrier) "
+                "distilled; independent of "
                 "duration. Actual cut is limited by duty. Omission uses legacy duration rule.",
             }
         )
@@ -1798,19 +1799,33 @@ def spectra_summary(info: dict[str, Any]) -> dict[str, Any]:
 def _recovery_suggestion(
     env: Any,
     info: dict[str, Any],
-    *,
-    actions: list[dict[str, Any]] | None = None,
 ) -> str | None:
-    flags = info.get("constraint_flags", {})
-    if not flags.get("precondition_failed") and not info.get("error_message"):
+    failure = _failure_summary(info)
+    transaction = failure["transaction_status"]
+    if not (
+        failure["precondition_failed"]
+        or failure["campaign_resource_rejected"]
+        or failure["constitution_failed"]
+        or failure["error_message"]
+        or transaction not in (None, "committed")
+        or info.get("operation_outcome") == "rejected"
+    ):
         return None
-    options = [
-        entry["operation"] for entry in (available_actions(env) if actions is None else actions)
-    ]
-    if options:
-        return "Retry with a currently valid operation such as " + ", ".join(options[:4]) + "."
+    if getattr(_base_env(env), "_done", False):
+        return "This session has ended; call reset() before submitting another action."
+    if failure["campaign_resource_rejected"]:
+        return (
+            "Inspect resource_rejection_reasons and remaining resources; check "
+            "available_actions() and the chosen action_schema() before retrying."
+        )
+    if failure["constitution_failed"] or transaction == "rolled_back":
+        return (
+            "The action was rolled back. Inspect the failure summary and revise the "
+            "action parameters; validate_action() can check a proposed retry without executing it."
+        )
     return (
-        "No valid operation is currently available; reset the environment or inspect task policy."
+        "Inspect failed_preconditions, check available_actions(), then consult the chosen "
+        "action_schema() and validate_action() before retrying."
     )
 
 
@@ -1893,11 +1908,22 @@ def _failure_summary(info: dict[str, Any]) -> dict[str, Any]:
         "constitution_failed": bool(flags.get("constitution_failed", False)),
         "transaction_status": info.get("transaction_status"),
         "rollback_reason": info.get("rollback_reason"),
-        "error_message": info.get("error_message"),
+        # The operation can reject an otherwise valid payload during execution.
+        # Publish its control error, not the accompanying private model diagnostics.
+        "error_message": info.get("error_message")
+        or info.get("outcome_diagnostics", {}).get("control_error"),
         "resource_rejection_reasons": to_builtin(
             info.get("campaign_resource_rejection_reasons", [])
         ),
         "failed_preconditions": failed_preconditions,
+    }
+
+
+def action_failure_feedback(env: Any, info: dict[str, Any]) -> dict[str, Any]:
+    """Summarize a finalized public outcome without building schemas or executing actions."""
+    return {
+        "failure_summary": _failure_summary(info),
+        "recovery_suggestion": _recovery_suggestion(env, info),
     }
 
 
@@ -1923,10 +1949,17 @@ def lab_report_view(
     cost = _safe_float(observation.get("cost"), default=0.0)
     risk = _safe_float(observation.get("safety_risk"), default=0.0)
     resource_rejected = failure["campaign_resource_rejected"]
-    failed = failure["precondition_failed"] or resource_rejected
-    status = (
-        "cannot_complete" if resource_rejected else "failed_precondition" if failed else "accepted"
-    )
+    transaction = failure["transaction_status"]
+    if resource_rejected:
+        status = "cannot_complete"
+    elif failure["precondition_failed"]:
+        status = "failed_precondition"
+    elif transaction is not None and transaction != "committed":
+        status = str(transaction)
+    elif failure["constitution_failed"] or info.get("operation_outcome") == "rejected":
+        status = "rejected"
+    else:
+        status = "accepted"
     operation = info.get("operation_type") or "none"
     opening = (
         f"Operation {operation} cannot be completed with the remaining campaign resources."
@@ -1966,6 +1999,14 @@ def lab_report_view(
             f"final_assays {progress['final_assay_count']}."
         ),
     ]
+    if status != "accepted":
+        lines.insert(
+            1,
+            "The requested operation was not executed. "
+            "Attempt and penalty accounting still applies.",
+        )
+        if failure["error_message"]:
+            lines.insert(2, "Reason: " + str(failure["error_message"]))
     if instrument["instrument"] is not None:
         lines.append(
             f"Instrument: {instrument['instrument']} "
@@ -2010,7 +2051,7 @@ def lab_report_view(
         lines.append("Spectral warnings: " + ", ".join(summary["warnings"]) + ".")
     if failure["resource_rejection_reasons"]:
         lines.append("Resource limits: " + ", ".join(failure["resource_rejection_reasons"]) + ".")
-    recovery = _recovery_suggestion(env, info, actions=actions)
+    recovery = _recovery_suggestion(env, info)
     if recovery is not None:
         lines.append(f"Recovery suggestion: {recovery}")
     if campaign["best_score"] is not None:
@@ -2243,6 +2284,7 @@ def agent_view_bundle(
 
 
 __all__ = [
+    "action_failure_feedback",
     "action_schema",
     "agent_view_bundle",
     "available_actions",

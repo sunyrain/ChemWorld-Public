@@ -98,7 +98,8 @@ def install_gas_node(
     pressure_control: GasPressureControlSpec | None = None,
 ) -> WorldState:
     """Update the original phase inventory; counters are never material stocks."""
-    assert state.process is not None
+    if not (state.process is not None):
+        raise ValueError("gas node update requires process state")
     volume = gas_node_volume(node, sum(amounts.values()), temperature, pressure_control)
     return state.replace(
         species_amounts=dict(amounts),
@@ -328,12 +329,14 @@ class GasReactorNetworkRuntime:
         self, state: WorldState
     ) -> tuple[EquipmentRecord, GasReactorNetworkSpec, CoupledState]:
         self._wall_binding(state)
-        assert self.composition.physics is not None
+        if not (self.composition.physics is not None):
+            raise ValueError("gas network requires composition physics")
         return unpack_gas_network(state, self.composition.physics.network)
 
     def validate_state(self, state: WorldState) -> None:
         if self._wall_binding(state):
-            assert self.composition.physics is not None
+            if not (self.composition.physics is not None):
+                raise ValueError("gas network requires composition physics")
             unpack_gas_network(state, self.composition.physics.network)
 
     def temperature_bounds_k(self, state: WorldState) -> tuple[float, float] | None:
@@ -399,7 +402,8 @@ class GasReactorNetworkRuntime:
         return self.preserved_source_vessels
 
     def validate_world(self) -> None:
-        assert self.composition.physics is not None
+        if not (self.composition.physics is not None):
+            raise ValueError("gas network requires composition physics")
         states = self.composition.physics.initial_states
         installed = {v for v, s in states.items() if self.supports(s)}
         declared = {
@@ -420,7 +424,8 @@ class GasReactorNetworkRuntime:
             self.shared_system(state, "finite-isothermal-gas-network")
             for node in spec.nodes:
                 vessels = states[node.vessel_id].vessels
-                assert vessels is not None
+                if not (vessels is not None):
+                    raise ValueError("gas network node requires vessel hardware")
                 hardware = vessels.vessels[node.vessel_id]
                 control = pressure_control_for(node, spec.pressure_control)
                 if (
@@ -464,7 +469,8 @@ class GasReactorNetworkRuntime:
                 outcome="rejected",
                 failure_reason="gas_network_requires_declared_isotherm",
             )
-        assert self.composition.physics is not None
+        if not (self.composition.physics is not None):
+            raise ValueError("gas network requires composition physics")
         network = self.composition.physics.network
         try:
             working = state

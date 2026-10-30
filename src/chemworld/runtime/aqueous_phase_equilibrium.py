@@ -91,7 +91,8 @@ def equilibrate_aqueous_phase_inventory(
         return AqueousPhaseInventoryResult(
             False, ledger, result, before, failure_reason=result.failure_reason,
         )
-    assert result.amounts_mol is not None
+    if not (result.amounts_mol is not None):
+        raise ValueError("successful aqueous equilibrium requires amounts")
     try:
         after = aqueous_phase_properties(
             specification.database, result.amounts_mol,

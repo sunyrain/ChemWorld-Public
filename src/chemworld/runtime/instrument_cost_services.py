@@ -254,6 +254,8 @@ class ChemWorldInstrumentCostServices:
             settings={
                 "instrument_id": instrument_id,
                 "last_time_s": state.ledger.time_s,
+                "last_sample_batch_generation": initial.samples.batch_generation,
+                "last_sample_vessel_id": initial.vessel_id,
                 "last_cost": cost,
                 "last_analysis_time_s": seconds,
                 "last_sample_consumed_L": volume,

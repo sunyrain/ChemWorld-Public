@@ -262,6 +262,8 @@ def build_fixed_bed_system(
     outlet_phase_id: str | None,
     policy: ODESolverPolicy = FIXED_BED_POLICY,
     maximum_pressure_Pa: float | None = None,
+    _phase_temperature: Callable[[CoupledStateView, str], float] | None = None,
+    _solid_temperature: Callable[[CoupledStateView, str], float] | None = None,
 ) -> tuple[CoupledSystem, dict[str, Any]]:
     """Compile selected finite compartments and original sorbent lots, without a clock."""
     phases = tuple(phase_volumes_L)
@@ -310,13 +312,18 @@ def build_fixed_bed_system(
         spec.sorbent.reference_temperature_K,
     )
 
-    def localized(base: CoupledProcess, volume: float) -> CoupledProcess:
+    def localized(base: CoupledProcess, volume: float, phase: str) -> CoupledProcess:
+        def local(state: CoupledStateView) -> CoupledStateView:
+            return replace(state, volume_L=volume, temperature_K=state.temperature_K
+                           if _solid_temperature is None else _solid_temperature(state, phase))
+
         def evaluate(state: CoupledStateView) -> ProcessContribution:
-            return base.evaluate(replace(state, volume_L=volume))
+            return base.evaluate(local(state))
 
         def validate(state: CoupledStateView) -> None:
-            assert base.validate_state is not None
-            base.validate_state(replace(state, volume_L=volume))
+            if not (base.validate_state is not None):
+                raise ValueError("fixed-bed process requires a state validator")
+            base.validate_state(local(state))
 
         return CoupledProcess(
             base.process_id,
@@ -334,7 +341,7 @@ def build_fixed_bed_system(
             fluid_keys={k: fixed_bed_gas_key(cells[i], k) for k in spec.sorbent.component_ids},
         )
         volume = phase_volumes_L[cells[i]]
-        processes.append(localized(base, volume))
+        processes.append(localized(base, volume, cells[i]))
     mesh = spec.mesh
     faces = [
         (cells[i], cells[i + 1], float(mesh.centers_m[i + 1] - mesh.centers_m[i]))
@@ -353,11 +360,18 @@ def build_fixed_bed_system(
     }
     cache: dict[str, Any] = {}
 
+    def pressure(state: CoupledStateView, phase: str) -> float:
+        local = state if _phase_temperature is None else replace(
+            state, temperature_K=_phase_temperature(state, phase))
+        return fixed_bed_pressure(spec, local, phase, phase_volumes_L[phase])
+
     def velocities(state: CoupledStateView) -> list[float]:
-        signature = (state.temperature_K, *(state.amounts_mol[k] for k in flat))
+        temperatures = ((state.temperature_K,) if _phase_temperature is None
+                        else tuple(_phase_temperature(state, p) for p in phases))
+        signature = (*temperatures, *(state.amounts_mol[k] for k in flat))
         if cache.get("signature") == signature:
             return cache["velocities"]
-        pressures = {p: fixed_bed_pressure(spec, state, p, phase_volumes_L[p]) for p in phases}
+        pressures = {p: pressure(state, p) for p in phases}
         result = []
         for left, right, distance in faces:
             density = 0.5 * fsum(
@@ -412,7 +426,7 @@ def build_fixed_bed_system(
         p: str, boundary: float, sign: float
     ) -> Callable[[CoupledStateView], float]:
         def value(state: CoupledStateView) -> float:
-            return sign * (fixed_bed_pressure(spec, state, p, phase_volumes_L[p]) - boundary)
+            return sign * (pressure(state, p) - boundary)
 
         return value
 
@@ -435,8 +449,8 @@ def build_fixed_bed_system(
 
     def validate(state: CoupledStateView) -> None:
         for p in phases:
-            pressure = fixed_bed_pressure(spec, state, p, phase_volumes_L[p])
-            if not spec.minimum_pressure_Pa - 1e-4 <= pressure <= limit + 1e-4:
+            value = pressure(state, p)
+            if not spec.minimum_pressure_Pa - 1e-4 <= value <= limit + 1e-4:
                 raise ValueError("actual gas compartment pressure leaves its hardware/domain")
         if max(map(abs, velocities(state)), default=0.0) > spec.maximum_velocity_m_s + 1e-8:
             raise ValueError("fixed-bed face velocity exceeds its declared domain")

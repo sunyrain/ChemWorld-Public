@@ -7,8 +7,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-pytest.importorskip("phasepy", reason="Optional independent reference dependency")
-
 from reference import molecular29_source_reference as source
 from reference import run_molecular29_general as runner
 from reference.molecular29_cases import fixed_cases, native_influence, native_model

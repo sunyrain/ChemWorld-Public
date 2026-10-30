@@ -12,6 +12,18 @@ from importlib import import_module
 from typing import Any
 
 _MODULE_EXPORTS: dict[str, list[str]] = {
+    "process_flowsheet": (
+        'ProcessSource ProcessUnit ProcessTear ProcessConstraint FlowsheetPolicy '
+        'FlowsheetGraph FlowsheetResult'
+    ).split(),
+    "process_flowsheet_units": (
+        'ProcessMixer ProcessSplitter MolecularHeatExchanger MolecularPressureRecovery'
+    ).split(),
+    "process_flowsheet_inventory": (
+        'FlowsheetTank ProcessFlowsheetInventorySpec ProcessFlowsheetInventory '
+        'ProcessFlowsheetInventoryError initialize_process_flowsheet_inventory '
+        'advance_process_flowsheet'
+    ).split(),
     "activated_sludge_kinetics": (
         'ASM1Parameters asm1_rates asm1_stoichiometry asm1_quality'
     ).split(),
@@ -60,7 +72,7 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     "rrkm_density_states": ['RRKMEnergyGrid', 'RRKMHarmonicState', 'harmonic_state_counts'],
     "rrkm_grain_binding": (
         'RRKMProductChannel RRKMGrainSpec rrkm_microcanonical_report compile_rrkm_grains '
-        'rrkm_grain_network rrkm_grain_world rrkm_canonical_report'
+        'rrkm_grain_network rrkm_canonical_report'
     ).split(),
     "aqueous_adsorption": (
         'AqueousAdsorptionSpec AqueousAdsorptionInventory AqueousAdsorptionAdvance '
@@ -142,7 +154,7 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'collision_transition_probabilities boltzmann_grain_fractions '
         'well_collision_generator energy_grain_generator grain_population_report'
     ).split(),
-    "energy_grain_binding": ['compile_energy_grain_network', 'energy_grain_world'],
+    "energy_grain_binding": ['compile_energy_grain_network'],
     "gas_network_energy_specs": ['GasNodeEnergySpec', 'GasThermalLinkSpec'],
     "water_dielectric": [
         'WaterDielectricResponse', 'water_relative_permittivity', 'water_dielectric_response',
@@ -273,8 +285,30 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'aqueous_database_capabilities'
     ).split(),
     "aqueous_database_external": (
-        'EXTERNAL_AQUEOUS_DATABASE_SCHEMA aqueous_database_from_external_json '
+        'EXTERNAL_AQUEOUS_DATABASE_SCHEMA external_json_unit_audit '
+        'aqueous_database_from_external_json '
         'aqueous_database_to_external_json'
+    ).split(),
+    "phreeqc_source_audit": (
+        "PHREEQC_SOURCE_AUDIT_SCHEMA PHREEQC_SOURCE_JSON_SCHEMA audit_phreeqc_dat "
+        "phreeqc_dat_to_source_json"
+    ).split(),
+    "phreeqc_native_eligibility": (
+        "PHREEQC_NATIVE_SUPPLEMENT_SCHEMA phreeqc_native_eligibility "
+        "phreeqc_source_to_native"
+    ).split(),
+    "reaktoro_source_audit": (
+        "REAKTORO_SOURCE_AUDIT_SCHEMA REAKTORO_SOURCE_JSON_SCHEMA "
+        "audit_reaktoro_source reaktoro_source_to_normalized_json"
+    ).split(),
+    "reaktoro_lgk": (
+        "LGK_EVALUATOR_SCHEMA LGK_VARIANTS evaluate_lgk"
+    ).split(),
+    "reaktoro_native_bridge": (
+        "REAKTORO_NATIVE_CAPABILITY_SCHEMA REAKTORO_NATIVE_SUPPLEMENT_SCHEMA "
+        "REACTION_STOICHIOMETRY_BASIS reaktoro_native_capabilities "
+        "reaktoro_native_eligibility "
+        "reaktoro_source_to_native"
     ).split(),
     "aqueous_reaction_equilibrium": (
         'AqueousEquilibriumSpec AqueousEquilibriumResult '
@@ -758,6 +792,8 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'FixedBedSpec', 'fixed_bed_slots', 'fixed_bed_face_velocity',
         'build_fixed_bed_system', 'FIXED_BED_POLICY',
     ],
+    "fixed_bed_thermal_specs": ['FixedBedThermalSpec'],
+    "fixed_bed_thermal": ['build_thermal_fixed_bed_system', 'THERMAL_FIXED_BED_POLICY'],
     "zero_order_treatment_specs": ['ZeroOrderTreatmentStage', 'ZeroOrderTreatmentSpec'],
     "zero_order_treatment": [
         'treatment_inventory', 'treatment_profile', 'advance_zero_order_treatment',
@@ -889,7 +925,12 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
         'load_library_mechanism mechanism_library_root mechanism_scenario_library_path '
         'repository_root validate_mechanism_library'
     ).split(),
-    "mechanism_import": ['mechanism_import_capabilities', 'convert_mechanism', 'import_mechanism'],
+    "mechanism_import": [
+        'mechanism_import_capabilities',
+        'convert_mechanism',
+        'import_mechanism',
+        'mechanism_to_cantera_document',
+    ],
     "chemkin_import": (
         'chemkin_import_capabilities convert_chemkin import_chemkin'
     ).split(),
@@ -904,8 +945,30 @@ _MODULE_EXPORTS: dict[str, list[str]] = {
     "gas_network_surface": ['GasSurfaceAttachment'],
     "gas_shaft_machine": ['GasShaftMachineSpec', 'gas_shaft_operating_point'],
     "gas_transport": (
-        'GasTransportSpec GasTransportResponse gas_transport_from_network gas_transport_response'
+        'GasTransportSpec GasTransportResponse gas_transport_capabilities '
+        'gas_transport_from_network gas_transport_from_chemkin gas_transport_from_dict '
+        'gas_transport_response'
     ).split(),
+    "gas_polynomial_transport": (
+        'GasTransportPolynomialSpec gas_polynomial_transport_response '
+        'gas_polynomial_transport_capabilities'
+    ).split(),
+    "gas_soret_transport": (
+        'GasMixtureSoretSpec GasMixtureSoretResult gas_mixture_soret_coefficients '
+        'midpoint_temperature_log_gradient soret_pair_well_depths_J soret_cstar '
+        'soret_a_coefficients'
+    ).split(),
+    "gas_premixed_flow": (
+        'GasFlamePhaseSpec GasPremixedFlowSpec premixed_flow_initial_profile '
+        'solve_premixed_gas_flow'
+    ).split(),
+    "gas_premixed_adaptive": (
+        'GasPremixedMeshPolicy premixed_mesh_indicators solve_adaptive_premixed_gas_flow'
+    ).split(),
+    "gas_opposed_flow": (
+        'GasOpposedFlowSpec opposed_flow_initial_profile solve_opposed_gas_flow'
+    ).split(),
+    "gas_opposed_continuation": ['trace_opposed_gas_branch'],
     "gas_transport_fluxes": ['GasTransportFluxResult', 'gas_transport_fluxes'],
     "gas_spatial_transport": ['GasSpatialTransportSpec'],
     "gas_spatial_energy": (

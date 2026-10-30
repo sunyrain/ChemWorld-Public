@@ -80,6 +80,49 @@ def _load_payload(payload: Mapping[str, Any] | str) -> Mapping[str, Any]:
     return _mapping(payload, "external aqueous database")
 
 
+def external_json_unit_audit(payload: Mapping[str, Any] | str) -> dict[str, Any]:
+    """Audit the envelope and unit declaration before database construction.
+
+    Provider exports must already contain values in the canonical SI units in
+    ``_UNITS``.  This audit is deliberately read-only: it reports missing,
+    extra, or mismatched declarations and never rescales numbers implicitly.
+    The full importer uses the same result, so a preflight report cannot
+    disagree with the eventual import decision.
+    """
+
+    data = _load_payload(payload)
+    declared = data.get("units")
+    mismatches: dict[str, dict[str, Any]] = {}
+    if not isinstance(declared, Mapping):
+        mismatches["units"] = {
+            "declared": declared,
+            "expected": dict(_UNITS),
+        }
+        declared_units: dict[str, Any] | None = None
+    else:
+        declared_units = dict(declared)
+        for key in sorted(set(_UNITS) | set(declared)):
+            expected = _UNITS.get(key)
+            actual = declared.get(key)
+            if expected != actual:
+                mismatches[key] = {"declared": actual, "expected": expected}
+    return {
+        "schema": data.get("schema"),
+        "provider": data.get("provider"),
+        "schema_valid": data.get("schema") == EXTERNAL_AQUEOUS_DATABASE_SCHEMA,
+        "provider_valid": data.get("provider") in _EXTERNAL_PROVIDERS,
+        "declared_units": declared_units,
+        "expected_units": dict(_UNITS),
+        "mismatches": mismatches,
+        "valid": (
+            data.get("schema") == EXTERNAL_AQUEOUS_DATABASE_SCHEMA
+            and data.get("provider") in _EXTERNAL_PROVIDERS
+            and not mismatches
+        ),
+        "policy": "canonical SI only; no implicit conversion",
+    }
+
+
 def _canonical_native_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """Map external names/formulae to the native database schema."""
     sources = []
@@ -148,7 +191,8 @@ def aqueous_database_from_external_json(
         raise ValueError("unknown external aqueous database schema")
     if data["provider"] not in _EXTERNAL_PROVIDERS:
         raise ValueError("provider must be exactly 'phreeqc' or 'reaktoro'")
-    if data["units"] != _UNITS:
+    unit_audit = external_json_unit_audit(data)
+    if not unit_audit["valid"] or data["units"] != _UNITS:
         raise ValueError("external aqueous database requires canonical SI units")
     if (
         not isinstance(data["sources"], list)
@@ -214,4 +258,5 @@ __all__ = [
     "EXTERNAL_AQUEOUS_DATABASE_SCHEMA",
     "aqueous_database_from_external_json",
     "aqueous_database_to_external_json",
+    "external_json_unit_audit",
 ]

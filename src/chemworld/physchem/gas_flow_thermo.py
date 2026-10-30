@@ -96,11 +96,10 @@ def solve_isentropic_gas_work(
     if process not in {"compression", "expansion"}:
         raise ValueError("process must be compression or expansion")
     if work_J_mol is None:
-        assert (
-            inlet_pressure_Pa is not None
-            and outlet_pressure_Pa is not None
-            and efficiency is not None
-        )
+        if inlet_pressure_Pa is None or outlet_pressure_Pa is None or efficiency is None:
+            raise AssertionError(
+                "invariant violated: inlet_pressure_Pa or outlet_pressure_Pa or efficiency is None"
+            )
         return isentropic_gas_work_molar(
             inlet_pressure_Pa=inlet_pressure_Pa,
             outlet_pressure_Pa=outlet_pressure_Pa,
@@ -117,7 +116,10 @@ def solve_isentropic_gas_work(
     ):
         raise ValueError("work sign conflicts with the declared process")
     if efficiency is None:
-        assert inlet_pressure_Pa is not None and outlet_pressure_Pa is not None
+        if inlet_pressure_Pa is None or outlet_pressure_Pa is None:
+            raise AssertionError(
+                "invariant violated: inlet_pressure_Pa or outlet_pressure_Pa is None"
+            )
         reversible = isentropic_gas_work_molar(
             inlet_pressure_Pa=inlet_pressure_Pa,
             outlet_pressure_Pa=outlet_pressure_Pa,
@@ -140,7 +142,8 @@ def solve_isentropic_gas_work(
         raise ValueError("work would require nonpositive outlet temperature")
     ratio = exp(log1p(dimensionless) / exponent)
     if inlet_pressure_Pa is None:
-        assert outlet_pressure_Pa is not None
+        if outlet_pressure_Pa is None:
+            raise AssertionError("invariant violated: outlet_pressure_Pa is not None")
         _positive(outlet_pressure_Pa, "outlet absolute pressure")
         return outlet_pressure_Pa / ratio
     _positive(inlet_pressure_Pa, "inlet absolute pressure")
@@ -180,7 +183,8 @@ def gas_efficiency_conversion(
         inlet_pressure_Pa, outlet_pressure_Pa, process
     )
     given = isentropic_efficiency if isentropic_efficiency is not None else polytropic_efficiency
-    assert given is not None
+    if given is None:
+        raise AssertionError("invariant violated: given is not None")
     _efficiency(given)
     if powered_log == 0:
         return given  # continuous zero-pressure-ratio limit
@@ -216,7 +220,8 @@ def gas_polytropic_exponent(
                 )
             return 1 / (1 - a / efficiency)
         return 1 / (1 - a * efficiency)
-    assert exponent is not None
+    if exponent is None:
+        raise AssertionError("invariant violated: exponent is not None")
     if not isfinite(exponent) or exponent <= 1:
         raise ValueError("polytropic exponent must exceed one")
     value = a * exponent / (exponent - 1) if process == "compression" else (1 - 1 / exponent) / a
@@ -346,7 +351,8 @@ def ideal_gas_nozzle(
     flux = discharge_coefficient * stagnation_pressure_Pa * exp(log_ratio / heat_capacity_ratio)
     flux *= sqrt(-2 * expm1(a * log_ratio) / (a * thermal_energy))
     if area_m2 is None:
-        assert mass_flow_kg_s is not None
+        if mass_flow_kg_s is None:
+            raise AssertionError("invariant violated: mass_flow_kg_s is not None")
         _positive(mass_flow_kg_s, "specified mass flow")
         if flux == 0:
             raise ValueError("positive flow cannot be sized at zero pressure difference")

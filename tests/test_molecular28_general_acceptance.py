@@ -8,8 +8,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-pytest.importorskip("phasepy", reason="Optional independent reference dependency")
-
 from reference import molecular28_general_reference as reference
 from reference import run_molecular28_general as runner
 

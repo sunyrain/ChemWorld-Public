@@ -529,6 +529,10 @@ def test_repeat_exhaustion_is_not_advertised_and_reports_cannot_complete() -> No
         assert report["failure_summary"]["resource_rejection_reasons"] == [
             "operation_repeat_limit:electrolyze"
         ]
+        assert rejected["failure_summary"] == report["failure_summary"]
+        assert rejected["failure_summary"]["campaign_resource_rejected"]
+        assert rejected["recovery_suggestion"] == report["recovery_suggestion"]
+        assert "remaining resources" in rejected["recovery_suggestion"]
         assert "cannot be completed" in report["text"]
     finally:
         env.close()

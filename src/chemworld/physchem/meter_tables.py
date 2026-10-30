@@ -115,10 +115,12 @@ class MeterTableSurface:
             coordinate = float(np.clip(coordinate, self.y[0], self.y[-1]))
         y = np.log(coordinate) if self.options["log_y"] else coordinate
         if self.one_dimensional:
-            assert self.interpolator is not None
+            if self.interpolator is None:
+                raise AssertionError("invariant violated: self.interpolator is not None")
             value = float(self.interpolator(y))
         else:
-            assert self.spline is not None
+            if self.spline is None:
+                raise AssertionError("invariant violated: self.spline is not None")
             value = float(self.spline(beta, y)[0, 0])
         if not np.isfinite(value) or value <= 0:
             raise ValueError("interpolated meter coefficient is not positive")

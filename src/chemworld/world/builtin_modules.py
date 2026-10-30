@@ -7,6 +7,7 @@ from chemworld.world.domain_modules import (
     ActionFieldSpec,
     AdvanceStrategySpec,
     ComponentCapability,
+    DeclaredParameterRule,
     DomainModuleSpec,
     InstrumentSpec,
     OperationSpec,
@@ -278,6 +279,7 @@ BUILTIN_MODULES = (
             interfaces=("material", "flow_rate", "temperature"),
             state_owners=("liquid_transport_enthalpy_v1", "membrane_bound_foulant_v1",
                           "seawater_tds_mass_v1"),
+            requires_physics=True,
         )),),
         advance_strategies=(AdvanceStrategySpec(
             "finite-dilute-ro", factories.ro_membrane, shared_clock=True,
@@ -287,6 +289,10 @@ BUILTIN_MODULES = (
     DomainModuleSpec(
         module_id="finite_transport",
         scope_notes=("Finite pump, pipe, tanks and authored heat exchange; bounded working point; "
+                     "or a declared molecular process graph with multiple algebraic tears, "
+                     "selective flash/cascade, same-reference heat exchange and shaft recovery, "
+                     "finite homogeneous tank n/H, separate heat/work ports and earliest events; "
+                     "declared preloaded tanks and source molar-ratio feed control; "
                      "or four finite tanks and two pumps exchanging countercurrent heat at "
                      "declared UA with independent circuit flows; "
                      "or declared isothermal zero-order liquid treatment chains with finite "
@@ -313,6 +319,8 @@ BUILTIN_MODULES = (
                      "not arbitrary multiphase process-network simulation.",),
         components=(("finite_transport", ComponentCapability(
             operations=("set_flow_rate", "run_flow", "wait"),
+            parameters=(("duration_range_s", DeclaredParameterRule(
+                value_kind="range", unit="s", minimum=1e-6, maximum=14400.0)),),
             interfaces=("material", "flow_rate", "temperature"),
             state_owners=("liquid_transport_enthalpy_v1", "finite_suspension_enthalpy"),
         )),),
@@ -620,6 +628,7 @@ BUILTIN_MODULES = (
                     ),
                     interfaces=("electrical_control", "spatial_diffusion"),
                     state_owners=("battery_inventory",),
+                    requires_physics=True,
                 ),
             ),
             (
@@ -631,6 +640,7 @@ BUILTIN_MODULES = (
                     ),
                     interfaces=("electrical_control",),
                     state_owners=("battery_inventory",),
+                    requires_physics=True,
                 ),
             ),
         ),
@@ -648,6 +658,7 @@ BUILTIN_MODULES = (
             operations=("configure_electrical_control", "queue_electrical_stage", "wait"),
             interfaces=("electrical_control",), state_owners=("empirical_circuit_state",),
             input_ports=(), outputs=(),
+            requires_physics=True,
         )),),
         advance_strategies=(AdvanceStrategySpec(
             "thevenin-empirical-circuit", factories.battery_thevenin, shared_clock=True,

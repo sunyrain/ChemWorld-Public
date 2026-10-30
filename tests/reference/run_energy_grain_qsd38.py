@@ -12,12 +12,12 @@ import energy_grain_qsd38_cases as inputs
 import energy_grain_qsd38_reference as oracle
 import numpy as np
 
-from chemworld.physchem.energy_grain_binding import energy_grain_world
 from chemworld.physchem.energy_grain_reduction import energy_grain_qsd
 from chemworld.physchem.energy_grain_specs import EnergyGrainMasterEquationSpec, R
 from chemworld.physchem.gas_reactor_network import GasReactorNetworkSpec, GasReactorNodeSpec
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.runtime.energy_grain_analysis import analyze_energy_grain_world_state
+from chemworld.world.energy_grain import energy_grain_world
 
 
 def numeric(name, actual, expected, *, atol=1e-9, rtol=3e-7):

@@ -201,7 +201,8 @@ class PurePotentialModel:
             return compensated_sum(term.evaluate(r/.31, 1.32/t, 1.32) for term in _THOL)
         if self.family == 'PeTS-2018':
             return _pets(t, r)
-        assert self.shape_parameter is not None
+        if self.shape_parameter is None:
+            raise AssertionError("invariant violated: self.shape_parameter is None")
         if self.family == 'exp6-Kataoka-1992':
             shape = (self.shape_parameter-8)/10
             return compensated_sum(c*r**int(p)*t**(-q)*shape**v

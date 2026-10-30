@@ -106,12 +106,14 @@ def correlation_integral(
             magnitude = logarithm_r if scalar_value(logarithm_r) >= 0 else -logarithm_r
             cube = magnitude**3
             exponent = cube / (t * cube + 4)
-        assert isinstance(order, int)
+        if not isinstance(order, int):
+            raise AssertionError("invariant violated: isinstance(order, int)")
         return (b[0] + b[1] * t ** (0.3 + 0.05 * order) + b[2] * t ** (1 / order)) * exponential(
             exponent
         )
     if not pair:
-        assert isinstance(order, int)
+        if not isinstance(order, int):
+            raise AssertionError("invariant violated: isinstance(order, int)")
         value = compensated_sum(a[4 * i + j] * r**i * t**j for i in range(5) for j in range(4))
         value += exponential(1 / t) * compensated_sum(
             a[20 + 3 * i + j] * r**i * t**j for i in range(5) for j in range(3)

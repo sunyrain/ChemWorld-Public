@@ -13,8 +13,6 @@ from pathlib import Path
 from time import monotonic
 
 import numpy as np
-import phasepy
-from phasepy.equilibrium import bubblePy
 from scipy.optimize import brentq
 
 DATA = Path(__file__).with_name("data") / "rolo2002_surface_tension.json"
@@ -26,6 +24,8 @@ CONSTANTS = {
 
 
 def source_model(ids):
+    import phasepy
+
     components = [phasepy.component(name=name, Tc=CONSTANTS[name]["Tc_K"],
         Pc=CONSTANTS[name]["Pc_Pa"]/1e5, w=CONSTANTS[name]["omega"]) for name in ids]
     mixture = components[0]
@@ -35,6 +35,8 @@ def source_model(ids):
 
 
 def endpoints(observation):
+    from phasepy.equilibrium import bubblePy
+
     ids = observation["component_ids"]
     x = np.array(observation["liquid_mole_fractions"])
     temperature = observation["temperature_K"]

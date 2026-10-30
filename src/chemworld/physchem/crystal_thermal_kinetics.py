@@ -189,7 +189,20 @@ def _layout(model, population, thermodynamics, *, newborn=False):
             properties[key] = thermodynamics.species[model.solid_property_keys[impurity]]
             fields["impurity"] = key
         solid_keys.append(fields)
-    return (replace(thermodynamics, species=properties), amounts, liquid_keys, solid_keys, cohorts)
+    from chemworld.physchem.crystal_caloric_layout import CrystalCaloricLayout
+    from chemworld.physchem.property_packages import PropertyPackageThermodynamics
+
+    # Do not replace custom caloric subclasses or the legacy enthalpy boundary.
+    packed = (
+        CrystalCaloricLayout(
+            properties,
+            thermodynamics.support_heat_capacity_J_K,
+            thermodynamics.reference_temperature_K,
+        )
+        if type(thermodynamics) is PropertyPackageThermodynamics
+        else replace(thermodynamics, species=properties)
+    )
+    return (packed, amounts, liquid_keys, solid_keys, cohorts)
 
 
 def _unpack(model, packed, liquid_keys, solid_keys, cohorts):
@@ -272,7 +285,8 @@ def _release_vanished_hosts(
     phase_energy = energy(candidate) - initial_energy
     if not isothermal and phase_energy != 0:
         temperature = caloric_temperature(
-            lambda t: energy(replace(candidate, temperature_K=t)), initial_energy,
+            lambda t: energy(replace(candidate, temperature_K=t)),
+            initial_energy,
             (model.solubility.minimum_temperature_K, model.solubility.maximum_temperature_K),
             energy_basis=(
                 "internal_energy" if thermal.internal_energy_j(packed) is not None else "enthalpy"
@@ -337,7 +351,36 @@ def crystal_kinetic_terms(model, state, liquid_keys, *, impurity_resolution_mol=
 def _process(
     model, thermal, liquid_keys, solid_keys, cohorts, *, kinetic_terms=crystal_kinetic_terms
 ):
+    from chemworld.physchem.crystal_caloric_layout import CrystalCaloricLayout
+    from chemworld.physchem.legacy_crystal_enthalpy import LegacyCrystalEnthalpy
+
+    # These exact caloric implementations consume summed molecular rates, not
+    # transfer objects. Custom calorics still receive the full transfer records.
+    aggregate_transfers = type(thermal) in (CrystalCaloricLayout, LegacyCrystalEnthalpy)
     target, impurity = model.target_component, model.impurity_component
+    particle_moles_unit = model.particle_moles(1.0)
+    layout = tuple(
+        (
+            fields,
+            cohort,
+            tuple(
+                (f"crystal:{index}:{label}", fields[label], fluid_key)
+                for label, fluid_key in zip(("seed", "grown"), liquid_keys[target], strict=True)
+            ),
+        )
+        for index, (fields, cohort) in enumerate(zip(solid_keys, cohorts, strict=True))
+    )
+    if aggregate_transfers:
+        identities = set()
+        for _, _, exchanges in layout:
+            for exchange_id, solid_key, fluid_key in exchanges:
+                InternalTransfer(exchange_id, fluid_key, solid_key, 0.0)
+                if exchange_id in identities:
+                    raise ValueError(f"duplicate internal exchange: {exchange_id}")
+                identities.add(exchange_id)
+                if solid_key not in thermal.species or fluid_key not in thermal.species:
+                    raise ValueError(
+                        "internal transfer endpoints must belong to the compiled inventory")
 
     def evaluate(state):
         temperature = state.temperature_K
@@ -354,33 +397,33 @@ def _process(
             raise ValueError("crystal caloric offsets disagree with the solubility energy")
         transfers = []
         amount_rates = {}
-        for index, (fields, cohort) in enumerate(zip(solid_keys, cohorts, strict=True)):
+        for fields, cohort, exchanges in layout:
             n = state.amounts_mol[fields["seed"]] + state.amounts_mol[fields["grown"]]
             if cohort is None:
                 rate = nucleation_rate
             else:
-                diameter = (n / cohort.particle_count / model.particle_moles(1.0)) ** (1 / 3)
-                rate = (
-                    3
-                    * cohort.particle_count
-                    * model.particle_moles(1.0)
-                    * diameter**2
-                    * diameter_rate
-                )
-            for label, fluid_key in zip(("seed", "grown"), liquid_keys[target], strict=True):
+                diameter = (n / cohort.particle_count / particle_moles_unit) ** (1 / 3)
+                rate = 3 * cohort.particle_count * particle_moles_unit * diameter**2 * diameter_rate
+            for exchange_id, solid_key, fluid_key in exchanges:
                 if rate >= 0:
                     amount = (
                         0
                         if liquid_target == 0
                         else rate * state.amounts_mol[fluid_key] / liquid_target
                     )
-                    source, destination = fluid_key, fields[label]
+                    source, destination = fluid_key, solid_key
                 else:
-                    amount = 0 if n == 0 else -rate * state.amounts_mol[fields[label]] / n
-                    source, destination = fields[label], fluid_key
-                transfers.append(
-                    InternalTransfer(f"crystal:{index}:{label}", source, destination, amount)
-                )
+                    amount = 0 if n == 0 else -rate * state.amounts_mol[solid_key] / n
+                    source, destination = solid_key, fluid_key
+                if aggregate_transfers:
+                    if not isfinite(amount) or amount < 0:
+                        raise ValueError("internal transfer rate must be finite and nonnegative")
+                    # Same per-component update order as the common assembler.
+                    # No reaction/port receipt or seed inventory is removed.
+                    amount_rates[source] = amount_rates.get(source, 0.0) - amount
+                    amount_rates[destination] = amount_rates.get(destination, 0.0) + amount
+                else:
+                    transfers.append(InternalTransfer(exchange_id, source, destination, amount))
             if impurity is not None:
                 fluid_key = liquid_keys[impurity][0]
                 if rate >= 0:
@@ -472,11 +515,19 @@ def advance_crystal_population(
     )
     impurity_resolution = impurity_stock * model.impurity_resolution_fraction
 
+    last_candidate, last_terms = None, None
+
     def kinetic_terms(model, candidate, liquid_keys):
-        values = crystal_kinetic_terms(
-            model, candidate, liquid_keys, impurity_resolution_mol=impurity_resolution
-        )
-        return (values[0], values[1], 0.0) if impurity_stock == 0 else values
+        nonlocal last_candidate, last_terms
+        # Process assembly and the geometry RHS ask for these same terms on
+        # the very same immutable state. No rounding or cross-state cache.
+        if candidate is not last_candidate:
+            values = crystal_kinetic_terms(
+                model, candidate, liquid_keys, impurity_resolution_mol=impurity_resolution
+            )
+            last_terms = (values[0], values[1], 0.0) if impurity_stock == 0 else values
+            last_candidate = candidate
+        return last_terms
 
     while state.time_s < end:
         birth = model.kinetics.primary_nucleation_coefficient_per_L_s > 0

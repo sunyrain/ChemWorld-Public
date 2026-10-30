@@ -12,8 +12,13 @@ import gymnasium as gym
 
 import chemworld  # noqa: F401
 from chemworld import ENV_ID
-from chemworld.data.datasets import dataset_card, export_dataset
+from chemworld.data.datasets import (
+    export_dataset,
+)
 from chemworld.data.logging import load_jsonl
+from chemworld.eval.dataset_cards import (
+    dataset_card,
+)
 from chemworld.eval.verify import verify_records
 from chemworld.tasks import get_task, list_tasks
 from chemworld.world.recipes import compile_recipe, validate_recipe
@@ -54,8 +59,24 @@ def _verify(args: argparse.Namespace) -> None:
 
 
 def _tasks_list(args: argparse.Namespace) -> None:
-    del args
-    print(json.dumps([task.to_dict() for task in list_tasks()], indent=2, sort_keys=True))
+    tasks = list_tasks()
+    if args.format == "summary":
+        payload = [
+            {
+                "task_id": task.task_id,
+                "scenario_id": task.scenario_id,
+                "difficulty": task.difficulty,
+                "budget": task.budget,
+                "episode_mode": task.episode_mode,
+                "objective": task.objective,
+                "success_metrics": list(task.success_metrics),
+                "description": task.description,
+            }
+            for task in tasks
+        ]
+    else:
+        payload = [task.to_dict() for task in tasks]
+    print(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def _tasks_show(args: argparse.Namespace) -> None:
@@ -63,8 +84,22 @@ def _tasks_show(args: argparse.Namespace) -> None:
 
 
 def _scenarios_list(args: argparse.Namespace) -> None:
-    del args
-    payload = [scenario.to_dict() for scenario in list_scenarios()]
+    scenarios = list_scenarios()
+    if args.format == "summary":
+        payload = [
+            {
+                "scenario_id": scenario.scenario_id,
+                "family": scenario.family,
+                "split": scenario.split,
+                "difficulty": scenario.difficulty,
+                "parameter_profile": scenario.parameter_profile,
+                "initial_state_id": scenario.initial_state_id,
+                "expected_qualitative_behavior": list(scenario.expected_qualitative_behavior),
+            }
+            for scenario in scenarios
+        ]
+    else:
+        payload = [scenario.to_dict() for scenario in scenarios]
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 
@@ -85,8 +120,25 @@ def _scenarios_show(args: argparse.Namespace) -> None:
 
 
 def _load_json_file(path: str | Path) -> dict[str, Any]:
-    with Path(path).open("r", encoding="utf-8-sig") as handle:
-        payload = json.load(handle)
+    """Load a JSON object from a file path or an inline JSON argument.
+
+    CLI examples are often copied into a shell one action at a time.  Accepting
+    an inline object keeps that workflow equivalent to the file based form,
+    while retaining file paths for larger compositions, recipes and actions.
+    """
+
+    raw = str(path)
+    try:
+        candidate = Path(raw)
+        if candidate.is_file():
+            with candidate.open("r", encoding="utf-8-sig") as handle:
+                payload = json.load(handle)
+        else:
+            payload = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"{path} must be a JSON object file path or an inline JSON object"
+        ) from exc
     if not isinstance(payload, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return payload
@@ -238,9 +290,14 @@ def _inspect_constitution(args: argparse.Namespace) -> None:
 
 
 def _capabilities(args):
-    from chemworld.examples.native_capabilities import capability_rows, markdown
+    from chemworld.examples.native_capabilities import capability_rows, markdown, summary_rows
 
-    print(markdown() if args.format == "markdown" else json.dumps(capability_rows(), indent=2))
+    if args.format == "markdown":
+        print(markdown())
+    elif args.format == "summary":
+        print(json.dumps(summary_rows(), indent=2, sort_keys=True))
+    else:
+        print(json.dumps(capability_rows(), indent=2))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -255,7 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = commands.add_parser(
         "capabilities", help="Inspect installed domain, operation and instrument declarations."
     )
-    p.add_argument("--format", choices=("json", "markdown"), default="json")
+    p.add_argument("--format", choices=("json", "markdown", "summary"), default="json")
     p.set_defaults(func=_capabilities)
     p = commands.add_parser("verify", help="Replay recorded operations; does not score an agent.")
     p.add_argument("--submission", required=True)
@@ -264,13 +321,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_verify)
     p = commands.add_parser("tasks", help="Inspect existing environment presets.")
     sub = p.add_subparsers(dest="tasks_command", required=True)
-    sub.add_parser("list").set_defaults(func=_tasks_list)
+    q = sub.add_parser("list")
+    q.add_argument("--format", choices=("json", "summary"), default="json")
+    q.set_defaults(func=_tasks_list)
     q = sub.add_parser("show")
     q.add_argument("task_id")
     q.set_defaults(func=_tasks_show)
     p = commands.add_parser("scenarios", help="Inspect world scenarios.")
     sub = p.add_subparsers(dest="scenarios_command", required=True)
-    sub.add_parser("list").set_defaults(func=_scenarios_list)
+    q = sub.add_parser("list")
+    q.add_argument("--format", choices=("json", "summary"), default="json")
+    q.set_defaults(func=_scenarios_list)
     q = sub.add_parser("show")
     q.add_argument("scenario_id")
     q.add_argument("--split", default="public-dev")
@@ -279,14 +340,14 @@ def build_parser() -> argparse.ArgumentParser:
         "validate-action", help="Validate a physical action without executing it."
     )
     p.add_argument("--task", required=True)
-    p.add_argument("--action", required=True)
+    p.add_argument("--action", required=True, help="JSON object file or inline JSON object")
     p.add_argument("--seed", type=int, default=0)
     p.set_defaults(func=_validate_action)
     p = commands.add_parser(
         "validate-recipe", help="Validate a recipe against an environment preset."
     )
     p.add_argument("--task", required=True)
-    p.add_argument("--recipe", required=True)
+    p.add_argument("--recipe", required=True, help="JSON object file or inline JSON object")
     p.set_defaults(func=_validate_recipe)
     p = commands.add_parser("datasets", help="Export and inspect recorded interaction data.")
     sub = p.add_subparsers(dest="datasets_command", required=True)
@@ -304,7 +365,13 @@ def build_parser() -> argparse.ArgumentParser:
     world.add_argument("--composition", help="Explicit world composition JSON.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--observation-seed", type=int)
-    p.add_argument("--actions", nargs="*", default=[])
+    p.add_argument(
+        "--actions",
+        nargs="*",
+        default=[],
+        metavar="ACTION_JSON",
+        help="JSON object files or inline JSON objects, in execution order",
+    )
     p.add_argument("--noise-mode", choices=("sequential", "keyed"), default="sequential")
     p.add_argument("--format", choices=("ansi", "json"), default="ansi")
     p.add_argument("--trajectory")

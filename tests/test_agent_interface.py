@@ -10,7 +10,6 @@ from examples.demo_dataset_agent_trace_export import build_demo
 
 import chemworld  # noqa: F401
 from chemworld.agent_interface import rl_observation_spec
-from chemworld.agents.interactive_codex_experiment import _material_information_payload
 from chemworld.data.datasets import flatten_record
 from chemworld.data.logging import load_jsonl
 from chemworld.data.records import trajectory_value
@@ -45,7 +44,10 @@ def test_partition_public_surfaces_hide_identity_and_deliver_selected_prior(mode
         _, info = env.reset(seed=0)
         base = env.unwrapped
         task = base.task_info()
-        public = _material_information_payload(task)
+        public = {
+            "material_catalog": task["material_catalog"],
+            "material_information": {"dossier": base.material_information_dossier()},
+        }
         schemas = [base.action_schema(op) for op in task["allowed_operations"]]
         surfaces = json.dumps([base.task_prompt(), public, schemas, info]).lower()
         for forbidden in ("ethanol", "acetonitrile", "toluene", "cas_number", '"formula"'):
@@ -713,7 +715,7 @@ def test_tool_using_llm_stub_runs_agent_facing_tasks(tmp_path) -> None:
     )
     records = load_jsonl(output)
     assert history[-1].info["leaderboard_score"] is not None
-    assert trajectory_value(records[-1], 'agent_view')["lab_report"]["mode"] == "lab_report"
+    assert trajectory_value(records[-1], "agent_view")["lab_report"]["mode"] == "lab_report"
     assert records[-1]["agent_trace"]
     latest_trace = records[-1]["agent_trace"][-1]
     assert latest_trace["prompt_input"]

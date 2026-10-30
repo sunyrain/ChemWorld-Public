@@ -125,7 +125,10 @@ def validate_model_state(state, model):
         if (not isinstance(memory, dict) or not isinstance(memory.get("process"), dict)
                 or memory["process"].get("signature") != expected):
             raise ValueError("formal integer continuation signature disagrees with source/state")
-        settled = _advance_candidate(state, model, coordinates, memory, 0.)
+        try:
+            settled = _advance_candidate(state, model, coordinates, memory, 0.)
+        except CoordinateEventError as exc:
+            raise ValueError("invalid integer source-event snapshot continuation") from exc
         if model.integer_kinetics.requires_boundaries and (
                 settled.final_state.coordinates != coordinates or settled.memory != memory):
             raise ValueError("integer source-event snapshot must have a settled original queue")

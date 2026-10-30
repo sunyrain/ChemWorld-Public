@@ -4,6 +4,7 @@ import json
 import os
 import signal
 from copy import deepcopy
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -717,11 +718,13 @@ def test_verified_exclusive_archives_and_nonfinite_failure_representation_are_re
 
 
 @pytest.mark.skipif(os.name != "posix", reason="route process-group budget is POSIX-only")
+@pytest.mark.parametrize("alternate_worker", [False, True])
 def test_posix_budget_kills_the_full_group_and_retains_latest_complete_prefix(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, alternate_worker
 ):
     directory = tmp_path / "route"
     signals = []
+    entrypoint = tmp_path / "resource_worker.py" if alternate_worker else None
 
     class Process:
         pid = 987654321
@@ -729,7 +732,9 @@ def test_posix_budget_kills_the_full_group_and_retains_latest_complete_prefix(
 
         def __init__(self, command, **kwargs):
             assert kwargs["start_new_session"] is True
-            assert "run_battery_half_cell_dfn45.py" in command[2]
+            assert command[2] == str(
+                Path(runner.__file__ if entrypoint is None else entrypoint).resolve()
+            )
             runner.archive_new(
                 directory / "progress-0000.json.gz",
                 {"segments": [{"records": []}], "pending_source_solution": {"source_y": [[1, 2]]}},
@@ -749,7 +754,9 @@ def test_posix_budget_kills_the_full_group_and_retains_latest_complete_prefix(
 
     monkeypatch.setattr(runner.subprocess, "Popen", Process)
     monkeypatch.setattr(runner.transport.os, "killpg", kill)
-    trace, artifact = runner.execute_route(routes()[0], directory, 0, progress=lambda event: None)
+    trace, artifact = runner.execute_route(
+        routes()[0], directory, 0, progress=lambda event: None, worker_entrypoint=entrypoint
+    )
     assert signals == [signal.SIGTERM, signal.SIGKILL]
     assert artifact["timed_out"] and trace["exception"]["type"] == "RouteTimeout"
     assert trace["partial_history"]["pending_source_solution"]["source_y"] == [[1, 2]]

@@ -26,9 +26,6 @@ from chemworld.physchem.equilibrium_mechanism import (
     EquilibriumMechanismFamily,
     solve_coupled_weak_acid_precipitation,
 )
-from chemworld.physchem.spectroscopy_adapter_manifest import (
-    ValidatedInstrumentRuntimeProvider,
-)
 from chemworld.runtime.full_process_contract import unrecoverable_crystallization_result
 from chemworld.runtime.mechanisms import CompiledMechanism
 from chemworld.runtime.observation_noise import (
@@ -57,6 +54,9 @@ from chemworld.world.species_roles import PHASE_PRODUCT_AMOUNT_KEY
 from chemworld.world.spectral_contract import (
     SPECTRAL_INSTRUMENTS,
     acquisition_cost,
+)
+from chemworld.world.spectroscopy_provider import (
+    ValidatedInstrumentRuntimeProvider,
 )
 
 if TYPE_CHECKING:

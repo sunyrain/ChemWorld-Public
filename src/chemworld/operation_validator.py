@@ -323,10 +323,11 @@ class OperationValidator:
             .get(f"{bounds_operation}:{field}", authored)
         )
         if authored is not None:
-            if operation_type in {"heat", "wait"} and field == "duration_s":
+            if operation_type in {"heat", "wait", "run_flow"} and field == "duration_s":
                 # The component owns an explicitly declared clock range. The
                 # static action lower bound is only the undeclared default.
                 owner = (
+                    "finite_transport" if operation_type == "run_flow" else
                     "lab_schedule" if state.lab_clock is not None and operation_type == "wait"
                     else "thermal"
                 )
@@ -881,9 +882,12 @@ class OperationValidator:
             settings = equipment_settings(
                 state.equipment,
                 instrument_equipment_id(instrument_id),
-                fields=("use_count", "last_time_s"),
+                fields=("use_count", "last_time_s", "last_sample_batch_generation",
+                        "last_sample_vessel_id"),
             )
             if int(settings.get("use_count", 0)) <= 0:
+                continue
+            if not self._assay_matches_material(state, settings):
                 continue
             last_time_s = self._float(settings.get("last_time_s"))
             if last_time_s is not None and abs(last_time_s - state.ledger.time_s) <= max(
@@ -1014,13 +1018,25 @@ class OperationValidator:
         settings = equipment_settings(
             state.equipment,
             instrument_equipment_id(instrument_id),
-            fields=("use_count", "last_time_s"),
+            fields=("use_count", "last_time_s", "last_sample_batch_generation",
+                    "last_sample_vessel_id"),
         )
         last_time_s = self._float(settings.get("last_time_s"))
         return (
             int(settings.get("use_count", 0)) > 0
+            and self._assay_matches_material(state, settings)
             and last_time_s is not None
             and last_time_s + max(self.constitution.tolerance, 1.0e-9) >= time_s
+        )
+
+    @staticmethod
+    def _assay_matches_material(state: WorldState, settings: dict[str, Any]) -> bool:
+        # Instruments persist across batches; their prior measurements cannot
+        # satisfy a new batch's assay requirement when its process clock resets.
+        return (
+            int(settings.get("last_sample_batch_generation", 0))
+            == state.samples.batch_generation
+            and settings.get("last_sample_vessel_id", state.vessel_id) == state.vessel_id
         )
 
     def _default_payload(

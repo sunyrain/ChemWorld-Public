@@ -11,8 +11,14 @@ import pytest
 
 import chemworld  # noqa: F401
 from chemworld.cli import main
-from chemworld.data.datasets import dataset_card, export_dataset, flatten_record
+from chemworld.data.datasets import (
+    export_dataset,
+    flatten_record,
+)
 from chemworld.data.logging import load_jsonl
+from chemworld.eval.dataset_cards import (
+    dataset_card,
+)
 from chemworld.foundation.state import (
     PhaseLedger,
     PhaseRecord,
@@ -27,6 +33,7 @@ from chemworld.foundation.state import (
     process_with_metrics,
     upsert_equipment_record,
 )
+from chemworld.legacy.cli import main as legacy_main
 from chemworld.operation_validator import OperationValidator
 from chemworld.physchem.mechanism_library import get_mechanism_card, list_mechanism_cards
 from chemworld.runtime.domain_services import (
@@ -173,11 +180,8 @@ def test_runtime_env_and_world_use_world_action_catalog() -> None:
     assert not Path("src/chemworld/core/actions.py").exists()
 
 
-def test_core_package_removed_from_source_and_tutorials() -> None:
-    roots = (
-        Path("src/chemworld"),
-        Path("notebooks/tutorials"),
-    )
+def test_core_package_removed_from_source() -> None:
+    roots = (Path("src/chemworld"),)
     offenders: list[Path] = []
     for root in roots:
         for path in root.rglob("*"):
@@ -190,13 +194,6 @@ def test_core_package_removed_from_source_and_tutorials() -> None:
 
     assert core_sources == []
     assert offenders == []
-
-
-def test_tutorial_helpers_do_not_import_removed_batch_runtime() -> None:
-    tutorial_helpers = Path("notebooks/tutorials/tutorial_utils.py").read_text(encoding="utf-8")
-
-    assert "chemworld.core.batch_reactor" not in tutorial_helpers
-    assert "from chemworld.world.recipes import recipe_to_event_sequence" in tutorial_helpers
 
 
 def test_runtime_does_not_use_legacy_species_constants() -> None:
@@ -2544,7 +2541,17 @@ def test_cli_scenarios_validation_render_and_dataset(tmp_path, capsys) -> None:
     main(["validate-action", "--task", "reaction-to-assay", "--action", str(action_path)])
     main(["validate-recipe", "--task", "reaction-to-assay", "--recipe", str(recipe_path)])
     main(["render", "--task", "reaction-to-assay", "--actions", str(action_path)])
-    main(["run", "--task", "reaction-to-assay", "--agent", "random", "--output", str(trajectory)])
+    legacy_main(
+        [
+            "run",
+            "--task",
+            "reaction-to-assay",
+            "--agent",
+            "random",
+            "--output",
+            str(trajectory),
+        ]
+    )
     main(
         [
             "datasets",

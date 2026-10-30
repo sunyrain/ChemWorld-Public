@@ -207,6 +207,8 @@ def validate_mechanism_rate(reaction: ReactionSpec) -> None:
         raise ValueError("gas reverse rate requires ideal_gas_thermo")
     if reaction.reversible and reaction.metadata.get("custom_orders"):
         raise ValueError("custom reaction orders are only allowed for irreversible reactions")
+    if reaction.metadata.get("custom_reverse_orders") and not reaction.reversible:
+        raise ValueError("custom reverse reaction orders require a reversible reaction")
     groups = []
     if law in {"arrhenius", "third_body_arrhenius", "blowers_masel"}:
         groups = [p]

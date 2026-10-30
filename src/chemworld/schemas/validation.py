@@ -5,10 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, cast
 
+from chemworld.foundation.action_layout import (
+    ELECTROLYTE_PROFILES,
+)
+from chemworld.foundation.action_layout import (
+    EXTENDED_INSTRUMENT_ORDER as INSTRUMENTS,
+)
+from chemworld.foundation.action_layout import (
+    LEGACY_OPERATION_ORDER as OPERATION_TYPES,
+)
 from chemworld.physchem.reaction_network_specs import SUPPORTED_RATE_LAW_EQUATION_IDS
-from chemworld.world.actions import ELECTROLYTE_PROFILES
-from chemworld.world.operations import EXTENDED_INSTRUMENTS as INSTRUMENTS
-from chemworld.world.operations import OPERATION_TYPES
 
 PHASES = ("reactor_liquid", "aqueous", "organic")
 MECHANISM_SCHEMA_VERSION = "chemworld_mechanism_v1"

@@ -414,6 +414,10 @@ class PlatingReadout:
     plated_mol: float
     dead_mol: float
     negative_electrode_potential_V: float
+    # Partial-plating exposes a real state-dependent decay rate.  Keep a
+    # default so existing reversible/irreversible and MPM positional readers
+    # remain source-compatible while their rate is correctly reported as 0.
+    deactivation_rate_mol_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -482,7 +486,8 @@ def plating_readout(spec, state, current_A):
                              *map(float, f["average_fraction"]),
                              *map(float, f["kinetic_overpotential_V"]), f["stripping_current_A"],
                              f["negative_intercalation_current_A"], f["plated_mol"], f["dead_mol"],
-                             f["negative_electrode_potential_V"])
+                             f["negative_electrode_potential_V"],
+                             f.get("deactivation_rate_mol_s", 0.0))
     surface, average, eta = [], [], []
     bins = _plating_bins(spec)
     for name in ("negative", "positive"):
@@ -495,7 +500,8 @@ def plating_readout(spec, state, current_A):
     return PlatingReadout(f["voltage_V"], f["current_A"], *surface, *average, *eta,
                          f["stripping_current_A"],
                          f["negative_intercalation_current_A"], f["plated_mol"], f["dead_mol"],
-                         f["negative_electrode_potential_V"])
+                         f["negative_electrode_potential_V"],
+                         f.get("deactivation_rate_mol_s", 0.0))
 
 
 def plating_particle_flux(spec, state, name, current_A):

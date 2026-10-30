@@ -22,7 +22,7 @@ def test_environment_and_research_imports_do_not_load_legacy_agents():
                     "import sys",
                     "from chemworld.cli import build_parser",
                     "from chemworld.eval.runner import run_agent",
-                    "import chemworld.agents.interactive_codex_experiment",
+                    "import chemworld.agents.experiment_documents",
                     "assert not any(m.startswith('chemworld.legacy') for m in sys.modules)",
                 ]
             ),

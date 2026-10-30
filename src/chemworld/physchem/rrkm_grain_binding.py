@@ -25,7 +25,6 @@ from chemworld.physchem.energy_grain_specs import (
     finite,
     identity,
 )
-from chemworld.physchem.gas_reactor_network import GasReactorNetworkSpec
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.rrkm_density_states import (
     AVOGADRO_PER_MOL,
@@ -36,7 +35,6 @@ from chemworld.physchem.rrkm_density_states import (
     harmonic_log_partition,
     harmonic_state_counts,
 )
-from chemworld.world.composition import WorldCompositionSpec
 
 
 @dataclass(frozen=True)
@@ -221,18 +219,6 @@ def rrkm_grain_network(spec: RRKMGrainSpec) -> ReactionNetworkSpec:
     return replace(network, metadata={**network.metadata, "rrkm_declaration": spec.to_dict()})
 
 
-def rrkm_grain_world(
-    spec: RRKMGrainSpec,
-    reactor_network: GasReactorNetworkSpec,
-    amounts_by_vessel: Mapping[str, Mapping[str, float]],
-    *,
-    budget: int = 100,
-) -> WorldCompositionSpec:
-    from chemworld.world.gas_reactor_network import gas_reactor_network_world
-
-    return gas_reactor_network_world(
-        reactor_network, rrkm_grain_network(spec), amounts_by_vessel, budget=budget
-    )
 
 
 def rrkm_canonical_report(spec: RRKMGrainSpec, temperature_K: float) -> dict[str, Any]:

@@ -86,6 +86,35 @@ def quantities(model, state):
     return total, seed
 
 
+def test_crystal_caloric_reuse_keeps_exact_temperature_model_and_validity_policy(monkeypatch):
+    from chemworld.physchem.crystal_caloric_layout import CrystalCaloricLayout
+
+    _, thermal, _ = crystal_fixture()
+    original = SpeciesCaloricModel.evaluate
+    calls = []
+
+    def evaluate(self, temperature, quantities, *, strict=True):
+        calls.append((id(self), temperature, tuple(quantities), strict))
+        return original(self, temperature, quantities, strict=strict)
+
+    monkeypatch.setattr(SpeciesCaloricModel, "evaluate", evaluate)
+    cached = CrystalCaloricLayout(
+        {"a": thermal.species["P"], "b": thermal.species["P"], "solid": thermal.species["solid:P"]},
+        60,
+        298.15,
+    )
+    first = cached._at("a", 298.15, ("cv",), strict=False)
+    assert cached._at("b", 298.15, ("cv",), strict=False) is first
+    assert len(calls) == 1
+    cached._at("a", 298.15, ("cv",), strict=True)
+    cached._at("solid", 298.15, ("cv",), strict=True)
+    cached._at("a", 298.15 + 1e-10, ("cv",), strict=True)
+    assert len(calls) == 4
+    cached._at("a", 450, ("cv",), strict=False)
+    with pytest.raises(RuntimeError, match="outside"):
+        cached._at("a", 450, ("cv",), strict=True)
+
+
 def test_finite_small_crystal_disappears_and_releases_actual_occlusion_and_seed():
     model, thermal, state = crystal_fixture()
     result = advance_crystal_population(model, state, thermal, 9000)
@@ -128,6 +157,38 @@ def test_crystal_caloric_energy_must_match_the_solubility_reference():
     thermal = replace(thermal, species={**thermal.species, "solid:P": wrong})
     with pytest.raises(ValueError, match="caloric offsets"):
         advance_crystal_population(model, state, thermal, 1)
+
+
+@pytest.mark.parametrize("saturation,newborn", [(0., False), (1., False), (2., False), (2., True)])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_compact_crystal_transfers_keep_full_rates_and_custom_caloric_records(
+    saturation, newborn, legacy,
+):
+    from chemworld.physchem.coupled_system import CoupledStateView, assemble_coupled_rates
+    from chemworld.physchem.crystal_thermal_kinetics import _layout, _process
+    from chemworld.runtime.legacy_crystal_thermal import LegacyCrystalEnthalpy
+
+    model, thermal, state = crystal_fixture(saturation=saturation, nucleation=2e7 if newborn else 0)
+    if legacy:
+        thermal = LegacyCrystalEnthalpy({'P': 0., 'I': 0., 'solid:P': -20000., 'solid:I': 0.}, 60.)
+    thermal, amounts, liquid, solid, cohorts = _layout(model, state, thermal, newborn=newborn)
+
+    class CustomCalorics(type(thermal)):
+        pass
+
+    custom = CustomCalorics(thermal.species, thermal.support_heat_capacity_J_K,
+                           thermal.reference_temperature_K)
+    candidate = CoupledStateView(amounts, state.temperature_K, state.volume_L)
+    reference_process = _process(model, custom, liquid, solid, cohorts)
+    assert len(reference_process.evaluate(candidate).internal_transfers) == 2 * len(cohorts)
+    current_process = _process(model, thermal, liquid, solid, cohorts)
+    current = assemble_coupled_rates(
+        candidate, processes=(current_process,), thermodynamics=thermal,
+        heat_flux=lambda _: HeatFlux(2., 1.))
+    reference = assemble_coupled_rates(
+        candidate, processes=(reference_process,), thermodynamics=custom,
+        heat_flux=lambda _: HeatFlux(2., 1.))
+    assert current == reference
 
 
 def test_nucleation_transfers_real_mass_without_fabricated_particle_inventory():
@@ -204,7 +265,10 @@ def test_finite_impurity_exhaustion_keeps_clean_growth_advancing_without_negativ
 
 @pytest.mark.parametrize("saturation", [0.0, 2.0])
 @pytest.mark.parametrize("isothermal", [False, True])
-def test_cohort_jacobian_matches_independent_full_difference(monkeypatch, saturation, isothermal):
+@pytest.mark.parametrize("cohort_count", [1, 5])
+def test_cohort_jacobian_matches_independent_full_difference(
+    monkeypatch, saturation, isothermal, cohort_count
+):
     import numpy as np
 
     from chemworld.physchem import solver_backend
@@ -213,6 +277,7 @@ def test_cohort_jacobian_matches_independent_full_difference(monkeypatch, satura
         pass
 
     def inspect(rhs, initial, **kwargs):
+        assert kwargs["jac_sparsity"] is None
         actual = kwargs["jac"](0, initial).toarray()
         numerical = np.zeros_like(actual)
         for column, value in enumerate(initial):
@@ -230,5 +295,20 @@ def test_cohort_jacobian_matches_independent_full_difference(monkeypatch, satura
 
     monkeypatch.setattr(solver_backend, "solve_ode", inspect)
     model, thermal, state = crystal_fixture(saturation=saturation)
+    cohort = state.cohorts[0]
+    state = replace(
+        state,
+        cohorts=tuple(
+            replace(
+                cohort,
+                particle_count=cohort.particle_count / cohort_count / (1 + i / 10) ** 3,
+                diameter_m=cohort.diameter_m * (1 + i / 10),
+                target_mol=cohort.target_mol / cohort_count,
+                seed_mol=cohort.seed_mol / cohort_count,
+                impurity_mol=cohort.impurity_mol / cohort_count,
+            )
+            for i in range(cohort_count)
+        ),
+    )
     with pytest.raises(InspectedError):
         advance_crystal_population(model, state, thermal, 100, isothermal=isothermal)

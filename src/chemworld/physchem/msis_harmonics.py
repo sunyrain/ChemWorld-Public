@@ -47,7 +47,8 @@ class MSISHarmonics:
         return offset + (slope - 1) * (offset + expm1(-rate * offset) / rate)
 
     def _historical_response(self, p: tuple[float, ...]) -> float:
-        assert self.history is not None
+        if self.history is None:
+            raise AssertionError("invariant violated: self.history is not None")
         decay = min(0.99999, exp(-10800 * abs(p[51]) / (1 + p[138] * (45 - abs(self.latitude)))))
         rate = max(abs(p[24]), 0.0001)
         values = [

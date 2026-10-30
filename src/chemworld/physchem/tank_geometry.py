@@ -269,10 +269,14 @@ class TankGeometry:
             if count != 2:
                 raise ValueError("exactly two of diameter, length and length/diameter required")
             if diameter_m is None:
-                assert length_m is not None and length_over_diameter is not None
+                if length_m is None or length_over_diameter is None:
+                    raise AssertionError(
+                        "invariant violated: length_m or length_over_diameter is None"
+                    )
                 diameter_m = length_m / length_over_diameter
             if length_m is None:
-                assert length_over_diameter is not None
+                if length_over_diameter is None:
+                    raise AssertionError("invariant violated: length_over_diameter is None")
                 length_m = diameter_m * length_over_diameter
         else:
             _positive(volume_m3, "target volume")
@@ -290,7 +294,8 @@ class TankGeometry:
                 diameter_m = (volume_m3 / coefficient) ** (1 / 3)
                 length_m = diameter_m * length_over_diameter
             else:
-                assert length_m is not None
+                if length_m is None:
+                    raise AssertionError("invariant violated: length_m is not None")
                 if length_m == 0:
                     if head_factor <= 0:
                         raise ValueError("zero shell length needs positive head capacity")

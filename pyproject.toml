@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chemworld-bench"
-version = "0.5.0.dev0"
+dynamic = ["version"]
 description = "A programmable physical-chemistry environment with native observations, persistent experiments and replay."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -77,6 +77,9 @@ chemworld = "chemworld.cli:main"
 Homepage = "https://github.com/sunyrain/ChemWorld-Public"
 Documentation = "https://sunyrain.github.io/ChemWorld-Public/"
 Issues = "https://github.com/sunyrain/ChemWorld-Public/issues"
+
+[tool.hatch.version]
+path = "src/chemworld/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chemworld"]

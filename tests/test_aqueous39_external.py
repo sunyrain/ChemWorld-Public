@@ -12,6 +12,7 @@ from chemworld.physchem.aqueous_database_external import (
     EXTERNAL_AQUEOUS_DATABASE_SCHEMA,
     aqueous_database_from_external_json,
     aqueous_database_to_external_json,
+    external_json_unit_audit,
 )
 from reference.aqueous39_fixtures import database
 
@@ -73,7 +74,32 @@ def test_external_json_rejects_provider_units_and_lossy_thermo_declarations() ->
         aqueous_database_from_external_json("not-json")
 
 
+def test_external_json_unit_audit_reports_canonical_contract_without_rescaling() -> None:
+    payload = aqueous_database_to_external_json(database(), provider="reaktoro")
+
+    report = external_json_unit_audit(payload)
+    assert report["valid"] is True
+    assert report["schema"] == EXTERNAL_AQUEOUS_DATABASE_SCHEMA
+    assert report["provider"] == "reaktoro"
+    assert report["mismatches"] == {}
+    assert report["policy"] == "canonical SI only; no implicit conversion"
+
+    invalid = copy.deepcopy(payload)
+    invalid["units"]["pressure"] = "bar"
+    invalid["units"]["legacy"] = "kcal/mol"
+    report = external_json_unit_audit(invalid)
+    assert report["valid"] is False
+    assert report["mismatches"]["pressure"] == {"declared": "bar", "expected": "Pa"}
+    assert report["mismatches"]["legacy"] == {
+        "declared": "kcal/mol",
+        "expected": None,
+    }
+    with pytest.raises(ValueError, match="canonical SI units"):
+        aqueous_database_from_external_json(invalid)
+
+
 def test_external_adapter_is_available_through_lazy_public_facade() -> None:
     payload = physchem.aqueous_database_to_external_json(database(), provider="reaktoro")
     restored = physchem.aqueous_database_from_external_json(payload)
     assert restored.to_dict() == database().to_dict()
+    assert physchem.external_json_unit_audit(payload)["valid"] is True

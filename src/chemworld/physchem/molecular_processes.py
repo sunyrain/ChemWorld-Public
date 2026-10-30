@@ -7,13 +7,14 @@ basins are not multiphase flash or a global stability assertion.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field
-from math import fsum, isfinite
+from dataclasses import asdict, dataclass, field, replace
+from math import exp, fsum, isfinite
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
+from chemworld.physchem.molecular_eos import _molecular_density_root
 from chemworld.physchem.molecular_flash import MolecularDensityBasin
 from chemworld.physchem.molecular_mixture import (
     MolecularCaloricModel,
@@ -249,7 +250,8 @@ def _single_result(
             failure_reason=closed.failure_reason,
             diagnostics={"mode": mode, **closed.diagnostics},
         )
-    assert closed.state is not None
+    if closed.state is None:
+        raise AssertionError("invariant violated: closed.state is not None")
     outlet = MolecularStream(closed.state, inlet.molar_rate_mol_s)
     return MolecularProcessResult(
         True,
@@ -310,7 +312,8 @@ class MolecularPressureStage:
                     failure_reason="isentropic_state:" + iso.failure_reason,
                     diagnostics=iso.diagnostics,
                 )
-            assert iso.state is not None
+            if iso.state is None:
+                raise AssertionError("invariant violated: iso.state is not None")
             isentropic = iso.state.enthalpy_J_mol
             delta = isentropic - target
             target += (
@@ -492,6 +495,33 @@ def molecular_mix_streams(
         for i in range(len(domain.model.component_ids))
     )
     enthalpy = fsum(s.enthalpy_rate_W for s in inlets)
+    # A basin's generic density seed can be mechanically unstable at the mixed
+    # composition even though every inlet is a valid homogeneous liquid. Use
+    # actual inlet volume flows to seed the same-basin pressure equation first.
+    # Volume additivity need not hold at the mixed composition. The subsequent
+    # PH solve uses only the remainder of the original iteration budget.
+    initial_density = rate / fsum(
+        s.molar_rate_mol_s / s.state.molar_density_mol_m3 for s in inlets
+    )
+    initialization = _molecular_density_root(
+        domain.model.residual_model, initial_temperature_K, outlet_pressure_Pa, fractions,
+        initial_density_mol_m3=initial_density,
+        density_bounds_mol_m3=domain.density_basin.density_bounds_mol_m3, policy=policy,
+    )
+    used = initialization.diagnostics["iterations"]
+    preparation = {
+        "initial_density_mol_m3": initial_density,
+        "initial_density_source": "inlet_volume_flow_then_same_basin_TP",
+        "initialization_root": initialization.diagnostics,
+        "total_root_iterations": used,
+        "total_root_evaluations": initialization.diagnostics["evaluations"],
+    }
+    remaining = policy.maximum_iterations-used
+    if not initialization.success or initialization.value is None or remaining < 1:
+        return MolecularProcessResult(
+            False, failure_reason=initialization.failure_reason or "iteration_limit",
+            diagnostics=preparation,
+        )
     closed = molecular_process_state(
         domain,
         pressure_Pa=outlet_pressure_Pa,
@@ -499,13 +529,18 @@ def molecular_mix_streams(
         value=enthalpy / rate,
         mole_fractions=fractions,
         initial_temperature_K=initial_temperature_K,
-        policy=policy,
+        initial_density_mol_m3=exp(initialization.value[0]),
+        policy=replace(policy, maximum_iterations=remaining),
     )
+    closed.diagnostics.update(preparation)
+    closed.diagnostics["total_root_iterations"] += closed.diagnostics["root"]["iterations"]
+    closed.diagnostics["total_root_evaluations"] += closed.diagnostics["root"]["evaluations"]
     if not closed.success:
         return MolecularProcessResult(
             False, failure_reason=closed.failure_reason, diagnostics=closed.diagnostics
         )
-    assert closed.state is not None
+    if closed.state is None:
+        raise AssertionError("invariant violated: closed.state is not None")
     out = MolecularStream(closed.state, rate)
     generated = rate * out.state.entropy_J_mol_K - fsum(
         s.molar_rate_mol_s * s.state.entropy_J_mol_K for s in inlets

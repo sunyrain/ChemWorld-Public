@@ -19,20 +19,24 @@ from types import MappingProxyType
 from typing import Any
 
 from chemworld.data.logging import to_builtin
+from chemworld.resource_receipts import ResourceReceipts
 from chemworld.world.operations import MATERIAL_STOCK_FIELDS
 
 
 def canonical_json_sha256(payload: Any) -> str:
     """Hash canonical JSON without importing the higher-level eval package."""
 
-    encoded = json.dumps(
+    return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+
+
+def _canonical_json_bytes(payload: Any) -> bytes:
+    return json.dumps(
         payload,
         ensure_ascii=False,
         allow_nan=False,
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 CAMPAIGN_RESOURCE_CARD_VERSION = "chemworld-campaign-resource-card-0.1"
@@ -595,9 +599,15 @@ class CampaignResourceLedger:
         )
         if self.reagent_charge_molar_multiplier <= 0:
             raise ValueError("Reagent multiplier must be positive")
-        self._protected_closeout_contract = self._load_protected_closeout_contract()
-        self._events: dict[str, dict[str, Any]] = {}
-        self._event_order: list[str] = []
+        self._protected_closeout_contract = _deep_freeze(self._load_protected_closeout_contract())
+        self._receipts = ResourceReceipts(
+            card.to_dict(), encode=_canonical_json_bytes, freeze=_deep_freeze, thaw=_deep_thaw
+        )
+        self._events = self._receipts
+        self._event_order = self._receipts.order
+        self._hash_card = self.card
+        self._receipt_validation = None
+        self._reserve_validation = None
         self.operation_attempts = 0
         self.vessel_starts = 0
         self.final_assays = 0
@@ -671,10 +681,9 @@ class CampaignResourceLedger:
             rejection_reasons=tuple(reasons),
             proposed_delta=proposed,
         )
-        self._event_order.append(event_id)
-        self._events[event_id] = {
+        event = {
             "event_id": event_id,
-            "ordinal": len(self._event_order),
+            "ordinal": len(self._event_order) + 1,
             "action": normalized_action,
             "starts_vessel": bool(starts_vessel),
             "action_sha256": action_sha256,
@@ -682,9 +691,10 @@ class CampaignResourceLedger:
             "outcome": None,
         }
         if instruments:
-            self._events[event_id]["instrument_reservation"] = instruments
+            event["instrument_reservation"] = instruments
+        self._receipts.append(event)
         self._append_history_chunk("preflight", self._events[event_id])
-        self.verify_integrity()
+        self.verify_integrity(_incremental=True)
         self._refresh_ledger_sha256()
         return preflight
 
@@ -786,13 +796,14 @@ class CampaignResourceLedger:
             actual,
             operation=(operation if committed else None),
         )
-        event["outcome"] = {
+        receipt_outcome = {
             "committed": committed,
             "outcome_sha256": outcome_sha256,
             "delta": actual.to_dict(),
         }
-        self._append_history_chunk("outcome", {"event_id": event_id, "outcome": event["outcome"]})
-        self.verify_integrity()
+        self._receipts.complete(event_id, receipt_outcome)
+        self._append_history_chunk("outcome", {"event_id": event_id, "outcome": receipt_outcome})
+        self.verify_integrity(_incremental=True)
         self._refresh_ledger_sha256()
         return actual
 
@@ -859,7 +870,18 @@ class CampaignResourceLedger:
         still rebuild and verify the canonical payload in :meth:`snapshot`.
         """
 
-        self._ledger_sha256 = canonical_json_sha256(self._snapshot_payload())
+        if self.card is not self._hash_card:
+            self._receipts.reset_card(self.card.to_dict())
+            self._hash_card = self.card
+        tail = {
+            "schema_version": CAMPAIGN_RESOURCE_LEDGER_VERSION,
+            "reagent_charge_molar_multiplier": self.reagent_charge_molar_multiplier,
+            "state": self._state_payload(),
+            "last_event_id": self._event_order[-1] if self._event_order else None,
+        }
+        if self._include_history_root:
+            tail["history_root_sha256"] = self._history_root_sha256
+        self._ledger_sha256 = self._receipts.canonical_hash(tail)
 
     @staticmethod
     def _history_chunk_payload(phase: str, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -957,8 +979,7 @@ class CampaignResourceLedger:
             event_id = ledger._normalize_event_id(str(event.get("event_id", "")))
             if event_id in ledger._events:
                 raise CampaignResourceIntegrityError("duplicate campaign resource event_id")
-            ledger._event_order.append(event_id)
-            ledger._events[event_id] = event
+            ledger._receipts.append(event)
         if payload.get("last_event_id") != (
             ledger._event_order[-1] if ledger._event_order else None
         ):
@@ -972,7 +993,10 @@ class CampaignResourceLedger:
             and supplied_history_root != ledger._history_root_sha256
         ):
             raise CampaignResourceIntegrityError("campaign resource history root mismatch")
-        replayed = ledger.snapshot()
+        # The receipts and history root were fully checked immediately above.
+        # Re-serializing the verified state checks canonical replay without a
+        # second identical traversal through snapshot().
+        replayed = ledger._snapshot_payload()
         if "history_root_sha256" not in payload:
             replayed.pop("history_root_sha256", None)
         replayed.pop("ledger_sha256", None)
@@ -980,11 +1004,23 @@ class CampaignResourceLedger:
             raise CampaignResourceIntegrityError(
                 "campaign resource snapshot is not canonically replayable"
             )
-        ledger._ledger_sha256 = str(supplied_hash)
+        ledger._refresh_ledger_sha256()
         return ledger
 
-    def verify_integrity(self) -> bool:
-        """Recompute all monotone state from event receipts and enforce hard limits."""
+    def _validation_key(self):
+        if self._events is not self._receipts or self._event_order is not self._receipts.order:
+            # Private-container replacement cannot reuse the immutable-prefix proof.
+            return object()
+        return (self.card, self.reagent_charge_molar_multiplier,
+                id(self._protected_closeout_contract), id(self._receipts))
+
+    def verify_integrity(self, *, _incremental: bool = False) -> bool:
+        """Recompute receipt totals and enforce hard limits.
+
+        Explicit calls and snapshot/restore check the entire history. Internal
+        controlled writes may reuse only an immutable, completed leading prefix.
+        Current counters and limits are checked on every call.
+        """
 
         attempts = 0
         vessels = 0
@@ -999,10 +1035,51 @@ class CampaignResourceLedger:
         physical_cost = 0.0
         accumulated_risk = 0.0
         peak_risk = 0.0
-        for ordinal, event_id in enumerate(self._event_order, start=1):
+        def capture():
+            return {
+                "operation_attempts": attempts,
+                "vessel_starts": vessels,
+                "final_assays": finals,
+                "discarded_batches": discarded,
+                "nonfinal_instrument_uses": nonfinal,
+                "instrument_uses": dict(sorted(instruments.items())),
+                "operation_committed_counts": dict(sorted(operation_committed_counts.items())),
+                "stocks_used": dict(sorted(stocks.items())),
+                "process_time_s": process_time_s,
+                "sample_consumed_L": sample_consumed_L,
+                "physical_cost": physical_cost,
+                "accumulated_risk": accumulated_risk,
+                "peak_risk": peak_risk,
+            }
+
+        key = self._validation_key()
+        cached = self._receipt_validation if _incremental else None
+        offset = 0
+        if cached is not None and cached[0] == key:
+            offset, state = cached[1], cached[2]
+            attempts = state['operation_attempts']
+            vessels = state['vessel_starts']
+            finals = state['final_assays']
+            discarded = state['discarded_batches']
+            nonfinal = state['nonfinal_instrument_uses']
+            instruments = dict(state['instrument_uses'])
+            operation_committed_counts = dict(state['operation_committed_counts'])
+            stocks = dict(state['stocks_used'])
+            process_time_s = state['process_time_s']
+            sample_consumed_L = state['sample_consumed_L']
+            physical_cost = state['physical_cost']
+            accumulated_risk = state['accumulated_risk']
+            peak_risk = state['peak_risk']
+        checkpoint = cached if offset else (key, 0, capture())
+        pending = False
+        for index in range(offset, len(self._event_order)):
+            ordinal, event_id = index + 1, self._event_order[index]
             event = self._events.get(event_id)
             if event is None or event.get("event_id") != event_id:
                 raise CampaignResourceIntegrityError("campaign resource event index mismatch")
+            if event.get("outcome") is None and not pending:
+                checkpoint = (key, index, capture())
+                pending = True
             if event.get("ordinal") != ordinal:
                 raise CampaignResourceIntegrityError("campaign resource event ordinal mismatch")
             action = self._normalize_action(event.get("action", {}))
@@ -1059,6 +1136,7 @@ class CampaignResourceLedger:
                 attempts += 1
             outcome = event.get("outcome")
             if outcome is None:
+                pending = True
                 continue
             if not isinstance(outcome, Mapping):
                 raise CampaignResourceIntegrityError("campaign resource outcome is invalid")
@@ -1104,21 +1182,9 @@ class CampaignResourceLedger:
             physical_cost += actual.physical_cost
             accumulated_risk += actual.accumulated_risk
             peak_risk = max(peak_risk, actual.observed_risk)
-        expected: dict[str, Any] = {
-            "operation_attempts": attempts,
-            "vessel_starts": vessels,
-            "final_assays": finals,
-            "discarded_batches": discarded,
-            "nonfinal_instrument_uses": nonfinal,
-            "instrument_uses": dict(sorted(instruments.items())),
-            "operation_committed_counts": dict(sorted(operation_committed_counts.items())),
-            "stocks_used": dict(sorted(stocks.items())),
-            "process_time_s": process_time_s,
-            "sample_consumed_L": sample_consumed_L,
-            "physical_cost": physical_cost,
-            "accumulated_risk": accumulated_risk,
-            "peak_risk": peak_risk,
-        }
+        if not pending:
+            checkpoint = (key, len(self._event_order), capture())
+        expected = capture()
         observed: dict[str, Any] = {
             "operation_attempts": self.operation_attempts,
             "vessel_starts": self.vessel_starts,
@@ -1165,6 +1231,7 @@ class CampaignResourceLedger:
                     f"campaign resource report state mismatch: {key}"
                 )
         self._verify_state_within_limits()
+        self._receipt_validation = checkpoint
         return True
 
     def _load_protected_closeout_contract(self) -> dict[str, Any] | None:
@@ -1294,7 +1361,17 @@ class CampaignResourceLedger:
         operation_consumed = 0
         process_consumed = 0.0
         by_class: dict[str, dict[str, float | int]] = {}
-        for event_id in self._event_order:
+        key = self._validation_key()
+        cached = self._reserve_validation
+        offset = 0
+        if cached is not None and cached[0] == key:
+            (offset, charged_attempts, elapsed_process_time,
+             operation_consumed, process_consumed, previous) = cached[1:]
+            by_class = {k: dict(v) for k, v in previous.items()}
+        checkpoint = cached if offset else None
+        pending = False
+        for index in range(offset, len(self._event_order)):
+            event_id = self._event_order[index]
             event = self._events[event_id]
             action = event.get("action")
             action = action if isinstance(action, Mapping) else {}
@@ -1311,18 +1388,25 @@ class CampaignResourceLedger:
                     operation_consumed += 1
                     entry["operation_attempts"] = int(entry["operation_attempts"]) + 1
             outcome = event.get("outcome")
-            if not isinstance(outcome, Mapping) or outcome.get("committed") is not True:
+            if not isinstance(outcome, Mapping):
+                pending = True
                 continue
-            delta = CampaignResourceDelta.from_dict(outcome.get("delta", {}))
-            before = elapsed_process_time
-            elapsed_process_time += delta.process_time_s
-            overlap = max(
-                elapsed_process_time - max(before, process_ceiling),
-                0.0,
-            )
-            if protected and overlap > 0.0:
-                process_consumed += overlap
-                entry["process_time_s"] = float(entry["process_time_s"]) + overlap
+            if outcome.get("committed") is True:
+                delta = CampaignResourceDelta.from_dict(outcome.get("delta", {}))
+                before = elapsed_process_time
+                elapsed_process_time += delta.process_time_s
+                overlap = max(
+                    elapsed_process_time - max(before, process_ceiling),
+                    0.0,
+                )
+                if protected and overlap > 0.0:
+                    process_consumed += overlap
+                    entry["process_time_s"] = float(entry["process_time_s"]) + overlap
+            if not pending:
+                checkpoint = (key, index + 1, charged_attempts, elapsed_process_time,
+                              operation_consumed, process_consumed,
+                              {k: dict(v) for k, v in by_class.items()})
+        self._reserve_validation = checkpoint
         return {
             "operation_attempts": operation_consumed,
             "process_time_s": process_consumed,
@@ -1678,7 +1762,7 @@ class CampaignResourceLedger:
         if not isinstance(payload, Mapping):
             raise CampaignResourceIntegrityError("campaign resource preflight is missing")
         reasons = payload.get("rejection_reasons", [])
-        if not isinstance(reasons, list):
+        if not isinstance(reasons, (list, tuple)):
             raise CampaignResourceIntegrityError("preflight rejection_reasons must be a list")
         proposed = payload.get("proposed_delta")
         if not isinstance(proposed, Mapping):

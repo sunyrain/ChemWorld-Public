@@ -83,8 +83,48 @@ def _execution_contract(binding):
     return result
 
 
+def _declared_parameter_binding(session, binding):
+    """Omit explicitly opt-in rules only when unused and exactly as installed."""
+    from chemworld.world.domain_modules import DeclaredParameterRule
+
+    compiled = session.compiled_composition
+    if compiled is None:
+        return binding
+    used = {(component.kind, name) for component in compiled.spec.components
+            for name in component.parameters}
+    unused = {(module.module_id, kind, name): declaration(rule)
+              for module in session.domain_modules.modules
+              for kind, cap in module.components for name, rule in cap.parameters
+              if type(rule) is DeclaredParameterRule and (kind, name) not in used}
+    result = deepcopy(binding)
+    modules = result.get("modules")
+    if not isinstance(modules, list):
+        return result
+    for module in modules:
+        if not isinstance(module, Mapping) or not isinstance(module.get("module_id"), str):
+            continue
+        components = module.get("components")
+        if not isinstance(components, list):
+            continue
+        for component in components:
+            if (not isinstance(component, list) or len(component) != 2
+                    or not isinstance(component[0], str)
+                    or not isinstance(component[1], Mapping)):
+                continue
+            kind, cap = component
+            rules = cap.get("parameters")
+            if isinstance(rules, list):
+                cap["parameters"] = [rule for rule in rules if not (
+                    isinstance(rule, list) and len(rule) == 2 and isinstance(rule[0], str)
+                    and sum(isinstance(other, list) and len(other) == 2
+                            and other[0] == rule[0] for other in rules) == 1
+                    and (module.get("module_id"), kind, rule[0]) in unused
+                    and rule[1] == unused[(module.get("module_id"), kind, rule[0])])]
+    return result
+
+
 def execution_binding(session):
-    return _execution_contract({
+    return _declared_parameter_binding(session, _execution_contract({
         "runtime": RUNTIME_SEMANTICS_ID,
         "modules": declaration(session.domain_modules.modules),
         "operation_order": list(session.action_codec.operation_types),
@@ -92,7 +132,59 @@ def execution_binding(session):
         "scipy_version": scipy.__version__,
         "python_version": platform.python_version(),
         "rng": session._rng.bit_generator.__class__.__name__,
-    })
+    }))
+
+
+def _execution_binding_matches(session, recorded):
+    """Allow added, unused parameter rules in an otherwise identical declaration.
+
+    A composition explicitly names every parameter it consumes. New catalogue
+    entries absent from that composition have no default execution effect. Keep
+    shared/removed rules, unknown fields and every other execution field strict.
+    Without a compiled composition there is no such usage proof.
+    """
+    from chemworld.world.domain_modules import ParameterRule
+
+    current = execution_binding(session)
+    previous = _declared_parameter_binding(session, _execution_contract(recorded))
+    if current == previous:
+        return True
+    compiled = session.compiled_composition
+    if compiled is None:
+        return False
+    used = {(component.kind, name) for component in compiled.spec.components
+            for name in component.parameters}
+    ordinary_rules = {(kind, name) for kind, cap in session.domain_modules.components().items()
+                      for name, rule in cap.parameters if type(rule) is ParameterRule}
+    old_modules = previous.get("modules")
+    if not isinstance(old_modules, list) or len(old_modules) != len(current["modules"]):
+        return False
+    for now, old in zip(current["modules"], old_modules, strict=True):
+        if not isinstance(old, Mapping) or now.get("module_id") != old.get("module_id"):
+            return False
+        old_components = old.get("components")
+        if (not isinstance(old_components, list)
+                or len(old_components) != len(now["components"])):
+            return False
+        for actual, stored in zip(now["components"], old_components, strict=True):
+            if (not isinstance(stored, list) or len(stored) != 2
+                    or stored[0] != actual[0] or not isinstance(stored[1], Mapping)):
+                return False
+            rules = stored[1].get("parameters")
+            if not isinstance(rules, list) or any(
+                not isinstance(rule, list) or len(rule) != 2 or not isinstance(rule[0], str)
+                for rule in rules
+            ):
+                return False
+            names = {rule[0] for rule in rules}
+            if len(names) != len(rules):
+                return False
+            actual[1]["parameters"] = [
+                rule for rule in actual[1]["parameters"]
+                if rule[0] in names or (actual[0], rule[0]) in used
+                or (actual[0], rule[0]) not in ordinary_rules
+            ]
+    return current == previous
 
 
 def session_configuration(session):
@@ -214,7 +306,7 @@ def capture_session(session):
 
 def restore_continuation(session, snapshot):
     payload = SessionSnapshot.from_dict(snapshot.to_dict()).payload
-    if execution_binding(session) != _execution_contract(payload["execution"]):
+    if not _execution_binding_matches(session, payload["execution"]):
         raise ValueError("session execution contracts changed; explicit migration required")
     state = restore_state(payload["world_state"], require_order=True)
     # State readers migrate historical equipment/material representations at

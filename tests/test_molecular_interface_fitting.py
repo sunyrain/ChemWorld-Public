@@ -187,3 +187,134 @@ def test_fit_rejects_duplicate_data_and_unsupported_parameter_indices():
     with pytest.raises(ValueError, match="outside"):
         fit_molecular_influence(pure_template(),
             (replace(pure_parameters()[0], indices=(1, 0)),), rows, pure_prediction)
+
+
+def one_coefficient_fit_inputs(measured=.02, upper=5e-19):
+    template = pure_template((1e-19,))
+    parameter = InfluenceFitParameter("c", "pure_coefficient", (0, 0), 1e-22, upper, 1e-19)
+    observations = tuple(SurfaceTensionObservation(str(i), temperature, measured, 2e-5,
+        "training", "synthetic recorded-stencil control")
+        for i, temperature in enumerate((295., 315.)))
+    return template, (parameter,), observations
+
+
+def assert_no_verification_forward_calls(fit, calls):
+    diagnostics = fit.diagnostics
+    trace = diagnostics["objective_trace"]
+    assert len(trace) == diagnostics["objective_calls"]
+    assert len(calls) == diagnostics["forward_calls"]
+    expected = sum(len(row["forward_success"]) for row in trace if row["declaration_valid"])
+    assert len(calls) == expected+len(fit.observations)
+    assert diagnostics["physical_jacobian_evidence"]["additional_forward_calls"] == 0
+
+
+def test_failed_final_difference_neighbor_cannot_create_physical_rank_or_covariance():
+    calls = []
+
+    def predictor(observation, influence):
+        coefficient = influence.pure_coefficients_J_m5_mol2[0][0]
+        valid = coefficient <= 1e-19
+        calls.append((observation.observation_id, coefficient, valid))
+        return (MolecularInterfaceResult(True, .02) if valid else
+                MolecularInterfaceResult(False, failure_reason="failed difference neighbor"))
+
+    fit = fit_molecular_influence(*one_coefficient_fit_inputs(), predictor)
+    assert not fit.success
+    assert "verified physical difference stencil" in fit.failure_reason
+    assert fit.diagnostics["optimizer_success"]
+    assert fit.diagnostics["optimizer_jacobian_rank"] == 1
+    assert fit.diagnostics["optimizer_scaled_parameters"] == [1.]
+    assert fit.diagnostics["optimizer_training_residuals"] == [0., 0.]
+    assert not fit.diagnostics["physical_jacobian_verified"]
+    assert fit.diagnostics["jacobian_rank"] is None
+    assert fit.diagnostics["scaled_jacobian_singular_values"] is None
+    assert not fit.diagnostics["identifiable"]
+    assert fit.diagnostics["local_physical_parameter_covariance"] is None
+    assert [call[2] for call in calls] == [True, True, False, False, True, True]
+    assert all(row["success"] for row in fit.observations)
+    matches = fit.diagnostics["physical_jacobian_evidence"]["columns"][0]["matching_calls"]
+    assert matches and not any(row["physical"] for row in matches)
+    assert_no_verification_forward_calls(fit, calls)
+    json.dumps(fit.to_dict(), allow_nan=False)
+
+
+def test_recorded_difference_at_upper_bound_uses_actual_negative_step():
+    calls = []
+
+    def predictor(observation, influence):
+        coefficient = influence.pure_coefficients_J_m5_mol2[0][0]
+        calls.append((observation.observation_id, coefficient))
+        return MolecularInterfaceResult(True, .02*coefficient/1e-19)
+
+    fit = fit_molecular_influence(*one_coefficient_fit_inputs(.04, 1.5e-19), predictor)
+    assert fit.success, fit.to_dict()
+    assert fit.diagnostics["physical_jacobian_verified"]
+    matches = fit.diagnostics["physical_jacobian_evidence"]["columns"][0]["matching_calls"]
+    assert any(row["physical"] and row["step_scaled"] < 0 for row in matches)
+    assert fit.diagnostics["active_bounds"] == ["c"]
+    assert_no_verification_forward_calls(fit, calls)
+
+
+def test_recorded_difference_at_zero_coordinate_preserves_fallback_step():
+    calls = []
+    template = pure_template()
+    parameter = InfluenceFitParameter("slope", "pure_coefficient", (0, 1), -.5e-19, .5e-19, 1e-19)
+    observations = one_coefficient_fit_inputs()[2]
+
+    def predictor(observation, influence):
+        coefficient = influence.pure_coefficients_J_m5_mol2[0][1]
+        calls.append((observation.observation_id, coefficient))
+        theta = (observation.temperature_K-298.15)/100
+        return MolecularInterfaceResult(True, .02*(1+theta*coefficient/1e-19))
+
+    fit = fit_molecular_influence(template, (parameter,), observations, predictor)
+    assert fit.success, fit.to_dict()
+    assert fit.diagnostics["optimizer_scaled_parameters"] == [0.]
+    matches = fit.diagnostics["physical_jacobian_evidence"]["columns"][0]["matching_calls"]
+    assert any(row["physical"] and row["step_scaled"] > 0 for row in matches)
+    assert fit.diagnostics["jacobian_rank"] == 1
+    assert_no_verification_forward_calls(fit, calls)
+
+
+def test_last_rejected_trial_does_not_hide_the_earlier_final_physical_stencil():
+    calls = []
+
+    def predictor(observation, influence):
+        q = influence.pure_coefficients_J_m5_mol2[0][0]/1e-19
+        valid = abs(q-1) <= .01
+        calls.append((observation.observation_id, q, valid))
+        return (MolecularInterfaceResult(True, .02*q) if valid else
+                MolecularInterfaceResult(False, failure_reason="rejected distant trial"))
+
+    fit = fit_molecular_influence(*one_coefficient_fit_inputs(.04, 3e-19), predictor,
+                                  maximum_evaluations=2)
+    assert not fit.success and not fit.diagnostics["optimizer_success"]
+    assert fit.diagnostics["physical_jacobian_verified"]
+    assert fit.diagnostics["jacobian_rank"] == 1
+    assert "difference stencil" not in fit.failure_reason
+    trace = fit.diagnostics["objective_trace"]
+    assert not any(trace[-1]["forward_success"])
+    assert trace[-1]["parameters_scaled"] != fit.diagnostics["optimizer_scaled_parameters"]
+    assert_no_verification_forward_calls(fit, calls)
+
+
+def test_earlier_failed_trial_does_not_reject_a_healthy_final_difference_stencil():
+    calls, failed_trial = [], []
+
+    def predictor(observation, influence):
+        q = influence.pure_coefficients_J_m5_mol2[0][0]/1e-19
+        if not failed_trial and abs(q-1) > .01:
+            failed_trial.append(q)
+        valid = not failed_trial or q != failed_trial[0]
+        calls.append((observation.observation_id, q, valid))
+        return (MolecularInterfaceResult(True, .02*sqrt(q)) if valid else
+                MolecularInterfaceResult(False, failure_reason="one retained failed trial point"))
+
+    fit = fit_molecular_influence(*one_coefficient_fit_inputs(.02*sqrt(3), 4e-19), predictor)
+    assert fit.success, fit.to_dict()
+    assert fit.parameters[0]["value"] == pytest.approx(3e-19, rel=1e-6)
+    assert fit.diagnostics["failed_evaluations"]
+    assert fit.diagnostics["physical_jacobian_verified"]
+    assert fit.diagnostics["identifiable"]
+    assert fit.diagnostics["local_physical_parameter_covariance"] is not None
+    assert_no_verification_forward_calls(fit, calls)

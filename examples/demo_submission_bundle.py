@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from chemworld.data.submission import build_example_submission_bundle
+from chemworld.legacy.submission_examples import (
+    build_example_submission_bundle,
+)
 
 
 def main() -> None:

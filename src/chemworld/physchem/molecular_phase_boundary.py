@@ -473,7 +473,8 @@ def _solve(
     if (temperature_K is None) == (pressure_Pa is None):
         raise ValueError("supply exactly one boundary temperature or pressure")
     target = temperature_K if temperature_K is not None else pressure_Pa
-    assert target is not None
+    if target is None:
+        raise AssertionError("invariant violated: target is not None")
     bounds = spec.temperature_bounds_K if temperature_K is not None else spec.pressure_bounds_Pa
     if not _positive(target) or not bounds[0] <= target <= bounds[1]:
         raise ValueError("boundary target outside declared domain")
@@ -586,7 +587,8 @@ def _tangent(
 
 
 def _critical(spec: MolecularPhaseBoundarySpec, point: MolecularBoundaryResult) -> dict[str, Any]:
-    assert point.liquid is not None and point.vapor is not None
+    if point.liquid is None or point.vapor is None:
+        raise AssertionError("invariant violated: point.liquid or point.vapor is None")
     low = max(spec.liquid_basin.density_bounds_mol_m3[0], spec.vapor_basin.density_bounds_mol_m3[0])
     high = min(
         spec.liquid_basin.density_bounds_mol_m3[1], spec.vapor_basin.density_bounds_mol_m3[1]

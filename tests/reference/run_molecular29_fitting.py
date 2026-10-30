@@ -14,7 +14,6 @@ from threading import Event, Thread
 from time import monotonic
 
 import numpy as np
-from molecular29_fitting_reference import CONSTANTS, DATA
 
 from chemworld.physchem.cpa import CPAComponent, CPAModel
 from chemworld.physchem.finite_volume import DiffusionMesh
@@ -30,8 +29,23 @@ from chemworld.physchem.molecular_interface_fitting import (
     fit_molecular_influence,
 )
 
+if __package__:
+    from .molecular29_fitting_reference import CONSTANTS, DATA
+else:
+    from molecular29_fitting_reference import CONSTANTS, DATA
 
-def native_case(row, endpoint):
+
+def density_bounds(endpoint_densities, covolumes, domain="endpoint-1.5"):
+    """A numerical box; the PR joint packing domain still applies inside it."""
+    if domain not in {"endpoint-1.5", "pr-covolume"}:
+        raise ValueError("unknown fitting density domain")
+    density = np.asarray(endpoint_densities)
+    return tuple((float(.01*min(density[:, i])),
+                  float(1.5*max(density[:, i])) if domain == "endpoint-1.5" else
+                  float(np.nextafter(1/b, 0.))) for i, b in enumerate(covolumes))
+
+
+def native_case(row, endpoint, density_domain="endpoint-1.5"):
     ids = tuple(row["component_ids"])
     r = endpoint["R_J_mol_K"]
     components = []
@@ -51,8 +65,7 @@ def native_case(row, endpoint):
         return MolecularInterfaceFitCase(model, *states, interior_density_grid=(lo+.5*(hi-lo),))
     density = np.array([np.array(state.mole_fractions)*state.molar_density_mol_m3
                         for state in states])
-    bounds = tuple((float(.01*min(density[:, i])), float(1.5*max(density[:, i])))
-                   for i in range(len(ids)))
+    bounds = density_bounds(density, [c.covolume_m3_mol for c in components], density_domain)
     return MolecularInterfaceFitCase(model, *states, mesh=DiffusionMesh.planar(12e-9, 256),
                                     component_density_bounds=bounds)
 
@@ -71,10 +84,38 @@ def evaluated(case, observation, influence):
         return MolecularInterfaceResult(False, failure_reason=f"{type(exc).__name__}: {exc}")
 
 
+def domain_record(observation_id, case, result=None):
+    covolumes = [component.covolume_m3_mol for component in case.model.components]
+    density = np.array([np.array(state.mole_fractions)*state.molar_density_mol_m3
+                       for state in (case.left_state, case.right_state)])
+    original = density_bounds(density, covolumes)
+    record = {"observation_id": observation_id, "component_ids": case.model.component_ids,
+              "component_covolumes_m3_mol": covolumes,
+              "component_density_bounds_mol_m3": case.component_density_bounds,
+              "original_endpoint_bounds_mol_m3": original if case.mesh is not None else None,
+              "coexistence_component_densities_mol_m3": density.tolist(),
+              "method": "scalar_first_integral" if case.mesh is None else "planar_free_density"}
+    if result is not None and result.success and case.mesh is not None:
+        profile = np.array(result.component_densities_mol_m3)
+        lo, hi = np.min(profile, axis=0), np.max(profile, axis=0)
+        bounds = np.array(case.component_density_bounds)
+        record["profile_domain_diagnostics"] = {
+            "minimum_densities_mol_m3": lo.tolist(), "maximum_densities_mol_m3": hi.tolist(),
+            "lower_slack_mol_m3": (lo-bounds[:, 0]).tolist(),
+            "upper_slack_mol_m3": (bounds[:, 1]-hi).tolist(),
+            "maximum_to_original_upper": (hi/np.array(original)[:, 1]).tolist(),
+            "maximum_to_actual_upper": (hi/bounds[:, 1]).tolist(),
+            "maximum_joint_packing": float(np.max(profile@covolumes)),
+            "role": "diagnostic only; no additional acceptance gate"}
+    return record
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--density-domain", choices=("endpoint-1.5", "pr-covolume"),
+                        default="endpoint-1.5")
     args = parser.parse_args()
     if args.output.exists():
         raise FileExistsError("fitting output is create-only")
@@ -104,6 +145,7 @@ def main():
         status["forward"] += 1
         status["last_seconds"] = duration
         raw.write(json.dumps({"stage": stage, "observation_id": observation.observation_id,
+            "density_domain": args.density_domain,
             "influence": influence.to_dict(), "duration_s": duration,
             "result": result.to_dict()}, allow_nan=False)+"\n")
         raw.flush()
@@ -112,7 +154,9 @@ def main():
         initial = monotonic()
         status["in_flight"] = {"stage": stage, "observation_id": observation.observation_id}
         starts.write(json.dumps({**status["in_flight"], "started_elapsed_s": initial-started,
-                                "influence": influence.to_dict()}, allow_nan=False)+"\n")
+            "density_domain": args.density_domain,
+            "domain": domain_record(observation.observation_id, case),
+            "influence": influence.to_dict()}, allow_nan=False)+"\n")
         starts.flush()
         result = evaluated(case, observation, influence)
         write_forward(stage, observation, influence, result, monotonic()-initial)
@@ -128,7 +172,8 @@ def main():
             dataset["doi"]+" Table"+str(row["source_table"])+" measured this-work value")
             for row in rows]
         try:
-            cases = {row["observation_id"]: native_case(row, endpoints[row["observation_id"]])
+            cases = {row["observation_id"]: native_case(
+                        row, endpoints[row["observation_id"]], args.density_domain)
                      for row in rows}
             if not all(endpoints[row["observation_id"]]["success"] for row in rows):
                 raise ValueError("independent source endpoint qualification failed")
@@ -178,6 +223,11 @@ def main():
                     f"F fit {j}/6 {ids} {p}", flush=True))
             result_dict = fit.to_dict()
             result_dict["component_ids"] = ids
+            result_dict["density_domain"] = args.density_domain
+            result_dict["numerical_domains"] = [domain_record(o.observation_id,
+                cases[o.observation_id], None if pure or fit.influence is None else cache.get(
+                    (o.observation_id, json.dumps(fit.influence.to_dict(), sort_keys=True))))
+                for o in observations]
             fits.append(result_dict)
             (args.output/f"fit-{group_index}.json").write_text(
                 json.dumps(result_dict, indent=2, allow_nan=False)+"\n")
@@ -229,6 +279,8 @@ def main():
                          metric["maximum_absolute_relative_error"] <= .1), "metrics": metric})
     expected = {"pure_scaling": 15, "grid": 45, "length": 3}
     summary = {"scope": "development measured-data fitting; saturated AIR omitted in PR-SGT",
+        "density_domain": args.density_domain,
+        "domain_constraint": "Per-component box only; original EOS joint packing remains required",
         "source_doi": dataset["doi"], "boundary_caveat": dataset["model_boundary_approximation"],
         "expected_observations": 60, "expected_training": 36, "expected_holdout": 24,
         "expected_fits": 6, "fits_completed": len(fits),

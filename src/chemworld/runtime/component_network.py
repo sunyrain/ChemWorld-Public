@@ -72,7 +72,11 @@ def _activate(
 
 
 def initialize_network(state: WorldState, compiled: Any) -> WorldState:
-    from chemworld.world.composition import physical_instruments, physical_operations
+    from chemworld.world.composition import (
+        component_instruments,
+        physical_instruments,
+        physical_operations,
+    )
 
     spec = compiled.spec
     components = {c.id: c for c in spec.components}
@@ -100,13 +104,10 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
             v["id"]: list(
                 physical_instruments(spec, v["id"])
                 if spec.physics is not None
-                else dict.fromkeys(
-                    instrument
-                    for c in spec.components
-                    if c.vessel == v["id"] and c.kind == "observation"
-                    for instrument in c.parameters.get(
-                        "instruments", compiled.task_spec.allowed_instruments
-                    )
+                else component_instruments(
+                    spec,
+                    v["id"],
+                    fallback=compiled.task_spec.allowed_instruments,
                 )
             )
             for v in spec.vessels

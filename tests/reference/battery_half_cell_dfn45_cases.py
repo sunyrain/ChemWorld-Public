@@ -253,12 +253,11 @@ def validate_case(data):
 
 
 def validate_grid(grid):
-    if (
-        set(grid) != {"x", "r"}
-        or len(grid["x"]) != 2
-        or any(type(n) is not int or n < 2 for n in (*grid["x"], grid["r"]))
-    ):
-        raise ValueError("half-cell source grid requires two real x domains and radial cells")
+    from battery_half_cell_dfn45_meshes import development_mesh_bounds, validate_mesh_grid
+
+    validate_mesh_grid(grid)
+    if "radial_exponent" in grid:
+        development_mesh_bounds(grid)
     return grid
 
 
@@ -410,7 +409,7 @@ def native_spec(data, grid):
             active_volume_m3=p["area_m2"] * p["lengths_m"][1] * p["active_fraction"],
             exchange_current_scale_A_m2=5.76e-11 * SOURCE_F_C_MOL * sqrt(1000.0) * p["cmax_mol_m3"],
             cells=grid["r"],
-            mesh_exponent=1.0,
+            mesh_exponent=grid.get("radial_exponent", 1.0),
         ),
         curve,
         LithiumMetalSaltKineticsSpec(

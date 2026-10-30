@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("thermo", reason="Optional independent reference dependency")
-
 from chemworld.examples.molecular_flash_separator import molecular_flash_separator_example
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.runtime.molecular_flash_separator import separator_record, unpack_separator

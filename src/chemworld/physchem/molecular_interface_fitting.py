@@ -144,6 +144,58 @@ def _updated(template: PolynomialSquareGradientInfluence,
     return candidate
 
 
+def _physical_jacobian_evidence(
+    values: NDArray[np.float64], residuals: NDArray[np.float64],
+    jacobian: NDArray[np.float64], records: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Verify the returned dense two-point Jacobian using only executed calls.
+
+    Match actual parameter displacements instead of guessing SciPy's relative
+    step, zero-coordinate substitution or bound direction. Rejected later trials
+    need not be adjacent to the final Jacobian. Every accepted column must have
+    an exactly matching, entirely physical base and difference evaluation.
+    """
+    samples = [(record, np.asarray(record["parameters_scaled"]),
+                np.asarray(record["residuals"])) for record in records]
+
+    def physical(record: dict[str, Any]) -> bool:
+        return (bool(record["declaration_valid"])
+                and len(record["forward_success"]) == len(residuals)
+                and all(record["forward_success"]))
+
+    bases = [record["objective_call"] for record, x, f in samples
+             if np.array_equal(x, values) and np.array_equal(f, residuals)
+             and physical(record)]
+    shape_valid = (jacobian.shape == (len(residuals), len(values))
+                   and np.all(np.isfinite(jacobian))
+                   and np.all(np.isfinite(values)) and np.all(np.isfinite(residuals)))
+    columns = []
+    for index in range(len(values)):
+        matches = []
+        if shape_valid:
+            for record, x, f in samples:
+                if x.shape != values.shape or f.shape != residuals.shape:
+                    continue
+                changed = np.flatnonzero(x != values)
+                if changed.tolist() != [index] or not np.all(np.isfinite(f)):
+                    continue
+                step = float(x[index]-values[index])
+                if not isfinite(step) or step == 0:
+                    continue
+                column = (f-residuals)/step
+                if np.array_equal(column, jacobian[:, index]):
+                    matches.append({"objective_call": record["objective_call"],
+                                    "step_scaled": step, "physical": physical(record)})
+        columns.append({"parameter_index": index, "matching_calls": matches,
+                        "verified": bool(bases and any(m["physical"] for m in matches))})
+    verified = bool(shape_valid and bases and all(column["verified"] for column in columns))
+    reason = ("" if verified else "invalid_optimizer_jacobian" if not shape_valid else
+              "no_physical_final_base" if not bases else "missing_physical_difference_columns")
+    return {"verified": verified, "method": "exact_recorded_dense_two_point",
+            "base_objective_calls": bases, "columns": columns, "failure_reason": reason,
+            "additional_forward_calls": 0}
+
+
 def fit_molecular_influence(
     template: PolynomialSquareGradientInfluence,
     parameters: Sequence[InfluenceFitParameter],
@@ -155,8 +207,9 @@ def fit_molecular_influence(
 ) -> MolecularInfluenceFitResult:
     """Fit selected coefficients; retain failed trials and every final holdout error.
 
-    Algorithmic success requires a full-rank scaled training Jacobian, successful
-    final forward problems, and optimizer termination. Predictive applicability
+    Algorithmic success requires a full-rank scaled training Jacobian verified
+    against physical recorded differences, successful final forward problems,
+    and optimizer termination. Predictive applicability
     is a separate caller-defined decision, never inferred from experimental sigma.
     The covariance is a local, unconstrained linear approximation and is not
     supplied at active bounds or for a rank-deficient model.
@@ -184,6 +237,7 @@ def fit_molecular_influence(
         raise ValueError("initial influence coefficients must lie in the declared fit bounds")
     _updated(template, parameters, initial)
     failures: list[dict[str, Any]] = []
+    objective_trace: list[dict[str, Any]] = []
     calls = 0
     forward_calls = 0
 
@@ -212,25 +266,41 @@ def fit_molecular_influence(
         except (ValueError, ArithmeticError) as exc:
             failures.append({"stage": "training_candidate", "objective_call": calls,
                              "parameters": (values*scales).tolist(), "error": str(exc)})
-            return np.full(len(training), 1e10)
+            rejected = np.full(len(training), 1e10)
+            objective_trace.append({"objective_call": calls,
+                "parameters_scaled": values.tolist(), "residuals": rejected.tolist(),
+                "declaration_valid": False, "forward_success": [False]*len(training)})
+            return rejected
         residuals = []
+        forward_success = []
         for o in training:
             gamma, _ = predict(o, declaration, "training_objective")
+            forward_success.append(gamma is not None)
             residuals.append(1e10 if gamma is None else
                              (gamma-o.surface_tension_N_m)/o.standard_uncertainty_N_m)
         if progress is not None:
             progress({"stage": "training", "objective_calls": calls,
                       "forward_calls": forward_calls, "failed_calls": len(failures)})
-        return np.asarray(residuals)
+        vector = np.asarray(residuals)
+        objective_trace.append({"objective_call": calls,
+            "parameters_scaled": values.tolist(), "residuals": vector.tolist(),
+            "declaration_valid": True, "forward_success": forward_success})
+        return vector
 
     optimum = least_squares(residual, initial, bounds=(lower, upper),
         max_nfev=maximum_evaluations, diff_step=difference_step, x_scale="jac",
         ftol=optimality_tolerance, xtol=optimality_tolerance, gtol=optimality_tolerance)
+    optimizer_values = {"optimizer_scaled_parameters": optimum.x.tolist(),
+                        "optimizer_training_residuals": optimum.fun.tolist(),
+                        "optimizer_scaled_jacobian": np.asarray(optimum.jac).tolist()}
     try:
         fitted = _updated(template, parameters, optimum.x)
     except (ValueError, ArithmeticError) as exc:
         return MolecularInfluenceFitResult(False, None, failure_reason=str(exc),
-            diagnostics={"failed_evaluations": failures, "objective_calls": calls})
+            diagnostics={"failed_evaluations": failures, "objective_calls": calls,
+                         "forward_calls": forward_calls, "objective_trace": objective_trace,
+                         "training_observation_ids": [o.observation_id for o in training],
+                         "physical_jacobian_verified": False, **optimizer_values})
     rows: list[dict[str, Any]] = []
     for observation in observations:
         gamma, reason = predict(observation, fitted, "final_"+observation.partition)
@@ -242,6 +312,9 @@ def fit_molecular_influence(
                      error/observation.standard_uncertainty_N_m,
                      "success": gamma is not None, "failure_reason": reason})
     jacobian = np.asarray(optimum.jac)
+    jacobian_evidence = _physical_jacobian_evidence(
+        optimum.x, optimum.fun, jacobian, objective_trace)
+    physical_jacobian_verified = jacobian_evidence["verified"]
     singular_values = np.linalg.svd(jacobian, compute_uv=False)
     cutoff = rank_relative_tolerance*singular_values[0]
     rank = int(np.count_nonzero(singular_values > cutoff)) if singular_values[0] > 0 else 0
@@ -249,8 +322,8 @@ def fit_molecular_influence(
                  if singular_values[-1] > 0 else None)
     active = [p.name for p, value, lo, hi in zip(parameters, optimum.x, lower, upper, strict=True)
               if min(value-lo, hi-value) <= 1e-6*max(1, abs(value))]
-    identifiable = rank == len(parameters) and condition is not None \
-        and condition <= maximum_condition_number
+    identifiable = (physical_jacobian_verified and rank == len(parameters)
+                    and condition is not None and condition <= maximum_condition_number)
     covariance = None
     if identifiable and not active and len(training) > len(parameters):
         covariance = ((np.linalg.inv(jacobian.T@jacobian)
@@ -274,7 +347,9 @@ def fit_molecular_influence(
     reasons = []
     if not optimum.success:
         reasons.append("optimizer: "+str(optimum.message))
-    if not identifiable:
+    if not physical_jacobian_verified:
+        reasons.append("final training Jacobian has no verified physical difference stencil")
+    elif not identifiable:
         reasons.append("training sensitivity is rank deficient or ill conditioned")
     if not all(row["success"] for row in rows):
         reasons.append("one or more final training/holdout forward problems failed")
@@ -285,8 +360,18 @@ def fit_molecular_influence(
          "optimizer_evaluations": int(optimum.nfev), "objective_calls": calls,
          "forward_calls": forward_calls, "training_weighted_sum_squares": float(2*optimum.cost),
          "training_degrees_of_freedom": len(training)-len(parameters),
-         "scaled_jacobian_singular_values": singular_values.tolist(), "jacobian_rank": rank,
-         "scaled_jacobian_condition": condition, "identifiable": identifiable,
+         "scaled_jacobian_singular_values": singular_values.tolist()
+             if physical_jacobian_verified else None,
+         "jacobian_rank": rank if physical_jacobian_verified else None,
+         "scaled_jacobian_condition": condition if physical_jacobian_verified else None,
+         "identifiable": identifiable,
+         "optimizer_jacobian_singular_values": singular_values.tolist(),
+         "optimizer_jacobian_rank": rank, "optimizer_jacobian_condition": condition,
+         "physical_jacobian_verified": physical_jacobian_verified,
+         "physical_jacobian_evidence": jacobian_evidence,
+         "objective_trace": objective_trace,
+         "training_observation_ids": [o.observation_id for o in training],
+         **optimizer_values,
          "active_bounds": active, "local_physical_parameter_covariance": covariance,
          "covariance_scope": "local_linear_unconstrained; scaled_by_training_residual_variance",
          "failed_evaluations": failures, "metrics": metrics,

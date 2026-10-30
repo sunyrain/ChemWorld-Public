@@ -7,7 +7,11 @@ import json
 import pytest
 import yaml
 
-from chemworld.physchem.mechanism_import import convert_mechanism, import_mechanism
+from chemworld.physchem.mechanism_import import (
+    convert_mechanism,
+    import_mechanism,
+    mechanism_to_cantera_document,
+)
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
 
 
@@ -189,3 +193,45 @@ def test_external_source_reaches_real_thermal_world_and_exact_continuation(tmp_p
     probe = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(probe)
     assert probe.run(tmp_path / "world-inputs")["exact_continuation"]
+
+
+def test_imported_network_exports_to_a_reimportable_cantera_document():
+    network = convert_mechanism(document(), source="synthetic-source.yaml")
+    exported = mechanism_to_cantera_document(network)
+    assert exported["generator"] == "chemworld.mechanism_import.export"
+    assert exported["phases"][0]["species"] == ["A", "B"]
+    assert [item["name"] for item in exported["species"]] == ["A", "B"]
+    restored = convert_mechanism(exported, source="roundtrip.yaml")
+    assert restored.species_ids == network.species_ids
+    assert restored.reaction_ids == network.reaction_ids
+    assert restored.reaction_rates(
+        {"A": 0.2, "B": 0.3}, volume_L=1, temperature_K=700
+    ) == network.reaction_rates({"A": 0.2, "B": 0.3}, volume_L=1, temperature_K=700)
+    assert json.loads(json.dumps(exported, allow_nan=False)) == exported
+
+
+def test_export_rejects_native_network_without_complete_source_declarations():
+    network = ReactionNetworkSpec.from_dict(
+        {
+            "network_id": "native",
+            "species": [
+                {"species_id": "A", "formula": "H2"},
+                {"species_id": "B", "formula": "H2"},
+            ],
+            "reactions": [
+                {
+                    "reaction_id": "reaction-001",
+                    "equation": "A => B",
+                    "stoichiometry": {"A": -1, "B": 1},
+                    "reversible": False,
+                    "rate_law": {
+                        "rate_law_id": "r",
+                        "equation_id": "arrhenius",
+                        "parameters": {"A": 1, "b": 0, "Ea_J_per_mol": 0},
+                    },
+                }
+            ],
+        }
+    )
+    with pytest.raises(ValueError, match="complete imported Cantera gas source"):
+        mechanism_to_cantera_document(network)

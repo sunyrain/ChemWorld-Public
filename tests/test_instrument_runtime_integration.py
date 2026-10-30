@@ -9,11 +9,6 @@ import chemworld  # noqa: F401
 from chemworld.eval.observation_identifiability import PublicSpectrumArchive
 from chemworld.eval.runner import _attach_spectrum_archive, _public_spectrum_packet
 from chemworld.foundation import equipment_settings, instrument_equipment_id
-from chemworld.physchem.spectroscopy_adapter_manifest import (
-    FORBIDDEN_PACKET_KEYS,
-    ValidatedInstrumentRuntimeProvider,
-    instrument_runtime_adapter_manifest,
-)
 from chemworld.runtime.instrument_cost_services import ChemWorldInstrumentCostServices
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.runtime.transactions import TransactionResult
@@ -21,6 +16,11 @@ from chemworld.world.instruments import (
     INSTRUMENT_RUNTIME_MODEL_ID,
     INSTRUMENT_RUNTIME_PROVIDER_PATH,
     instrument_runtime_contract_hash,
+)
+from chemworld.world.spectroscopy_provider import (
+    FORBIDDEN_PACKET_KEYS,
+    ValidatedInstrumentRuntimeProvider,
+    instrument_runtime_adapter_manifest,
 )
 
 
@@ -324,6 +324,12 @@ def test_rolled_back_final_assay_cannot_observe_reward_or_end_episode(
         assert info["transaction_status"] == "rolled_back"
         assert info["rollback_reason"] == "constitution_failed"
         assert info["constraint_flags"]["constitution_failed"] is True
+        assert info["failure_summary"]["constitution_failed"] is True
+        assert info["failure_summary"]["rollback_reason"] == "constitution_failed"
+        assert "rolled back" in info["recovery_suggestion"]
+        report = base.observation_view("lab_report")
+        assert report["failure_summary"] == info["failure_summary"]
+        assert report["recovery_suggestion"] == info["recovery_suggestion"]
         assert reward == 0.0
         assert info["measurement_cost"] == 0.0
         assert info["sample_consumed"] == 0.0

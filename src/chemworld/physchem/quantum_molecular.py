@@ -223,7 +223,11 @@ class SAFTVRQMieModel:
 
     def pair(self, i: int, j: int) -> QuantumMiePair:
         left, right = self.components[i], self.components[j]
-        assert self.diameter_interaction is not None and self.repulsion_interaction is not None
+        if self.diameter_interaction is None or self.repulsion_interaction is None:
+            raise AssertionError(
+                "invariant violated: self.diameter_interaction or self.repulsion_interaction is "
+                "None"
+            )
         sigma = (left.diameter_m+right.diameter_m)/2*(1-self.diameter_interaction[i][j])
         epsilon = sqrt(left.well_depth_K*right.well_depth_K)*(1-self.interaction[i][j])
         if self.energy_mixing == "Lafitte":

@@ -28,11 +28,11 @@ from chemworld.physchem.rrkm_grain_binding import (
     compile_rrkm_grains,
     rrkm_canonical_report,
     rrkm_grain_network,
-    rrkm_grain_world,
     rrkm_microcanonical_report,
 )
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.runtime.scheduling import local_states
+from chemworld.world.energy_grain import rrkm_grain_world
 
 
 class Record:
@@ -490,7 +490,7 @@ from pathlib import Path
 from dataclasses import fields
 from collections.abc import Mapping
 sys.path.insert(0,sys.argv[2])
-import chemworld.physchem.energy_grain_binding as binding
+import chemworld.world.energy_grain as binding
 from chemworld.physchem.energy_grain_specs import EnergyGrainMasterEquationSpec
 from chemworld.physchem.gas_reactor_network import (
     GasReactorNetworkSpec,GasReactorNodeSpec,pack_gas_reactor_network_state,

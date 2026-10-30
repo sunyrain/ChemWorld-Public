@@ -188,7 +188,8 @@ qualifications. Neither policy establishes measured accuracy for a material.
             multiplier = (.061 if e < .4 else .05)*diameter_factor*(
                 1000+60*sqrt(re)+12*re)/solid
         else:
-            assert spec.tube_diameter_m is not None
+            if spec.tube_diameter_m is None:
+                raise AssertionError("invariant violated: spec.tube_diameter_m is None")
             multiplier = 180+(9.5374*d/spec.tube_diameter_m-2.8054)*rem**.97
         pressure = multiplier*viscous_scale*spec.length_m
     if not isfinite(pressure) or pressure < 0:

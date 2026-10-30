@@ -1472,7 +1472,8 @@ def chemostatted_rate_control(
     if product_species is not None and element_basis is not None:
         pH_selectivity: dict[str, Any] = {"status": "unavailable", "value": None}
         if result["pH_sensitivity"]["status"] == "available":
-            assert pH_low is not None and pH_high is not None
+            if pH_low is None or pH_high is None:
+                raise AssertionError("invariant violated: pH_low or pH_high is None")
             pH_selectivity = selectivity_stencil([(spec, low), (spec, high)], pH_high - pH_low)
         result["selectivity_control"] = {
             "potential_V": selectivity_stencil(potential_cases, 2 * potential_step_V),

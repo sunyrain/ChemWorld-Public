@@ -180,7 +180,7 @@ def test_inventory_guard_runs_after_first_actual_reaction_not_after_long_wait(me
     session.close()
 
 
-def test_tau_guard_observes_whole_original_leap_batches_with_declared_step_held_semantics():
+def test_tau_state_guard_settles_after_the_first_critical_reaction():
     original = parsed(
         original=source(counts={"A": 10000, "B": 0, "C": 3}),
         events=event(
@@ -198,8 +198,9 @@ def test_tau_guard_observes_whole_original_leap_batches_with_declared_step_held_
     session = ChemWorldRuntime(composition=declaration)
     session.reset(seed=37)
     result = wait(session, 1.0)
-    assert 0 < counts(session)["A"] < 9999 and counts(session)["A"] + counts(session)["B"] == 10000
-    assert diagnostics(result)["stochastic_work"]["leap_firings"] > 1
+    assert counts(session)["A"] == 9999 and counts(session)["B"] == 1
+    assert diagnostics(result)["stochastic_work"]["leap_firings"] == 0
+    assert diagnostics(result)["stochastic_work"]["ssa_steps"] == 1
     assert diagnostics(result)["source_events_executed"] == 1
     session.close()
 

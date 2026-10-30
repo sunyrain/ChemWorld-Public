@@ -224,7 +224,8 @@ def unpack_activated_sludge(
             utility, work = dict(typed[ASM1_UTILITIES].values), dict(typed[ASM1_WORK].values)
         if local.ledger.time_s != state.ledger.time_s:
             raise ValueError("ASM1 member clocks disagree with the original shared advance")
-    assert utility is not None and work is not None
+    if not (utility is not None and work is not None):
+        raise ValueError("ASM1 network requires a member with utility and work state")
     inventory = ActivatedSludgeInventory(
         tuple(water), tuple(components), tuple(extents), utility, work, state.ledger.time_s
     )

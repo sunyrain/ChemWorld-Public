@@ -540,7 +540,8 @@ def diameter_spacing(
         if (lower_m is None) == (upper_m is None):
             raise ValueError("Renard spacing requires exactly one endpoint")
         anchor = lower_m if lower_m is not None else upper_m
-        assert anchor is not None
+        if anchor is None:
+            raise AssertionError("invariant violated: anchor is not None")
         _positive(anchor, "diameter endpoint")
         powers = np.arange(points) if lower_m is not None else np.arange(1 - points, 1)
         return tuple(float(anchor * 10 ** (i / series)) for i in powers)

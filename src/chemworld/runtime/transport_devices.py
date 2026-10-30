@@ -151,6 +151,7 @@ class TransportRuntime:
         from chemworld.runtime.finite_heat_recovery import FiniteHeatRecoveryAdapter
         from chemworld.runtime.molecular_cascade import MolecularCascadeAdapter
         from chemworld.runtime.molecular_flash_separator import MolecularFlashSeparatorAdapter
+        from chemworld.runtime.process_flowsheet import ProcessFlowsheetAdapter
         from chemworld.runtime.reactive_water_treatment import ReactiveWaterTreatmentAdapter
         from chemworld.runtime.suspension_treatment import SuspensionTreatmentAdapter
         from chemworld.runtime.zero_order_treatment import ZeroOrderTreatmentAdapter
@@ -160,6 +161,7 @@ class TransportRuntime:
         self.heat_recovery = FiniteHeatRecoveryAdapter(composition)
         self.molecular_cascade = MolecularCascadeAdapter(composition)
         self.molecular_flash_separator = MolecularFlashSeparatorAdapter(composition)
+        self.process_flowsheet = ProcessFlowsheetAdapter(composition)
         self.reactive_treatment = ReactiveWaterTreatmentAdapter(composition)
         self.aqueous_adsorption = AqueousAdsorptionAdapter(composition)
         self.cation_exchange = CationExchangeAdapter(composition)
@@ -168,6 +170,7 @@ class TransportRuntime:
         self.adapters = (
             self.treatment, self.heat_recovery, self.molecular_cascade,
             self.molecular_flash_separator,
+            self.process_flowsheet,
             self.reactive_treatment,
             self.aqueous_adsorption,
             self.cation_exchange,
@@ -183,6 +186,8 @@ class TransportRuntime:
         return matches == 1
 
     def validate_state(self, state):
+        if self.process_flowsheet.supports(state):
+            self.process_flowsheet.validate_state(state)
         if self.molecular_cascade.supports(state):
             self.molecular_cascade.validate_state(state)
         if self.molecular_flash_separator.supports(state):

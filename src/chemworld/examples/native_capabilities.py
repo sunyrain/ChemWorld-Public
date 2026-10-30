@@ -21,6 +21,7 @@ def capability_rows(registry=None):
                     "operations": list(component.operations),
                     "interfaces": list(component.interfaces),
                     "state_owners": list(component.state_owners),
+                    "requires_physics": component.requires_physics,
                     "processes": list(component.processes),
                     "ports": {
                         "input": list(component.input_ports),
@@ -42,6 +43,28 @@ def capability_rows(registry=None):
                 instrument.definition.id: instrument.contract.to_dict()
                 for instrument in module.instruments
             },
+        }
+        for module in registry.modules
+    ]
+
+
+def summary_rows(registry=None):
+    """Project declaration names without materializing parameter or instrument schemas."""
+
+    registry = registry or DomainModuleRegistry.default()
+    return [
+        {
+            "module": module.module_id,
+            "components": sorted(name for name, _ in module.components),
+            "advance_strategies": [spec.strategy_id for spec in module.advance_strategies],
+            "operations": sorted(
+                {
+                    *(spec.operation.id for spec in module.operations),
+                    *(operation for _, component in module.components
+                      for operation in component.operations),
+                }
+            ),
+            "instruments": sorted(spec.definition.id for spec in module.instruments),
         }
         for module in registry.modules
     ]
@@ -161,7 +184,7 @@ def markdown():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--format", choices=("markdown", "json", "execution-json"), default="markdown"
+        "--format", choices=("markdown", "json", "summary", "execution-json"), default="markdown"
     )
     parser.add_argument("--composition", type=Path, help="Export bound public contracts as JSON")
     args = parser.parse_args()
@@ -179,7 +202,12 @@ def main():
     if args.format == "execution-json":
         print(json.dumps(execution_inventory(), indent=2))
     else:
-        print(markdown() if args.format == "markdown" else json.dumps(capability_rows(), indent=2))
+        if args.format == "markdown":
+            print(markdown())
+        elif args.format == "summary":
+            print(json.dumps(summary_rows(), indent=2, sort_keys=True))
+        else:
+            print(json.dumps(capability_rows(), indent=2))
 
 
 if __name__ == "__main__":

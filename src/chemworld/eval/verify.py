@@ -177,8 +177,8 @@ def verify_records(
                         "abs_error": None,
                         "reason": (
                             "This trajectory requires its original frozen runtime and uv.lock. "
-                            "Current main does not replay historical physics; see "
-                            "configs/current.json publication.frozen_release for paper evidence."
+                            "Use the recorded execution version and its matching dependencies "
+                            "to replay historical physics."
                         ),
                     }
                 ],

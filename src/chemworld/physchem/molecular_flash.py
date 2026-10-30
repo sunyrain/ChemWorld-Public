@@ -316,7 +316,10 @@ def molecular_tp_flash(
         tpd_tolerance=tpd_tolerance)
     if not stability.complete:
         return MolecularTPFlashResult(False, (), stability, failure_reason=stability.failure_reason)
-    assert stability.reference_state is not None and stability.reference_basin is not None
+    if stability.reference_state is None or stability.reference_basin is None:
+        raise AssertionError(
+            "invariant violated: stability.reference_state or stability.reference_basin is None"
+        )
     if not stability.unstable:
         # Distinct equal-G pure roots need another extensive constraint for their amounts.
         ref_g = float(z[active] @ _mu(stability.reference_state, active))

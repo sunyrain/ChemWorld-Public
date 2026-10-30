@@ -460,7 +460,8 @@ def bind_generated_network(
         binding = matches[0]
         if report.policy.allylic_resonance:
             mapping = _match(graph, binding.graph, report.policy)
-            assert mapping is not None  # The unique binding was matched above.
+            if not (mapping is not None):
+                raise ValueError("unique reaction binding lost its atom mapping")
             atom_maps[key] = mapping
         bound[key] = replace(
             binding.species,

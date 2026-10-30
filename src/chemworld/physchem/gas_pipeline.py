@@ -113,7 +113,8 @@ def _model_terms(spec: EmpiricalGasPipelineSpec, diameter: float) -> tuple[float
         factor = coefficient * spec.effective_efficiency * reference**ref_power * diameter**d_power
         factor /= (sg**sg_power * temperature * spec.compressibility_factor) ** power
         if mu_power:
-            assert spec.viscosity_Pa_s is not None
+            if spec.viscosity_Pa_s is None:
+                raise AssertionError("invariant violated: spec.viscosity_Pa_s is None")
             factor /= spec.viscosity_Pa_s**mu_power
         return factor, power
     if spec.method == "Oliphant":
@@ -167,22 +168,30 @@ def solve_empirical_gas_pipeline(
         else:
             _positive(value, key)
     if reference_flow_m3_s is None:
-        assert diameter_m is not None and length_m is not None
-        assert upstream_pressure_Pa is not None and downstream_pressure_Pa is not None
+        if diameter_m is None or length_m is None:
+            raise AssertionError("invariant violated: diameter_m or length_m is None")
+        if upstream_pressure_Pa is None or downstream_pressure_Pa is None:
+            raise AssertionError(
+                "invariant violated: upstream_pressure_Pa or downstream_pressure_Pa is None"
+            )
         factor, power = _model_terms(spec, diameter_m)
         reference_flow_m3_s = (
             factor
             * (_drive(spec, upstream_pressure_Pa, downstream_pressure_Pa) / length_m) ** power
         )
     elif diameter_m is None or length_m is None:
-        assert upstream_pressure_Pa is not None and downstream_pressure_Pa is not None
+        if upstream_pressure_Pa is None or downstream_pressure_Pa is None:
+            raise AssertionError(
+                "invariant violated: upstream_pressure_Pa or downstream_pressure_Pa is None"
+            )
         driving = _drive(spec, upstream_pressure_Pa, downstream_pressure_Pa)
         if driving <= 0 or reference_flow_m3_s <= 0:
             raise ValueError(
                 "dimensions are indeterminate without positive flow and pressure difference"
             )
         if length_m is None:
-            assert diameter_m is not None
+            if diameter_m is None:
+                raise AssertionError("invariant violated: diameter_m is not None")
             factor, power = _model_terms(spec, diameter_m)
             length_m = driving / (reference_flow_m3_s / factor) ** (1 / power)
         else:
@@ -204,11 +213,13 @@ def solve_empirical_gas_pipeline(
                 )
             )
     else:
-        assert diameter_m is not None and length_m is not None
+        if diameter_m is None or length_m is None:
+            raise AssertionError("invariant violated: diameter_m or length_m is None")
         factor, power = _model_terms(spec, diameter_m)
         driving = length_m * (reference_flow_m3_s / factor) ** (1 / power)
         if upstream_pressure_Pa is None:
-            assert downstream_pressure_Pa is not None
+            if downstream_pressure_Pa is None:
+                raise AssertionError("invariant violated: downstream_pressure_Pa is None")
             upstream_pressure_Pa = (
                 downstream_pressure_Pa + driving
                 if spec.method == "Spitzglass_low"
@@ -222,7 +233,7 @@ def solve_empirical_gas_pipeline(
                 if squared <= 0:
                     raise ValueError("requested flow has no positive absolute outlet pressure")
                 downstream_pressure_Pa = sqrt(squared)
-    assert all(
+    if not all(
         x is not None
         for x in (
             reference_flow_m3_s,
@@ -231,9 +242,17 @@ def solve_empirical_gas_pipeline(
             diameter_m,
             length_m,
         )
-    )
-    assert upstream_pressure_Pa is not None and downstream_pressure_Pa is not None
-    assert diameter_m is not None and length_m is not None
+    ):
+        raise AssertionError(
+            "invariant violated: reference_flow_m3_s, upstream_pressure_Pa, "
+            "downstream_pressure_Pa, diameter_m or length_m is None"
+        )
+    if upstream_pressure_Pa is None or downstream_pressure_Pa is None:
+        raise AssertionError(
+            "invariant violated: upstream_pressure_Pa or downstream_pressure_Pa is None"
+        )
+    if diameter_m is None or length_m is None:
+        raise AssertionError("invariant violated: diameter_m or length_m is None")
     if spec.pressure_basis == "absolute":
         _positive(upstream_pressure_Pa, "solved upstream absolute pressure")
         _positive(downstream_pressure_Pa, "solved downstream absolute pressure")

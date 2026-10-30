@@ -7,16 +7,11 @@ from typing import Any
 
 import numpy as np
 
+from chemworld.foundation.action_layout import ELECTROLYTE_PROFILES as ELECTROLYTE_PROFILES
 from chemworld.foundation.solvents import SOLVENT_IDS
 
 CATALYSTS = ("cat_a", "cat_b", "cat_c", "cat_d")
 SOLVENTS = SOLVENT_IDS
-ELECTROLYTE_PROFILES = (
-    "low_support_acetate",
-    "high_support_acetate",
-    "acidic_high_transport",
-    "precipitation_prone",
-)
 
 
 @dataclass(frozen=True)

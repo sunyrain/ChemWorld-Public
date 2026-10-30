@@ -5,8 +5,6 @@ from dataclasses import replace
 
 import pytest
 
-pytest.importorskip("thermo", reason="Optional independent reference dependency")
-
 from chemworld.foundation.state_ledgers import VesselLedger
 from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.molecular_caloric_flash import (

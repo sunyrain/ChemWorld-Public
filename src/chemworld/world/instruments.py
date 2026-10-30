@@ -23,7 +23,7 @@ from chemworld.world.spectral_contract import (
 
 INSTRUMENT_RUNTIME_MODEL_ID = "chemworld_validated_synthetic_instruments_v1"
 INSTRUMENT_RUNTIME_PROVIDER_PATH = (
-    "chemworld.physchem.spectroscopy_adapter_manifest.ValidatedInstrumentRuntimeProvider"
+    "chemworld.world.spectroscopy_provider.ValidatedInstrumentRuntimeProvider"
 )
 INSTRUMENT_RUNTIME_PROVENANCE = (
     "ChemWorld bounded public synthetic instrument contracts v1",

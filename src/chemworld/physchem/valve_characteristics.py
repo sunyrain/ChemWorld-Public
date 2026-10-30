@@ -104,7 +104,8 @@ def gas_valve_choke_pressure(
     if upstream_pressure_Pa is not None:
         _positive(upstream_pressure_Pa, "upstream absolute pressure")
         return upstream_pressure_Pa * (1 - fraction)
-    assert downstream_pressure_Pa is not None
+    if downstream_pressure_Pa is None:
+        raise AssertionError("invariant violated: downstream_pressure_Pa is None")
     _positive(downstream_pressure_Pa, "downstream absolute pressure")
     return downstream_pressure_Pa / (1 - fraction)
 
@@ -130,7 +131,8 @@ def liquid_valve_choke_pressure(
         ):
             raise ValueError("inlet pressure is too low for liquid choking")
         return upstream_pressure_Pa * (1 - squared) + squared * ff * saturation_pressure_Pa
-    assert downstream_pressure_Pa is not None
+    if downstream_pressure_Pa is None:
+        raise AssertionError("invariant violated: downstream_pressure_Pa is None")
     _positive(downstream_pressure_Pa, "downstream absolute pressure")
     if squared == 1:
         raise ValueError("upstream pressure is indeterminate at unit recovery")
@@ -196,7 +198,8 @@ class ValveOpeningCurve:
             raise ValueError("opening must lie in [0, 1]")
         if self.characteristic == "linear":
             return opening
-        assert self.source_curve is not None
+        if self.source_curve is None:
+            raise AssertionError("invariant violated: self.source_curve is not None")
         result = (
             float(self._spline(opening))
             if self._spline is not None

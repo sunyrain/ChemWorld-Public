@@ -1,7 +1,8 @@
-"""Public continuous-stream event fields."""
+"""Public world-level names for the shared operation contract."""
 
-STREAM_FIELDS = {
-    "set_flow_stream": ("connection", "flow_rate_mL_min"),
-    "advance_flow": ("duration_s", "target_temperature_K", "current_mA"),
-}
-STREAM_OPERATIONS = tuple(STREAM_FIELDS)
+from chemworld.foundation.stream_contract import (
+    STREAM_FIELDS as STREAM_FIELDS,
+)
+from chemworld.foundation.stream_contract import (
+    STREAM_OPERATIONS as STREAM_OPERATIONS,
+)

@@ -13,6 +13,7 @@ from chemworld.physchem import (
     thermochemistry_model_cards,
     validate_model_card,
 )
+from chemworld.physchem.thermochemistry import species_thermo_from_dict
 
 
 def _constant_cp_species(
@@ -136,6 +137,31 @@ def test_nasa7_continuity_report_flags_gaps_and_jumps() -> None:
     report = with_gap.continuity_report()
     assert not report["passed"]
     assert report["checks"][0]["reason"] == "temperature_gap"
+
+
+def test_nasa7_continuous_energy_policy_corrects_only_integration_constants() -> None:
+    thermo = {
+        "model": "NASA7",
+        "temperature-ranges": [200.0, 1000.0, 2000.0],
+        "data": [
+            [3.5, 0.0, 0.0, 0.0, 0.0, -1000.0, 2.0],
+            [3.5, 0.0, 0.0, 0.0, 0.0, -999.0, 2.5],
+        ],
+    }
+    source = NASA7SpeciesThermo.from_cantera_yaml_thermo(
+        species_id="A", thermo=thermo, boundary_policy="source"
+    )
+    continuous = NASA7SpeciesThermo.from_cantera_yaml_thermo(
+        species_id="A", thermo=thermo, boundary_policy="continuous-energy"
+    )
+    assert source.segments[1].coefficients[:5] == continuous.segments[1].coefficients[:5]
+    assert source.segments[1].coefficients[5:] != continuous.segments[1].coefficients[5:]
+    left = continuous.segments[0].evaluate(1000.0)
+    right = continuous.segments[1].evaluate(1000.0)
+    assert right.enthalpy_J_mol == pytest.approx(left.enthalpy_J_mol)
+    assert right.entropy_J_mol_K == pytest.approx(left.entropy_J_mol_K)
+    restored = species_thermo_from_dict(continuous.to_dict())
+    assert restored.to_dict() == continuous.to_dict()
 
 
 def test_thermochemistry_model_card_is_valid() -> None:

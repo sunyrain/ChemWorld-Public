@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 from math import isfinite, pi
 from numbers import Integral
 
@@ -100,7 +101,7 @@ class DiffusionMesh:
         return 3 / 5 * (b**4 + b**3 * a + b**2 * a**2 + b * a**3 + a**4) / (
             b**2 + b * a + a**2)
 
-    @property
+    @cached_property
     def spherical_surface_distance_m(self):
         """Surface derivative to outer shell-average difference for a+b*r^2."""
         radius = self.faces_m[-1]

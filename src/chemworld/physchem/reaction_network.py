@@ -381,7 +381,9 @@ class ReactionNetworkSpec:
         from chemworld.physchem.thermochemistry import species_thermo_from_cantera_yaml
 
         return {
-            key: species_thermo_from_cantera_yaml(species_id=key, **node)
+            key: species_thermo_from_cantera_yaml(
+                species_id=key, boundary_policy="continuous-energy", **node
+            )
             for key, node in self.metadata.get("gas_thermochemistry", {}).items()
         }
 

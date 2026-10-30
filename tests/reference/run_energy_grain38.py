@@ -15,7 +15,7 @@ import energy_grain38_cases as cases
 import energy_grain38_reference as oracle
 import numpy as np
 
-from chemworld.physchem.energy_grain_binding import compile_energy_grain_network, energy_grain_world
+from chemworld.physchem.energy_grain_binding import compile_energy_grain_network
 from chemworld.physchem.energy_grain_master_equation import (
     boltzmann_grain_fractions,
     collision_transition_probabilities,
@@ -33,6 +33,7 @@ from chemworld.physchem.gas_reactor_network import (
 )
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.runtime.scheduling import local_states
+from chemworld.world.energy_grain import energy_grain_world
 
 
 class Record:

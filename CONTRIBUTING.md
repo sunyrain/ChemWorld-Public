@@ -1,5 +1,16 @@
 # Contributing
 
+The maintained product is developed in
+[ChemWorld](https://github.com/sunyrain/ChemWorld) and exported into this repository.
+Changes to the website, documentation and frozen public evidence are kept separate
+from product exports. Propose product changes upstream so that the two copies do
+not evolve independently. The development version is defined once in
+`src/chemworld/__init__.py`; Hatch reads it when building package metadata.
+
+Retired study runners and their dedicated tests no longer ship with the product.
+The notebook tutorials pinned to v0.3.0 and the frozen evidence remain historical
+examples; use their declared release for historical reproduction.
+
 Develop against current main with the locked environment:
 
 ```bash

@@ -72,7 +72,8 @@ def add_spatial_boundary_faces(
 ) -> None:
     """Add actual donor-composition boundary fluxes to a transient face packet."""
     spatial = spec.spatial_transport
-    assert spatial is not None
+    if not (spatial is not None):
+        raise ValueError("spatial boundary flux requires declared spatial transport")
     thermo = network.imported_gas_thermochemistry
     masses = {s.species_id: molecular_weight(s.composition) / 1000 for s in network.species}
     boundary = {}

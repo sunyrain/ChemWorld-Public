@@ -287,7 +287,8 @@ def size_gas_relief_valve(
             )
         )
     if mass_flow_kg_s is None:
-        assert area_m2 is not None
+        if area_m2 is None:
+            raise AssertionError("invariant violated: area_m2 is not None")
         mass_flow_kg_s = area_m2 / factor
     else:
         area_m2 = mass_flow_kg_s * factor
@@ -348,7 +349,8 @@ def size_steam_relief_valve(
         * superheat
     )
     if mass_flow_kg_s is None:
-        assert area_m2 is not None
+        if area_m2 is None:
+            raise AssertionError("invariant violated: area_m2 is not None")
         mass_flow_kg_s = area_m2 / factor
     else:
         area_m2 = mass_flow_kg_s * factor
@@ -429,17 +431,20 @@ def size_liquid_relief_valve(
     def correction(mass: float) -> tuple[float, float | None]:
         if viscosity_factor is not None:
             return viscosity_factor, None
-        assert viscosity_Pa_s is not None
+        if viscosity_Pa_s is None:
+            raise AssertionError("invariant violated: viscosity_Pa_s is not None")
         initial_area = base * mass
         reynolds = mass / initial_area * sqrt(4 * initial_area / pi) / viscosity_Pa_s
         return api520_viscosity_factor(reynolds, edition=edition), reynolds
 
     if mass_flow_kg_s is None:
-        assert area_m2 is not None
+        if area_m2 is None:
+            raise AssertionError("invariant violated: area_m2 is not None")
         if viscosity_factor is not None:
             mass_flow_kg_s = area_m2 * viscosity_factor / base
         else:
-            assert viscosity_Pa_s is not None
+            if viscosity_Pa_s is None:
+                raise AssertionError("invariant violated: viscosity_Pa_s is not None")
             target = area_m2
             minimum_mass = (
                 (80.0000001 * viscosity_Pa_s) ** 2 * pi * base / 4 if edition == "10E" else 1e-20

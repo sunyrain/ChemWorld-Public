@@ -187,6 +187,15 @@ class ParameterRule:
 
 
 @dataclass(frozen=True)
+class DeclaredParameterRule(ParameterRule):
+    """A rule with no execution effect until a composition names its parameter.
+
+    Keep ordinary catalogue rules unchanged. This explicit opt-in lets a new
+    optional parameter leave existing composition execution bindings exact.
+    """
+
+
+@dataclass(frozen=True)
 class ComponentCapability:
     operations: tuple[str, ...]
     template: str | None = None
@@ -205,6 +214,9 @@ class ComponentCapability:
     port_unit: str = "mol"
     parameters: tuple[tuple[str, ParameterRule], ...] = ()
     processes: tuple[str, ...] = ()
+    # Specialized native models must not silently fall back to generic
+    # component-network services when their physical binding is absent.
+    requires_physics: bool = False
 
 
 @dataclass(frozen=True)

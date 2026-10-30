@@ -28,9 +28,24 @@ def capture(task, job, output, row):
         if line.strip()
     ]
     names = list(job["initial"])
-    if any(len(v) != len(names) + 1 for v in values):
+    parameter_names = job.get("reported_parameters", [])
+    compartment_names = job.get("reported_compartments", [])
+    if any(len(v) != len(names) + len(parameter_names) + len(compartment_names) + 1
+           for v in values):
         raise ValueError("source particle report width disagrees")
-    rows = [{"time_s": v[0], "populations": dict(zip(names, v[1:], strict=True))} for v in values]
+    rows = []
+    for values_row in values:
+        offset = 1 + len(names)
+        point = {"time_s": values_row[0],
+                 "populations": dict(zip(names, values_row[1:offset], strict=True))}
+        if parameter_names:
+            point["parameters"] = dict(zip(
+                parameter_names, values_row[offset:offset+len(parameter_names)], strict=True))
+        offset += len(parameter_names)
+        if compartment_names:
+            point["compartments"] = dict(zip(
+                compartment_names, values_row[offset:], strict=True))
+        rows.append(point)
     row["report_rows"] = rows
     if len(table) != len(rows):
         raise ValueError("source report and time-series lengths disagree")
@@ -182,6 +197,20 @@ def simulate(api, job, output):
             },
         }
         ordered = [cns["time_s"], *(cns[k] for k in job["initial"])]
+        for kind, names, objects in (
+            ("parameter", job.get("reported_parameters", []), model.getModelValues()),
+            ("compartment", job.get("reported_compartments", []), model.getCompartments()),
+        ):
+            if not names:
+                continue
+            entities = {str(entity.getObjectName()): entity for entity in objects}
+            for name in names:
+                entity = entities[name]
+                cn = str(entity.getValueReference().getCN().getString())
+                cns[kind + ":" + name] = cn
+                ordered.append(cn)
+            row["initial_" + kind + "_values"] = {
+                name: float(entities[name].getValue()) for name in names}
         for index, cn in enumerate(ordered):
             if index:
                 body.push_back(api.CRegisteredCommonName(report.getSeparator().getCN().getString()))

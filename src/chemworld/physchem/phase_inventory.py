@@ -23,6 +23,8 @@ class PhaseInventoryRates:
     streams: tuple[dict, ...]
     outlet_amounts_mol_s: dict[str, float] = field(default_factory=dict, kw_only=True)
     outlet_enthalpy_W: float = field(default=0.0, kw_only=True)
+    shaft_import_W: float = field(default=0.0, kw_only=True)
+    shaft_export_W: float = field(default=0.0, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -69,11 +71,19 @@ def integrate_phase_inventory(
     operating_limit_error=ValueError,
     initial_boundary="reject",
     constant_amounts=False,
+    include_shaft_work=False,
+    reuse_cell_closures=False,
 ):
     """One solve for retained n/H, utility heat and explicit outlet integrals.
 
     ``rates`` contributes a single candidate derivative. PH is algebraic;
     utility and outlet counters cannot alter the constitutive candidate state.
+    ``reuse_cell_closures`` requires a deterministic, side-effect-free n/H
+    closure and bounds provider for the duration of this solve. Stateful search
+    providers retain the default complete evaluation sequence.
+    Explicit shaft accounting adds separate nonnegative import/export integrals
+    to the same solve. Its state must expose shaft_import_energy_J and
+    shaft_export_energy_J; the default numerical coordinates remain unchanged.
     A model may select a genuine zero-duration initial stop or reject a request
     that starts at an already reached operating limit.
     """
@@ -86,9 +96,17 @@ def integrate_phase_inventory(
         or any(set(n) != set(ids) for n in state.amounts_mol)
         or len(state.enthalpies_J) != count
         or type(constant_amounts) is not bool
+        or type(include_shaft_work) is not bool
+        or type(reuse_cell_closures) is not bool
         or (constant_amounts and open_outlet)
     ):
         raise ValueError("phase integration needs matching finite inventories, H and duration")
+    if include_shaft_work and any(
+        not hasattr(state, name) or isinstance(getattr(state, name), bool)
+        or not isfinite(getattr(state, name)) or getattr(state, name) < 0
+        for name in ("shaft_import_energy_J", "shaft_export_energy_J")
+    ):
+        raise ValueError("shaft accounting requires owned nonnegative import/export integrals")
     initial_n = np.array([[n[k] for k in ids] for n in state.amounts_mol])
     # These strategies have internal ports and optional outlets, with no
     # material inlet. A species absent everywhere is an invariant zero, not
@@ -100,23 +118,29 @@ def integrate_phase_inventory(
     # remains the original physical stock, never a projected/repaired trial.
     n_end = 0 if constant_amounts else count*width
     h_end = n_end+count
-    q_end = h_end + 2
+    utility_count = 4 if include_shaft_work else 2
+    q_end = h_end + utility_count
     scales = np.r_[
         np.empty(0) if constant_amounts else np.maximum(initial_n, 1e-3).ravel(),
         np.maximum(np.abs(state.enthalpies_J), 10),
-        100.0,
-        100.0,
+        np.full(utility_count, 100.0),
     ]
     initial = np.r_[np.empty(0) if constant_amounts else initial_n.ravel(),
-                    state.enthalpies_J, 0.0, 0.0]
+                    state.enthalpies_J, np.zeros(utility_count)]
     if open_outlet:
         scales = np.r_[scales, np.maximum(np.sum(initial_n, axis=0), 1e-3), 100.0]
         initial = np.r_[initial, np.zeros(width + 1)]
     counters = diagnostic_counters if diagnostic_counters is not None else {}
     counters.setdefault("trial_domain_extensions", 0)
-    minimum_trial_counters = [0.0, 0.0]
+    minimum_trial_counters = [0.0] * utility_count
     corrections_J, corrections_mol = {}, {}
     cache = [None, None]
+    # A finite-difference trial usually changes only one compartment. Each
+    # constitutive closure depends on that cell's n/H, not on the global
+    # clock or utility integrals. Keep one exact point per cell for this solve
+    # only; rates and event functions still see every candidate and time.
+    cell_bounds = [None] * count
+    cell_flashes = [None] * count
     evaluations = [0]
 
     def unpack(vector, *, accepted=False, time=0):
@@ -129,12 +153,12 @@ def integrate_phase_inventory(
         )
         enthalpies = tuple(map(float, vector[n_end:h_end]))
         if not accepted:
-            for j in (0, 1):
+            for j in range(utility_count):
                 minimum_trial_counters[j] = min(minimum_trial_counters[j], float(vector[h_end + j]))
             return _PhaseInventoryView(amounts, enthalpies, state.time_s + time)
         for i, j in zip(*np.nonzero(raw < 0), strict=True):
             corrections_mol[f"cell:{i}:{ids[j]}@{time}"] = float(-raw[i, j])
-        increments = [float(vector[h_end]), float(vector[h_end + 1])]
+        increments = [float(vector[h_end + j]) for j in range(utility_count)]
         for j, value in enumerate(increments):
             if value < -1e-8:
                 raise RuntimeError("accepted phase utility integral is negative")
@@ -157,6 +181,10 @@ def integrate_phase_inventory(
                 },
                 "outlet_enthalpy_J": state.outlet_enthalpy_J + float(vector[-1]),
             }
+        shaft = {} if not include_shaft_work else {
+            "shaft_import_energy_J": state.shaft_import_energy_J + increments[2],
+            "shaft_export_energy_J": state.shaft_export_energy_J + increments[3],
+        }
         return replace(
             state,
             amounts_mol=amounts,
@@ -164,6 +192,7 @@ def integrate_phase_inventory(
             time_s=state.time_s + time,
             heater_energy_J=state.heater_energy_J + increments[0],
             condenser_energy_J=state.condenser_energy_J + increments[1],
+            **shaft,
             **outlet,
         )
 
@@ -176,10 +205,21 @@ def integrate_phase_inventory(
         flashes = [None] * count
         for i in closure_indices:
             n, h = candidate.amounts_mol[i], candidate.enthalpies_J[i]
-            low, high = enthalpy_bounds(i, n)
+            n_key = tuple(n[k] for k in ids)
+            bounds = cell_bounds[i]
+            if not reuse_cell_closures or bounds is None or bounds[0] != n_key:
+                bounds = (n_key, enthalpy_bounds(i, n))
+                cell_bounds[i] = bounds
+            low, high = bounds[1]
             if not low <= h <= high:
                 counters["trial_domain_extensions"] += 1
-            flashes[i] = spec.at_ph(i, n, min(max(h, low), high))
+            bounded_h = min(max(h, low), high)
+            key_i = (n_key, bounded_h)
+            cached = cell_flashes[i]
+            if not reuse_cell_closures or cached is None or cached[0] != key_i:
+                cached = (key_i, spec.at_ph(i, n, bounded_h))
+                cell_flashes[i] = cached
+            flashes[i] = cached[1]
         cache[:] = [key, (candidate, tuple(flashes))]
         return cache[1]
 
@@ -196,6 +236,13 @@ def integrate_phase_inventory(
             contribution.heater_W,
             contribution.condenser_W,
         ]
+        work = (contribution.shaft_import_W, contribution.shaft_export_W)
+        if any(isinstance(value, bool) or not isfinite(value) or value < 0 for value in work):
+            raise ValueError("shaft powers require finite nonnegative import/export values")
+        if include_shaft_work:
+            derivative = np.r_[derivative, work]
+        elif any(work):
+            raise ValueError("shaft power requires explicitly enabled shaft accounting")
         if open_outlet:
             outgoing = contribution.outlet_amounts_mol_s
             if set(outgoing) - set(ids) or any(not isfinite(v) or v < 0 for v in outgoing.values()):
@@ -295,14 +342,28 @@ def integrate_phase_inventory(
         - state.condenser_energy_J
         + (final.outlet_enthalpy_J - state.outlet_enthalpy_J if open_outlet else 0)
     )
+    if include_shaft_work:
+        energy_residual += (
+            -(final.shaft_import_energy_J - state.shaft_import_energy_J)
+            + final.shaft_export_energy_J - state.shaft_export_energy_J
+        )
     material_scale = (
         sum(map(sum, (n.values() for n in state.amounts_mol)))
         if balance_scale_mol is None
         else balance_scale_mol
     )
+    energy_scale = max(1, abs(sum(state.enthalpies_J)),
+                       final.heater_energy_J - state.heater_energy_J)
+    if include_shaft_work:
+        energy_scale = max(
+            energy_scale,
+            final.shaft_import_energy_J - state.shaft_import_energy_J,
+            final.shaft_export_energy_J - state.shaft_export_energy_J,
+            final.condenser_energy_J - state.condenser_energy_J,
+        )
     if max(map(abs, residuals.values())) > 1e-8 * max(material_scale, 1e-8) or abs(
         energy_residual
-    ) > 1e-6 * max(1, abs(sum(state.enthalpies_J)), final.heater_energy_J - state.heater_energy_J):
+    ) > 1e-6 * energy_scale:
         raise RuntimeError("phase advance failed independent component/H conservation")
     return result_type(
         state,
@@ -317,6 +378,7 @@ def integrate_phase_inventory(
             "minimum_trial_utility_integrals_J": minimum_trial_counters,
             "roundoff_resource_corrections_J": corrections_J,
             "roundoff_inventory_corrections_mol": corrections_mol,
+            **({"shaft_accounting": "separate_import_export"} if include_shaft_work else {}),
         },
         residuals,
         float(energy_residual),

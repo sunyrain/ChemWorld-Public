@@ -210,8 +210,8 @@ def check_operation_preconditions(
         "electrolyze",
         "terminate",
     }
-    from chemworld.world.control_contract import CONTROL_OPERATIONS
-    from chemworld.world.stream_contract import STREAM_OPERATIONS
+    from chemworld.foundation.control_contract import CONTROL_OPERATIONS
+    from chemworld.foundation.stream_contract import STREAM_OPERATIONS
 
     if operation_type in CONTROL_OPERATIONS:
         needs_not_terminated = True

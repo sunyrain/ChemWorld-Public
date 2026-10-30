@@ -440,4 +440,5 @@ def advance_dynamic_column(
         balance_scale_mol=initial_total,
         diagnostic_counters=counters,
         operating_limit_error=ColumnOperatingLimitError,
+        reuse_cell_closures=type(spec) is DynamicColumnSpec,
     )

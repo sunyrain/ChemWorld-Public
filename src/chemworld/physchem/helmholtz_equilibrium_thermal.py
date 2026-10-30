@@ -53,7 +53,8 @@ class HelmholtzEquilibriumIsochoricThermodynamics:
             if not saturation.success:
                 raise ValueError("equilibrium thermal saturation:"+saturation.failure_reason)
             liquid, gas = saturation.liquid, saturation.gas
-            assert liquid is not None and gas is not None
+            if liquid is None or gas is None:
+                raise AssertionError("invariant violated: liquid or gas is None")
             if gas.molar_density_mol_m3 <= rho <= liquid.molar_density_mol_m3:
                 quality = ((1/rho-1/liquid.molar_density_mol_m3)
                            /(1/gas.molar_density_mol_m3-1/liquid.molar_density_mol_m3))

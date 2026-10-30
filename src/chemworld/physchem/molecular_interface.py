@@ -425,11 +425,15 @@ def _coexistence(
         rank = len(active)
         nullspace = np.empty((len(active), 0))
     else:
-        assert declared is not None
+        if declared is None:
+            raise AssertionError("invariant violated: declared is not None")
         if isinstance(influence, SingularSquareGradientInfluence):
             factors = np.asarray(influence.gradient_factors_sqrt_J_m5_mol2)
         else:
-            assert isinstance(influence, PolynomialSquareGradientInfluence)
+            if not isinstance(influence, PolynomialSquareGradientInfluence):
+                raise AssertionError(
+                    "invariant violated: influence must be PolynomialSquareGradientInfluence"
+                )
             factors = influence.gradient_factors_at(t)
         restricted = factors[active]
         rank = (

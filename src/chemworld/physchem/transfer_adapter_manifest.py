@@ -11,13 +11,13 @@ from chemworld.physchem.maturity import (
     ModelExecutionRole,
     ModelProviderContract,
 )
+from chemworld.physchem.model_provider import ModelProviderResult
 from chemworld.physchem.transfer_units import (
     IDAES_COMMIT,
     TRANSFER_MODEL_ID,
     TransferRequest,
     simulate_transfer,
 )
-from chemworld.runtime.kernel_contracts import ModelProviderResult
 
 OWNER_WORKSTREAM = "wf-30-transfer-holdup"
 OWNED_PATHS = (

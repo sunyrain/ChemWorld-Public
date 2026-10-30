@@ -591,6 +591,80 @@ class HalfCellDFNReadout:
     electrolyte_ohmic_V: float
     solid_ohmic_V: float
 
+    def __post_init__(self):
+        """Keep public measurements finite and JSON-safe.
+
+        The DFN readout is derived data, so it must never become a second
+        device state.  Rejecting non-finite values at this boundary keeps
+        runtime meters, snapshots and external JSON consumers deterministic.
+        """
+        for name in (
+            "voltage_V",
+            "current_A",
+            "working_surface_fraction",
+            "working_average_fraction",
+            "metal_amount_mol",
+            "metal_overpotential_V",
+            "working_overpotential_V",
+            "metal_ohmic_V",
+            "metal_resistance_ohm",
+            "concentration_overpotential_V",
+            "electrolyte_ohmic_V",
+            "solid_ohmic_V",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
+                raise ValueError(f"DFN half-cell readout {name} must be finite")
+
+    def to_dict(self):
+        """Return the stable JSON measurement contract for this model."""
+        return {
+            "model_family": HALF_CELL_DFN_FAMILY,
+            **{
+                name: float(getattr(self, name))
+                for name in (
+                    "voltage_V",
+                    "current_A",
+                    "working_surface_fraction",
+                    "working_average_fraction",
+                    "metal_amount_mol",
+                    "metal_overpotential_V",
+                    "working_overpotential_V",
+                    "metal_ohmic_V",
+                    "metal_resistance_ohm",
+                    "concentration_overpotential_V",
+                    "electrolyte_ohmic_V",
+                    "solid_ohmic_V",
+                )
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, value):
+        """Restore a readout while rejecting another model or stray fields."""
+        if not isinstance(value, dict):
+            raise ValueError("DFN half-cell readout must be an object")
+        payload = dict(value)
+        if payload.pop("model_family", HALF_CELL_DFN_FAMILY) != HALF_CELL_DFN_FAMILY:
+            raise ValueError("unknown DFN half-cell readout family")
+        names = {
+            "voltage_V",
+            "current_A",
+            "working_surface_fraction",
+            "working_average_fraction",
+            "metal_amount_mol",
+            "metal_overpotential_V",
+            "working_overpotential_V",
+            "metal_ohmic_V",
+            "metal_resistance_ohm",
+            "concentration_overpotential_V",
+            "electrolyte_ohmic_V",
+            "solid_ohmic_V",
+        }
+        if set(payload) != names:
+            raise ValueError("unknown or missing DFN half-cell readout fields")
+        return cls(**payload)
+
 
 def _linear_electrical(spec, vector):
     """Two-domain geometry map using the original exact linear-field integral."""

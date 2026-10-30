@@ -15,6 +15,7 @@ from chemworld.physchem.coupled_system import (
     CoupledSystem,
     HeatFlux,
     ProcessContribution,
+    SpeciesInternalEnergy,
 )
 from chemworld.physchem.solver_backend import ODESolverPolicy
 
@@ -75,3 +76,50 @@ def test_actual_coupled_depletion_preserves_progress_heat_and_requested_grid(gri
 def test_feasible_side_requires_an_explicit_directed_terminal_event(changes):
     with pytest.raises(ValueError, match="directed terminal"):
         CoupledEvent("bad", lambda _s: 1., **{"feasible_side": True, **changes})
+
+
+@pytest.mark.parametrize("negative,accepted", [(-1e-15, True), (-1e-10, False)])
+def test_terminal_event_uses_original_snapshot_tolerance_for_unrelated_zero_stock(
+    monkeypatch, negative, accepted,
+):
+    import chemworld.physchem.coupled_system as coupled
+
+    original_solve = coupled.solve_ode
+    inventory_scale = 1e-3
+
+    def solve_with_zero_stock_roundoff(*args, **kwargs):
+        report = original_solve(*args, **kwargs)
+        interpolant = report.raw_result.sol
+
+        def perturbed(t):
+            values = np.asarray(interpolant(t)).copy()
+            values[0] = negative/inventory_scale
+            return values
+
+        report.raw_result.sol = perturbed
+        for vector in report.raw_result.y_events[0]:
+            vector[0] = negative/inventory_scale
+        return report
+
+    monkeypatch.setattr(coupled, "solve_ode", solve_with_zero_stock_roundoff)
+    system = CoupledSystem(
+        ConstantCvThermodynamics({"tracer": SpeciesInternalEnergy(0., 0.)}, 10.), (),
+        heat_flux=lambda _s: HeatFlux(heater_W=3.),
+        inventory_scales_mol={"tracer": inventory_scale},
+        conservation_laws={"tracer": {"tracer": 1.}},
+        events=(CoupledEvent("temperature-limit", lambda s: 301.-s.temperature_K,
+                             feasible_side=True),),
+        policy=ODESolverPolicy("zero-stock-event", method="BDF"),
+    )
+    initial = CoupledState({"tracer": 0.}, 300., 1.)
+    if not accepted:
+        with pytest.raises(RuntimeError, match="roundoff interval"):
+            system.advance(initial, 5.)
+        return
+    result = system.advance(initial, 5.)
+    assert result.stopping_event == "temperature-limit"
+    assert result.actual_duration_s == pytest.approx(10/3, rel=0, abs=1e-10)
+    assert result.final_state.amounts_mol["tracer"] == 0.
+    assert result.roundoff_corrections_mol["tracer"] == pytest.approx(-negative, rel=1e-14, abs=0)
+    assert abs(result.energy_balance_residual_J) <= 1e-10
+    assert initial.amounts_mol["tracer"] == 0.

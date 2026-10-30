@@ -36,6 +36,7 @@ from chemworld.physchem.gas_network_energy import (
     gas_reaction_energy_key,
     gas_temperature_key,
 )
+from chemworld.physchem.gas_polynomial_transport import GasTransportPolynomialSpec
 from chemworld.physchem.gas_reactor_network import (
     GasReactorNetworkSpec,
     _key,
@@ -95,10 +96,90 @@ class _SpatialEnergyClosure:
             self.models[name].validate_temperature_interval(
                 energy.minimum_temperature_K, energy.maximum_temperature_K
             )
+        self.fit_temperature_domains: dict[str, tuple[float, float]] = {}
+        self.rhs_temperature_domains: dict[str, tuple[float, float]] = {}
+        if isinstance(spatial.transport, GasTransportPolynomialSpec):
+            if spatial.transport.thermal_diffusion != "off":
+                raise ValueError("thermal source-fit spatial gas requires thermal_diffusion='off'")
+            thermo_low = max(s.min_temperature_K for s in self.thermo.values())
+            thermo_high = min(s.max_temperature_K for s in self.thermo.values())
+            for name, energy in self.energy.items():
+                low, high = thermo_low, thermo_high
+                if name in spatial.cell_vessel_ids:
+                    fit_low, fit_high = spatial.transport.fit_temperature_range_K
+                    low, high = max(low, fit_low), min(high, fit_high)
+                    common = (
+                        max(low, energy.minimum_temperature_K),
+                        min(high, energy.maximum_temperature_K),
+                    )
+                    if common[0] >= common[1]:
+                        raise ValueError(f"no common temperature domain for source-fit cell {name}")
+                    self.fit_temperature_domains[name] = common
+                self.rhs_temperature_domains[name] = (low, high)
         self.reaction = reaction_network_process(network, species_thermo=self.thermo)
 
     def views(self, state: CoupledStateView) -> dict[str, CoupledStateView]:
         return {name: gas_node_view(state, node, self.network) for name, node in self.nodes.items()}
+
+    def extend_source_boundary_trial(self, state: CoupledStateView) -> CoupledStateView:
+        """Policy B: extend only the numerical RHS/Mach view, never a snapshot.
+
+        Raw event callbacks retain their signed distances. The shared ODE
+        wrapper counts RHS extensions; this is not a claim that its raw trial
+        vectors stay inside the fit or that all trials are archived.
+        """
+        anchor_t = state.temperature_K
+        coordinates = dict(state.coordinates)
+        changed = False
+        for name, (low, high) in self.rhs_temperature_domains.items():
+            value = (
+                anchor_t
+                if name == self.spec.anchor_vessel_id
+                else coordinates[gas_temperature_key(name)]
+            )
+            bounded = max(low, min(high, value))
+            if bounded != value:
+                changed = True
+                if name == self.spec.anchor_vessel_id:
+                    anchor_t = bounded
+                else:
+                    coordinates[gas_temperature_key(name)] = bounded
+        return replace(state, temperature_K=anchor_t, coordinates=coordinates) if changed else state
+
+    def validate_fit_temperature(self, state: CoupledStateView) -> None:
+        if not self.fit_temperature_domains:
+            return
+        low, high = self.spatial.transport.fit_temperature_range_K
+        for name in self.fit_temperature_domains:
+            temperature = (
+                state.temperature_K
+                if name == self.spec.anchor_vessel_id
+                else state.coordinates[gas_temperature_key(name)]
+            )
+            if not low <= temperature <= high:
+                raise ValueError(f"source-fit temperature outside declared domain: {name}")
+
+    def fit_domain_receipt(self) -> dict[str, Any]:
+        return {
+            "policy": "B:constant-boundary-trial-view",
+            "fit_temperature_range_K": list(self.spatial.transport.fit_temperature_range_K),
+            "cell_temperature_domains_K": {
+                name: list(bounds) for name, bounds in self.fit_temperature_domains.items()
+            },
+            "rhs_trial_temperature_domains_K": {
+                name: list(bounds) for name, bounds in self.rhs_temperature_domains.items()
+            },
+            "coefficient_policy": "strict fit-domain evaluation in the numerical view",
+            "accepted_states_projected": False,
+            "raw_rhs_trials_guaranteed_in_fit_domain": False,
+            "complete_raw_trial_trace": False,
+            "t0_boundary_policy": "zero-duration stop without an inward-direction test",
+            "concurrent_event_limit": (
+                "another selected event may not provide a fit-feasible rounded root; "
+                "strict accepted-state validation fails closed"
+            ),
+            "rhs_extension": None,
+        }
 
     def heat(
         self, views: dict[str, CoupledStateView]
@@ -134,6 +215,7 @@ class _SpatialEnergyClosure:
         dict[str, float],
         dict[str, float],
     ]:
+        self.validate_fit_temperature(state)
         ids, cells, mesh = self.network.species_ids, self.spatial.cell_vessel_ids, self.spatial.mesh
         views = self.views(state)
         total = {name: fsum(v.amounts_mol.values()) for name, v in views.items()}
@@ -178,6 +260,10 @@ class _SpatialEnergyClosure:
             distance = float(mesh.centers_m[j] - mesh.centers_m[j - 1])
             weight = float((mesh.faces_m[j] - mesh.centers_m[j - 1]) / distance)
             t = (1 - weight) * temperatures[left] + weight * temperatures[right]
+            if self.fit_temperature_domains:
+                # Equal boundary temperatures remain exactly at that boundary;
+                # the original LJ path retains its original arithmetic.
+                t = temperatures[left] + weight * (temperatures[right] - temperatures[left])
             composition = {s: (1 - weight) * x[left][s] + weight * x[right][s] for s in ids}
             response = gas_transport_response(
                 self.spatial.transport,
@@ -449,6 +535,7 @@ class _SpatialEnergyClosure:
         )
 
     def validate(self, state: CoupledStateView) -> None:
+        self.validate_fit_temperature(state)
         if not isclose(state.volume_L, sum(n.volume_L for n in self.spec.nodes), rel_tol=1e-12):
             raise ValueError("thermal spatial mesh and tank volumes must remain fixed")
         if set(state.coordinates) != {
@@ -519,9 +606,26 @@ class _SpatialEnergyClosure:
             trial = replace(
                 state, amounts_mol={s: max(n, 0.0) for s, n in state.amounts_mol.items()}
             )
+            if self.fit_temperature_domains:
+                trial = self.extend_source_boundary_trial(trial)
             return self.spatial.maximum_mach - self.evaluate(trial)[2]["maximum_mach"]
 
+        fit_events = ()
+        if self.fit_temperature_domains:
+
+            def fit_limit(state: CoupledStateView) -> float:
+                low, high = self.spatial.transport.fit_temperature_range_K
+                views = self.views(state)
+                return min(
+                    min(views[name].temperature_K - low, high - views[name].temperature_K)
+                    for name in self.fit_temperature_domains
+                )
+
+            fit_events = (
+                CoupledEvent("spatial:transport_fit_temperature", fit_limit, feasible_side=True),
+            )
         return (
+            *fit_events,
             CoupledEvent("spatial:maximum_pressure", pressure_limit),
             CoupledEvent("spatial:maximum_mach", mach_limit),
             CoupledEvent(
@@ -557,6 +661,11 @@ def gas_spatial_energy_system(
             }
             for e in {e for s in network.species for e in s.composition}
         },
+        **(
+            {"trial_state_extension": model.extend_source_boundary_trial}
+            if model.fit_temperature_domains
+            else {}
+        ),
     )
 
 
@@ -568,7 +677,11 @@ def spatial_energy_rates(
     thermal_device: ThermalDeviceSpec | None = None,
 ) -> dict[str, Any]:
     """Read the current joint closure without committing stock, time or resources."""
-    return _SpatialEnergyClosure(spec, network, thermal_device).evaluate(state)[2]
+    model = _SpatialEnergyClosure(spec, network, thermal_device)
+    packet = model.evaluate(state)[2]
+    if model.fit_temperature_domains:
+        packet["source_fit_temperature_domain"] = model.fit_domain_receipt()
+    return packet
 
 
 def advance_gas_spatial_energy(
@@ -658,11 +771,38 @@ def advance_gas_spatial_energy(
         heater, final.boundary_heat_J - state.boundary_heat_J, abs_tol=2e-7, rel_tol=2e-7
     ) or not isclose(loss, final.heat_loss_J - state.heat_loss_J, abs_tol=2e-7, rel_tol=2e-7):
         raise RuntimeError("thermal spatial receipts differ from original common energy ledger")
+    spatial = spatial_energy_rates(spec, network, final, thermal_device=thermal_device)
+    if "source_fit_temperature_domain" in spatial:
+        receipt = spatial["source_fit_temperature_domain"]
+        extension = result.solver_diagnostic.get("rhs_state_extension", {})
+        coordinate_offsets = dict(extension.get("maximum_coordinate_offsets", {}))
+        anchor_offset = extension.get("maximum_temperature_offset_K", 0.0)
+        receipt["rhs_extension"] = {
+            "count_scope": "shared ODE RHS; excludes Mach event callback evaluations",
+            "extended_evaluations": extension.get("extended_evaluations", 0),
+            "maximum_anchor_temperature_offset_K": anchor_offset,
+            "maximum_coordinate_offsets": coordinate_offsets,
+            "maximum_node_temperature_offset_K": max(
+                anchor_offset, *coordinate_offsets.values(), 0.0
+            ),
+        }
+        result = replace(
+            result,
+            solver_diagnostic={
+                **result.solver_diagnostic,
+                "source_fit_temperature_domain": receipt,
+            },
+        )
     return result, {
         "nodes": details,
         "connections": faces,
         "heat_links": links,
-        "spatial": spatial_energy_rates(spec, network, final, thermal_device=thermal_device),
+        "spatial": spatial,
+        **(
+            {"source_fit_temperature_domain": spatial["source_fit_temperature_domain"]}
+            if "source_fit_temperature_domain" in spatial
+            else {}
+        ),
         "bath_heat_J": heater,
         "heat_loss_J": loss,
         "actual_duration_s": result.actual_duration_s,

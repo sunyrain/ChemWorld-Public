@@ -251,8 +251,12 @@ class HelmholtzPhaseModel:
             if not saturated.success:
                 return HelmholtzSolveReport(None, False, "saturation:"+saturated.failure_reason,
                                             saturated.diagnostics)
-            assert saturated.pressure_Pa is not None
-            assert saturated.liquid is not None and saturated.gas is not None
+            if saturated.pressure_Pa is None:
+                raise AssertionError("invariant violated: saturated.pressure_Pa is None")
+            if saturated.liquid is None or saturated.gas is None:
+                raise AssertionError(
+                    "invariant violated: saturated.liquid or saturated.gas is None"
+                )
             stable_phase = "gas" if pressure < saturated.pressure_Pa else "liquid"
             if phase == "auto" and abs(pressure-saturated.pressure_Pa) <= max(
                     1e-4, saturated.pressure_Pa*1e-8):

@@ -118,7 +118,8 @@ class HelmholtzPressureStage:
             if not isentropic.success:
                 return HelmholtzPressureStageReport(inlet, None, None, False,
                     "isentropic_state:"+isentropic.failure_reason, isentropic.diagnostics)
-            assert isentropic.state is not None
+            if isentropic.state is None:
+                raise AssertionError("invariant violated: isentropic.state is not None")
             delta_h = isentropic.state.enthalpy_J_mol-current.enthalpy_J_mol
             target_h += (delta_h/self.isentropic_efficiency if self.mode == "compressor"
                          else self.isentropic_efficiency*delta_h)
@@ -129,7 +130,8 @@ class HelmholtzPressureStage:
         if not final.success:
             return HelmholtzPressureStageReport(inlet, None, None, False,
                 "outlet_state:"+final.failure_reason, final.diagnostics)
-        assert final.state is not None
+        if final.state is None:
+            raise AssertionError("invariant violated: final.state is not None")
         outlet = HelmholtzStream(final.state, inlet.molar_rate_mol_s)
         work = inlet.molar_rate_mol_s*(target_h-current.enthalpy_J_mol)
         diagnostics.update(outlet_phase=final.phase,

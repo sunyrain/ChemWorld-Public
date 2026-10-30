@@ -101,6 +101,8 @@ class SBMLSystemSpec:
     _events: tuple = field(init=False, repr=False, compare=False)
     _roots: object = field(init=False, repr=False, compare=False)
     _integer: object = field(init=False, repr=False, compare=False, default=None)
+    _guard_critical_reactions: frozenset = field(init=False, repr=False, compare=False,
+                                               default=frozenset())
 
     def __post_init__(self):
         for name in ("maximum_events", "maximum_segments", "maximum_pending_events",
@@ -140,9 +142,12 @@ class SBMLSystemSpec:
         else:
             integer = None
         if integer is not None and integer.requires_boundaries:
+            from chemworld.physchem.sbml_integer_boundary_policy import guard_critical_reactions
             from chemworld.physchem.sbml_jump_triggers import SBMLJumpTriggers
 
             roots = SBMLJumpTriggers(frame, integer.rules)
+            object.__setattr__(self, "_guard_critical_reactions", guard_critical_reactions(
+                roots, integer.compile(frame.initial_values, self.initial_model_time)))
         else:
             roots = SBMLTriggerRoots(frame)
         observables = tuple(self.observables)
@@ -195,6 +200,10 @@ class SBMLSystemSpec:
     @property
     def integer_kinetics(self):
         return self._integer
+
+    @property
+    def guard_critical_reactions(self):
+        return self._guard_critical_reactions
 
     def continuous_system(self):
         if self.integer_kinetics is not None:

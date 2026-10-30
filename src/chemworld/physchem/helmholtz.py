@@ -13,6 +13,7 @@ from math import isfinite, sqrt
 from typing import Any
 
 from chemworld.physchem.caloric_math import compensated_sum, partial_derivative
+from chemworld.physchem.helmholtz_response import residual_response
 from chemworld.physchem.helmholtz_terms import HelmholtzTerm
 from chemworld.physchem.second_order_pair import SecondOrderPair
 
@@ -127,7 +128,16 @@ class HelmholtzFluid:
         """Evaluate each contribution once for all state-response derivatives."""
         density, temperature = SecondOrderPair(delta, dx=1), SecondOrderPair(tau, dy=1)
         ideal = SecondOrderPair(0) + self.alpha("ideal", density, temperature)
-        residual = SecondOrderPair(0) + self.alpha("residual", density, temperature)
+        # Subclasses may supply a molecular residual through alpha(); keep
+        # that extension point rather than reading their term list directly.
+        residual = SecondOrderPair(0) + (
+            compensated_sum(
+                residual_response(term, delta, tau, self.reducing_temperature_K)
+                for term in self.residual_terms
+            )
+            if type(self) is HelmholtzFluid
+            else self.alpha("residual", density, temperature)
+        )
         total = ideal + residual
         values = (total.value, total.dy, total.dyy, residual.dx, residual.dxx, residual.dxy)
         if not all(isfinite(value) for value in values):
@@ -181,7 +191,7 @@ class HelmholtzFluid:
             enthalpy, internal, entropy, cp, cv, sqrt(speed2), enthalpy-T*entropy, R*T*a,
             z, rho*R*thermal, R*T*stiffness, 1/(rho*R*T*stiffness),
             thermal/(T*stiffness), stiffness, stable, warnings)
-        if any(not isfinite(v) for v in asdict(result).values() if isinstance(v, float)):
+        if any(not isfinite(v) for v in vars(result).values() if isinstance(v, float)):
             raise ValueError("nonfinite Helmholtz state response")
         return result
 

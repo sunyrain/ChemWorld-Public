@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,11 +14,12 @@ from typing import Any
 import numpy as np
 
 from chemworld import __version__
+from chemworld.agents.base import Agent
 from chemworld.data.submission import git_commit
 from chemworld.eval.provenance import build_solver_provenance_manifest
+from chemworld.eval.result_summary import aggregate_leaderboard
 from chemworld.eval.seed_suite import task_seed_plan
 from chemworld.eval.suite import run_suite
-from chemworld.legacy.leaderboard import aggregate_leaderboard
 from chemworld.tasks import CORE_TASK_IDS, SERIOUS_TASK_IDS, get_task
 
 DEFAULT_BASELINE_AGENTS = (
@@ -86,6 +88,7 @@ class BaselineReport:
 
 def generate_baseline_report(
     *,
+    agent_factory: Callable[[str], Agent],
     task_ids: list[str],
     agents: list[str] | None = None,
     seeds: list[int] | None = None,
@@ -111,6 +114,7 @@ def generate_baseline_report(
         for agent_name in resolved_agents:
             task_output = root / "runs" / task.task_id / agent_name
             results = run_suite(
+                agent_factory=agent_factory,
                 agent_name=agent_name,
                 env_id=task.env_id,
                 world_splits=[task.world_split],
@@ -178,6 +182,7 @@ def generate_baseline_report(
 
 def generate_core_baseline_report(
     *,
+    agent_factory: Callable[[str], Agent],
     agents: list[str] | None = None,
     seeds: list[int] | None = None,
     output_dir: str | Path,
@@ -185,6 +190,7 @@ def generate_core_baseline_report(
     """Generate the baseline table for the compact core task set."""
 
     return generate_baseline_report(
+        agent_factory=agent_factory,
         task_ids=list(CORE_TASK_IDS),
         agents=agents or list(CORE_BASELINE_AGENTS),
         seeds=seeds,
@@ -194,6 +200,7 @@ def generate_core_baseline_report(
 
 def generate_serious_baseline_report(
     *,
+    agent_factory: Callable[[str], Agent],
     agents: list[str] | None = None,
     seeds: list[int] | None = None,
     output_dir: str | Path,
@@ -201,6 +208,7 @@ def generate_serious_baseline_report(
     """Generate a baseline table for the serious-task candidate suite."""
 
     return generate_baseline_report(
+        agent_factory=agent_factory,
         task_ids=list(SERIOUS_TASK_IDS),
         agents=agents or list(SERIOUS_BASELINE_AGENTS),
         seeds=seeds,

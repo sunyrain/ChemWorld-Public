@@ -7,8 +7,14 @@ import pytest
 
 import chemworld  # noqa: F401
 from chemworld.campaign_resources import CampaignResourceCard
-from chemworld.data.datasets import dataset_card, export_dataset, flatten_record
+from chemworld.data.datasets import (
+    export_dataset,
+    flatten_record,
+)
 from chemworld.data.logging import TrajectoryLogger, load_jsonl
+from chemworld.eval.dataset_cards import (
+    dataset_card,
+)
 from chemworld.eval.verify import verify_records
 
 

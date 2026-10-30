@@ -221,17 +221,20 @@ def two_phase_void_fraction(
             )
         )
     elif method == "Domanski Didion":
-        assert xtt is not None
+        if xtt is None:
+            raise AssertionError("invariant violated: xtt is not None")
         value = (1 + xtt**0.8) ** -0.378 if xtt < 10 else 0.823 - 0.157 * log(xtt)
     elif method == "Kawahara":
-        assert diameter_m is not None
+        if diameter_m is None:
+            raise AssertionError("invariant violated: diameter_m is not None")
         if diameter_m > 0.00025:
             value = 0.833 * homogeneous
         else:
             coefficient = 0.03 if diameter_m > 7.5e-5 else 0.02
             value = coefficient * sqrt(homogeneous) / (1 - (1 - coefficient) * sqrt(homogeneous))
     else:
-        assert mass_flux_kg_m2_s is not None and diameter_m is not None
+        if mass_flux_kg_m2_s is None or diameter_m is None:
+            raise AssertionError("invariant violated: mass_flux_kg_m2_s or diameter_m is None")
         flux, diameter, gravity = mass_flux_kg_m2_s, diameter_m, gravity_m_s2
         gas_superficial, liquid_superficial = flux * x / vapor, flux * (1 - x) / liquid
         mixture_volume = x / vapor + (1 - x) / liquid
@@ -264,7 +267,8 @@ def two_phase_void_fraction(
                 1 + (1 + 2 * froude_liquid**-0.2 * homogeneous**3.5) * quality_ratio * density_ratio
             )
         elif method in {"Tandon Varma Gupta", "Harms", "Yashar"}:
-            assert xtt is not None
+            if xtt is None:
+                raise AssertionError("invariant violated: xtt is not None")
             liquid_mu, _ = _viscosities(properties)
             reynolds = flux * diameter / liquid_mu
             if method == "Yashar":
@@ -288,7 +292,10 @@ def two_phase_void_fraction(
         else:
             distribution, drift = 1.2, 0.35 * sqrt(gravity * diameter)
             if method != "Nicklin Wilkes Davidson":
-                assert properties.surface_tension_N_m is not None
+                if properties.surface_tension_N_m is None:
+                    raise AssertionError(
+                        "invariant violated: properties.surface_tension_N_m is None"
+                    )
                 sigma = properties.surface_tension_N_m
                 capillary_speed = (gravity * sigma * (liquid - vapor) / liquid**2) ** 0.25
                 if method in {"Rouhani 1", "Rouhani 2", "Steiner"}:
@@ -299,10 +306,11 @@ def two_phase_void_fraction(
                         )
                     drift = 1.18 * (1 - x) * capillary_speed
                 elif method == "Sun Duffey Peng":
-                    assert (
-                        properties.pressure_Pa is not None
-                        and properties.critical_pressure_Pa is not None
-                    )
+                    if properties.pressure_Pa is None or properties.critical_pressure_Pa is None:
+                        raise AssertionError(
+                            "invariant violated: properties.pressure_Pa or "
+                            "properties.critical_pressure_Pa is None"
+                        )
                     reduced = properties.pressure_Pa / properties.critical_pressure_Pa
                     if reduced > 1:
                         raise ValueError("Sun Duffey Peng requires subcritical pressure")
@@ -313,7 +321,10 @@ def two_phase_void_fraction(
                     )
                     drift = 2.9 * capillary_speed
                     if method == "Woldesemayat Ghajar":
-                        assert properties.pressure_Pa is not None
+                        if properties.pressure_Pa is None:
+                            raise AssertionError(
+                                "invariant violated: properties.pressure_Pa is None"
+                            )
                         angle = radians(inclination_degrees)
                         drift *= (diameter * (1 + cos(angle))) ** 0.25 * (
                             1.22 * (1 + sin(angle))

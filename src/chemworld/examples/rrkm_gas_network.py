@@ -25,9 +25,9 @@ from chemworld.physchem.rrkm_grain_binding import (
     RRKMGrainSpec,
     RRKMProductChannel,
     rrkm_grain_network,
-    rrkm_grain_world,
 )
 from chemworld.runtime import ChemWorldRuntime
+from chemworld.world.energy_grain import rrkm_grain_world
 
 
 def example_inputs(*, flowing: bool = False) -> tuple[Any, ...]:

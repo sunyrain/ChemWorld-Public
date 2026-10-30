@@ -27,16 +27,16 @@ from chemworld.physchem.phase_equilibrium_adapter_manifest import (
     stability_aware_lle_provider_contract,
 )
 from chemworld.physchem.reaction_adapter_manifest import reaction_rate_provider_contract
-from chemworld.physchem.spectroscopy_adapter_manifest import (
-    instrument_runtime_provider_contract,
-    spectroscopy_identifiability_provider_contract,
-)
 from chemworld.physchem.transfer_adapter_manifest import transfer_provider_contract
 from chemworld.runtime.domain_service_registry import DomainServiceRegistry
 from chemworld.runtime.kernel_registry import OperationKernelRegistry
 from chemworld.runtime.profiles import TaskRuntimeProfile
 from chemworld.tasks import TaskSpec, get_task, list_tasks
 from chemworld.world.operations import INSTRUMENTS, OPERATION_TYPES
+from chemworld.world.spectroscopy_provider import (
+    instrument_runtime_provider_contract,
+    spectroscopy_identifiability_provider_contract,
+)
 
 MODEL_REACHABILITY_SCHEMA_VERSION = "chemworld-model-reachability-0.1"
 

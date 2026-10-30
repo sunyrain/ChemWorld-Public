@@ -57,7 +57,7 @@ native = run_example(reward_fn=None)
 assert len(native['steps']) == 3
 assert native['steps'][-1]['observation']['native']['channels'][0]['unit'] == 'Pa'
 from chemworld.eval.runner import run_agent
-import chemworld.agents.interactive_codex_experiment
+import chemworld.agents.experiment_documents
 print(json.dumps({'package': chemworld.__file__, 'version': chemworld.__version__,
                   'tasks': tasks, 'contracts': readiness['contract_ready_count'],
                   'ui_packages_absent': True, 'console_commands': ['chemworld'],

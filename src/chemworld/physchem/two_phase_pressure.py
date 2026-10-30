@@ -157,7 +157,11 @@ def _domain_warnings(
         ):
             warnings.append("Kim_Mudawar Reynolds number above reported development range")
     if method == "Zhang_Webb":
-        assert properties.pressure_Pa is not None and properties.critical_pressure_Pa is not None
+        if properties.pressure_Pa is None or properties.critical_pressure_Pa is None:
+            raise AssertionError(
+                "invariant violated: properties.pressure_Pa or properties.critical_pressure_Pa is "
+                "None"
+            )
         if (
             not 0.001 <= diameter <= 0.007
             or properties.pressure_Pa / properties.critical_pressure_Pa <= 0.2
@@ -243,7 +247,8 @@ def two_phase_pressure_drop(
     if not check_recommended_ranges:
         warnings.append("recommended range checks disabled: formula analysis, not qualification")
     if method == "Lockhart_Martinelli":
-        assert mu_l is not None and mu_g is not None
+        if mu_l is None or mu_g is None:
+            raise AssertionError("invariant violated: mu_l or mu_g is None")
         original = lockhart_martinelli_pressure_drop(
             mass_flow_kg_s=mass_flow_kg_s,
             vapor_quality=x,
@@ -264,17 +269,22 @@ def two_phase_pressure_drop(
         )
     density_h = 1 / ((1 - x) / liquid + x / gas)
     if method == "Lombardi_Pedrocchi":
-        assert p.surface_tension_N_m is not None
+        if p.surface_tension_N_m is None:
+            raise AssertionError("invariant violated: p.surface_tension_N_m is None")
         drop = 0.83 * flux**1.4 * p.surface_tension_N_m**0.4 * length / (d**1.2 * density_h**0.866)
         return TwoPhasePressureResult(
             method, drop, "friction", re_l, re_g, warnings=tuple(warnings)
         )
-    assert mu_l is not None
+    if mu_l is None:
+        raise AssertionError("invariant violated: mu_l is not None")
     rel0 = flux * d / mu_l
     f_l0 = pipe_friction_factor(rel0, roughness_m / d)
     dp_l0 = f_l0 * length / d * flux**2 / (2 * liquid)
     if method == "Zhang_Webb":
-        assert p.pressure_Pa is not None and p.critical_pressure_Pa is not None
+        if p.pressure_Pa is None or p.critical_pressure_Pa is None:
+            raise AssertionError(
+                "invariant violated: p.pressure_Pa or p.critical_pressure_Pa is None"
+            )
         reduced = p.pressure_Pa / p.critical_pressure_Pa
         if reduced >= 1:
             raise ValueError("Zhang_Webb requires subcritical pressure")
@@ -284,7 +294,8 @@ def two_phase_pressure_drop(
         return TwoPhasePressureResult(
             method, dp_l0 * multiplier, "friction", re_l, re_g, warnings=tuple(warnings)
         )
-    assert mu_g is not None and re_l is not None and re_g is not None
+    if mu_g is None or re_l is None or re_g is None:
+        raise AssertionError("invariant violated: mu_g or re_l or re_g is None")
     if method == "Beggs-Brill":
         return _beggs_brill(
             p,
@@ -395,7 +406,8 @@ def two_phase_pressure_drop(
         parameter = 18.65 * sqrt(gas / liquid) * (1 - x) / x * re_g**0.1 / sqrt(re_l)
         drop = dp_l * parameter**-1.9
     else:
-        assert p.surface_tension_N_m is not None
+        if p.surface_tension_N_m is None:
+            raise AssertionError("invariant violated: p.surface_tension_N_m is None")
         sigma = p.surface_tension_N_m
         confinement = sqrt(sigma / (gravity * (liquid - gas))) / d
         froude = flux**2 / (density_h**2 * gravity * d)
@@ -500,8 +512,12 @@ def _beggs_brill(
     acceleration: bool,
     warnings: tuple[str, ...],
 ) -> TwoPhasePressureResult:
-    assert p.surface_tension_N_m is not None and p.pressure_Pa is not None
-    assert p.liquid_viscosity_Pa_s is not None and p.vapor_viscosity_Pa_s is not None
+    if p.surface_tension_N_m is None or p.pressure_Pa is None:
+        raise AssertionError("invariant violated: p.surface_tension_N_m or p.pressure_Pa is None")
+    if p.liquid_viscosity_Pa_s is None or p.vapor_viscosity_Pa_s is None:
+        raise AssertionError(
+            "invariant violated: p.liquid_viscosity_Pa_s or p.vapor_viscosity_Pa_s is None"
+        )
     liquid, gas = p.liquid_density_kg_m3, p.vapor_density_kg_m3
     v_l, v_g = flux * (1 - quality) / liquid, flux * quality / gas
     speed, angle = v_l + v_g, radians(inclination)

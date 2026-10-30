@@ -2,7 +2,8 @@
 
 N_i denotes diffusive molar flux relative to the selected average velocity.
 First-order Stefan-Maxwell uses sum_j(x_j N_i - x_i N_j)/D_ij = -c d_i,
-d_i = grad(x_i) + (x_i-y_i) grad(log P). No body force or Soret term is inferred.
+d_i = grad(x_i) + (x_i-y_i) grad(log P). Soret requires explicit coefficients
+and an explicit log-temperature force; no body force or thermal term is inferred.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ class GasTransportFluxResult:
     fourier_heat_flux_W_m2: float
     diffusion_enthalpy_flux_W_m2: float
     total_heat_flux_W_m2: float
+    thermal_diffusion: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -38,11 +40,16 @@ class GasTransportFluxResult:
             "mass_fluxes_kg_m2_s",
             "driving_forces_per_m",
             "friction_residuals_per_m",
+            "thermal_diffusion",
         ):
             object.__setattr__(self, name, _frozen(getattr(self, name)))
 
     def to_dict(self) -> dict[str, Any]:
-        return {name: _plain(value) for name, value in vars(self).items()}
+        return {
+            name: _plain(value)
+            for name, value in vars(self).items()
+            if name != "thermal_diffusion" or value is not None
+        }
 
 
 def gas_transport_fluxes(
@@ -54,6 +61,7 @@ def gas_transport_fluxes(
     model: str,
     frame: str,
     thermal_diffusion: str,
+    temperature_log_gradient_per_m: float | None = None,
 ) -> GasTransportFluxResult:
     """One Cartesian flux component, with mass or molar reference velocity.
 
@@ -66,8 +74,25 @@ def gas_transport_fluxes(
     """
     if model not in {"mixture-averaged", "stefan-maxwell"} or frame not in {"mass", "molar"}:
         raise ValueError("declare a supported whole-mixture flux model and reference frame")
-    if thermal_diffusion != "off" or response.models.get("thermal_diffusion") != "off":
-        raise ValueError("Soret transport is unsupported; declare thermal_diffusion='off'")
+    enabled = thermal_diffusion == "cantera-3.2-mixture-soret"
+    if thermal_diffusion not in ("off", "cantera-3.2-mixture-soret") or (
+        response.models.get("thermal_diffusion") != thermal_diffusion
+    ):
+        raise ValueError("declare the matching explicit Soret/off thermal-diffusion response")
+    if enabled:
+        if model != "mixture-averaged" or response.thermal_diffusion_coefficients_kg_m_s is None:
+            raise ValueError(
+                "mixture Soret requires its matching mixture-averaged coefficient vector"
+            )
+        if (
+            temperature_log_gradient_per_m is None
+            or isinstance(temperature_log_gradient_per_m, bool)
+            or not isinstance(temperature_log_gradient_per_m, int | float)
+            or not isfinite(temperature_log_gradient_per_m)
+        ):
+            raise ValueError("Soret requires an explicit finite log-temperature gradient")
+    elif temperature_log_gradient_per_m is not None:
+        raise ValueError("an off request cannot silently consume a Soret force")
     ids = response.species_ids
     if set(mole_fraction_gradients_per_m) != set(ids):
         raise ValueError("composition gradient must contain exactly the original species")
@@ -112,9 +137,22 @@ def gas_transport_fluxes(
         if any(coefficients[s] is None and d[i] != 0 for i, s in enumerate(ids)):
             raise ValueError("pure-vertex mixture coefficient is directional; use stefan-maxwell")
         raw = -density * np.asarray([coefficients[s] or 0.0 for s in ids]) * d
+        if enabled:
+            raw += np.asarray(
+                [
+                    -response.thermal_diffusion_coefficients_kg_m_s[s]
+                    * temperature_log_gradient_per_m
+                    / masses[i]
+                    for i, s in enumerate(ids)
+                ]
+            )
+            if not np.all(np.isfinite(raw)):
+                raise ValueError("Soret driving force exceeds the finite flux domain")
         # One canonical approximation; the requested frame is a velocity change,
         # not a second independent approximation to the same physical flux.
         flux = raw - x * float(weights @ raw)
+    if enabled and not np.all(np.isfinite(flux)):
+        raise ValueError("Soret frame transformation exceeds the finite flux domain")
     mass_flux = masses * flux
     residual = friction @ (flux / density) + d if model == "stefan-maxwell" else None
     frame_residual = float(fsum(mass_flux) if frame == "mass" else fsum(flux))
@@ -122,6 +160,8 @@ def gas_transport_fluxes(
     enthalpy = fsum(
         response.partial_enthalpies_J_mol[s] * float(flux[i]) for i, s in enumerate(ids)
     )
+    if enabled and not all(isfinite(v) for v in (fourier, enthalpy, fourier + enthalpy)):
+        raise ValueError("Soret heat flux exceeds the finite numeric domain")
     return GasTransportFluxResult(
         model,
         frame,
@@ -134,4 +174,12 @@ def gas_transport_fluxes(
         fourier,
         enthalpy,
         fourier + enthalpy,
+        {
+            "model": thermal_diffusion,
+            "temperature_log_gradient_per_m": temperature_log_gradient_per_m,
+            "coefficients_kg_m_s": dict(response.thermal_diffusion_coefficients_kg_m_s),
+            "heat_policy": "final whole-vector diffusion enthalpy counted once",
+        }
+        if enabled
+        else None,
     )

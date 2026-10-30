@@ -85,12 +85,14 @@ def build_aqueous_filtration_world(
         allow_empty_vessels=tuple(sorted(members)),
         budget=budget,
     )
-    assert base.physics is not None
+    if not (base.physics is not None):
+        raise ValueError("aqueous filtration requires composition physics")
     states = dict(base.physics.initial_states)
     payload = base.to_dict()
     for f in filters:
         state = states[f.source_vessel]
-        assert state.equipment is not None
+        if not (state.equipment is not None):
+            raise ValueError("aqueous filtration source requires equipment state")
         record = EquipmentRecord(
             f.filter_id,
             AQUEOUS_FILTER_TYPE,

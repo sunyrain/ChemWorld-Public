@@ -29,9 +29,7 @@ from chemworld.cli import (
 )
 from chemworld.data.logging import load_jsonl
 from chemworld.data.submission import (
-    build_example_submission_bundle,
     init_submission_bundle,
-    summarize_submission_bundle,
     validate_submission_bundle,
     write_submission_manifest,
 )
@@ -40,7 +38,6 @@ from chemworld.eval.baseline_report import (
     SERIOUS_BASELINE_AGENTS,
     generate_baseline_report,
 )
-from chemworld.eval.paper_artifact import create_paper_artifact
 from chemworld.eval.private_artifact import (
     sign_private_eval_results,
     verify_private_eval_artifact,
@@ -48,9 +45,15 @@ from chemworld.eval.private_artifact import (
 from chemworld.eval.result_artifacts import build_verified_evaluation_result
 from chemworld.eval.runner import run_agent
 from chemworld.eval.seed_suite import official_seed_suite, official_seeds_for_task
+from chemworld.eval.submissions import (
+    summarize_submission_bundle,
+)
 from chemworld.eval.suite import run_suite
 from chemworld.legacy.agent_registry import make_agent
 from chemworld.legacy.leaderboard import aggregate_leaderboard, load_results
+from chemworld.legacy.submission_examples import (
+    build_example_submission_bundle,
+)
 from chemworld.task_design import serious_task_readiness_manifest
 from chemworld.tasks import CORE_TASK_IDS, SERIOUS_TASK_IDS, get_task, get_task_card, list_tasks
 
@@ -188,6 +191,7 @@ def _leaderboard(args: argparse.Namespace) -> None:
 def _suite(args: argparse.Namespace) -> None:
     config = _resolve_suite_args(args)
     results = run_suite(
+        agent_factory=make_agent,
         agent_name=args.agent,
         env_id=config["env"],
         world_splits=config["world_splits"],
@@ -215,6 +219,7 @@ def _baselines_report(args: argparse.Namespace) -> None:
     task_ids = _resolve_task_preset(args.preset, args.tasks)
     agents = _resolve_agent_preset(args.preset, args.agents)
     report = generate_baseline_report(
+        agent_factory=make_agent,
         task_ids=task_ids,
         agents=agents,
         seeds=args.seeds,
@@ -244,16 +249,6 @@ def _private_eval_verify(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
-def _artifact_create(args: argparse.Namespace) -> None:
-    task_ids = _resolve_task_preset(args.preset, args.tasks)
-    agents = _resolve_artifact_agent_preset(args.preset, args.agents)
-    summary = create_paper_artifact(
-        output_dir=args.output_dir,
-        task_ids=task_ids,
-        agents=agents,
-        seeds=args.seeds,
-    )
-    print(json.dumps(summary, indent=2, sort_keys=True))
 
 
 def _resolve_task_preset(preset: str | None, tasks: list[str] | None) -> list[str]:
@@ -272,15 +267,6 @@ def _resolve_agent_preset(preset: str | None, agents: list[str] | None) -> list[
     return list(CORE_BASELINE_AGENTS)
 
 
-def _resolve_artifact_agent_preset(
-    preset: str | None,
-    agents: list[str] | None,
-) -> list[str]:
-    if agents:
-        return agents
-    if preset == "serious":
-        return list(SERIOUS_BASELINE_AGENTS)
-    return ["scripted_chemistry"]
 
 
 def _tasks_card(args: argparse.Namespace) -> None:
@@ -440,40 +426,10 @@ def build_parser() -> argparse.ArgumentParser:
     private_verify_parser.add_argument("--salt", required=True)
     private_verify_parser.set_defaults(func=_private_eval_verify)
 
-    artifact_parser = subparsers.add_parser(
-        "artifact",
-        help="Generate local paper/preprint artifact folders.",
-    )
-    artifact_subparsers = artifact_parser.add_subparsers(
-        dest="artifact_command",
-        required=True,
-    )
-    artifact_create_parser = artifact_subparsers.add_parser(
-        "create",
-        help="Create a benchmark release artifact.",
-    )
-    artifact_create_parser.add_argument("--output-dir", default="artifact")
-    artifact_create_parser.add_argument(
-        "--preset",
-        choices=["core", "serious"],
-        default="core",
-        help="Use a frozen artifact preset unless --tasks or --agents override it.",
-    )
-    artifact_create_parser.add_argument(
-        "--tasks",
-        nargs="+",
-    )
-    artifact_create_parser.add_argument(
-        "--agents",
-        nargs="+",
-    )
-    artifact_create_parser.add_argument("--seeds", nargs="+", type=int, default=[0])
-    artifact_create_parser.set_defaults(func=_artifact_create)
-
     tasks_parser = subparsers.add_parser("tasks", help="Inspect benchmark task specs.")
     tasks_subparsers = tasks_parser.add_subparsers(dest="tasks_command", required=True)
     tasks_list_parser = tasks_subparsers.add_parser("list", help="List registered tasks.")
-    tasks_list_parser.set_defaults(func=_tasks_list)
+    tasks_list_parser.set_defaults(func=_tasks_list, format="json")
     tasks_show_parser = tasks_subparsers.add_parser("show", help="Show one registered task.")
     tasks_show_parser.add_argument("task_id")
     tasks_show_parser.set_defaults(func=_tasks_show)
@@ -502,7 +458,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
     )
     scenarios_list_parser = scenarios_subparsers.add_parser("list", help="List scenarios.")
-    scenarios_list_parser.set_defaults(func=_scenarios_list)
+    scenarios_list_parser.set_defaults(func=_scenarios_list, format="json")
     scenarios_show_parser = scenarios_subparsers.add_parser("show", help="Show one scenario.")
     scenarios_show_parser.add_argument("scenario_id")
     scenarios_show_parser.add_argument("--split")

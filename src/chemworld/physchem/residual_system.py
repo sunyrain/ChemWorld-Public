@@ -186,12 +186,18 @@ def finite_jacobian(
 
 @dataclass(frozen=True)
 class ResidualDerivatives:
+    """Derivative policy; optional numerical state pattern lists possible rows per column.
+
+    A pattern is a conservative structural declaration, never inferred from
+    values that happen to be zero at one point. Existing defaults stay dense.
+    """
     mode: str
     state: Callable | None = None
     rate: Callable | None = None
     parameter: Callable | None = None
     time: Callable | None = None
     relative_step: float = 6e-6
+    state_sparsity: tuple[tuple[int, ...], ...] | None = None
 
     def __post_init__(self):
         if self.mode not in {"analytic", "finite_difference", "hybrid"}:
@@ -205,6 +211,13 @@ class ResidualDerivatives:
             raise ValueError("derivative providers must be callable")
         if not isfinite(self.relative_step) or self.relative_step <= 0:
             raise ValueError("difference step must be finite and positive")
+        if self.state_sparsity is not None:
+            if self.mode == "analytic" or self.state is not None:
+                raise ValueError("state sparsity is only an explicit numerical derivative policy")
+            from chemworld.physchem.residual_sparse_difference import validate_column_sparsity
+            object.__setattr__(self, "state_sparsity", validate_column_sparsity(
+                self.state_sparsity, len(self.state_sparsity)
+            ))
 
 
 @dataclass(frozen=True)
@@ -239,6 +252,10 @@ class ResidualSystem:
             raise ValueError("parameter outside declared bounds")
         if not isfinite(self.time_scale_s) or self.time_scale_s <= 0:
             raise ValueError("nominal time scale must be finite and positive")
+        if self.derivatives.state_sparsity is not None:
+            from chemworld.physchem.residual_sparse_difference import validate_column_sparsity
+            validate_column_sparsity(self.derivatives.state_sparsity,
+                                     len(self.variables), len(self.equations))
 
     @property
     def differential(self):
@@ -335,7 +352,13 @@ class ResidualEvaluator:
             def function(v):
                 return self.value(v[0], y, rate)
 
-        answer = finite_jacobian(
+        numerical = finite_jacobian
+        options = {}
+        if kind == "state" and providers.state_sparsity is not None:
+            from chemworld.physchem.residual_sparse_difference import sparse_finite_jacobian
+            numerical = sparse_finite_jacobian
+            options["sparsity"] = providers.state_sparsity
+        answer = numerical(
             function,
             point,
             scales,
@@ -343,6 +366,7 @@ class ResidualEvaluator:
             upper=high,
             relative_step=providers.relative_step,
             indices=columns,
+            **options,
         )
         return answer[:, 0] if kind == "time" else answer
 
@@ -425,7 +449,8 @@ class RootResult:
 
 
 def solve_root(
-    function, initial, *, jacobian, variables, residual_scales, policy=DEFAULT_ROOT_POLICY
+    function, initial, *, jacobian, variables, residual_scales, policy=DEFAULT_ROOT_POLICY,
+    progress=None,
 ):
     """Projected Newton with a scaled gradient fallback and residual merit test.
 
@@ -474,6 +499,13 @@ def solve_root(
         f = evaluate(x)
         for iteration in range(policy.maximum_iterations + 1):
             norm = float(np.linalg.norm(f, ord=np.inf))
+            if progress is not None:
+                progress({
+                    "event": "root-iteration", "iteration": iteration,
+                    "maximum_iterations": policy.maximum_iterations,
+                    "root_evaluations": calls, "backtracks": backtracks,
+                    "scaled_residual_norm": norm,
+                })
             if norm <= policy.tolerance:
                 return finish(True)
             if iteration == policy.maximum_iterations:
@@ -487,10 +519,14 @@ def solve_root(
             step = linear_solve(scaled, -f)
             gradient = np.asarray(scaled.T @ f).ravel()
             merit = 0.5 * float(f @ f)
+            if not np.all(np.isfinite(gradient)) or not isfinite(merit):
+                return finish(False, "nonfinite_scaled_gradient_or_merit")
             for direction_kind in ("newton", "gradient"):
                 if direction_kind == "gradient":
                     jg = scaled @ gradient
                     curvature = float(jg @ jg)
+                    if not np.all(np.isfinite(jg)) or not isfinite(curvature):
+                        return finish(False, "nonfinite_gradient_curvature")
                     if curvature == 0:
                         continue
                     step = -gradient * (float(gradient @ gradient) / curvature)
@@ -541,7 +577,7 @@ class SteadyResidualResult:
 
 
 def solve_steady_residual(
-    system, initial, *, time_s=0.0, policy=DEFAULT_ROOT_POLICY, sensitivity=False
+    system, initial, *, time_s=0.0, policy=DEFAULT_ROOT_POLICY, sensitivity=False, progress=None
 ):
     evaluator = ResidualEvaluator(system)
     zero = np.zeros(len(system.variables))
@@ -552,6 +588,7 @@ def solve_steady_residual(
         variables=system.variables,
         residual_scales=system.residual_scales,
         policy=policy,
+        progress=progress,
     )
     response = None
     if root.success and sensitivity:

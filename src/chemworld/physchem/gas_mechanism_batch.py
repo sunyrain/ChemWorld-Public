@@ -7,6 +7,14 @@ from math import isfinite
 from chemworld.physchem.coupled_system import CoupledSystem, HeatFlux
 from chemworld.physchem.reaction_network import R_J_PER_MOL_K, ReactionNetworkSpec
 from chemworld.physchem.reactor_solvers import reaction_network_process
+from chemworld.physchem.solver_backend import ODESolverPolicy
+
+CONTINUOUS_GAS_BATCH_ODE_POLICY = ODESolverPolicy(
+    solver_id="chemworld_gas_batch_continuous_bdf_v1",
+    method="BDF",
+    rtol=1.0e-10,
+    atol=1.0e-14,
+)
 
 
 @dataclass(frozen=True)
@@ -108,6 +116,12 @@ def gas_batch_system(network: ReactionNetworkSpec, *, heat_flux=None, policy=Non
     if set(thermo) != set(network.species_ids):
         raise ValueError("gas batch requires all declared thermochemistry")
     elements = {element for species in network.species for element in species.composition}
+    selected_policy = policy
+    if selected_policy is None and any(
+        getattr(value, "boundary_policy", "source") == "continuous-energy"
+        for value in thermo.values()
+    ):
+        selected_policy = CONTINUOUS_GAS_BATCH_ODE_POLICY
     return CoupledSystem(
         IdealGasThermodynamics(thermo),
         (reaction_network_process(network, species_thermo=thermo),),
@@ -116,5 +130,5 @@ def gas_batch_system(network: ReactionNetworkSpec, *, heat_flux=None, policy=Non
             element: {s.species_id: s.composition.get(element, 0) for s in network.species}
             for element in elements
         },
-        **({"policy": policy} if policy is not None else {}),
+        **({"policy": selected_policy} if selected_policy is not None else {}),
     )

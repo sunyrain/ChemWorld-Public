@@ -25,6 +25,7 @@ from chemworld.physchem.battery_half_cell_dfn import (
     PHI_E,
     BatteryHalfCellDFNSpec,
     BatteryHalfCellElectrolyteSpec,
+    HalfCellDFNReadout,
     LithiumMetalSaltKineticsSpec,
     advance_half_cell_dfn,
     half_cell_dfn_control_current,
@@ -148,6 +149,19 @@ def test_codec_real_two_domain_layout_and_fixed_foil_geometry():
     del encoded["metal_kinetics"]
     with pytest.raises(ValueError, match="fields"):
         BatteryHalfCellDFNSpec.from_dict(encoded)
+
+
+def test_dfn_readout_codec_is_strict_and_json_safe():
+    spec = model()
+    readout = half_cell_dfn_readout(spec, spec.initial_state(), 0.2)
+    payload = readout.to_dict()
+    assert HalfCellDFNReadout.from_dict(json.loads(json.dumps(payload))) == readout
+    with pytest.raises(ValueError, match="unknown DFN"):
+        HalfCellDFNReadout.from_dict({**payload, "model_family": "other"})
+    with pytest.raises(ValueError, match="fields"):
+        HalfCellDFNReadout.from_dict({**payload, "extra": 1})
+    with pytest.raises(ValueError, match="finite"):
+        HalfCellDFNReadout.from_dict({**payload, "voltage_V": float("nan")})
 
 
 @pytest.mark.parametrize(

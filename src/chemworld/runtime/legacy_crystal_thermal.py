@@ -5,7 +5,7 @@ equation is retained and labelled; no Cp is renamed as Cv or given gas data.
 """
 
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import replace
 
 from chemworld.foundation.state_ledgers import PhaseLedger, PhaseRecord
 from chemworld.physchem.coupled_system import HeatFlux
@@ -18,6 +18,9 @@ from chemworld.physchem.crystallization_units import (
     SolubilityCurveSpec,
 )
 from chemworld.physchem.elements import molecular_weight
+from chemworld.physchem.legacy_crystal_enthalpy import (
+    LegacyCrystalEnthalpy as LegacyCrystalEnthalpy,
+)
 from chemworld.physchem.reactor_shared import HeatTransferSpec
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.world.mixtures import (
@@ -25,38 +28,6 @@ from chemworld.world.mixtures import (
     volumetric_heat_capacity,
     working_solvents,
 )
-
-
-@dataclass(frozen=True)
-class LegacyCrystalEnthalpy:
-    species: dict[str, float]
-    support_heat_capacity_J_K: float
-    reference_temperature_K: float = 298.15
-
-    @property
-    def inventory_keys(self):
-        return tuple(self.species)
-
-    def heat_capacity_j_k(self, state):
-        return self.support_heat_capacity_J_K
-
-    def internal_energy_j(self, state):
-        return None
-
-    def control_volume_enthalpy_j(self, state):
-        return self.support_heat_capacity_J_K * (
-            state.temperature_K - self.reference_temperature_K
-        ) + sum(self.species[k] * n for k, n in state.amounts_mol.items())
-
-    def species_energy_j_mol(self, key, temperature):
-        return self.species[key]
-
-    def chemical_energy_rate_w(self, state, derivatives, contributions):
-        if any(c.legacy_reaction_energy_W is not None for c in contributions):
-            raise ValueError(
-                "legacy crystal contact does not certify simultaneous reactive calorics"
-            )
-        return sum(self.species[k] * v for k, v in derivatives.items())
 
 
 class LegacyCrystalThermalRuntime:
@@ -244,6 +215,21 @@ class LegacyCrystalThermalRuntime:
                 heat=heat,
                 energy_basis="legacy_condensed_enthalpy",
             )
+            # The finite crystal solver owns physical time and heat; the preset
+            # runtime still owns its published operation-cost policy. Settle it
+            # once using the accepted interval, not the requested duration.
+            operation = action.get("operation", "heat" if heat else "wait")
+            if operation in {"heat", "wait", "cool_crystallize"}:
+                base, hourly = (0.018, 0.018) if operation == "cool_crystallize" else (0.01, 0.015)
+                cost = base + result.actual_duration_s / 3600.0 * hourly
+                cost += abs(result.boundary_heat_J) / 250_000.0
+                final = committed.state
+                committed = replace(
+                    committed,
+                    state=final.replace(ledger=final.ledger.with_updates(
+                        cost=final.ledger.cost + cost,
+                    )),
+                )
             return committed
         except (ArithmeticError, RuntimeError, ValueError) as exc:
             return ModelProviderResult(

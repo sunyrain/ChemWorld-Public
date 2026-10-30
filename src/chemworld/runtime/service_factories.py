@@ -248,6 +248,24 @@ def gas_reactor_network(composition):
     return GasReactorNetworkRuntime(composition)
 
 
+def thermal_fixed_bed(composition):
+    from chemworld.runtime.thermal_fixed_bed_world import ThermalFixedBedRuntime
+
+    return ThermalFixedBedRuntime(composition)
+
+
+def configure_thermal_bed(state, action):
+    from chemworld.runtime.thermal_fixed_bed_world import configure_thermal_bed as configure
+
+    return configure(state, action)
+
+
+def thermal_bed_boundary_choices(state, validator=None):
+    from chemworld.runtime.thermal_fixed_bed_world import bed_boundary_choices
+
+    return bed_boundary_choices(state, validator)
+
+
 def aqueous_reactive_transport(composition):
     from chemworld.runtime.aqueous_reactive_transport import AqueousReactiveTransportRuntime
 

@@ -81,7 +81,8 @@ class MolecularProcessPath:
                     failure_reason=result.failure_reason,
                     diagnostics={"failed_device_index": len(reports) - 1, "devices": reports},
                 )
-            assert result.outlet is not None
+            if result.outlet is None:
+                raise AssertionError("invariant violated: result.outlet is not None")
             stream = result.outlet
             heat += result.heat_duty_W
             work += result.shaft_work_W
@@ -170,7 +171,8 @@ def build_molecular_process_receiver(
     evaluated = path.evaluate()
     if not evaluated.success:
         return None, evaluated
-    assert evaluated.outlet is not None
+    if evaluated.outlet is None:
+        raise AssertionError("invariant violated: evaluated.outlet is not None")
     stream = evaluated.outlet
     maximum_temperature = path.domain.temperature_range_K[1]
     if maximum_temperature_K is not None:

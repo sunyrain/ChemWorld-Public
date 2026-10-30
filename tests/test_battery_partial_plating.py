@@ -153,6 +153,16 @@ def test_inventory_ledger_exposes_declared_constant_decay_without_relabeling_pla
         s.plating.initial_plated_mol, rel=2e-6)
 
 
+def test_public_readout_exposes_partial_deactivation_rate():
+    s = model(rate=0., gamma=.02)
+    readout = plating_readout(s, s.initial_state(), 0.)
+    assert readout.deactivation_rate_mol_s == pytest.approx(.02 * 4e-5)
+
+    # Existing plating modes retain the compatible zero default.
+    legacy = old_model()
+    assert plating_readout(legacy, legacy.initial_state(), 0.).deactivation_rate_mol_s == 0.
+
+
 def test_gamma_zero_does_not_insert_structural_zero_in_shared_jacobian():
     s = model(gamma=0.)
     old = replace(s, plating=old_declaration())

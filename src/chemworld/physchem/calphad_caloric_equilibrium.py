@@ -7,6 +7,7 @@ singularity at an invariant transition is resolved by the extensive H row.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from itertools import combinations
@@ -231,6 +232,8 @@ class CalphadCaloricProblem:
         if self._warm is not None:
             selections.remove(self._warm[0])
             selections.insert(0, self._warm[0])
+        # Exact constitutive points only; scope ends with this PH solve.
+        phase_parts = OrderedDict()
         for selected in selections:
             count = len(selected)
             active = [self.pool[i] for i in selected]
@@ -248,7 +251,8 @@ class CalphadCaloricProblem:
                 if selected == self._warm[0]:
                     initial = self._warm[1].copy()
 
-            def parts(z: Any, active: Any = active, slices: Any = slices) -> Any:
+            def parts(z: Any, active: Any = active, slices: Any = slices,
+                      count: int = count) -> Any:
                 temperature = float(z[-1])
                 out = []
                 for (index, *_), sl in zip(active, slices, strict=True):
@@ -261,6 +265,11 @@ class CalphadCaloricProblem:
                         spec.equilibrium.policy.site_floor,
                     )
                     q = z[sl]
+                    part_key = (index, temperature, tuple(map(float, q))) if count > 1 else None
+                    if count > 1 and part_key in phase_parts:
+                        out.append(phase_parts[part_key])
+                        phase_parts.move_to_end(part_key)
+                        continue
                     surface.values(q)
 
                     def evaluate(coords: Any, surface: Any = surface, model: Any = model) -> Any:
@@ -282,6 +291,10 @@ class CalphadCaloricProblem:
                     out.append(
                         (v, j[:, 1:], v[0] - temperature * j[0, 0], -j[0, 0], surface.sites(q))
                     )
+                    if count > 1:
+                        phase_parts[part_key] = out[-1]
+                        if len(phase_parts) > 128:
+                            phase_parts.popitem(last=False)
                 return out
 
             def equations(

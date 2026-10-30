@@ -67,24 +67,28 @@ def solve_tube_pitch(
             if abs(divisor) < 1e-15:
                 raise ValueError("pitch is indeterminate at this angle")
             component = normal_m if normal_m is not None else parallel_m
-            assert component is not None
+            if component is None:
+                raise AssertionError("invariant violated: component is not None")
             pitch_m = component / divisor
         parallel_m, normal_m = pitch_m * cos(angle), pitch_m * sin(angle)
     elif pitch_m is not None:
         _positive(pitch_m, "pitch")
         coordinate = normal_m if normal_m is not None else parallel_m
-        assert coordinate is not None
+        if coordinate is None:
+            raise AssertionError("invariant violated: coordinate is not None")
         if coordinate > pitch_m:
             raise ValueError("pitch component exceeds pitch")
         angle = asin(coordinate / pitch_m) if normal_m is not None else acos(coordinate / pitch_m)
         angle_degrees = degrees(angle)
         parallel_m, normal_m = pitch_m * cos(angle), pitch_m * sin(angle)
     else:
-        assert parallel_m is not None and normal_m is not None
+        if parallel_m is None or normal_m is None:
+            raise AssertionError("invariant violated: parallel_m or normal_m is None")
         pitch_m = hypot(parallel_m, normal_m)
         _positive(pitch_m, "pitch")
         angle_degrees = degrees(asin(normal_m / pitch_m))
-    assert angle_degrees is not None and parallel_m is not None and normal_m is not None
+    if angle_degrees is None or parallel_m is None or normal_m is None:
+        raise AssertionError("invariant violated: angle_degrees or parallel_m or normal_m is None")
     _positive(pitch_m, "pitch")
     return angle_degrees, pitch_m, parallel_m, normal_m
 
@@ -123,16 +127,19 @@ def helical_coil_geometry(
     if sum(v is not None for v in (pitch_m, height_m, turns)) != 2:
         raise ValueError("exactly two of pitch, height and turns required")
     if turns is None:
-        assert height_m is not None and pitch_m is not None
+        if height_m is None or pitch_m is None:
+            raise AssertionError("invariant violated: height_m or pitch_m is None")
         _positive(pitch_m, "pitch")
         turns = height_m / pitch_m
     elif pitch_m is None:
-        assert height_m is not None
+        if height_m is None:
+            raise AssertionError("invariant violated: height_m is not None")
         _positive(turns, "turns")
         pitch_m = height_m / turns
     else:
         height_m = turns * pitch_m
-    assert height_m is not None
+    if height_m is None:
+        raise AssertionError("invariant violated: height_m is not None")
     for value in (pitch_m, turns, height_m):
         _positive(value, "coil dimension")
     if (pitch_m < dt and not isclose(pitch_m, dt, rel_tol=1e-12)) or coil_diameter_m < dt:
@@ -364,9 +371,11 @@ def air_cooled_geometry(
     if fin_diameter_m is not None:
         fin_height_m = (fin_diameter_m - diameter) / 2
     else:
-        assert fin_height_m is not None
+        if fin_height_m is None:
+            raise AssertionError("invariant violated: fin_height_m is not None")
         fin_diameter_m = diameter + 2 * fin_height_m
-    assert fin_height_m is not None
+    if fin_height_m is None:
+        raise AssertionError("invariant violated: fin_height_m is not None")
     _positive(fin_height_m, "fin height")
     if (fin_density_per_m is None) == (fin_interval_m is None):
         raise ValueError("one fin density/interval required")
@@ -374,10 +383,12 @@ def air_cooled_geometry(
         _positive(fin_interval_m, "fin interval")
         fin_density_per_m = 1 / fin_interval_m
     else:
-        assert fin_density_per_m is not None
+        if fin_density_per_m is None:
+            raise AssertionError("invariant violated: fin_density_per_m is not None")
         _positive(fin_density_per_m, "fin density")
         fin_interval_m = 1 / fin_density_per_m
-    assert fin_density_per_m is not None
+    if fin_density_per_m is None:
+        raise AssertionError("invariant violated: fin_density_per_m is not None")
     if fin_interval_m <= thickness:
         raise ValueError("fin thickness blocks air passage")
     diagonal = hypot(parallel, 0.5 * normal)

@@ -5,6 +5,10 @@ import math
 from pathlib import Path
 
 import pytest
+from scripts.check_score_replay import (
+    audit_score_replay_protocol,
+    load_score_replay_protocol,
+)
 
 from chemworld.data.logging import load_jsonl
 from chemworld.eval.metrics import evaluate_records
@@ -15,10 +19,6 @@ from chemworld.eval.result_artifacts import (
     validate_verified_evaluation_result,
 )
 from chemworld.eval.runner import run_agent
-from chemworld.eval.score_replay_audit import (
-    audit_score_replay_protocol,
-    load_score_replay_protocol,
-)
 from chemworld.legacy.agent_registry import make_agent
 from chemworld.legacy.leaderboard import aggregate_leaderboard
 
@@ -106,5 +106,5 @@ def test_score_replay_audit(tmp_path: Path) -> None:
         workspace=tmp_path / "audit",
     )
     assert report["controls_ready"] is True
-    assert report["publication_ready"] is False
+    assert report["status"] == "passed"
     assert all(report["adversarial_probes"].values())

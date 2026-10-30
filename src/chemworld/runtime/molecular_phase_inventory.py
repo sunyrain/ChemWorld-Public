@@ -158,7 +158,8 @@ def _install_molecular_phase_result(
             if specification.caloric_model is not None:
                 caloric = specification.caloric_model.state(temperature_K,
                     phase.state.molar_density_mol_m3, phase.state.mole_fractions)
-                assert enthalpies is not None
+                if enthalpies is None:
+                    raise AssertionError("invariant violated: enthalpies is not None")
                 enthalpies[target.phase_id] = phase.amount_mol*caloric.enthalpy_J_mol
             previous = ledger.phases.get(target.phase_id)
             installed[target.phase_id] = PhaseRecord(target.phase_id, vessel_id, target.phase_type,

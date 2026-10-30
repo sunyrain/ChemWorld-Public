@@ -105,12 +105,16 @@
                   "third_body_arrhenius",
                   "lindemann_falloff",
                   "troe_falloff",
+                  "sri_falloff",
+                  "tsang_falloff",
+                  "blowers_masel",
                   "pressure_log",
                   "chebyshev",
                   "catalytic_activity",
                   "catalyst_deactivation",
                   "langmuir_hinshelwood",
-                  "michaelis_menten"
+                  "michaelis_menten",
+                  "energy_grain_collision"
                 ]
               },
               "parameters": {

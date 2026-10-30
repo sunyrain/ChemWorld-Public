@@ -140,10 +140,10 @@ def native_case(data, radial_cells, size_cells=None):
     from dataclasses import replace
 
     from battery_thevenin_cases import table
-    from chemworld.physchem.battery_ocp import ElectrodeOCPSpec
 
     from chemworld.data.scientific_inputs import InputSource
     from chemworld.physchem.battery_materials import ElectrodeOCV
+    from chemworld.physchem.battery_ocp import ElectrodeOCPSpec
     from chemworld.physchem.data_conflicts import DataSourceProvenance
 
     source = InputSource(DataSourceProvenance("synthetic-hysteresis-branches", 0,

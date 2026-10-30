@@ -127,9 +127,26 @@ class CatalyticSpeciesThermo:
     adsorbate: HarmonicAdsorbateThermo | HinderedAdsorbateThermo | None = None
     surface_declaration: Mapping[str, Any] | None = None
     aqueous_standard: AqueousStandardThermo | None = None
+    caloric_boundary_policy: str = "source"
 
     def __post_init__(self) -> None:
         validate_source(self.source)
+        if not isinstance(
+            self.caloric_boundary_policy, str
+        ) or self.caloric_boundary_policy not in {
+            "source",
+            "continuous-energy",
+        }:
+            raise ValueError("unsupported catalytic caloric boundary policy")
+        if self.caloric_boundary_policy != "source":
+            declaration = (
+                self.gas_declaration if self.species.phase == "gas" else self.surface_declaration
+            )
+            if (
+                not isinstance(declaration, Mapping)
+                or declaration.get("thermo", {}).get("model") != "NASA7"
+            ):
+                raise ValueError("continuous-energy catalytic policy requires gas/surface NASA7")
         if not self.reference_frame:
             raise ValueError(
                 "catalytic energies require an explicit common caloric reference frame"
@@ -195,7 +212,9 @@ class CatalyticSpeciesThermo:
         if self.gas_declaration is None:
             raise ValueError("surface species do not have gas caloric semantics")
         return species_thermo_from_cantera_yaml(
-            species_id=self.species.species_id, **_plain_declaration(self.gas_declaration)
+            species_id=self.species.species_id,
+            boundary_policy=self.caloric_boundary_policy,
+            **_plain_declaration(self.gas_declaration),
         )
 
     @cached_property
@@ -203,7 +222,9 @@ class CatalyticSpeciesThermo:
         if self.surface_declaration is None:
             raise ValueError("this surface species has no source polynomial thermochemistry")
         return species_thermo_from_cantera_yaml(
-            species_id=self.species.species_id, **_plain_declaration(self.surface_declaration)
+            species_id=self.species.species_id,
+            boundary_policy=self.caloric_boundary_policy,
+            **_plain_declaration(self.surface_declaration),
         )
 
     def evaluate(self, temperature_K: float) -> SpeciesThermoState:
@@ -257,6 +278,11 @@ class CatalyticSpeciesThermo:
             if self.gas_declaration is None
             else _plain_declaration(self.gas_declaration),
             "adsorbate": None if self.adsorbate is None else self.adsorbate.to_dict(),
+            **(
+                {"caloric_boundary_policy": self.caloric_boundary_policy}
+                if self.caloric_boundary_policy != "source"
+                else {}
+            ),
             **(
                 {"aqueous_standard": self.aqueous_standard.to_dict()}
                 if self.aqueous_standard is not None

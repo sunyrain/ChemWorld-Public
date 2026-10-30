@@ -167,7 +167,7 @@ class ChemWorldRuntime:
         self.compiled_composition = (
             None
             if composition is None
-            else compile_world_composition(composition, modules=self.domain_modules)
+            else compile_world_composition(composition, modules=domain_modules)
         )
         if self.compiled_composition is not None:
             self.domain_modules = self.compiled_composition.spec.modules
@@ -957,6 +957,11 @@ class ChemWorldRuntime:
             info["campaign_terminal"] = True
             info["campaign_terminal_reason"] = self._campaign_terminal_reason
         self._done = terminated or truncated
+        # Report only after transaction, resource, rollback and ending fields are final.
+        # The public projection does not enumerate schemas or execute recovery actions.
+        from chemworld.agent_interface import action_failure_feedback
+
+        info.update(action_failure_feedback(self, info))
         self._last_info = deepcopy(info)
         return SessionResult(self.observe(), reward, terminated, truncated, info)
 

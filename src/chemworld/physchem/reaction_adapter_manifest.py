@@ -11,13 +11,13 @@ from chemworld.physchem.maturity import (
     ModelExecutionRole,
     ModelProviderContract,
 )
+from chemworld.physchem.model_provider import ModelProviderResult
 from chemworld.physchem.reaction_network_specs import ReactionSpec
 from chemworld.physchem.reaction_rate_contracts import (
     CANTERA_COMMIT,
     RMG_PY_COMMIT,
     audit_reaction_rate_contract,
 )
-from chemworld.runtime.kernel_contracts import ModelProviderResult
 
 OWNED_PATHS = (
     "src/chemworld/physchem/reaction_rate_contracts.py",

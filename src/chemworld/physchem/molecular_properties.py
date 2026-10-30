@@ -93,7 +93,8 @@ class MolecularEOSSpec:
         # property packages use the ideal gas at the same pressure instead.
         entropy = state.residual_entropy_J_mol_K + R_J_PER_MOL_K * log(z)
         enthalpy = state.residual_enthalpy_J_mol
-        assert state.log_fugacity_coefficients is not None
+        if state.log_fugacity_coefficients is None:
+            raise AssertionError("invariant violated: state.log_fugacity_coefficients is None")
         phi = tuple(exp(v) for v in state.log_fugacity_coefficients)
         if any(not isfinite(v) or v <= 0 for v in phi):
             raise ValueError("nonfinite molecular fugacity coefficient")
