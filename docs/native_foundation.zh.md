@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_foundation.zh.md; edit the upstream guide. -->
+
 # 原生物理会话
 
 ## 工质与分子过程 {#working-fluids-and-molecular-processes}
@@ -361,7 +363,7 @@ chemworld verify --submission run.jsonl
 
 这种气体反应、五步表面速率、有限的材料转移、共享的内部能量/比热容平衡以及加热器模型，都是可执行的物理模型。测试中出现的数值失效、过程失效和无效读数，是接口上的测试，而不是实际的失效机制。热力学停止使用真实事件。属性表和速率参数是有限的合成合约。表面流动、任意的热力学和新的电极动力学，则不在这个基础部分。
 
-原生的接受范围包括固定的原生/健身房/CLI/代理历史记录，以及两种观察噪声模式，直接/检测结果，回放和保留的设备。安装检查同时构建了两个档案，并在不进行检查的情况下运行安装的模块，其中 Cantera 不存在，并且从子环境中移除了模型密钥。报告的平台结果仅适用于实际运行；这是一种开发接受，而不是正式发布或声称普遍的化学有效性。请参阅 [的分发边界和](current-foundation.zh.md#source-synchronization) ，了解包装和冻结发布的细节。
+原生的接受范围包括固定的原生/健身房/CLI/代理历史记录，以及两种观察噪声模式，直接/检测结果，回放和保留的设备。安装检查同时构建了两个档案，并在不进行检查的情况下运行安装的模块，其中 Cantera 不存在，并且从子环境中移除了模型密钥。报告的平台结果仅适用于实际运行；这是一种开发接受，而不是正式发布或声称普遍的化学有效性。请参阅 [的分发边界和](https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/current-foundation.zh.md#source-synchronization) ，了解包装和冻结发布的细节。
 
 ## 当前状态下的特性 {#properties-at-the-current-state}
 
@@ -507,7 +509,7 @@ print(result.observation.channel("peak_1_area"))
 uv run --no-sync python -m chemworld.examples.programmed_chromatography --output /tmp/chromatography-example
 ```
 
-选择一个新的输出目录；现有的结果不会被覆盖。相同的模块是从已安装的轮（wheel）运行的。这是一个有限的开发示例，而不是一个真实的柱：三个合成分析物、对称的峰、合并的残差、固定的离线运行时间以及一个不随时间变化的宿主。连续的流动相使用、柱的空间运输和仪器的热能利用均未建模，因此无法进行能量守恒或一般的梯度-柱相关性声明。请参阅 [的开发验收](current-foundation.zh.md#source-synchronization) 。
+选择一个新的输出目录；现有的结果不会被覆盖。相同的模块是从已安装的轮（wheel）运行的。这是一个有限的开发示例，而不是一个真实的柱：三个合成分析物、对称的峰、合并的残差、固定的离线运行时间以及一个不随时间变化的宿主。连续的流动相使用、柱的空间运输和仪器的热能利用均未建模，因此无法进行能量守恒或一般的梯度-柱相关性声明。请参阅 [的开发验收](https://github.com/sunyrain/ChemWorld-Public/blob/main/docs/current-foundation.zh.md#source-synchronization) 。
 
 ## 原生单颗粒锂电池 {#native-single-particle-lithium-battery}
 

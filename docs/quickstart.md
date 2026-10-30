@@ -1,23 +1,21 @@
 # 5-minute quickstart
 
-Install the environment, run three operations and receive an instrument reading.
+Install the environment and run one experiment with retained material and a final assay.
 These examples use synthetic models and need no model key or optional upstream solver.
 
 ```bash
 git clone https://github.com/sunyrain/ChemWorld-Public.git
 cd ChemWorld-Public
 uv sync --locked --extra dev
-uv run --no-sync chemworld capabilities --format json
-uv run --no-sync python -m chemworld.examples.user_reward
+uv run --no-sync python -m chemworld.examples.native_surface_research --bulk --mobile --terminal-assay
 ```
 
-The last command adds two feeds and measures pressure. Its optional reward
-is an ordinary user function; changing it does not change the acquired observation.
-
-For a longer experiment with retained material, transfer and a terminal assay:
+The command prints a JSON execution record. Next, inspect available capabilities
+or try the small user-defined reward example:
 
 ```bash
-uv run --no-sync python -m chemworld.examples.native_surface_research --bulk --mobile --terminal-assay
+uv run --no-sync chemworld capabilities --format summary
+uv run --no-sync python -m chemworld.examples.user_reward
 ```
 
 Next, [design an environment](environment-authoring.md), [connect your own agent](environment.md),

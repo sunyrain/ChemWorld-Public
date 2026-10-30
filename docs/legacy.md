@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/legacy.en.md; edit the upstream guide. -->
+
 # Historical applications
 
 ChemWorld is a programmable physical environment. Rankings, preset policy factories
@@ -11,17 +13,26 @@ freeze procedures do not govern general environment development. Its original pa
 contents remain unchanged for bound historical evidence; the retained v1 composition
 contract likewise describes its first-paper research scope.
 
+The old Work I, Work II, S0/G2, mechanism-adaptation and Experiment 1 applications,
+including their study runners and evidence pipeline, have been removed from the
+current product. Current NCS organization and analyses live beside its notebook.
+Their bound guides and
+configurations remain historical evidence. See the
+[research application archive](https://github.com/sunyrain/ChemWorld/blob/main/archive/README.md)
+for the preserved source; these applications are no longer maintained entry points.
+
 | Historical feature | Explicit archive entry |
 | --- | --- |
-| run, evaluate, leaderboard, suite, baselines, submission and old release commands | `python -m chemworld.legacy.cli --help` |
+| run, evaluate, leaderboard, suite, baselines and submission | `python -m chemworld.legacy.cli --help` |
 | Ranking aggregation | `chemworld.legacy.leaderboard` |
 | Preset policy factory | `chemworld.legacy.agent_registry.make_agent` |
 | Eleven baseline/adapter modules | `chemworld.legacy.agents`: bo, greedy, lhs, random, event, rl, llm, live_llm, diagnostic_live_llm, documented_codex_g2, structured_g2 |
 
 These archived applications remain distributed for explicit research consumers.
 They are not recommended environment APIs or default scoring methods. Old imports
-are not silently redirected. The shared runner, free-research MCP tools, notebooks
-and used research implementations remain available. Runtime/trajectory fields with
+are not silently redirected. The generic agent runner, document workspace, public
+history and versioned notebooks remain available. The study-specific MCP adapter
+and its typed-belief protocol are archived with their research consumers. Runtime/trajectory fields with
 existing consumers retain their semantics in this cleanup.
 
 Previous documentation and source are in Git commit

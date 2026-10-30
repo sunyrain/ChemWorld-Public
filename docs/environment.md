@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/environment.en.md; edit the upstream guide. -->
+
 # Use the programmable environment
 
 ChemWorld provides physical models, composable equipment, experimental operations,
@@ -11,7 +13,7 @@ agent and no leaderboard submission.
 git clone https://github.com/sunyrain/ChemWorld-Public.git
 cd ChemWorld-Public
 uv sync --locked --extra dev
-uv run --no-sync chemworld capabilities --format json
+uv run --no-sync chemworld capabilities --format summary
 uv run --no-sync python -m chemworld.examples.user_reward
 ```
 
@@ -31,7 +33,7 @@ from chemworld.world.surface_world import surface_world_spec
 session = ChemWorldRuntime(composition=surface_world_spec())
 try:
     session.reset(seed=12)
-    print(session.available_actions())
+    print([item["operation"] for item in session.available_actions()])
     print(session.action_schema("add_component"))
     # Your agent chooses the action. No preset policy or reward is required.
     action = {"operation": "add_component", "component": "CO-feed", "amount_mol": 6e-5}
@@ -47,11 +49,9 @@ measurement. Supported operations depend on the declared world and current state
 Keep host diagnostics private: do not forward the entire `result.info` or a private
 snapshot to a restricted agent.
 
-The existing tool-based research path supplies MCP operations, public history,
-measurement artifacts and an optional notebook. `InteractiveCodexExperimentAgent`
-remains a used provider integration, not a requirement for free exploration.
-A separate third-party MCP host has not been qualified in this cleanup; callers
-can directly control the Python environment interface.
+The runtime exposes operations, public history and a document workspace.
+Your application owns the research loop, persistent model context and evaluation.
+The old study-specific interactive adapter is archived; it is not required to use these APIs.
 
 ## Write your own reward or evaluator
 
@@ -86,5 +86,5 @@ See [native sessions](https://github.com/sunyrain/ChemWorld/blob/main/docs/nativ
 [domain workflows](https://github.com/sunyrain/ChemWorld/blob/main/docs/native_domains.md),
 [shared laboratories](https://github.com/sunyrain/ChemWorld/blob/main/docs/native_shared_lab.md)
 and [distribution scope](community_release.md).
-[Offline research](https://github.com/sunyrain/ChemWorld-Public/blob/main/examples/demo_offline_research.py) demonstrates one optional evaluation template.
+[Offline research](offline_research.md) demonstrates one optional evaluation template.
 Historical rankings, baselines and step-wise LLM adapters have [explicit legacy entry points](legacy.md).

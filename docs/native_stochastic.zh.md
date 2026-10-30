@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_stochastic.zh.md; edit the upstream guide. -->
+
 # 原生整数随机化学
 
 通过 `ReactionNetworkSpec(..., stochastic={"volume_L": 0.01, "temperature_K": 298.15})`

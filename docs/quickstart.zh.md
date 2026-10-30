@@ -1,21 +1,19 @@
 # 五分钟开始
 
-安装环境，执行三次操作并取得仪器读数。示例使用合成模型，不需要模型密钥或可选上游求解器。
+安装环境，运行包含材料延续和终检的一次实验。示例使用合成模型，不需要模型密钥或可选上游求解器。
 
 ```bash
 git clone https://github.com/sunyrain/ChemWorld-Public.git
 cd ChemWorld-Public
 uv sync --locked --extra dev
-uv run --no-sync chemworld capabilities --format json
-uv run --no-sync python -m chemworld.examples.user_reward
+uv run --no-sync python -m chemworld.examples.native_surface_research --bulk --mobile --terminal-assay
 ```
 
-最后一个命令执行两次投料和一次压力测量。奖励是可选的普通Python函数，更改奖励不改变取得的观测。
-
-运行包含材料延续、转移和终检的较长实验：
+命令输出 JSON 执行记录。接下来可以查看可用能力，或尝试自定义奖励函数的小例子：
 
 ```bash
-uv run --no-sync python -m chemworld.examples.native_surface_research --bulk --mobile --terminal-assay
+uv run --no-sync chemworld capabilities --format summary
+uv run --no-sync python -m chemworld.examples.user_reward
 ```
 
 然后[设计自己的环境](environment-authoring.md)、[接入Agent](environment.md)，或查看

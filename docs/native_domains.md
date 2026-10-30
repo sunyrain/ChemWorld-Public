@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_domains.md; edit the upstream guide. -->
+
 # Run the integrated native examples
 
 These are fixed synthetic development workflows, not autonomous model campaigns

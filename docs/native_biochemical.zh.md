@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_biochemical.zh.md; edit the upstream guide. -->
+
 # 有限的低复制世界
 
 > 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/docs/native_biochemical/)。

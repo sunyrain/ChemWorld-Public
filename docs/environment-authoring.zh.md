@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/environment-authoring.md; edit the upstream guide. -->
+
 # 设计自己的实验环境
 
 从已支持的物理领域选择设备和模型，声明可用操作、仪器与资源，然后把环境交给自己的Agent。
@@ -35,7 +37,7 @@ session = ChemWorldRuntime(composition=spec, observation_noise_mode="keyed")
 try:
     session.reset(seed=12)
     print(session.task_prompt()["text"])
-    print(session.available_actions())
+    print([item["operation"] for item in session.available_actions()])
     print(session.action_schema("heat"))
 finally:
     session.close()

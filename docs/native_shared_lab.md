@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_shared_lab.md; edit the upstream guide. -->
+
 # A finite shared laboratory clock
 
 Run the self-contained example from the locked repository environment:

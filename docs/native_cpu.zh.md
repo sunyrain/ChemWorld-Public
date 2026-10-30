@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_cpu.md; edit the upstream guide. -->
+
 # 可选 CPU 构建边界
 
 ChemWorld 的 Python/reference 路径不需要 C++ 编译器。当前主线提供一个隔离的 C++20 CPU ABI

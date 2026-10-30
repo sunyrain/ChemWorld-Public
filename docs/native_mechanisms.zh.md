@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_mechanisms.zh.md; edit the upstream guide. -->
+
 # 有限原生气相反应机制
 
 > 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/docs/native_mechanisms/)。
@@ -33,6 +35,14 @@ uv run --no-sync python -m chemworld.examples.native_gas_mechanism \
 可执行的 Python 脚本，外部物种包括，自定义反应顺序，不支持负 A 拟合，不支持未平衡的动力学和热力学，以及未实现的模型均导致失败。 运输和未选择的相仍然保留原始元数据，但未实现模型。 `h2o2.yaml` 和其 BSD 许可证在 `tests/fixtures/mechanisms/cantera-3.1.0/` 下保留。
 
 ## 验证 {#validation}
+
+单独的 `import_chemkin(mechanism_path, thermo_path)` 接口支持有限的 NASA7 气相子集：
+基元反应、第三体、Lindemann、Troe、PLOG、CHEB、REV、FORD 和 RORD 声明。
+它展开本地递归 INCLUDE，接受 ELEM/ELEMENTS，并保留源单位与反应级数。
+MOLECULES 浓度单位通过精确阿伏伽德罗常数转换为原生 mol/L。
+命名反应区段、表面／等离子体／离子相及非理想模型等未支持内容会使整个导入失败。
+Cantera 3.2 的 ck2yaml 尚拒绝 RORD，该上游往返限制仍保留。
+这个接口不由 YAML/JSON 命令行自动选择；其资格范围与下述比较分开。
 
 ```
 uv run --no-sync pytest tests/test_pressure_dependent_mechanisms.py tests/test_reaction_rate_contracts.py -q

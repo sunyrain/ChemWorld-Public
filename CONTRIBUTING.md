@@ -2,8 +2,10 @@
 
 The maintained product is developed in
 [ChemWorld](https://github.com/sunyrain/ChemWorld) and exported into this repository.
-Changes to the website, documentation and frozen public evidence are kept separate
-from product exports. Propose product changes upstream so that the two copies do
+The website, editorial pages and frozen public evidence are maintained here.
+Shared technical guides are exported from main using `export_public_product --docs`;
+each exported file identifies its upstream source. Propose those edits upstream,
+not in the generated copy. Propose product changes upstream so that the two copies do
 not evolve independently. The development version is defined once in
 `src/chemworld/__init__.py`; Hatch reads it when building package metadata.
 
@@ -25,7 +27,7 @@ uv run --no-sync python scripts/build_explorer_site.py --output site/explore
 Use focused tests while implementing. For packaging changes, run
 `uv run --no-sync python scripts/smoke_test_wheel.py --python 3.12` to build both
 wheel and sdist and install them outside the checkout with locked dependencies.
-This checks the installed CLI, resources, Student Lab and replay examples.
+This checks the installed CLI, resources, native workflows and replay examples.
 Run the corresponding check on other platforms before claiming their validation.
 
 Preserve material/energy accounting, rejected requests and exact replay. A model

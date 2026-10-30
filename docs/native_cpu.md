@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_cpu.en.md; edit the upstream guide. -->
+
 # Optional CPU build
 
 The Python backend runs without a C++ compiler. The optional C++20 build currently

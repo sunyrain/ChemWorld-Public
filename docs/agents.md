@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/agents.md; edit the upstream guide. -->
+
 # Connect an agent
 
 Start with the [environment API](environment.md) and [authoring guide](environment-authoring.md). You can supply any planner and choose your own reward, or use no reward. The task-scored runner and preset adapters below are retained historical applications; their CLI is `python -m chemworld.legacy.cli`.
@@ -15,7 +17,6 @@ replay trajectory. Start offline before introducing an external model.
 | Replay agent | No | Re-run a previously captured model trace | Stable |
 | DeepSeek `LiveLLMAgent` | `DEEPSEEK_API_KEY` | Operation-level online model experiments | Optional adapter |
 | Codex subscription client | Existing `codex login` | Audited structured calls through a ChatGPT subscription | Optional adapter |
-| Interactive Codex experiment | Existing `codex login` | One persistent model context per complete experiment | Advanced API |
 | Frozen SB3 policy | Local checkpoint and `.[rl]` | Evaluation of an already trained RL policy | Optional extra |
 
 The command-line `--agent` flag intentionally exposes only constructor-free built-ins. Agents that
@@ -119,9 +120,9 @@ Install the Codex CLI, complete `codex login` with a ChatGPT subscription, and c
 `LiveLLMAgent` using the same runner pattern above. Subscription usage has no per-run USD price, so
 the accounting receipt reports that limitation rather than inventing a cost.
 
-`InteractiveCodexExperimentAgent` is the advanced path for keeping one Codex context alive across a
-complete experiment. It requires an explicit isolated workspace and role identifier; see the class
-docstring and focused tests before using it in a formal comparison.
+A persistent research context, study design and prediction protocol belong to the caller.
+The former study-specific interactive adapter is archived; the generic runtime,
+agent runner, public history and document workspace remain available.
 
 ## Reproducibility and safety boundary
 

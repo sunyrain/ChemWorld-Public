@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/environment.md; edit the upstream guide. -->
+
 # 使用可编程环境
 
 ChemWorld提供多领域物理模型、可组合设备、实验操作、原生单位观测、资源记录和回放。
@@ -9,7 +11,7 @@ Agent、实验目标、奖励函数和评价方法由使用者定义。自由探
 git clone https://github.com/sunyrain/ChemWorld-Public.git
 cd ChemWorld-Public
 uv sync --locked --extra dev
-uv run --no-sync chemworld capabilities --format json
+uv run --no-sync chemworld capabilities --format summary
 uv run --no-sync python -m chemworld.examples.user_reward
 ```
 
@@ -27,7 +29,7 @@ from chemworld.world.surface_world import surface_world_spec
 session = ChemWorldRuntime(composition=surface_world_spec())
 try:
     session.reset(seed=12)
-    print(session.available_actions())
+    print([item["operation"] for item in session.available_actions()])
     print(session.action_schema("add_component"))
     # 用自己的Agent决定下一步；不需要继承内置Agent或使用固定奖励。
     action = {"operation": "add_component", "component": "CO-feed", "amount_mol": 6e-5}
@@ -41,9 +43,8 @@ finally:
 读取已有观测不会生成新测量。允许的操作和实体由世界声明及当前状态决定。
 宿主负责保留内部执行诊断；不要把完整`result.info`或私有快照直接发送给受限Agent。
 
-已有工具调用研究路径提供MCP操作、公开历史、测量文件和可选笔记本。
-`InteractiveCodexExperimentAgent`是仍在使用的提供方接入实现，不是自由探索能力的唯一入口。
-独立第三方MCP宿主的启动接入尚未在本轮验证；Python接口可以直接由用户控制。
+运行时提供操作、公开历史和文档工作区。研究循环、模型上下文与评价由调用方组织。
+旧研究专用交互适配器已经归档，使用这些公开接口不需要该适配器。
 
 ## 奖励与评价由用户定义
 
@@ -72,5 +73,5 @@ Task Lab、轻量Lab控制台、Experiment Explorer和Asset Preview已从源码�
 
 进一步阅读[原生基座](native_foundation.md)、[领域工作流](native_domains.md)、
 [共享实验室](native_shared_lab.md)和[发行范围](community_release.md)。
-[离线研究例子](https://github.com/sunyrain/ChemWorld-Public/blob/main/examples/demo_offline_research.py)展示一种用户评价模板，不是全环境强制协议。
+[离线研究例子](offline_research.md)展示一种用户评价模板，不是全环境强制协议。
 旧排行榜、基线和逐步LLM适配见[历史入口](legacy.md)。

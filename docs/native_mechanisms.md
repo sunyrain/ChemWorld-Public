@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_mechanisms.md; edit the upstream guide. -->
+
 # Finite native gas mechanisms
 
 This is a development feature, not a general Cantera/RMG interpreter or a claim
@@ -119,16 +121,19 @@ the resulting network uses the original inventory, heat and runtime consumers.
 External element/adjacent-phase sections and other phase families remain outside
 this gas importer.
 
-A separate experimental `import_chemkin(mechanism_path, thermo_path)` entry
-implements a bounded gas subset for NASA7 and elementary/third-body/Lindemann/
-Troe declarations. It rejects unsupported directives such as REV, PLOG, CHEB,
-FORD/RORD and MOLECULES rather than silently dropping them. It is not selected
-by this YAML/JSON CLI. Standard CHEMKIN interoperability remains unresolved:
-an actual Cantera 3.2 export exposes rejected `ELEM` shorthand and an incorrect
-NASA7 temperature-field ordering in the current reader. The source-selection
-[handoff report](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/34-source/README.md#chemkin-interoperability-handoff)
-retains the reproducible input and failures. The YAML/JSON comparison below does
-not qualify that separate importer.
+A separate `import_chemkin(mechanism_path, thermo_path)` entry implements a
+bounded NASA7 gas subset for elementary, third-body, Lindemann, Troe, PLOG,
+CHEB, REV, FORD, and RORD declarations. It expands recursive local INCLUDE
+files, accepts both `ELEM` and `ELEMENTS`, and preserves explicit source units
+and reaction-order metadata. Unsupported directives and phase families still
+reject the complete import rather than being silently dropped; current limits
+include named reaction sections, surface/plasma/ionic phases, and nonideal
+models. MOLECULES concentration headers are converted to native mol/L kinetics
+using the exact Avogadro constant and recorded source metadata. Cantera 3.2
+`ck2yaml` currently rejects RORD continuations,
+so that upstream round-trip limitation remains recorded in the CHEMKIN report.
+This entry is not selected by the YAML/JSON CLI, and its bounded source contract
+does not qualify the broader comparison below.
 
 ## Validation
 

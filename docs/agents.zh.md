@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/agents.zh.md; edit the upstream guide. -->
+
 # 接入 Agent
 
 新应用从[环境API](environment.md)和[环境作者指南](environment-authoring.md)开始。可使用自己的规划器与奖励，也可完全不评分。下文按任务评分的runner与预设适配器属于保留的历史应用；其命令入口为`python -m chemworld.legacy.cli`。
@@ -14,7 +16,6 @@ ChemWorld Agent 每一步都从公开任务状态中选择一个有类型的操�
 | Replay Agent | 不需要 | 重放已经捕获的模型轨迹 | 稳定 |
 | DeepSeek `LiveLLMAgent` | `DEEPSEEK_API_KEY` | 操作级在线模型实验 | 可选适配器 |
 | Codex subscription client | 已完成 `codex login` | 通过 ChatGPT subscription 调用结构化输出 | 可选适配器 |
-| Interactive Codex experiment | 已完成 `codex login` | 每个完整实验保留一个模型上下文 | 高级 API |
 | Frozen SB3 policy | 本地 checkpoint 与 `.[rl]` | 评估已经训练好的 RL 策略 | 可选 extra |
 
 命令行 `--agent` 只暴露无需构造参数的内置 Agent。需要凭据、模型、replay 文件、checkpoint 或
@@ -113,8 +114,8 @@ run_agent(
 `chemworld.providers.codex_subscription` 创建 `CodexSubscriptionClient`，按上面的方式传给
 `LiveLLMAgent`。subscription 无法提供逐次调用的美元价格，因此 receipt 会明确记录这一限制。
 
-`InteractiveCodexExperimentAgent` 用于在一个完整实验内保持同一 Codex 上下文。它要求显式指定
-隔离 workspace 和 role ID；正式比较前应阅读类说明和对应测试。
+持续研究上下文、实验设计和预测协议由调用方组织。原研究专用交互适配器已归档；
+通用运行时、Agent 运行器、公开历史和文档工作区继续保留。
 
 ## 可复现与安全边界
 

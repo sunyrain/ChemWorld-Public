@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_stochastic.md; edit the upstream guide. -->
+
 # Native stochastic and mixed chemistry
 
 Declare `ReactionNetworkSpec(..., stochastic={"volume_L": 0.01,
@@ -56,7 +58,7 @@ all outcomes and statistical criteria are in the world_foundation workstream.
 The next-reaction development block completed 49,152 trajectories across both
 methods; all 29 units and 353 fixed distribution, continuation, world and work
 comparisons passed. Its fixed design and statistical resolution are recorded in the
-[51A delivery](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51A/README.md).
+[51A delivery](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/51A/README.md).
 
 ## Approximate adaptive tau-leaping
 
@@ -75,7 +77,7 @@ numerical path exactly. A batch records aggregate firings, without inventing
 the individual event times of an SSA trajectory.
 
 `chemworld.examples.stochastic_tau_leap.run_example()` exercises original world
-waits and restored continuation. The [51C delivery](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51C/README.md)
+waits and restored continuation. The [51C delivery](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/51C/README.md)
 records 30 units, 192 comparisons and 49,152 distribution trajectories in each
 of two retained attempts, including non-grid observation error and fallback
 costs. These results do not qualify implicit tau methods, SDE or automatic
@@ -89,7 +91,7 @@ coordinates in the same phase ledger. Integrated Poisson hazards respond to the
 continuous trajectory; pending hazards and RNG survive ordinary snapshots.
 The original profile allows rate feedback between the partitions while each
 partition's net elemental stock remains closed. Its actual world and shared-clock
-qualification is recorded in the [51B delivery](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51B/README.md).
+qualification is recorded in the [51B delivery](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/51B/README.md).
 
 `CrossPartitionHybridSpec` explicitly selects real material transfer: one jump
 can change integer molecules and continuous mol by the corresponding molecular
@@ -104,6 +106,6 @@ This profile retains fixed volume, temperature and partition assignments.
 It does not supply a heat model, consuming hybrid sampling or automatic
 repartitioning. Same-prefix snapshot continuation and numerical agreement under
 different adaptive integration splits are distinct guarantees. The
-[51D delivery](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51D/REPORT.md)
+[51D delivery](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/51D/REPORT.md)
 records 36/36 development units and 338/338 checks, with a separate complete
 shared-world/runtime snapshot consumer and all retained failures.

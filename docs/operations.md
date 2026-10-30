@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/operations.en.md; edit the upstream guide. -->
+
 # Operations and instruments
 
 Use the current public schema, not guessed laboratory verbs:
@@ -40,5 +42,5 @@ a cancelled session nor a budget truncation is a completed final assay. Missing
 values remain null; read masks. A negative result is retained as an assay, not
 deleted. Native replay reconstructs actions and observations, not reasoning.
 
-Start with [the executable examples](current-foundation.md#source-synchronization). These virtual model
+Start with [the executable examples](getting_started.md). These virtual model
 operations are not physical laboratory instructions.

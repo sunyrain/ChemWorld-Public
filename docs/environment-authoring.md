@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/environment-authoring.en.md; edit the upstream guide. -->
+
 # Design your own experimental environment
 
 Choose supported physical models and equipment, declare operations, instruments and
@@ -37,7 +39,7 @@ session = ChemWorldRuntime(composition=spec, observation_noise_mode="keyed")
 try:
     session.reset(seed=12)
     print(session.task_prompt()["text"])
-    print(session.available_actions())
+    print([item["operation"] for item in session.available_actions()])
     print(session.action_schema("heat"))
 finally:
     session.close()

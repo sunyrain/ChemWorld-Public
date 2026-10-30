@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_domains.zh.md; edit the upstream guide. -->
+
 # 运行集成后的原生示例
 
 > 中文预览译文；技术接口与适用范围请同时核对[英文原文](https://sunyrain.github.io/ChemWorld-Public/docs/native_domains/)。

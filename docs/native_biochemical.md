@@ -1,3 +1,5 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_biochemical.md; edit the upstream guide. -->
+
 # Finite low-copy worlds
 
 Original SBML inputs can use the same integer kernels through `sbml_world`:
@@ -54,18 +56,27 @@ still need an explicit `items_per_mole` policy when using `from_archive`.
 
 The developing integer source-event profile also consumes piecewise constant
 global parameter assignment rules, state-only constraints and the existing SBML
-event queue. State guards are checked after each actual reaction or tau batch;
-affine source-time guards and delayed queue deadlines split the advance. Event
+event queue. Tau treats reactions that change source-guard dependencies as
+critical, so a state guard can settle after its first relevant reaction.
+Affine source-time guards and delayed queue deadlines bound a proposal before
+Poisson sampling, independently of observation endpoints. Event
 capture, cancellation, priorities, cascades and source concentration/volume
 assignments use the existing formal coordinates and unit conversion. The new
-queue continuation survives complete runtime and experiment JSON. Tau observes
-whole batches; this does not locate source events inside an approximate leap.
+queue continuation survives complete runtime and experiment JSON. Other channels
+still use actual Poisson batches. Source-boundary profiles additionally use the
+conservative particle-fluctuation bound `max(epsilon*sqrt(n_i)/g_i, 1)`; ordinary
+tau profiles keep their original selection rule. This remains an approximate
+method, without a global error guarantee or arbitrary batch-interior event search.
 
 Continuous rate rules, non-affine time guards, time equality pulses, assignment
 rules for species/geometry and time-dependent constraints are rejected explicitly.
 The event profile is in development: functional and compatibility checks are
-available, while independent scientific/source and installed-package acceptance
-remain open. See the [51K evidence and scope](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51K/README.md).
+available. The complete first independent CME development block found ten failed
+cells out of eighty. The current fix passed installed-package acceptance with
+twelve complete experiments and twenty-four exact fresh-process continuations;
+the full independent CME block is rerunning. Original combined-source
+qualification remains open. See the
+[51K evidence and scope](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/51K/README.md).
 
 Two synthetic worlds run on the native session and task-36 direct SSA strategy:
 `biochemical_world("reversible")` (A↔B) and `biochemical_world("enzyme")`
@@ -82,7 +93,7 @@ declaration keeps its original meaning. In tau-leap, newly admitted channels als
 use a conservative initial-stock firing bound without crediting other channels'
 same-leap production. Invalid proposals are rejected, never clipped; this remains
 a biased Poisson approximation. See the
-[implementation and qualification boundaries](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51H/README.md).
+[implementation and qualification boundaries](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/51H/README.md).
 The fixed fourteen-model development block completed 98,312 trajectories across
 the exact and two approximate strategies against independent finite-CME laws.
 The tau acceptance tests include declared approximation allowances; they do not
@@ -152,7 +163,7 @@ shared clock. The fixed partition keeps its integer and continuous closed stocks
 the cross-partition variant additionally records real stoichiometric molecular
 transfers and enforces whole-jump availability. Existing isothermal, fixed-volume
 and unsupported-operation boundaries still apply. See the
-[cross-partition example](https://github.com/sunyrain/ChemWorld-Public/blob/main/examples/native_cross_partition.py); pass
+[cross-partition example](https://github.com/sunyrain/ChemWorld/blob/main/examples/native_cross_partition.py); pass
 `ode_method="RK45"` when constructing its physical specification.
 
 Full checkpoints with the same future actions reproduce the complete state and
@@ -164,7 +175,7 @@ kernel measurements against DOP853 found RK45 slower on most tested models;
 explicit selection does not imply acceleration. Actual COPASI method-31 output
 has retained negative-stock and last-bit repeat discrepancies, so full source
 qualification remains open in task 51G. See the
-[complete results and limits](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51G/README.md).
+[complete results and limits](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/51G/README.md).
 
 ## Continuous reaction SDE (development)
 
@@ -384,4 +395,4 @@ calls stop before their requested endpoint and other cases lose material.
 All failures and partial outputs are retained. Continuous-hazard convergence
 and full source equivalence remain unproven; this adaptive extension does not
 expand the separate integer SSA or fixed-partition model admission rules.
-See the [complete qualification and limitations](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/51F/README.md).
+See the [complete qualification and limitations](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/51F/README.md).

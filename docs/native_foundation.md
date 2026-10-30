@@ -1,11 +1,86 @@
+<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/docs/native_foundation.md; edit the upstream guide. -->
+
 # Native physical sessions
 
-The [property and source delivery catalog](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/22/README.md)
+The [property and source delivery catalog](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/22/README.md)
 connects all 32 chemicals 1.5.2 public modules to native entry points, retained
 qualification results and separate EOS/flash responsibilities. It also lists the
 existing data adapters and shared sources. This is a responsibility map, not a
 claim of drop-in upstream API compatibility or empirical accuracy for every material.
 External source files remain caller-supplied; production does not import chemicals.
+
+## Design and operate a finite process graph
+
+`FlowsheetGraph` declares sources, units, named product ports and simultaneous
+recycle tears. It supports original molecular mixing, splitting, heating,
+pressure stages, selective flash/cascade, two-sided heat exchange and shaft
+recovery. `ProcessFlowsheetInventorySpec` assigns each boundary to a finite tank;
+internal recycle streams own no extra inventory. Tanks require an explicit
+pressure, homogeneous phase branch, positive initial component amounts and limits.
+
+This installed example defines two coupled recycles, optimizes an authored feed
+cost under a product-rate constraint, and executes the selected process on real
+finite stocks. Its ideal-gas A/B parameters and currency coefficients are synthetic
+API examples. Supply your own physical model, controls, constraints and costs.
+
+```python
+from dataclasses import replace
+
+from chemworld.examples.process_flowsheet import (
+    recycle_feed_design, recycle_flowsheet_example,
+)
+from chemworld.runtime import ChemWorldRuntime, optimize_flowsheet
+from chemworld.world import build_process_flowsheet_world
+
+design = optimize_flowsheet(recycle_feed_design())
+if not design.success:
+    raise RuntimeError(design.optimization.failure_reason)
+spec, amounts, temperatures = recycle_flowsheet_example()
+spec = replace(spec, graph=design.selected_graph)
+world = build_process_flowsheet_world(
+    spec, amounts, temperatures, formulas={"A": "Ar", "B": "C3H8"},
+)
+session = ChemWorldRuntime(composition=world)
+try:
+    session.reset(seed=33)
+    result = session.execute({"operation": "wait", "duration_s": 0.1})
+    assert result.info["transaction_status"] == "committed"
+    snapshot = session.snapshot().to_dict()
+finally:
+    session.close()
+```
+
+For direct inventory integration, import `initialize_process_flowsheet_inventory`
+and `advance_process_flowsheet` from `chemworld.physchem`. The initializer's public
+name differs from the submodule name, so importing examples or world builders
+first does not turn the callable into a module. Full snapshots can resume through
+`ChemWorldRuntime.from_snapshot(snapshot)`; preserve the original declared model.
+
+`TrajectoryDesignSpec` describes periods of original actions and a user-defined
+objective. `optimize_trajectory(session, spec)` predicts on private snapshots;
+`execute_first_period(session, plan)` commits only the verified first period.
+`run_receding_horizon` repeats planning from the actual current state. Planning
+retains computational evaluations and failures without charging experimental
+stock/time; real actions retain their normal resource charges. These engineering
+tools use internal model states explicitly; they do not grant an agent access to
+hidden state through its ordinary observation API. Agent rewards remain user code.
+
+Thermal import/export is counted per external port, including opposite duties in
+one cascade. Internal exchanger heat and recovered shaft work are not charged
+twice. This builder declares subsecond `run_flow` for local operation and `wait`
+for the shared clock; existing worlds keep their own declared action ranges.
+Source-only uniform drainage preserves intensive state while integrating n/H;
+receivers stop at their actual amount, volume and temperature events. Arbitrary
+empty tanks, automatic tank phase switching and global optimization guarantees
+are outside this declared model.
+
+Development qualification covers 43 graph cases, 42 finite-world cases, 22 steady
+design cases (including six expected refusals), and 22 trajectory/control cases.
+The installed package also passes all six declared consumers, including actual
+fresh-process continuation. [The delivery report](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/33/README.md)
+lists independent references, exact checks, costs and retained failures. Numerical
+search is bounded and can be expensive: inspect the reported evaluations and
+failure reason, and execute a plan only when its verified result succeeds.
 
 ## Inspect and choose property methods
 
@@ -86,7 +161,7 @@ When the identifier tables have no exact record, pass an explicit `ComponentSpec
 with reviewed identity evidence to the existing property input API. Do not copy
 the structure of the first alias search result.
 
-The [reviewed CRC component inputs](https://github.com/sunyrain/ChemWorld-Public/blob/main/examples/fixtures/crc_electro_optical_components.json)
+The [reviewed CRC component inputs](https://github.com/sunyrain/ChemWorld/blob/main/examples/fixtures/crc_electro_optical_components.json)
 cover 200 identities and 246 original dielectric/refractive-index rows.
 They retain the source CAS, available full InChI, cited public records, documented
 stereochemical scope, and explicit superseded-CAS relationships. Their default phase is unknown.
@@ -184,7 +259,7 @@ Their connectivity-only InChI does not encode that material definition by itself
 the full `ComponentSpec` metadata and provenance must accompany the input.
 No absolute enantiomer is selected and no SRac conversion is claimed for this group.
 
-Run the [cis/trans example](https://github.com/sunyrain/ChemWorld-Public/blob/main/examples/crc_electro_optical_inputs.py) with your
+Run the [cis/trans example](https://github.com/sunyrain/ChemWorld/blob/main/examples/crc_electro_optical_inputs.py) with your
 directory containing the original external CRC source tables:
 
 ```text
@@ -691,7 +766,7 @@ to the original solid-equilibrium API with explicit element-reference shifts.
 It supplies onset tangents and solid-consumer seeds, not a coupled fluid/solid
 precipitation inventory.
 
-The [current development qualification](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/28-general/README.md)
+The [current development qualification](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/28-general/README.md)
 covers explicit PR mixtures and analytic regular-solution controls, original
 runtime consumers and the solid interface. It does not qualify every EOS or
 every state in a declared rectangular domain.
@@ -726,14 +801,22 @@ query itself is not a timed measurement or a capillary-flow process.
 interactions using uncertainty-weighted training observations and bounded
 parameters. It reports failed forward trials, training sensitivity rank and
 condition, active bounds, local covariance and held-out prediction errors.
+Physical sensitivity diagnostics require successful recorded finite-difference
+evaluations; a failed-trial penalty cannot establish parameter identifiability.
+The original optimizer diagnostics and every final prediction remain available
+when the physical derivative cannot be verified.
 Optimizer success and predictive applicability are separate results. The current
 real-data development block uses Rolo et al.'s alkane measurements in saturated
 air and explicitly approximates the boundary by hydrocarbon VLE with no
 noncondensable air; its errors must be read with that modeling assumption.
 
-The [current consumer checks](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/29-general/CONSUMERS.md)
-track the extension in development. Full multicomponent/source and real-data
-fitting qualification remains under parent29 until all required blocks finish.
+The [completed development qualification](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/29-general/README.md)
+covers pure, binary, ternary, singular and near-critical profiles, independent
+PhasePy comparisons, original inventory consumers, installed-package use and the
+complete measured-data fit with held-out predictions and mesh/domain convergence.
+The earlier failed fitting attempts remain available. Several fitted parameters
+reach their declared bounds; this qualification does not remove that limitation
+or establish same-boundary experimental validation for the omitted air phase.
 
 ## Strict liquid stability and finite washing
 
@@ -1039,7 +1122,7 @@ a fitted real column: three synthetic analytes, symmetric peaks, lumped residue,
 fixed offline duration and a non-evolving host. Continuous mobile-phase usage,
 column spatial transport and instrument thermal utilities are not modelled, so
 no energy-closure or general gradient-column claim is made. See
-[development acceptance](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/archive/20261020-native-extension/evidence/NATIVE_CHROMATOGRAPHY_ACCEPTANCE.md).
+[development acceptance](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/archive/20261020-native-extension/evidence/NATIVE_CHROMATOGRAPHY_ACCEPTANCE.md).
 
 ## Native single-particle lithium battery
 
@@ -3213,7 +3296,7 @@ Neutral optional CPU declarations preserve real saved v2 checkpoints, with the
 four-entry block, whole protocols and installed wheel requalified after the fix.
 Non-default and unknown execution contracts remain strict.
 Retained independent SDK disagreements remain separate from continuation correctness;
-see the [supported scope and full results](https://github.com/sunyrain/ChemWorld/blob/823b6b01f/workstreams/world_foundation/reports/convergence/50/README.md).
+see the [supported scope and full results](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/50/README.md).
 
 ## Multifluid mixtures, local criticality and fitting
 

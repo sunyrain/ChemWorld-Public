@@ -25,6 +25,18 @@ RUNTIME_CONFIGS = frozenset(
 )
 SOURCE_EXTRAS = frozenset(
     {
+        # Both repositories carry the same guides with different locale suffixes.
+        *{
+            f"docs/{name}{suffix}.md"
+            for name in (
+                "agents", "environment", "environment-authoring", "getting_started",
+                "operations", "action_schema", "legacy", "offline_research",
+                "native_foundation", "native_domains", "native_capabilities",
+                "native_biochemical", "native_shared_lab", "native_mechanisms",
+                "native_stochastic", "native_cpu",
+            )
+            for suffix in ("", ".en", ".zh")
+        },
         BUILD_HOOK,
         "scripts/build_cpu.py",
         "scripts/smoke_test_wheel.py",
