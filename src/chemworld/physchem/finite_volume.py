@@ -7,25 +7,43 @@ below contributes to the existing coupled solver; it owns no persistent state.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from math import isfinite, pi
 from numbers import Integral
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import numpy as np
-from scipy.sparse import coo_matrix, csr_matrix
+from numpy.typing import ArrayLike, NDArray
+from scipy.sparse import coo_matrix, csr_matrix, sparray, spmatrix
 
 from chemworld.physchem.coupled_system import (
     CoupledEvent,
     CoupledProcess,
+    CoupledStateView,
     InternalTransfer,
     MaterialPort,
     ProcessContribution,
 )
 
+if TYPE_CHECKING:
+    from chemworld.physchem.residual_system import ResidualSystem, ResidualVariable
 
-def _readonly(values):
+
+_VectorCallback = Callable[[float, NDArray[np.float64], NDArray[np.float64]], ArrayLike]
+_MatrixCallback = Callable[
+    [float, NDArray[np.float64], NDArray[np.float64]], ArrayLike | spmatrix | sparray,
+]
+
+
+class _DerivativeOptions(TypedDict, total=False):
+    rhs_jacobian: _MatrixCallback
+    rhs_time_derivative: _VectorCallback
+    rhs_parameter_jacobian: _MatrixCallback
+
+
+def _readonly(values: ArrayLike) -> NDArray[np.float64]:
     result = np.asarray(values, dtype=float).copy()
     result.setflags(write=False)
     return result
@@ -53,7 +71,7 @@ class DiffusionMesh:
             if self.particle_count != 1:
                 raise ValueError("particle count applies only to spherical geometry")
             volumes = self.area_m2 * np.diff(faces)
-            areas = np.full(faces.size, self.area_m2)
+            areas: NDArray[np.float64] = np.full(faces.size, self.area_m2)
         else:
             if self.area_m2 != 1:
                 raise ValueError("planar area does not apply to spherical geometry")
@@ -73,27 +91,31 @@ class DiffusionMesh:
         object.__setattr__(self, "face_areas_m2", _readonly(areas))
 
     @classmethod
-    def planar(cls, length_m, cells, *, area_m2=1.0):
+    def planar(
+        cls, length_m: float, cells: int | np.integer, *, area_m2: float = 1.0,
+    ) -> DiffusionMesh:
         return cls("planar", cls._uniform_faces(length_m, cells), area_m2=area_m2)
 
     @classmethod
-    def spherical(cls, radius_m, cells, *, particle_count=1.0):
+    def spherical(
+        cls, radius_m: float, cells: int | np.integer, *, particle_count: float = 1.0,
+    ) -> DiffusionMesh:
         return cls("spherical", cls._uniform_faces(radius_m, cells),
                    particle_count=particle_count)
 
     @staticmethod
-    def _uniform_faces(extent_m, cells):
-        if (not isfinite(extent_m) or extent_m <= 0 or not isinstance(cells, Integral)
+    def _uniform_faces(extent_m: float, cells: int | np.integer) -> tuple[float, ...]:
+        if (not isfinite(extent_m) or extent_m <= 0 or not isinstance(cast(object, cells), Integral)
                 or isinstance(cells, bool) or cells < 1):
             raise ValueError("mesh extent and integer cell count must be positive")
         return tuple(np.linspace(0, extent_m, cells + 1))
 
     @property
-    def cells(self):
+    def cells(self) -> int:
         return len(self.faces_m) - 1
 
     @property
-    def shell_mean_square_radius_m2(self):
+    def shell_mean_square_radius_m2(self) -> NDArray[np.float64]:
         """Volume average of r^2; stable polynomial quotient for thin shells."""
         if self.geometry != "spherical":
             raise ValueError("shell moments require spherical geometry")
@@ -102,7 +124,7 @@ class DiffusionMesh:
             b**2 + b * a + a**2)
 
     @cached_property
-    def spherical_surface_distance_m(self):
+    def spherical_surface_distance_m(self) -> float:
         """Surface derivative to outer shell-average difference for a+b*r^2."""
         radius = self.faces_m[-1]
         return (radius**2 - self.shell_mean_square_radius_m2[-1]) / (2 * radius)
@@ -132,7 +154,7 @@ class DiffusionRates:
             object.__setattr__(self, name, _readonly(getattr(self, name)))
 
     @property
-    def outward_boundary_rates_mol_s(self):
+    def outward_boundary_rates_mol_s(self) -> tuple[float, float]:
         return (-float(self.face_rates_mol_s[0]), float(self.face_rates_mol_s[-1]))
 
 
@@ -170,7 +192,7 @@ class ConservativeDiffusion:
             raise ValueError("the sphere center requires symmetry/zero flux")
         rows, columns, values = [], [], []
 
-        def add(row, column, value):
+        def add(row: int, column: int, value: float) -> None:
             rows.append(row)
             columns.append(column)
             values.append(value)
@@ -191,7 +213,7 @@ class ConservativeDiffusion:
         matrix.eliminate_zeros()
         object.__setattr__(self, "_jacobian", matrix)
 
-    def _internal_conductances(self):
+    def _internal_conductances(self) -> NDArray[np.float64]:
         faces = np.asarray(self.mesh.faces_m[1:-1])
         left_distance = faces - self.mesh.centers_m[:-1]
         right_distance = self.mesh.centers_m[1:] - faces
@@ -217,7 +239,7 @@ class ConservativeDiffusion:
         return (self.diffusivity_m2_s * self.mesh.face_areas_m2[1:-1]
                 / (left_distance + right_distance))
 
-    def _boundary_conductance(self, side):
+    def _boundary_conductance(self, side: str) -> float:
         index = 0 if side == "left" else -1
         distance = abs(self.mesh.faces_m[index] - self.mesh.centers_m[index])
         if self.mesh.geometry == "spherical" and side == "right":
@@ -227,18 +249,18 @@ class ConservativeDiffusion:
         return coefficient * self.mesh.face_areas_m2[index] / distance
 
     @property
-    def storage_volumes_m3(self):
+    def storage_volumes_m3(self) -> NDArray[np.float64]:
         """Physical pore volume, not an extra copy of the caller's inventory."""
         if self.storage_fractions is None:
             return self.mesh.cell_volumes_m3
         return self.mesh.cell_volumes_m3 * np.asarray(self.storage_fractions)
 
     @property
-    def inventory_jacobian_s_inv(self):
+    def inventory_jacobian_s_inv(self) -> csr_matrix:
         """dn_dot/dn, a tridiagonal sparse matrix; callers receive an independent copy."""
         return self._jacobian.copy()
 
-    def evaluate(self, amounts_mol: Sequence[float]) -> DiffusionRates:
+    def evaluate(self, amounts_mol: ArrayLike) -> DiffusionRates:
         amounts = np.asarray(amounts_mol, dtype=float)
         if (amounts.shape != (self.mesh.cells,) or not np.all(np.isfinite(amounts))
                 or np.any(amounts < 0)):
@@ -261,11 +283,15 @@ class ConservativeDiffusion:
         return DiffusionRates(derivatives, faces)
 
     def residual_system(
-        self, inventory_keys, *, system_id, basis="amount", concentration_scale_mol_m3=1.0,
-        time_scale_s=1.0, reaction_rates=None, reaction_jacobian=None,
-        reaction_parameter_jacobian=None, reaction_time_derivative=None,
-        parameters=(), parameter_values=(), derivatives="analytic",
-    ):
+        self, inventory_keys: Sequence[str], *, system_id: str, basis: str = "amount",
+        concentration_scale_mol_m3: float = 1.0, time_scale_s: float = 1.0,
+        reaction_rates: _VectorCallback | None = None,
+        reaction_jacobian: _MatrixCallback | None = None,
+        reaction_parameter_jacobian: _MatrixCallback | None = None,
+        reaction_time_derivative: _VectorCallback | None = None,
+        parameters: Sequence[ResidualVariable] = (), parameter_values: Sequence[float] = (),
+        derivatives: str = "analytic",
+    ) -> ResidualSystem:
         """Reuse the affine face operator in an amount or concentration residual.
 
         Reaction callbacks consume amounts (mol) and return mol/s, with their
@@ -303,21 +329,24 @@ class ConservativeDiffusion:
         operator = self.inventory_jacobian_s_inv
         boundary = self.evaluate(np.zeros(n)).amount_rates_mol_s
 
-        def rhs(t, y, p):
+        def rhs(
+            t: float, y: NDArray[np.float64], p: NDArray[np.float64],
+        ) -> NDArray[np.float64]:
             amounts = y * mass
             rates = operator @ amounts + boundary
             if reaction_rates is not None:
                 rates += vector(reaction_rates(t, _readonly(amounts), p), n, "reaction rates")
             return rates
 
-        def jacobian(t, y, p):
+        def jacobian(t: float, y: NDArray[np.float64], p: NDArray[np.float64]) -> csr_matrix:
             total = operator
             if reaction_rates is not None:
-                total = total + matrix(reaction_jacobian(t, _readonly(y * mass), p),
+                total = total + matrix(cast(_MatrixCallback, reaction_jacobian)(
+                    t, _readonly(y * mass), p),
                                        (n, n), "reaction Jacobian")
             return csr_matrix(total) @ diags(mass)
 
-        options = {}
+        options: _DerivativeOptions = {}
         if derivatives == "analytic":
             options["rhs_jacobian"] = jacobian
             if reaction_rates is None:
@@ -371,7 +400,7 @@ class ConservativeDiffusion:
             for side, index, _ in sides for direction in ("in", "out")
         )
 
-        def evaluate(state):
+        def evaluate(state: CoupledStateView) -> ProcessContribution:
             rates = self.evaluate([state.amounts_mol[key] for key in keys])
             transfers = tuple(
                 InternalTransfer(f"{process_id}:face:{face}",
@@ -391,15 +420,21 @@ class ConservativeDiffusion:
                                        port_rates_mol_s=port_rates,
                                        port_enthalpies_J_mol=port_enthalpies)
 
+        def depletion_condition(key: str) -> Callable[[CoupledStateView], float]:
+            def remaining_amount(state: CoupledStateView) -> float:
+                return state.amounts_mol[key]
+
+            return remaining_amount
+
         events = tuple(
             CoupledEvent(f"{process_id}:depleted:{side}",
-                         lambda state, key=keys[index]: state.amounts_mol[key])
+                         depletion_condition(keys[index]))
             for side, index, boundary in sides if boundary.kind == "flux" and boundary.value > 0
         )
         dependencies = {key: keys[max(0, i - 1):min(len(keys), i + 2)]
                         for i, key in enumerate(keys)}
 
-        def validate(state):
+        def validate(state: CoupledStateView) -> None:
             self.evaluate([state.amounts_mol[key] for key in keys])
 
         return DiffusionCoupling(CoupledProcess(
