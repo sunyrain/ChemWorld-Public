@@ -6,16 +6,24 @@ declare a hysteresis chemical-energy law. The caller owns the one shared
 electrode state and integrates it through the common coupled solver.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
 from math import isfinite, tanh
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Self, cast
 
 from chemworld.data.scientific_inputs import ScientificTable, _keys, _text
 from chemworld.foundation.units import convert_value
 from chemworld.physchem.battery_materials import ElectrodeOCV
-from chemworld.physchem.coupled_system import CoupledCoordinate
+from chemworld.physchem.coupled_system import CoupledCoordinate, CoupledStateView
 from chemworld.physchem.electrochemistry import FARADAY_C_PER_MOL as F
+
+if TYPE_CHECKING:
+    from chemworld.physchem.battery_composite import BatteryCompositeSPMSpec
+    from chemworld.physchem.battery_models import BatterySPMSpec
 
 OCP_CONVENTION = "pybamm-25.4.2-ocp"
 OCP_UNITS = {
@@ -24,7 +32,7 @@ OCP_UNITS = {
 }
 
 
-def hysteresis_key(electrode):
+def hysteresis_key(electrode: str) -> str:
     if electrode not in {"negative", "positive"}:
         raise ValueError("unknown OCP electrode")
     return f"battery:{electrode}:hysteresis"
@@ -38,7 +46,7 @@ class ElectrodeOCPSpec:
     parameters: ScientificTable | None = None
     parameter_row_id: str = ""
     convention: str = OCP_CONVENTION
-    _native: object = field(init=False, repr=False, compare=False)
+    _native: Mapping[str, float] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.mode not in {"single", *OCP_UNITS} or self.convention != OCP_CONVENTION:
@@ -53,7 +61,8 @@ class ElectrodeOCPSpec:
                 raise ValueError("single OCP uses the unchanged equilibrium curve only")
             object.__setattr__(self, "_native", MappingProxyType({}))
             return
-        if not all(isinstance(c, ElectrodeOCV) for c in (self.lithiation, self.delithiation)):
+        if (not isinstance(self.lithiation, ElectrodeOCV)
+                or not isinstance(self.delithiation, ElectrodeOCV)):
             raise ValueError("directional OCP requires explicit sourced electrode branches")
         if self.lithiation.material_id != self.delithiation.material_id:
             raise ValueError("OCP branches must describe the same declared material")
@@ -69,7 +78,7 @@ class ElectrodeOCPSpec:
         if any(v.quality != "valid" or v.value is None for v in cells.values()):
             raise ValueError("OCP requires valid finite parameter values")
         values = {
-            k: convert_value(cells[k].value, cells[k].unit, unit)
+            k: convert_value(cast(float, cells[k].value), cells[k].unit, unit)
             for k, unit in OCP_UNITS[self.mode].items()
         }
         if any(not isfinite(v) or (k != "initial_h" and v <= 0) for k, v in values.items()):
@@ -83,18 +92,21 @@ class ElectrodeOCPSpec:
         object.__setattr__(self, "_native", MappingProxyType(values))
 
     @property
-    def native_parameters(self):
+    def native_parameters(self) -> Mapping[str, float]:
         return self._native
 
-    def derivatives(self, electrode, theta, current_A, h=None):
+    def derivatives(
+        self, electrode: str, theta: float, current_A: float, h: float | None = None,
+    ) -> tuple[float, float, float, float]:
         """Return (U, dU/dtheta, dU/dI, dU/dh); theta permits solver trials."""
         hysteresis_key(electrode)
         if self.mode == "single":
             raise ValueError("single OCP is evaluated using its owning spec.ocv")
         if not isfinite(current_A):
             raise ValueError("OCP current must be finite")
-        lith, dlith = self.lithiation.derivatives(theta, trial=True)
-        de, dde = self.delithiation.derivatives(theta, trial=True)
+        # Non-single modes require both source curves at construction.
+        lith, dlith = cast(ElectrodeOCV, self.lithiation).derivatives(theta, trial=True)
+        de, dde = cast(ElectrodeOCV, self.delithiation).derivatives(theta, trial=True)
         if self.mode == "current_sigmoid":
             gain = self._native["sigmoid_slope_m2_A"] / self._native["collector_area_m2"]
             gain *= -1 if electrode == "negative" else 1
@@ -110,7 +122,9 @@ class ElectrodeOCPSpec:
             di, dh = 0.0, (de - lith) / 2
         return (weight * lith + (1 - weight) * de, weight * dlith + (1 - weight) * dde, di, dh)
 
-    def rate_derivatives(self, electrode, current_A, h, capacity_mol):
+    def rate_derivatives(
+        self, electrode: str, current_A: float, h: float, capacity_mol: float,
+    ) -> tuple[float, float, float]:
         """Axen h rate, current partial and state partial in physical SI units."""
         if self.mode != "axen":
             return 0.0, 0.0, 0.0
@@ -130,7 +144,9 @@ class ElectrodeOCPSpec:
             -gain * abs(q),
         )
 
-    def reaction_rate_derivatives(self, delithiation_current_A, h, capacity_mol):
+    def reaction_rate_derivatives(
+        self, delithiation_current_A: float, h: float, capacity_mol: float,
+    ) -> tuple[float, float, float]:
         """Axen rate and partials in the actual main-reaction current.
 
         A side reaction changes the negative particle current without changing
@@ -141,7 +157,7 @@ class ElectrodeOCPSpec:
         return self.rate_derivatives("negative", delithiation_current_A, h, capacity_mol)
 
     @cached_property
-    def cv_monotone_certified(self):
+    def cv_monotone_certified(self) -> bool:
         """Conservative source-domain certificate, never a sampled root guess.
 
         Nonpositive branch slopes and U_lith <= U_delith imply each passive
@@ -150,8 +166,11 @@ class ElectrodeOCPSpec:
         """
         if self.mode == "single":
             return True
-        lower = max(c.stoichiometry_domain[0] for c in (self.lithiation, self.delithiation))
-        upper = min(c.stoichiometry_domain[1] for c in (self.lithiation, self.delithiation))
+        lithiation = cast(ElectrodeOCV, self.lithiation)
+        delithiation = cast(ElectrodeOCV, self.delithiation)
+        branches = (lithiation, delithiation)
+        lower = max(c.stoichiometry_domain[0] for c in branches)
+        upper = min(c.stoichiometry_domain[1] for c in branches)
         if lower >= upper:
             return False
         identical = all(
@@ -159,7 +178,7 @@ class ElectrodeOCPSpec:
             for k in ("polynomial_V", "exponential_terms", "tanh_terms", "endpoint_policy")
         )
 
-        def constant(curve):
+        def constant(curve: ElectrodeOCV) -> bool:
             return (
                 curve.endpoint_policy is None
                 and not any(curve.polynomial_V[1:])
@@ -171,18 +190,18 @@ class ElectrodeOCPSpec:
             a, b = lower + (upper - lower) * i / 64, lower + (upper - lower) * (i + 1) / 64
             if any(
                 not constant(c) and c.enclosure(a, b, derivative=True).upper > 0
-                for c in (self.lithiation, self.delithiation)
+                for c in branches
             ):
                 return False
             if (
                 self.mode == "current_sigmoid"
                 and not identical
-                and (self.lithiation.enclosure(a, b) - self.delithiation.enclosure(a, b)).upper > 0
+                and (lithiation.enclosure(a, b) - delithiation.enclosure(a, b)).upper > 0
             ):
                 return False
         return True
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
             "lithiation": None if self.lithiation is None else self.lithiation.to_dict(),
@@ -193,7 +212,7 @@ class ElectrodeOCPSpec:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         _keys(
             value,
             ("mode", "lithiation", "delithiation", "parameters", "parameter_row_id", "convention"),
@@ -210,13 +229,17 @@ class ElectrodeOCPSpec:
         )
 
 
-def hysteresis_coordinates(spec):
+def hysteresis_coordinates(
+    spec: BatterySPMSpec | BatteryCompositeSPMSpec,
+) -> tuple[CoupledCoordinate, ...]:
     # Do not declare endpoint root events: h=+/-1 is an admissible invariant
     # endpoint, not a termination. Strict accepted-state validation is separate.
     return tuple(CoupledCoordinate(key, "dimensionless", 1) for key in spec.hysteresis_keys)
 
 
-def validate_hysteresis(spec, state):
+def validate_hysteresis(
+    spec: BatterySPMSpec | BatteryCompositeSPMSpec, state: CoupledStateView,
+) -> None:
     for key in spec.hysteresis_keys:
         if key not in state.coordinates or not isfinite(state.coordinates[key]):
             raise ValueError("missing or nonfinite persistent electrode hysteresis state")
@@ -224,7 +247,10 @@ def validate_hysteresis(spec, state):
             raise ValueError("electrode hysteresis state is outside [-1, 1]")
 
 
-def hysteresis_rates(spec, state, current_A, *, reaction_currents_A=None):
+def hysteresis_rates(
+    spec: BatterySPMSpec | BatteryCompositeSPMSpec, state: CoupledStateView, current_A: float,
+    *, reaction_currents_A: Mapping[str, float] | None = None,
+) -> dict[str, float]:
     if reaction_currents_A is not None:
         return {
             hysteresis_key(name): ocp.reaction_rate_derivatives(
@@ -246,7 +272,7 @@ def hysteresis_rates(spec, state, current_A, *, reaction_currents_A=None):
     }
 
 
-def validate_ocp_cv(spec):
+def validate_ocp_cv(spec: BatterySPMSpec | BatteryCompositeSPMSpec) -> None:
     if any(
         c is not None and not c.cv_monotone_certified
         for c in (spec.negative_ocp, spec.positive_ocp)

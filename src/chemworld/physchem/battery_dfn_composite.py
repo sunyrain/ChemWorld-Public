@@ -77,10 +77,11 @@ class BatteryCompositeDFNSpec:
             if isinstance(self.positive_phase, dict)
             else self.positive_phase
         )
+        raw_electrolyte: object = self.electrolyte
         electrolyte = (
-            BatteryElectrolyteSpec(**self.electrolyte)
-            if isinstance(self.electrolyte, dict)
-            else self.electrolyte
+            BatteryElectrolyteSpec(**raw_electrolyte)
+            if isinstance(raw_electrolyte, dict)
+            else raw_electrolyte
         )
         if len(phases) != 2 or not all(
             isinstance(p, ActiveMaterialPhaseSpec) for p in (*phases, positive)

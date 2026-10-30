@@ -9,6 +9,7 @@ Upstream's effective one-electron coefficient is not copied as our stoichiometry
 from dataclasses import dataclass
 from math import exp, isfinite
 
+from chemworld.physchem.coupled_system import CoupledStateView
 from chemworld.physchem.electrochemistry import R_J_PER_MOL_K
 
 SEI_SPECIES = {"sei:EC": "EC", "sei:carbonate": "Li2CO3", "sei:ethylene": "C2H4"}
@@ -44,24 +45,24 @@ class SEISpec:
                 "SEI reference temperature, volumes and initial thickness must be positive"
             )
 
-    def initial_amounts(self, area_m2):
+    def initial_amounts(self, area_m2: float) -> dict[str, float]:
         return {
             "sei:EC": self.solvent_volume_m3 * self.initial_solvent_concentration_mol_m3,
             "sei:carbonate": area_m2 * self.initial_thickness_m / self.molar_volume_m3_mol,
             "sei:ethylene": 0.0,
         }
 
-    def diffusivity(self, temperature_K):
+    def diffusivity(self, temperature_K: float) -> float:
         return self.solvent_diffusivity_m2_s * exp(
             -self.activation_energy_J_mol
             / R_J_PER_MOL_K
             * (1 / temperature_K - 1 / self.reference_temperature_K)
         )
 
-    def thickness_m(self, state, area_m2):
+    def thickness_m(self, state: CoupledStateView, area_m2: float) -> float:
         return state.amounts_mol["sei:carbonate"] * self.molar_volume_m3_mol / area_m2
 
-    def reaction_rate_mol_s(self, state, area_m2):
+    def reaction_rate_mol_s(self, state: CoupledStateView, area_m2: float) -> float:
         thickness = self.thickness_m(state, area_m2)
         if thickness <= 0:
             raise ValueError("solvent-limited SEI requires an existing film")
@@ -72,5 +73,5 @@ class SEISpec:
             / thickness
         )
 
-    def resistance_ohm(self, state, area_m2):
+    def resistance_ohm(self, state: CoupledStateView, area_m2: float) -> float:
         return self.film_resistivity_ohm_m * self.thickness_m(state, area_m2) / area_m2

@@ -5,19 +5,30 @@ integrated electrolyte conductivity (BSD-3-Clause). Independent constant-propert
 realisation using ChemWorld's conservative porous finite-volume operator.
 """
 
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from functools import cached_property
 from math import isfinite
 from numbers import Integral
+from typing import Any, TypedDict
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
-from chemworld.physchem.coupled_system import CoupledProcess, ProcessContribution
+from chemworld.physchem.coupled_system import CoupledProcess, CoupledStateView, ProcessContribution
 from chemworld.physchem.electrochemistry import FARADAY_C_PER_MOL, R_J_PER_MOL_K
 from chemworld.physchem.finite_volume import ConservativeDiffusion, DiffusionMesh
 
 REGIONS = ("negative", "separator", "positive")
 ELECTROLYTE_SPECIES = "battery:LiPF6"
+
+
+class ElectrolytePotential(TypedDict):
+    potential_V: NDArray[np.float64]
+    ionic_current_A_m2: NDArray[np.float64]
+    concentration_overpotential_V: float
+    electrolyte_ohmic_V: float
+    solid_ohmic_V: float
 
 
 @dataclass(frozen=True)
@@ -50,7 +61,9 @@ class BatteryElectrolyteSpec:
             if len(values) != count or any(not isfinite(x) or x <= 0 for x in values):
                 raise ValueError(f"{name} requires {count} positive finite entries")
             object.__setattr__(self, name, values)
-        if any(not isinstance(n, Integral) or isinstance(n, bool) or n < 2 for n in self.cells):
+        # JSON input is normalized above but still needs the integer-cell check.
+        cells: Sequence[object] = self.cells
+        if any(isinstance(n, bool) or not isinstance(n, Integral) or n < 2 for n in cells):
             raise ValueError("each electrolyte region requires at least two integer cells")
         if any(e >= 1 for e in self.porosities):
             raise ValueError("porosities must be strictly between zero and one")
@@ -64,35 +77,35 @@ class BatteryElectrolyteSpec:
             raise ValueError("initial electrolyte must be above the depletion cutoff")
 
     @cached_property
-    def mesh(self):
+    def mesh(self) -> DiffusionMesh:
         faces = [0.0]
         for length, count in zip(self.lengths_m, self.cells, strict=True):
             faces.extend(faces[-1] + np.linspace(0, length, count + 1)[1:])
         return DiffusionMesh("planar", tuple(faces), area_m2=self.area_m2)
 
     @cached_property
-    def region_slices(self):
+    def region_slices(self) -> dict[str, slice]:
         cuts = np.r_[0, np.cumsum(self.cells)]
         return {name: slice(int(cuts[i]), int(cuts[i + 1])) for i, name in enumerate(REGIONS)}
 
     @cached_property
-    def keys(self):
+    def keys(self) -> tuple[str, ...]:
         return tuple(f"electrolyte:salt:{i}" for i in range(sum(self.cells)))
 
     @cached_property
-    def diffusion(self):
+    def diffusion(self) -> ConservativeDiffusion:
         efficiencies = np.power(self.porosities, self.bruggeman)
         return ConservativeDiffusion(
             self.mesh, tuple(np.repeat(efficiencies * self.diffusivity_m2_s, self.cells)),
             storage_fractions=tuple(np.repeat(self.porosities, self.cells)),
         )
 
-    def concentrations(self, state):
+    def concentrations(self, state: CoupledStateView) -> NDArray[np.float64]:
         return np.array([state.amounts_mol[k] for k in self.keys]) / (
             self.diffusion.storage_volumes_m3
         )
 
-    def minimum_resolved_concentration(self, state):
+    def minimum_resolved_concentration(self, state: CoupledStateView) -> float:
         """Include collector boundaries, where the salt gradient is zero.
 
         The persistent concentrations are cell averages. A quadratic satisfying
@@ -109,26 +122,26 @@ class BatteryElectrolyteSpec:
             boundaries.append(values[0] + weight * (values[0] - values[1]))
         return float(min(*boundaries, np.min(c)))
 
-    def initial_amounts(self):
+    def initial_amounts(self) -> dict[str, float]:
         return dict(zip(self.keys, self.diffusion.storage_volumes_m3
                         * self.initial_concentration_mol_m3, strict=True))
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {key: list(value) if isinstance(value, tuple) else value
                 for key, value in asdict(self).items()}
 
-    def region_average(self, values, region):
+    def region_average(self, values: ArrayLike, region: str) -> float:
         selected = self.region_slices[region]
         return float(np.average(np.asarray(values)[selected],
                                 weights=self.mesh.cell_volumes_m3[selected]))
 
-    def kinetics_factor(self, state, region):
+    def kinetics_factor(self, state: CoupledStateView, region: str) -> float:
         # Trial extension is used only below the physical positive cutoff; it
         # changes no stored amounts. Accepted trajectories stop before this point.
         c = np.maximum(self.concentrations(state), self.minimum_concentration_mol_m3 / 2)
         return self.region_average(np.sqrt(c / self.initial_concentration_mol_m3), region)
 
-    def potential(self, state, current_A):
+    def potential(self, state: CoupledStateView, current_A: float) -> ElectrolytePotential:
         """Return centre potentials in a zero-mean-negative-electrode gauge.
 
         Constant transport makes the composite and integrated formulations
@@ -190,7 +203,9 @@ class BatteryElectrolyteSpec:
             "electrolyte_ohmic_V": electrolyte_ohmic, "solid_ohmic_V": solid_ohmic,
         }
 
-    def processes(self, control_current):
+    def processes(
+        self, control_current: Callable[[CoupledStateView], float],
+    ) -> tuple[CoupledProcess, CoupledProcess]:
         diffusion = self.diffusion.couple(
             self.keys, process_id="battery:electrolyte-diffusion", owner_id="battery",
         ).process
@@ -198,7 +213,7 @@ class BatteryElectrolyteSpec:
         source_weights[self.region_slices["negative"]] = 1 / self.cells[0]
         source_weights[self.region_slices["positive"]] = -1 / self.cells[2]
 
-        def source(state):
+        def source(state: CoupledStateView) -> ProcessContribution:
             current = control_current(state)
             rates = source_weights * ((1 - self.cation_transference) * current
                                       / FARADAY_C_PER_MOL)
