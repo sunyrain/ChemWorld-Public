@@ -1,9 +1,17 @@
 """Adaptive chemical delegate of the original stochastic physical coordinator."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
 
+from chemworld.foundation import WorldState
+from chemworld.foundation.lifecycle import LifecycleTransition
+from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, ProcessLedger
 from chemworld.physchem.stochastic_adaptive_advance import (
+    AdaptiveContinuation,
     advance_adaptive_hybrid,
     rebind_adaptive_continuation,
     validate_adaptive_continuation,
@@ -15,13 +23,18 @@ from chemworld.physchem.stochastic_adaptive_hybrid import (
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 
+if TYPE_CHECKING:
+    from chemworld.physchem.reactor_shared import JacketTemperatureProgram
+    from chemworld.world.composition import WorldCompositionSpec
+    from chemworld.world.physical_world import CompositionPhysics
+
 
 class AdaptiveHybridStochasticRuntime:
-    def __init__(self, composition):
+    def __init__(self, composition: WorldCompositionSpec | None) -> None:
         self.composition = composition
 
     @property
-    def models(self):
+    def models(self) -> Mapping[str, AdaptiveHybridSpec]:
         if self.composition is None or self.composition.physics is None:
             return {}
         return {
@@ -30,31 +43,34 @@ class AdaptiveHybridStochasticRuntime:
             if isinstance(value, AdaptiveHybridSpec)
         }
 
-    def supports(self, state):
-        memory = state.process.stochastic_continuation
+    def supports(self, state: WorldState) -> bool:
+        memory = cast(ProcessLedger, state.process).stochastic_continuation
         return state.vessel_id in self.models or (
             memory is not None and memory.get("algorithm") == ADAPTIVE_HYBRID_ALGORITHM
         )
 
-    def validate(self, state, *, numerical=True):
+    def validate(self, state: WorldState, *, numerical: bool = True) -> AdaptiveHybridSpec:
         spec = self.models.get(state.vessel_id)
         if spec is None:
             raise ValueError("adaptive process requires its actual physical model declaration")
         if state.temperature_K != spec.temperature_K or state.volume_L != spec.volume_L:
             raise ValueError("adaptive process changed its declared fixed temperature or volume")
         if (
-            len(state.phases.phases) != 1
+            len(cast(PhaseLedger, state.phases).phases) != 1
             or state.phase != "liquid"
-            or next(iter(state.phases.phases.values())).species_amounts_mol != state.species_amounts
+            or next(iter(cast(PhaseLedger, state.phases).phases.values())).species_amounts_mol
+            != state.species_amounts
             or state.state_slots.slots
             or state.samples.samples
         ):
             raise ValueError("adaptive process requires one authoritative liquid mol inventory")
-        memory = state.process.stochastic_continuation
+        memory = cast(ProcessLedger, state.process).stochastic_continuation
         if memory is None or memory.get("time_s") != state.ledger.time_s:
             raise ValueError("adaptive process and original world clocks disagree")
+        composition = cast("WorldCompositionSpec", self.composition)
+        physics = cast("CompositionPhysics", composition.physics)
         validate_adaptive_continuation(
-            self.composition.physics.network,
+            physics.network,
             spec,
             state.species_amounts,
             memory,
@@ -65,7 +81,8 @@ class AdaptiveHybridStochasticRuntime:
     def validate_world(self) -> None:
         if not self.models:
             return
-        physics = self.composition.physics
+        composition = cast("WorldCompositionSpec", self.composition)
+        physics = cast("CompositionPhysics", composition.physics)
         if (
             physics.network.stochastic is not None
             or not set(self.models) <= physics.initial_states.keys()
@@ -82,7 +99,7 @@ class AdaptiveHybridStochasticRuntime:
                 if kind != "stochastic_hybrid"
             ):
                 raise ValueError("adaptive process cannot ignore another physical model")
-            for component in self.composition.components:
+            for component in composition.components:
                 if component.vessel != identity:
                     continue
                 if component.kind not in {
@@ -97,11 +114,11 @@ class AdaptiveHybridStochasticRuntime:
                     raise ValueError("adaptive kinetics do not include thermal evolution")
             if any(
                 r.equipment_type not in {"batch_reactor", "instrument"}
-                for r in state.equipment.equipment.values()
+                for r in cast(EquipmentLedger, state.equipment).equipment.values()
             ):
                 raise ValueError("adaptive process has no continuous equipment coupling")
-            for name in physical_instruments(self.composition, identity):
-                instrument = self.composition.modules.instrument_specs()[name]
+            for name in physical_instruments(composition, identity):
+                instrument = composition.modules.instrument_specs()[name]
                 if (
                     name != "sde_amount_meter"
                     or instrument.discrete_sampling
@@ -112,18 +129,22 @@ class AdaptiveHybridStochasticRuntime:
                         "adaptive fixed-volume world needs its continuous nonconsuming gauge"
                     )
 
-    def reconcile_initialization(self, transition, *, previous=None):
+    def reconcile_initialization(
+        self, transition: LifecycleTransition, *, previous: WorldState | None = None,
+    ) -> LifecycleTransition:
         state = transition.state
         locals_ = {s.vessel_id: s for s in (state, *state.inactive_vessels.values())}
         records = {}
         for identity in set(transition.receipt.get("vessels", {})) & self.models.keys():
             local = locals_[identity]
+            composition = cast("WorldCompositionSpec", self.composition)
+            physics = cast("CompositionPhysics", composition.physics)
             if transition.receipt.get("scope") == "batch":
-                memory = deepcopy(
-                    self.composition.physics.initial_states[
-                        identity
-                    ].process.stochastic_continuation
-                )
+                memory = deepcopy(cast(
+                    AdaptiveContinuation,
+                    cast(ProcessLedger, physics.initial_states[identity].process)
+                    .stochastic_continuation,
+                ))
                 policy = "declared_initial_adaptive_process"
             else:
                 if previous is None:
@@ -132,16 +153,18 @@ class AdaptiveHybridStochasticRuntime:
                     identity
                 ]
                 memory = rebind_adaptive_continuation(
-                    self.composition.physics.network,
+                    physics.network,
                     self.models[identity],
                     old.species_amounts,
                     local.species_amounts,
-                    old.process.stochastic_continuation,
+                    cast(Mapping[str, object],
+                        cast(ProcessLedger, old.process).stochastic_continuation),
                     force_refresh=True,
                 ).continuation
                 policy = "retain_process_stream_and_rebind_original_channel_targets"
             locals_[identity] = local.replace(
-                process=replace(local.process, stochastic_continuation=memory)
+                process=replace(cast(ProcessLedger, local.process),
+                    stochastic_continuation=cast(dict[str, object], memory))
             )
             records[identity] = {"policy": policy, "time_s": memory["time_s"]}
         if records:
@@ -159,7 +182,10 @@ class AdaptiveHybridStochasticRuntime:
             },
         )
 
-    def advance(self, state, action, *, heat=False, jacket_program=None):
+    def advance(
+        self, state: WorldState, action: Mapping[str, Any], *, heat: bool = False,
+        jacket_program: JacketTemperatureProgram | None = None,
+    ) -> ModelProviderResult:
         if (
             heat
             or jacket_program is not None
@@ -173,19 +199,22 @@ class AdaptiveHybridStochasticRuntime:
             )
         try:
             spec = self.validate(state, numerical=False)
+            composition = cast("WorldCompositionSpec", self.composition)
+            physics = cast("CompositionPhysics", composition.physics)
             result = advance_adaptive_hybrid(
-                self.composition.physics.network,
+                physics.network,
                 spec,
                 state.species_amounts,
-                state.process.stochastic_continuation,
+                cast(Mapping[str, object],
+                    cast(ProcessLedger, state.process).stochastic_continuation),
                 action["duration_s"],
             )
             candidate = state.replace(
                 species_amounts=result.amounts_mol,
                 process=replace(
-                    state.process,
+                    cast(ProcessLedger, state.process),
                     last_observation_record=None,
-                    stochastic_continuation=result.continuation,
+                    stochastic_continuation=cast(dict[str, object], result.continuation),
                 ),
                 ledger=advance_ledger(state.ledger, result.actual_duration_s),
             )
