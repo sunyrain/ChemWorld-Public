@@ -672,8 +672,9 @@ def _occlude_impurity(
 
 
 def _occlusion_loading_ratio(
-    *, relative_supersaturation, dissolved_impurity, solvent_volume_L, kinetics
-):
+    *, relative_supersaturation: float, dissolved_impurity: float,
+    solvent_volume_L: float, kinetics: CrystallizationKineticsSpec,
+) -> float:
     if kinetics.impurity_occlusion_law_id == "linear_supersaturation_transfer_v1":
         ratio = kinetics.impurity_occlusion_mol_per_mol * (
             1.0 + kinetics.supersaturation_occlusion_factor * relative_supersaturation

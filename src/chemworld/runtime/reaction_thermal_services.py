@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.foundation import (
     WorldState,
@@ -27,7 +27,10 @@ from chemworld.world.thermal_kernel import account_temperature_transition, press
 
 if TYPE_CHECKING:
     from chemworld.runtime.concentration import ConcentrationRuntime
+    from chemworld.runtime.crystal_thermal import CrystalThermalRuntime
     from chemworld.runtime.liquid_equilibrium import LiquidEquilibriumRuntime
+    from chemworld.world.composition import WorldCompositionSpec
+    from chemworld.world.domain_modules import DomainModuleRegistry
 
 
 class ChemWorldReactionThermalServices:
@@ -37,14 +40,15 @@ class ChemWorldReactionThermalServices:
     # describes the installed service without creating it for absent modules.
     liquid: LiquidEquilibriumRuntime
     concentration: ConcentrationRuntime
+    crystal: CrystalThermalRuntime
 
     def __init__(
         self,
         world: ChemWorldParameters,
         species_view: MechanismSpeciesView,
         *,
-        composition=None,
-        modules=None,
+        composition: WorldCompositionSpec | None = None,
+        modules: DomainModuleRegistry | None = None,
     ) -> None:
         self.world = world
         self.species_view = species_view
@@ -305,9 +309,11 @@ class ChemWorldReactionThermalServices:
         phases = working_state.phases
         species_amounts = result.species_amounts
         if active_phase is not None and active_phase_id != "reactor_liquid":
-            phase_records = working_state.phases.phases.copy()
-            phase_records[active_phase_id] = replace(
-                phase_records[active_phase_id],
+            phase_records = cast(PhaseLedger, working_state.phases).phases.copy()
+            # The active record above was read under this same ledger key.
+            active_phase_key = cast(str, active_phase_id)
+            phase_records[active_phase_key] = replace(
+                phase_records[active_phase_key],
                 species_amounts_mol=result.species_amounts,
             )
             phases = PhaseLedger(phase_records)

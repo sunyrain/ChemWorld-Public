@@ -14,10 +14,11 @@ from chemworld.physchem.coupled_system import ConstantCvThermodynamics, SpeciesI
 from chemworld.physchem.elements import molecular_weight
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.runtime.crystal_thermal import crystal_inventory_energy, population_from_state
+from chemworld.world.composition import WorldCompositionSpec
 from chemworld.world.crystal_world import crystal_world_spec
 
 
-def session_for(*, constant_cv=False):
+def session_for(*, constant_cv=False, without_impurity=False):
     model = synthetic_crystal_model(molecular_weight({"C": 6, "H": 12, "O": 1}) / 1000)
     thermal = synthetic_crystal_thermodynamics()
     if constant_cv:
@@ -36,6 +37,27 @@ def session_for(*, constant_cv=False):
     world = crystal_world_spec(
         model, thermal, {"P": "C6H12O", "I": "C3H8O"}
     )
+    if without_impurity:
+        # The convenience fixture authors two components. The general world
+        # interface also accepts an explicitly impurity-free crystal model.
+        payload = world.to_dict()
+        physics = payload["physics"]
+        physics["network"]["species"] = [
+            s for s in physics["network"]["species"] if s["species_id"] == "P"
+        ]
+        state = physics["initial_states"]["reactor"]
+        state["species_amounts"].pop("I")
+        state["species"]["initial_amounts_mol"].pop("I")
+        for phase in state["phases"].values():
+            phase["species_amounts_mol"].pop("I")
+        state["equipment"]["crystallizer"]["settings"]["population_constituents"][0][1] = 0.0
+        crystal = physics["models"]["crystal"]["bindings"]["reactor"]
+        crystal["impurity_component"] = None
+        crystal["solid_property_keys"].pop("I")
+        calorics = physics["models"]["thermal"]["bindings"]["reactor"]["thermodynamics"]
+        calorics["species"].pop("I")
+        calorics["species"].pop("solid:I")
+        world = WorldCompositionSpec.from_dict(payload)
     session = ChemWorldRuntime(composition=world)
     session.reset(seed=23)
     return world, session
@@ -91,8 +113,11 @@ def test_native_cold_warm_and_snapshot_continue_one_clock_without_future_allocat
             replay.close()
 
 
-def test_native_filter_resuspend_preserves_historical_filtrate_and_reconciles_energy():
-    world, session = session_for()
+@pytest.mark.parametrize("without_impurity", [False, True], ids=["mixture", "pure-target"])
+def test_native_filter_resuspend_preserves_historical_filtrate_and_reconciles_energy(
+    without_impurity,
+):
+    world, session = session_for(without_impurity=without_impurity)
     try:
         execute(session, operation="filter_crystals")
         before = session._state
@@ -269,8 +294,9 @@ def test_native_resource_card_without_reagent_operation_enforces_actual_seed_sto
         session.close()
 
 
-def test_seed_input_preserves_a_seed_excluded_native_recovery_reference():
-    _, session = session_for()
+@pytest.mark.parametrize("without_impurity", [False, True], ids=["mixture", "pure-target"])
+def test_seed_input_preserves_a_seed_excluded_native_recovery_reference(without_impurity):
+    _, session = session_for(without_impurity=without_impurity)
     try:
         execute(session, operation="seed_crystals", seed_mass_g=0.001)
         # Initial P=.021 includes .0003 solid and .0002 dissolved seed.
@@ -281,5 +307,9 @@ def test_seed_input_preserves_a_seed_excluded_native_recovery_reference():
         assert session._state.process.metrics["seed_excluded_recovery"] == pytest.approx(
             (solid - seed) / 0.0205
         )
+        expected_components = {"P"} if without_impurity else {"P", "I"}
+        assert set(session._state.species_amounts) == expected_components
+        for phase in session._state.phases.phases.values():
+            assert set(phase.species_amounts_mol) == expected_components
     finally:
         session.close()

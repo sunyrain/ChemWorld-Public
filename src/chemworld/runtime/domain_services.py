@@ -34,6 +34,7 @@ from chemworld.world.operations import operation_name
 from chemworld.world.parameters import ChemWorldParameters
 
 if TYPE_CHECKING:
+    from chemworld.runtime.crystallization_services import ChemWorldCrystallizationServices
     from chemworld.runtime.instrument_cost_services import ChemWorldInstrumentCostServices
     from chemworld.runtime.reaction_thermal_services import ChemWorldReactionThermalServices
     from chemworld.runtime.scheduling import LabScheduleServices
@@ -52,6 +53,7 @@ class ChemWorldDomainServices:
     instrument_cost: ChemWorldInstrumentCostServices
     reaction_thermal: ChemWorldReactionThermalServices
     lab_schedule: LabScheduleServices
+    crystallization: ChemWorldCrystallizationServices
 
     def __init__(
         self,
