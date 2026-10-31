@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from chemworld.data.sbml import SBMLModel
 from chemworld.data.scientific_inputs import InputSource
 from chemworld.physchem.data_conflicts import DataSourceProvenance
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.runtime.sbml_flux_modes import analyze_sbml_flux_modes
+from chemworld.world.physical_world import CompositionPhysics
 from chemworld.world.sbml_world import sbml_world
 
 
@@ -98,7 +99,7 @@ def flux_model(
 
 def run_example() -> dict[str, Any]:
     composition = sbml_world(flux_model(), controlled_parameters=("cf",), budget=100)
-    model = composition.physics.models_of("sbml")["formal_workspace"]
+    model = cast(CompositionPhysics, composition.physics).models_of("sbml")["formal_workspace"]
     runtime = ChemWorldRuntime(composition=composition)
     try:
         runtime.reset(seed=0)

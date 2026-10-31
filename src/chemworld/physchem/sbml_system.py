@@ -4,32 +4,40 @@ This declaration contains initialization recipes, numerical and readout policy,
 never evolving coordinates or a clock. Live data belong to EquipmentRecord.
 """
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import isfinite
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast, overload
 
 from chemworld.data.sbml import SBMLModel
+from chemworld.data.sbml_units import SBMLUnitSignature
 from chemworld.foundation.dimensions import dimension_definition
 from chemworld.foundation.units import COHERENT_SI_UNITS, unit_spec
 from chemworld.physchem.caloric_math import scalar_value
-from chemworld.physchem.coordinate_events import _finite_real, _integer
+from chemworld.physchem.coordinate_events import CoordinateEventSpec, _finite_real, _integer
+from chemworld.physchem.coupled_system import CoupledSystem
 from chemworld.physchem.sbml_events import SBMLTriggerRoots, sbml_coordinate_events
-from chemworld.physchem.sbml_kinetics import SBMLKinetics, sbml_continuous_system
+from chemworld.physchem.sbml_kinetics import SBMLKinetics, SBMLScalar, sbml_continuous_system
 from chemworld.physchem.solver_backend import ODESolverPolicy
+
+if TYPE_CHECKING:
+    from chemworld.physchem.sbml_jump_triggers import SBMLJumpTriggers
+    from chemworld.physchem.sbml_stochastic import SBMLIntegerKinetics
 
 SBML_ENTITY_TYPE = "sbml_formal_kinetics_v1"
 
 
-def _parameter_signature(model, identity):
+def _parameter_signature(model: SBMLModel, identity: str) -> SBMLUnitSignature:
     parameters = {p.get("id"): p for p in model.declaration.items("listOfParameters")}
     if identity not in parameters or parameters[identity].get("units") is None:
         raise ValueError("parameter readouts require a declared global parameter and source units")
     return model.unit_signature(parameters[identity].get("units"))
 
 
-def parameter_observable(model, identity):
+def parameter_observable(model: SBMLModel, identity: str) -> SBMLObservable:
     signature = _parameter_signature(model, identity)
     for unit in COHERENT_SI_UNITS:
         if dimension_definition(unit_spec(unit).dimension).vector == signature.dimension:
@@ -54,23 +62,23 @@ class SBMLObservable:
             raise ValueError("parameter readouts need an explicit supported coherent SI unit")
 
     @property
-    def channel_id(self):
+    def channel_id(self) -> str:
         return self.kind+"_"+self.source_id
 
     @property
-    def unit(self):
-        return (self.unit_name if self.kind == "parameter" else
+    def unit(self) -> str:
+        return (cast(str, self.unit_name) if self.kind == "parameter" else
             {"amount": "mol", "concentration": "mol/L", "volume": "L",
              "reaction_rate": "mol/s"}[self.kind])
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str]:
         payload = {"kind": self.kind, "source_id": self.source_id}
         if self.kind == "parameter":
-            payload["unit"] = self.unit_name
+            payload["unit"] = cast(str, self.unit_name)
         return payload
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Any) -> SBMLObservable:
         if not isinstance(payload, dict):
             raise ValueError("unknown formal readout fields")
         expected = {"kind", "source_id"} | (
@@ -98,11 +106,12 @@ class SBMLSystemSpec:
     controlled_parameters: tuple[str, ...] = ()
     solver_method: str = "BDF"
     tau_policy: Any = None
-    _frame: object = field(init=False, repr=False, compare=False)
-    _events: tuple = field(init=False, repr=False, compare=False)
-    _roots: object = field(init=False, repr=False, compare=False)
-    _integer: object = field(init=False, repr=False, compare=False, default=None)
-    _guard_critical_reactions: frozenset = field(init=False, repr=False, compare=False,
+    _frame: SBMLKinetics = field(init=False, repr=False, compare=False)
+    _events: tuple[CoordinateEventSpec, ...] = field(init=False, repr=False, compare=False)
+    _roots: SBMLTriggerRoots | SBMLJumpTriggers = field(init=False, repr=False, compare=False)
+    _integer: SBMLIntegerKinetics | None = field(
+        init=False, repr=False, compare=False, default=None)
+    _guard_critical_reactions: frozenset[str] = field(init=False, repr=False, compare=False,
                                                default=frozenset())
 
     def __post_init__(self) -> None:
@@ -136,6 +145,8 @@ class SBMLSystemSpec:
         if self.maximum_step_s is not None and (
                 not _finite_real(self.maximum_step_s) or self.maximum_step_s <= 0):
             raise ValueError("formal root maximum step must be finite positive seconds")
+        integer: SBMLIntegerKinetics | None
+        roots: SBMLTriggerRoots | SBMLJumpTriggers
         if integer_mode:
             from chemworld.physchem.sbml_stochastic import SBMLIntegerKinetics
 
@@ -179,34 +190,34 @@ class SBMLSystemSpec:
         object.__setattr__(self, "_events", events)
         object.__setattr__(self, "_roots", roots)
         if integer_mode:
-            policy = integer.policy(frame.initial_values, self.solver_method,
-                                    self.maximum_events, self.tau_policy)
+            policy = cast("SBMLIntegerKinetics", integer).policy(
+                frame.initial_values, self.solver_method, self.maximum_events, self.tau_policy)
             object.__setattr__(self, "tau_policy", policy.tau_policy)
             object.__setattr__(self, "_integer", integer)
         else:
             self.continuous_system()  # Validate the common numerical declaration now.
 
     @property
-    def frame(self):
+    def frame(self) -> SBMLKinetics:
         return self._frame
 
     @property
-    def events(self):
+    def events(self) -> tuple[CoordinateEventSpec, ...]:
         return self._events
 
     @property
-    def roots(self):
+    def roots(self) -> SBMLTriggerRoots | SBMLJumpTriggers:
         return self._roots
 
     @property
-    def integer_kinetics(self):
+    def integer_kinetics(self) -> SBMLIntegerKinetics | None:
         return self._integer
 
     @property
-    def guard_critical_reactions(self):
+    def guard_critical_reactions(self) -> frozenset[str]:
         return self._guard_critical_reactions
 
-    def continuous_system(self):
+    def continuous_system(self) -> CoupledSystem:
         if self.integer_kinetics is not None:
             raise ValueError("an integer SBML declaration is not a continuous ODE system")
         policy = ODESolverPolicy("chemworld_formal_sbml_"+self.solver_method.lower()+"_v1",
@@ -215,7 +226,17 @@ class SBMLSystemSpec:
         return sbml_continuous_system(self.frame, coordinate_scales=self.coordinate_scales,
                                       numerical_form=self.numerical_form, policy=policy)
 
-    def readout(self, values, time_s):
+    @overload
+    def readout(self, values: Mapping[str, float], time_s: float) -> dict[str, float]: ...
+
+    @overload
+    def readout(
+        self, values: Mapping[str, SBMLScalar], time_s: SBMLScalar,
+    ) -> dict[str, SBMLScalar]: ...
+
+    def readout(
+        self, values: Mapping[str, SBMLScalar], time_s: SBMLScalar,
+    ) -> Mapping[str, SBMLScalar]:
         self.frame.validate_values(values, time_s)
         amounts, volumes = self.frame.quantities(values, time_s)
         context = self.frame.context(values, time_s)
@@ -225,7 +246,7 @@ class SBMLSystemSpec:
             if observable.kind == "parameter":
                 value = context[name]*_parameter_signature(self.model, name).si_factor
             elif observable.kind == "reaction_rate":
-                value = context[name]*self.frame._extent_scale/self.frame._time_scale
+                value = context[name]*cast(float, self.frame._extent_scale)/self.frame._time_scale
             else:
                 value = (volumes[name] if observable.kind == "volume" else amounts[name]
                          if observable.kind == "amount" else
@@ -235,7 +256,7 @@ class SBMLSystemSpec:
             result[observable.channel_id] = value
         return result
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         payload = {"format": "chemworld_sbml_system_v1", "model": self.model.to_dict(),
             "observables": [o.to_dict() for o in self.observables],
             **{name: getattr(self, name) for name in ("initial_model_time", "numerical_form",
@@ -253,7 +274,7 @@ class SBMLSystemSpec:
         return payload
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Any) -> SBMLSystemSpec:
         expected = {"format", "model", "observables", "initial_model_time", "numerical_form",
             "rtol", "atol", "maximum_step_s", "maximum_events", "maximum_segments",
             "maximum_pending_events", "maximum_coordinates", "readout_relative_sd",

@@ -10,7 +10,7 @@ from chemworld.physchem.analytic_functions import SMOOTH_FUNCTIONS
 from chemworld.physchem.caloric_math import FirstDerivative, scalar_value
 from chemworld.physchem.coordinate_events import CoordinateEventSpec
 from chemworld.physchem.coordinate_hybrid import CoordinateRoot
-from chemworld.physchem.coupled_system import CoupledState
+from chemworld.physchem.coupled_system import CoupledState, CoupledStateView
 from chemworld.physchem.mathml import _COMPARISONS, MathExpression, MathNode
 from chemworld.physchem.sbml_kinetics import SBMLKinetics, SBMLScalar
 
@@ -141,7 +141,7 @@ class SBMLTriggerRoots:
             identity = f"sbml_guard:{len(roots)}"
             symbols = (expression._symbols(left) | expression._symbols(right)) - {"$time"}
 
-            def difference(state: CoupledState, derivative: bool = False) -> float:
+            def difference(state: CoupledStateView, derivative: bool = False) -> float:
                 values: Mapping[str, SBMLScalar]
                 if derivative:
                     rates = frame.rates(state.coordinates, state.time_s).coordinate_rates

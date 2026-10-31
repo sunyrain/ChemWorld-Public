@@ -137,7 +137,7 @@ def sbml_trajectory_sensitivities(
             }
         return vector, readings
 
-    report = {
+    report: dict[str, Any] = {
         "schema_version": "chemworld-sbml-forward-sensitivity-1",
         "initialization": "author_initial_state_then_time_zero_control",
         "parameter_basis": "declared_source_units",

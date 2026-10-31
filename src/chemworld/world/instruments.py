@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from math import isfinite
@@ -254,7 +255,7 @@ class InstrumentContract:
     raw_signal_schema: dict[str, Any]
     processed_estimate_schema: dict[str, Any]
     uncertainty_model: str
-    noise_model: dict[str, float]
+    noise_model: Mapping[str, float | Mapping[str, float]]
     calibration_contract: dict[str, Any]
     detection_contract: dict[str, Any]
     saturation_contract: dict[str, Any]

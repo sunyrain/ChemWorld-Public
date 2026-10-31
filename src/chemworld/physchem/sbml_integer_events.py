@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from math import isfinite
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.physchem.coordinate_events import (
     CoordinateEventError,
@@ -23,6 +23,7 @@ from chemworld.physchem.sbml_stochastic import (
 )
 
 if TYPE_CHECKING:
+    from chemworld.physchem.sbml_jump_triggers import SBMLJumpTriggers
     from chemworld.physchem.sbml_system import SBMLSystemSpec
     from chemworld.physchem.stochastic_kinetics import StochasticAdvance, StochasticLeap
 
@@ -68,7 +69,7 @@ def advance_integer_events(
     settlement at that same time. This is the declared right-continuous numerical
     path for tau, not an assertion of exact within-leap source event locations.
     """
-    if not model.integer_kinetics.requires_boundaries:
+    if not cast(SBMLIntegerKinetics, model.integer_kinetics).requires_boundaries:
         raise ValueError("source boundary coordination requires an explicit source profile")
     if type(duration_s) not in {int, float} or not isfinite(duration_s) or duration_s < 0:
         raise ValueError("integer boundary duration must be finite nonnegative seconds")
@@ -85,7 +86,7 @@ def advance_integer_events(
     start, target = state.time_s, state.time_s + duration_s
     if not isfinite(target) or (duration_s > 0 and target <= start):
         raise ValueError("integer source duration exceeds native clock resolution")
-    integer, candidate = model.integer_kinetics, state
+    integer, candidate = cast(SBMLIntegerKinetics, model.integer_kinetics), state
     validator = IntegerEventValidator(integer)
     process = memory["process"]
     if (
@@ -133,12 +134,12 @@ def advance_integer_events(
                 queue,
                 model.events,
                 max_events=model.maximum_events - len(source_events),
-                trigger_values=model.roots.trigger_values,
+                trigger_values=cast("SBMLJumpTriggers", model.roots).trigger_values,
                 max_pending=model.maximum_pending_events,
             )
             source_events.extend(settled.events)
             candidate, queue = settled.state, settled.memory
-            guard = model.roots.next_boundary(candidate)
+            guard = cast("SBMLJumpTriggers", model.roots).next_boundary(candidate)
             calendar = [pending.due_time_s for pending in queue.pending]
             if guard is not None:
                 calendar.append(guard)

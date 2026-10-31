@@ -1,22 +1,36 @@
 """Declared formal quantity gauge; the existing detector RNG supplies noise."""
 
-from chemworld.foundation import Instrument, Observation, ObservationChannel
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from chemworld.foundation import Instrument, Observation, ObservationChannel, WorldState
 from chemworld.foundation.units import COHERENT_SI_UNITS
 from chemworld.world.domain_modules import InstrumentSpec
 from chemworld.world.instruments import InstrumentContract
+
+if TYPE_CHECKING:
+    from chemworld.world.composition import WorldCompositionSpec
 
 FORMAL_METER = "formal_quantity_meter"
 NOISE_FLOORS = {"mol": 1e-9, "L": 1e-9, "mol/L": 1e-6}
 
 
-def formal_observer_factory(composition):
+def formal_observer_factory(
+    composition: WorldCompositionSpec | None,
+) -> Callable[[WorldState, Mapping[str, object], np.random.Generator], Observation]:
     from chemworld.runtime.sbml_models import validate_model_state
 
     if composition is None or composition.physics is None:
         raise ValueError("formal gauge requires its immutable native model declaration")
     models = composition.physics.models_of("sbml")
 
-    def read(state, action, rng):
+    def read(
+        state: WorldState, action: Mapping[str, object], rng: np.random.Generator,
+    ) -> Observation:
         if state.vessel_id not in models:
             raise ValueError("formal gauge has no model at this workspace")
         model = models[state.vessel_id]
@@ -35,7 +49,7 @@ def formal_observer_factory(composition):
     return read
 
 
-def formal_instrument_spec():
+def formal_instrument_spec() -> InstrumentSpec:
     definition = Instrument(FORMAL_METER, "Declared formal entity quantity gauge", (), .01, 0., {})
     contract = InstrumentContract(instrument_id=FORMAL_METER, observable_keys=(),
         input_state_schema={"required_phase": "formal"}, axis_contract={"shape": "scalar"},

@@ -1,19 +1,27 @@
 """Declare a formal multicompartment entity on the existing native world."""
 
+from collections.abc import Iterable
+from typing import Any
+
+from chemworld.data.sbml import SBMLModel
 from chemworld.foundation import WorldState
 from chemworld.foundation.lab_clock import LabClockSpec
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
-from chemworld.physchem.sbml_system import SBMLSystemSpec
+from chemworld.physchem.sbml_system import SBMLObservable, SBMLSystemSpec
 from chemworld.runtime.sbml_models import install_initial_model
 from chemworld.world.composition import WorldCompositionSpec
 from chemworld.world.physical_world import CompositionPhysics
 from chemworld.world.sbml_instruments import FORMAL_METER
 
 
-def sbml_world(model, *, maximum_step_s=None, initial_model_time=0., budget=40,
-               observables=(), numerical_form="ode", readout_relative_sd=.01,
-               rtol=1e-9, atol=1e-12, controlled_parameters=(), solver_method="BDF",
-               tau_policy=None, seed=0, maximum_events=1000):
+def sbml_world(
+    model: SBMLModel, *, maximum_step_s: float | None = None,
+    initial_model_time: float = 0., budget: int | None = 40,
+    observables: Iterable[SBMLObservable] = (), numerical_form: str = "ode",
+    readout_relative_sd: float = .01, rtol: float = 1e-9, atol: float = 1e-12,
+    controlled_parameters: tuple[str, ...] = (), solver_method: str = "BDF",
+    tau_policy: Any = None, seed: int = 0, maximum_events: int = 1000,
+) -> WorldCompositionSpec:
     spec = SBMLSystemSpec(model, tuple(observables), initial_model_time, numerical_form,
         maximum_step_s=maximum_step_s, readout_relative_sd=readout_relative_sd,
         rtol=rtol, atol=atol, controlled_parameters=controlled_parameters,

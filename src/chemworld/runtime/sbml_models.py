@@ -4,45 +4,61 @@ The installed EquipmentRecord owns all live formal coordinates and queue data.
 The adapter has configuration references only; the world ledger owns time.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import ulp
+from typing import TYPE_CHECKING, Any, cast
 
-from chemworld.foundation import upsert_equipment_record
+from chemworld.foundation import WorldState, upsert_equipment_record
+from chemworld.foundation.state_ledgers import EquipmentLedger, EquipmentRecord
 from chemworld.physchem.coordinate_events import CoordinateEventError, _check_memory, _finite_real
-from chemworld.physchem.coordinate_hybrid import CoordinateHybridMemory, advance_coordinate_events
+from chemworld.physchem.coordinate_hybrid import (
+    CoordinateHybridMemory,
+    CoordinateHybridResult,
+    advance_coordinate_events,
+)
 from chemworld.physchem.coupled_system import CoupledState
 from chemworld.physchem.sbml_system import SBML_ENTITY_TYPE, SBMLSystemSpec
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.kernel_contracts import ModelProviderResult
+
+if TYPE_CHECKING:
+    from chemworld.physchem.sbml_integer_events import IntegerEventAdvance
+    from chemworld.physchem.stochastic_kinetics import StochasticAdvance, StochasticLeap
+    from chemworld.world.composition import WorldCompositionSpec
 
 STATE_FORMAT = "chemworld_formal_model_state_v1"
 
 
 @dataclass(frozen=True)
 class _FormalCoordinates:
-    coordinates: dict
+    coordinates: dict[str, float]
 
 
 @dataclass(frozen=True)
 class _IntegerCandidate:
     final_state: _FormalCoordinates
-    memory: dict
+    memory: dict[str, Any]
     actual_duration_s: float
-    events: tuple
-    segment_diagnostics: tuple
-    work: dict
+    events: tuple[tuple[float, str], ...]
+    segment_diagnostics: tuple[StochasticLeap, ...]
+    work: dict[str, int]
     source_events_executed: int = 0
 
 
-def model_record(state):
-    records = [r for r in state.equipment.equipment.values()
+def model_record(state: WorldState) -> EquipmentRecord | None:
+    records = [r for r in cast(EquipmentLedger, state.equipment).equipment.values()
                if r.equipment_type == SBML_ENTITY_TYPE and r.attached_vessel_id == state.vessel_id]
     if len(records) > 1:
         raise ValueError("one native entity must own each formal model state")
     return records[0] if records else None
 
 
-def _view(state, model, coordinates):
+def _view(
+    state: WorldState, model: SBMLSystemSpec, coordinates: Mapping[str, float],
+) -> CoupledState:
     _, volumes = model.frame.quantities(coordinates, state.ledger.time_s)
     # Required legacy coupled geometry is a transient reference only. Formal
     # equations use their explicitly owned V coordinates, not this field.
@@ -50,7 +66,10 @@ def _view(state, model, coordinates):
                         time_s=state.ledger.time_s, coordinates=coordinates)
 
 
-def _install(state, identity, coordinates, continuation):
+def _install(
+    state: WorldState, identity: str, coordinates: Mapping[str, float],
+    continuation: dict[str, Any] | CoordinateHybridMemory,
+) -> WorldState:
     return state.replace(equipment=upsert_equipment_record(state.equipment,
         equipment_id=identity, equipment_type=SBML_ENTITY_TYPE, attached_vessel_id=state.vessel_id,
         settings={"format": STATE_FORMAT, "model_binding": state.vessel_id,
@@ -59,30 +78,38 @@ def _install(state, identity, coordinates, continuation):
         batch_reset="preserve", private_settings=("coordinates", "continuation")))
 
 
-def _advance_candidate(state, model, coordinates, memory, duration):
+def _advance_candidate(
+    state: WorldState, model: SBMLSystemSpec, coordinates: Mapping[str, float],
+    memory: dict[str, Any] | CoordinateHybridMemory, duration: float,
+) -> _IntegerCandidate | CoordinateHybridResult:
+    result: IntegerEventAdvance | StochasticAdvance
     if model.integer_kinetics is not None:
         if model.integer_kinetics.requires_boundaries:
             from chemworld.physchem.sbml_integer_events import advance_integer_events
 
             result = advance_integer_events(model, _view(state, model, coordinates),
-                                            memory, duration)
+                                            cast(dict[str, Any], memory), duration)
             return _IntegerCandidate(_FormalCoordinates(result.coordinates), result.memory,
                 result.actual_duration_s, result.events, result.batches, result.work,
                 len(result.source_events))
-        values, continuation, result = model.integer_kinetics.advance(coordinates, memory,
+        values, continuation, result = model.integer_kinetics.advance(
+            coordinates, cast(dict[str, Any], memory),
             state.ledger.time_s, duration, model.solver_method,
             model.maximum_events, model.tau_policy)
         return _IntegerCandidate(_FormalCoordinates(values), continuation,
             result.actual_duration_s, result.events, result.batches, result.work)
     return advance_coordinate_events(model.continuous_system(), _view(state, model, coordinates),
-        duration, memory, model.events, roots=model.roots.roots,
+        duration, cast(CoordinateHybridMemory, memory), model.events, roots=model.roots.roots,
         trigger_values=model.roots.trigger_values, max_events=model.maximum_events,
         max_segments=model.maximum_segments, max_pending=model.maximum_pending_events)
 
 
-def install_initial_model(state, model, *, equipment_id="formal_model", seed=0):
+def install_initial_model(
+    state: WorldState, model: SBMLSystemSpec, *, equipment_id: str = "formal_model", seed: int = 0,
+) -> WorldState:
     if not isinstance(model, SBMLSystemSpec) or state.phase != "formal" or state.ledger.time_s != 0:
         raise ValueError("formal initialization needs a model and empty initial workspace")
+    memory: dict[str, Any] | CoordinateHybridMemory
     if model.integer_kinetics is not None:
         from chemworld.physchem.sbml_stochastic import initial_memory
 
@@ -98,7 +125,9 @@ def install_initial_model(state, model, *, equipment_id="formal_model", seed=0):
     return _install(state, equipment_id, result.final_state.coordinates, result.memory)
 
 
-def validate_model_state(state, model):
+def validate_model_state(
+    state: WorldState, model: SBMLSystemSpec,
+) -> tuple[EquipmentRecord, dict[str, float], dict[str, Any] | CoordinateHybridMemory]:
     record = model_record(state)
     if record is None or not isinstance(model, SBMLSystemSpec) or state.phase != "formal":
         raise ValueError("formal model binding and its unique native state owner must agree")
@@ -109,7 +138,8 @@ def validate_model_state(state, model):
             or not isinstance(payload["coordinates"], dict)
             or any(not _finite_real(v) for v in payload["coordinates"].values())):
         raise ValueError("unknown or invalid formal model state fields")
-    coordinates = payload["coordinates"]
+    coordinates = cast(dict[str, float], payload["coordinates"])
+    memory: dict[str, Any] | CoordinateHybridMemory
     model.frame.validate_values(coordinates, state.ledger.time_s)
     if model.integer_kinetics is not None:
         from chemworld.physchem.stochastic_kinetics import _signature
@@ -153,13 +183,13 @@ def validate_model_state(state, model):
 class SBMLAdvanceStrategy:
     supported_operations = ("wait",)
 
-    def __init__(self, composition=None):
+    def __init__(self, composition: WorldCompositionSpec | None = None) -> None:
         self.composition = composition
 
-    def supports(self, state):
+    def supports(self, state: WorldState) -> bool:
         return model_record(state) is not None
 
-    def model(self, state):
+    def model(self, state: WorldState) -> SBMLSystemSpec:
         if self.composition is None or self.composition.physics is None:
             raise ValueError("formal model requires its native composition declaration")
         model = self.composition.physics.models_of("sbml").get(state.vessel_id)
@@ -167,10 +197,10 @@ class SBMLAdvanceStrategy:
             raise ValueError("formal native entity has no matching model declaration")
         return model
 
-    def validate_state(self, state):
+    def validate_state(self, state: WorldState) -> None:
         validate_model_state(state, self.model(state))
 
-    def apply_parameters(self, state, action):
+    def apply_parameters(self, state: WorldState, action: Mapping[str, Any]) -> ModelProviderResult:
         if state.terminated:
             return ModelProviderResult({}, {}, success=False, outcome="rejected",
                 failure_reason="formal_model_terminated")
@@ -192,10 +222,11 @@ class SBMLAdvanceStrategy:
             return ModelProviderResult({}, {"solver_error": str(exc)}, success=False,
                 outcome="numerical_failure",
                 failure_reason="formal_control_event_settlement_failed")
-        diagnostics = {"events_executed": len(result.events),
+        diagnostics: dict[str, Any] = {"events_executed": len(result.events),
                        "parameter_basis": "declared_source_units"}
         if model.integer_kinetics is not None and model.integer_kinetics.requires_boundaries:
-            diagnostics["source_events_executed"] = result.source_events_executed
+            diagnostics["source_events_executed"] = cast(
+                _IntegerCandidate, result).source_events_executed
         return ModelProviderResult({}, diagnostics, state=candidate, actual_duration_s=0.)
 
     def validate_world(self) -> None:
@@ -218,7 +249,10 @@ class SBMLAdvanceStrategy:
             if any(vessel in bindings for key, bindings in physics.models.items() if key != "sbml"):
                 raise ValueError("formal entity cannot also bind a competing physical model")
 
-    def advance(self, state, action, *, heat=False, jacket_program=None):
+    def advance(
+        self, state: WorldState, action: Mapping[str, Any], *,
+        heat: bool = False, jacket_program: object = None,
+    ) -> ModelProviderResult:
         if heat or jacket_program is not None or state.quenched or state.terminated:
             return ModelProviderResult({}, {}, success=False, outcome="rejected",
                 failure_reason="formal_model_boundary_only")
@@ -238,16 +272,19 @@ class SBMLAdvanceStrategy:
                     if isinstance(exc, CoordinateEventError) else 0)},
                 success=False, outcome="numerical_failure",
                 failure_reason="formal_model_advance_failed")
-        diagnostics = {"solver": "shared_coupled_formal_kinetics",
+        diagnostics: dict[str, Any] = {"solver": "shared_coupled_formal_kinetics",
             "events_executed": len(result.events), "segments": len(result.segment_diagnostics),
             "energy_scope": "not_declared_formal_kinetics",
             "chemical_inventory_scope": "formal_entity_coordinates_only"}
         if model.integer_kinetics is not None:
-            diagnostics.update(solver=model.solver_method, stochastic_work=result.work,
+            diagnostics.update(solver=model.solver_method,
+                stochastic_work=cast(_IntegerCandidate, result).work,
                 stochastic_batches=len(result.segment_diagnostics),
-                firings_committed=(result.memory["process"]["events_committed"]
-                                  - memory["process"]["events_committed"]))
+                firings_committed=(cast(_IntegerCandidate, result).memory[
+                                      "process"]["events_committed"]
+                                  - cast(dict[str, Any], memory)["process"]["events_committed"]))
             if model.integer_kinetics.requires_boundaries:
-                diagnostics["source_events_executed"] = result.source_events_executed
+                diagnostics["source_events_executed"] = cast(
+                    _IntegerCandidate, result).source_events_executed
         return ModelProviderResult({}, diagnostics,
             state=candidate, actual_duration_s=result.actual_duration_s)

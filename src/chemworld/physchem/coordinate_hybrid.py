@@ -5,25 +5,38 @@ single clock, resource settlement, transaction, and continuation persistence.
 No event is located by advancing an auxiliary simulator or nudging time.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from math import copysign, isfinite, nextafter
 from types import MappingProxyType
+from typing import Any, TypeAlias, cast
 
 from chemworld.physchem.coordinate_events import (
     CoordinateEventError,
     CoordinateEventMemory,
+    CoordinateEventRecord,
+    CoordinateEventSpec,
     _finite_real,
     _integer,
     settle_coordinate_events,
 )
-from chemworld.physchem.coupled_system import CoupledEvent
+from chemworld.physchem.coupled_system import (
+    CoupledEvent,
+    CoupledState,
+    CoupledStateView,
+    CoupledSystem,
+)
+
+RootTriggers: TypeAlias = Callable[[CoupledState, Mapping[str, float]], Mapping[str, bool]]
 
 
 @dataclass(frozen=True)
 class CoordinateRoot:
     root_id: str
-    value: object
-    derivative: object
+    value: Callable[[CoupledStateView], float]
+    derivative: Callable[[CoupledStateView], float]
 
     def __post_init__(self) -> None:
         if (not isinstance(self.root_id, str) or not self.root_id
@@ -34,7 +47,7 @@ class CoordinateRoot:
 @dataclass(frozen=True)
 class CoordinateHybridMemory:
     events: CoordinateEventMemory
-    root_values: object = field(default_factory=dict)
+    root_values: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         from collections.abc import Mapping
@@ -47,15 +60,15 @@ class CoordinateHybridMemory:
         object.__setattr__(self, "root_values", MappingProxyType(dict(self.root_values)))
 
     @classmethod
-    def initialize(cls, events):
+    def initialize(cls, events: Iterable[CoordinateEventSpec]) -> CoordinateHybridMemory:
         return cls(CoordinateEventMemory.initialize(events))
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"format": "chemworld_coordinate_hybrid_v1", "events": self.events.to_dict(),
                 "root_values": dict(self.root_values)}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Any) -> CoordinateHybridMemory:
         if (not isinstance(payload, dict) or set(payload) != {"format", "events", "root_values"}
                 or payload["format"] != "chemworld_coordinate_hybrid_v1"):
             raise ValueError("unknown coordinate hybrid continuation fields/format")
@@ -64,20 +77,22 @@ class CoordinateHybridMemory:
 
 @dataclass(frozen=True)
 class CoordinateHybridResult:
-    initial_state: object
-    final_state: object
+    initial_state: CoupledState
+    final_state: CoupledState
     memory: CoordinateHybridMemory
-    trajectory: tuple
-    events: tuple
-    segment_diagnostics: tuple
+    trajectory: tuple[CoupledState, ...]
+    events: tuple[CoordinateEventRecord, ...]
+    segment_diagnostics: tuple[dict[str, Any], ...]
     stopping_event: str | None = None
 
     @property
-    def actual_duration_s(self):
+    def actual_duration_s(self) -> float:
         return self.final_state.time_s-self.initial_state.time_s
 
 
-def coordinate_root_sides(state, roots, root_values):
+def coordinate_root_sides(
+    state: CoupledState, roots: Iterable[CoordinateRoot], root_values: Mapping[str, float],
+) -> dict[str, int]:
     """Right-side signs only at an exact or recorded numerical root candidate.
 
     A nonzero derivative is required there; tangencies and static equalities
@@ -98,9 +113,12 @@ def coordinate_root_sides(state, roots, root_values):
     return signs
 
 
-def advance_coordinate_events(system, state, duration_s, memory, events, *, roots=(),
-                              trigger_values=None, max_segments=10000, max_events=1000,
-                              max_pending=1024):
+def advance_coordinate_events(
+    system: CoupledSystem, state: CoupledState, duration_s: float,
+    memory: CoordinateHybridMemory, events: Iterable[CoordinateEventSpec], *,
+    roots: Iterable[CoordinateRoot] = (), trigger_values: RootTriggers | None = None,
+    max_segments: int = 10000, max_events: int = 1000, max_pending: int = 1024,
+) -> CoordinateHybridResult:
     """Propose shared continuous segments and atomic same-time coordinate jumps.
 
     ``trigger_values(state, signs)`` evaluates guards using supplied outgoing
@@ -127,14 +145,19 @@ def advance_coordinate_events(system, state, duration_s, memory, events, *, root
     if not isfinite(end_time) or (duration_s > 0 and end_time <= state.time_s):
         raise ValueError("hybrid duration exceeds shared clock range/resolution")
     candidate, continuation = state, memory
+    trajectory: list[CoupledState]
+    executed: list[CoordinateEventRecord]
+    diagnostics: list[dict[str, Any]]
     trajectory, executed, diagnostics = [state], [], []
     stopping_event = None
     try:
         while True:
             boundary_values = dict(continuation.root_values)
 
-            def observe(current, boundaries=boundary_values):
-                return trigger_values(current, coordinate_root_sides(
+            def observe(
+                current: CoupledState, boundaries: Mapping[str, float] = boundary_values,
+            ) -> Mapping[str, bool]:
+                return cast(RootTriggers, trigger_values)(current, coordinate_root_sides(
                     current, roots, boundaries))
 
             settled = settle_coordinate_events(system, candidate, continuation.events, events,
@@ -163,7 +186,10 @@ def advance_coordinate_events(system, state, duration_s, memory, events, *, root
             for root in roots:
                 sign = signs[root.root_id]
 
-                def value(current, spec=root, side=sign, start=start_time, values=start_values):
+                def value(
+                    current: CoupledStateView, spec: CoordinateRoot = root, side: int = sign,
+                    start: float = start_time, values: Mapping[str, float] = start_values,
+                ) -> float:
                     raw = spec.value(current)
                     # Root initialization only: avoid immediately locating the
                     # root just consumed. No physical time/state is perturbed.
@@ -181,7 +207,7 @@ def advance_coordinate_events(system, state, duration_s, memory, events, *, root
             trajectory.extend(segment.trajectory[1:])
             active = {}
             if segment.stopping_event in identities:
-                active[segment.stopping_event] = next(
+                active[cast(str, segment.stopping_event)] = next(
                     r.value(candidate) for r in roots if r.root_id == segment.stopping_event)
             else:
                 stopping_event = segment.stopping_event
