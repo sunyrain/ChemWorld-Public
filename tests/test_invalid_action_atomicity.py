@@ -337,3 +337,47 @@ def test_state_precondition_rollback_only_penalizes_process_ledger() -> None:
         _assert_process_penalty(before, after, info)
     finally:
         env.close()
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0], ids=["zero", "negative"])
+@pytest.mark.parametrize(
+    "operation,field",
+    [
+        ("add_reagent", "amount_mol"),
+        ("add_solvent", "volume_L"),
+        ("add_catalyst", "catalyst_amount_mol"),
+        ("heat", "duration_s"),
+        ("wait", "duration_s"),
+        ("sample", "sample_volume_L"),
+        ("add_phase", "volume_L"),
+        ("add_extractant", "volume_L"),
+        ("mix", "duration_s"),
+        ("settle", "duration_s"),
+        ("wash", "wash_volume_L"),
+        ("concentrate", "duration_s"),
+        ("transfer", "transfer_fraction"),
+        ("seed_crystals", "seed_mass_g"),
+        ("cool_crystallize", "duration_s"),
+        ("evaporate", "duration_s"),
+        ("distill", "duration_s"),
+        ("collect_fraction", "transfer_fraction"),
+        ("set_flow_rate", "flow_rate_mL_min"),
+        ("set_flow_rate", "residence_time_s"),
+        ("run_flow", "duration_s"),
+        ("set_potential", "current_mA"),
+        ("electrolyze", "duration_s"),
+    ],
+)
+def test_positive_action_quantities_reject_zero_and_negative_payloads(
+    operation: str, field: str, value: float,
+) -> None:
+    # These are positive amounts, durations and fractions, not signed potentials
+    # or temperatures. Keep the physical bound check independent of old release
+    # protocols and of whichever task/state precondition might also reject it.
+    with gym.make("ChemWorld", task_id="reaction-to-assay", seed=0) as env:
+        env.reset(seed=0)
+        validation = env.unwrapped.operation_validator.validate(
+            {"operation": operation, field: value}, env.unwrapped._state,
+        )
+        assert not validation.is_valid
+        assert f"payload_bounds:{field}" in validation.invalid_reasons

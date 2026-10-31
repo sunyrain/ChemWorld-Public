@@ -270,6 +270,11 @@ class OperationValidator:
 
         dynamic_low = low
         dynamic_high = high
+        if (operation_type == "set_flow_rate" and field == "flow_rate_mL_min"
+                and (self.material_router is None or self.material_router.physics is None)):
+            # The fixed-volume preset reactor derives residence from positive
+            # flow. Native finite-feed devices can instead stop at zero flow.
+            dynamic_low = max(dynamic_low, 0.01)
         if operation_type == "configure_control" and field == "headspace_L":
             from chemworld.runtime.control_program import control_settings
 
@@ -417,6 +422,14 @@ class OperationValidator:
                              if f.name == field), None)
             if declared is not None and declared.choice_provider is not None:
                 return tuple(declared.choice_provider(state, self))
+        physics = None if self.material_router is None else self.material_router.physics
+        if operation_type == "distill" and field == "full_reflux":
+            column_installed = (
+                physics is not None and state.vessel_id in physics.models_of("column")
+            )
+            return tuple(choice for choice in choices if column_installed or choice == 0)
+        if operation_type == "set_flow_rate" and field == "flow_path" and physics is None:
+            return tuple(choice for choice in choices if choice == "process")
         if field in {"vessel", "connection"}:
             network = state.metadata.get("component_network", {})
             if field == "connection":
@@ -1203,6 +1216,18 @@ class OperationValidator:
         for (candidate_operation, field), choices in OPERATION_FIELD_CHOICES.items():
             if operation_type == candidate_operation and field in payload:
                 checks[f"payload_choice:{field}"] = payload.get(field) in choices
+
+        # Optional apparatus controls are declared by the installed module, not
+        # by the legacy required-field table above. Use the same choices that
+        # the public schema advertises instead of dispatching unsupported modes.
+        if modules is not None and operation_type in {"distill", "set_flow_rate"}:
+            for declared in modules.operation_specs()[operation_type].fields:
+                if declared.name in {"full_reflux", "flow_path"} and declared.name in payload:
+                    choices = self.public_field_choices(
+                        operation_type, declared.name, state,
+                        choices=declared.runtime_choices or declared.choices,
+                    )
+                    checks[f"payload_choice:{declared.name}"] = payload[declared.name] in choices
 
         lock_contract = {
             "add_catalyst": ("catalyst", "batch_reactor", "catalyst_amount_mol"),
