@@ -63,7 +63,17 @@ Population = tuple[str, int, ParticleSpec, tuple[str, ...], str]
 CurrentCoordinates = tuple[tuple[int, tuple[int, ...], tuple[float, ...]], ...]
 
 
-class ParticleFields(TypedDict):
+class ParticleSideFields(TypedDict, total=False):
+    """Additional physical fields only when a particle side reaction is enabled."""
+
+    stripping_current_A: float
+    plated_mol: float
+    dead_mol: float
+    negative_electrode_potential_V: float
+    deactivation_rate_mol_s: float
+
+
+class ParticleFields(ParticleSideFields):
     """Derived fields at the shared particle-electrode electrical solution."""
 
     algebraic_values: dict[str, float]
@@ -78,11 +88,17 @@ class ParticleFields(TypedDict):
     electrolyte_potential_V: float
     bv_residual_V: NDArray[np.float64]
     closure_diagnostic: NotRequired[dict[str, Any]]
-    stripping_current_A: NotRequired[float]
-    plated_mol: NotRequired[float]
-    dead_mol: NotRequired[float]
-    negative_electrode_potential_V: NotRequired[float]
-    deactivation_rate_mol_s: NotRequired[float]
+
+
+class PlatingFields(ParticleFields):
+    """Particle fields with the actual geometry and total intercalation current."""
+
+    negative_intercalation_current_A: float
+    particle_electrodes: tuple[str, ...]
+    particle_radii_m: NDArray[np.float64]
+    particle_volume_weights: NDArray[np.float64]
+    particle_area_weights: NDArray[np.float64]
+    negative_active_area_m2: float
 
 
 def current_coordinates(spec: ParticleOwner) -> CurrentCoordinates:

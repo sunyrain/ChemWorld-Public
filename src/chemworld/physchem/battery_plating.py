@@ -7,20 +7,42 @@ post-step loss correction is used. The first scope is isothermal single-valued
 SPM or MPM with a fixed electrolyte concentration and fixed negative geometry.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cached_property
 from math import exp, isclose, isfinite
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any, Self, TypedDict, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 from chemworld.data.scientific_inputs import ScientificTable, _keys, _number, _text
 from chemworld.foundation.units import convert_value
-from chemworld.physchem.coupled_system import CoupledState
+from chemworld.physchem.coupled_system import (
+    CoupledAdvanceResult,
+    CoupledAlgebraic,
+    CoupledEvent,
+    CoupledState,
+    CoupledStateView,
+    CoupledSystem,
+)
 from chemworld.physchem.electrochemistry import FARADAY_C_PER_MOL as F
 from chemworld.physchem.electrochemistry import R_J_PER_MOL_K as R
 from chemworld.physchem.residual_system import ResidualEquation, ResidualVariable
+
+if TYPE_CHECKING:
+    from chemworld.physchem.battery_models import BatterySPMSpec
+    from chemworld.physchem.battery_mpm import BatteryMPMSpec
+    from chemworld.physchem.battery_particle_electrodes import (
+        ParticleFields,
+        ParticleSideFields,
+        PlatingFields,
+        Population,
+    )
+    from chemworld.physchem.reactor_shared import ScalarControlProgram
 
 PLATING_VERSION = "pybamm-25.4.2-spm-plating-v1"
 PARTIAL_PLATING_VERSION = "pybamm-25.4.2-constant-decay-plating-v1"
@@ -43,7 +65,7 @@ class LithiumPlatingSpec:
     mode: str = "reversible"
     initial_plated_mol: float = 0.0
     initial_dead_mol: float = 0.0
-    _native: object = field(init=False, repr=False, compare=False)
+    _native: Mapping[str, float] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.mode not in {"reversible", "irreversible", "partially reversible"}:
@@ -60,7 +82,7 @@ class LithiumPlatingSpec:
             raise ValueError("plating parameters must match the declared mode's parameter columns")
         if any(v.quality != "valid" or v.value is None for v in cells.values()):
             raise ValueError("plating requires valid finite parameters")
-        values = {key: convert_value(cells[key].value, cells[key].unit, unit)
+        values = {key: convert_value(cast(float, cells[key].value), cells[key].unit, unit)
                   for key, unit in units.items()}
         if (any(not isfinite(v) for v in values.values())
                 or values["k_m_s"] < 0 or not 0 < values["alpha"] < 1
@@ -80,17 +102,17 @@ class LithiumPlatingSpec:
         object.__setattr__(self, "_native", MappingProxyType(values))
 
     @property
-    def native_parameters(self):
+    def native_parameters(self) -> Mapping[str, float]:
         return self._native
 
-    def initial_amounts(self):
+    def initial_amounts(self) -> dict[str, float]:
         return {"plating:Li": self.initial_plated_mol, "dead:Li": self.initial_dead_mol}
 
     @property
-    def decay_rate_s_inv(self):
+    def decay_rate_s_inv(self) -> float:
         return self._native.get("gamma_s_inv", 0.0)
 
-    def deactivation_rate_mol_s(self, plated_mol):
+    def deactivation_rate_mol_s(self, plated_mol: float) -> float:
         """Declared constant-rate metal transfer, independent of electron current."""
         if not isfinite(plated_mol) or plated_mol < 0:
             raise ValueError("metal deactivation requires finite nonnegative plated lithium")
@@ -99,7 +121,9 @@ class LithiumPlatingSpec:
             raise ValueError("metallic lithium deactivation rate is not representable")
         return rate
 
-    def current_derivatives(self, potential_V, plated_mol, temperature_K, area_m2):
+    def current_derivatives(
+        self, potential_V: float, plated_mol: float, temperature_K: float, area_m2: float,
+    ) -> tuple[float, float, float, float]:
         """Return q_strip and partials w.r.t. potential, plated mol and T.
 
         The concentration denominator is the entire negative electrode's fixed
@@ -131,7 +155,7 @@ class LithiumPlatingSpec:
             raise ValueError("plating kinetic response is outside the representable domain")
         return value, dpotential, dplated, dtemperature
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         version = (PARTIAL_PLATING_VERSION if self.mode == "partially reversible"
                    else PLATING_VERSION)
         return {"model_version": version, "parameters": self.parameters.to_dict(),
@@ -140,7 +164,7 @@ class LithiumPlatingSpec:
                 "initial_dead_mol": self.initial_dead_mol}
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         _keys(value, ("model_version", "parameters", "parameter_row_id", "mode",
                       "initial_plated_mol", "initial_dead_mol"))
         version = (PARTIAL_PLATING_VERSION if value["mode"] == "partially reversible"
@@ -151,7 +175,7 @@ class LithiumPlatingSpec:
                    value["mode"], value["initial_plated_mol"], value["initial_dead_mol"])
 
 
-def _nonincreasing_ocv(spec, electrode):
+def _nonincreasing_ocv(spec: BatterySPMSpec, electrode: str) -> bool:
     curve = getattr(spec, electrode + "_ocv")
     if curve is None:
         return getattr(spec, electrode + "_ocv_slope_V") <= 0
@@ -164,7 +188,7 @@ def _nonincreasing_ocv(spec, electrode):
                                derivative=True).upper <= 0 for i in range(64))
 
 
-def validate_plating_configuration(spec):
+def validate_plating_configuration(spec: BatterySPMSpec) -> None:
     """Declare the actual supported owner and certify the passive closure."""
     from chemworld.physchem.battery_models import BatterySPMSpec
     from chemworld.physchem.battery_mpm import BatteryMPMSpec
@@ -204,14 +228,16 @@ def validate_plating_configuration(spec):
             raise ValueError("plating current closure requires certified nonincreasing OCV")
 
 
-def _plating_bins(spec):
+def _plating_bins(spec: BatterySPMSpec) -> tuple[Population, ...]:
     if getattr(spec, "model_family", None) == "mpm-isothermal-v1":
-        return spec.particle_bins
+        return cast("BatteryMPMSpec", spec).particle_bins
     return tuple((name, 0, getattr(spec, name), getattr(spec, name).keys(name), name)
                  for name in ("negative", "positive"))
 
 
-def validate_plating_state(spec, state):
+def validate_plating_state(spec: BatterySPMSpec, state: CoupledStateView) -> None:
+    # Enabled plating is validated by the owning SPM/MPM constructor.
+    plating = cast(LithiumPlatingSpec, spec.plating)
     if (set(state.amounts_mol) != set(spec.inventory_keys)
             or set(state.coordinates) != set(spec.coordinate_keys)):
         raise ValueError("plating state must retain both metal inventories, both particles and Q/W")
@@ -241,18 +267,18 @@ def validate_plating_state(spec, state):
         initial = getattr(spec, name).capacity_mol * getattr(spec, "initial_"+name+"_fraction")
         if name == "negative":
             total += sum(state.amounts_mol[k] for k in PLATING_SPECIES)
-            initial += sum(spec.plating.initial_amounts().values())
+            initial += sum(plating.initial_amounts().values())
         if not isclose(F*total+sign*charge, F*initial, rel_tol=1e-8, abs_tol=1e-8):
             raise ValueError("plating inventories disagree with original Faradaic charge")
-    if spec.plating.mode == "partially reversible" and spec.plating.decay_rate_s_inv > 0:
-        initial_dead = spec.plating.initial_dead_mol
+    if plating.mode == "partially reversible" and plating.decay_rate_s_inv > 0:
+        initial_dead = plating.initial_dead_mol
         if state.amounts_mol["dead:Li"] < initial_dead - (1e-14 + 1e-10*initial_dead):
             raise ValueError("inactive lithium cannot fall below its declared initial inventory")
-        spec.plating.deactivation_rate_mol_s(state.amounts_mol["plating:Li"])
+        plating.deactivation_rate_mol_s(state.amounts_mol["plating:Li"])
         return
-    fixed = ("dead:Li" if spec.plating.mode in {"reversible", "partially reversible"}
+    fixed = ("dead:Li" if plating.mode in {"reversible", "partially reversible"}
              else "plating:Li")
-    if not isclose(state.amounts_mol[fixed], spec.plating.initial_amounts()[fixed],
+    if not isclose(state.amounts_mol[fixed], plating.initial_amounts()[fixed],
                    rel_tol=1e-10, abs_tol=1e-14):
         raise ValueError("metal inventory changes in an unsupported plating mode")
 
@@ -260,65 +286,75 @@ def validate_plating_state(spec, state):
 class _PlatingSideReaction:
     current_key = STRIPPING_CURRENT
 
-    def __init__(self, spec):
+    def __init__(self, spec: BatterySPMSpec) -> None:
         self.spec = spec
 
     @property
-    def variable(self):
+    def variable(self) -> ResidualVariable:
         return ResidualVariable(self.current_key, "A", self.spec.maximum_current_A, "algebraic")
 
     @property
-    def equation(self):
+    def equation(self) -> ResidualEquation:
         return ResidualEquation("battery:plating:kinetics", "dimensionless")
 
     @property
-    def inventory_scales(self):
+    def inventory_scales(self) -> dict[str, float]:
         return dict.fromkeys(PLATING_SPECIES, self.spec.negative.capacity_mol)
 
     @property
-    def amount_current_derivatives(self):
-        return {"plating:Li": -1/F if self.spec.plating.mode in {
+    def amount_current_derivatives(self) -> dict[str, float]:
+        plating = cast(LithiumPlatingSpec, self.spec.plating)
+        return {"plating:Li": -1/F if plating.mode in {
                     "reversible", "partially reversible"} else 0.0,
-                "dead:Li": -1/F if self.spec.plating.mode == "irreversible" else 0.0}
+                "dead:Li": -1/F if plating.mode == "irreversible" else 0.0}
 
     @property
-    def amount_state_derivatives(self):
-        gamma = self.spec.plating.decay_rate_s_inv
+    def amount_state_derivatives(self) -> dict[tuple[str, str], float]:
+        gamma = cast(LithiumPlatingSpec, self.spec.plating).decay_rate_s_inv
         if gamma == 0:
             return {}
         return {("plating:Li", "plating:Li"): -gamma,
                 ("dead:Li", "plating:Li"): gamma}
 
-    def amount_rates(self, fields):
+    def amount_rates(self, fields: ParticleFields) -> dict[str, float]:
+        plating = cast(LithiumPlatingSpec, self.spec.plating)
         rates = {key: value*fields["stripping_current_A"]
                  for key, value in self.amount_current_derivatives.items()}
-        if self.spec.plating.decay_rate_s_inv != 0:
-            rate = self.spec.plating.deactivation_rate_mol_s(fields["plated_mol"])
+        if plating.decay_rate_s_inv != 0:
+            rate = plating.deactivation_rate_mol_s(fields["plated_mol"])
             rates["plating:Li"] -= rate
             rates["dead:Li"] += rate
         return rates
 
-    def fields(self, state, values, potential_key):
-        result = {"stripping_current_A": values[self.current_key],
+    def fields(
+        self, state: CoupledStateView, values: Mapping[str, float], potential_key: str,
+    ) -> ParticleSideFields:
+        plating = cast(LithiumPlatingSpec, self.spec.plating)
+        result: ParticleSideFields = {"stripping_current_A": values[self.current_key],
                 "plated_mol": state.amounts_mol["plating:Li"],
                 "dead_mol": state.amounts_mol["dead:Li"],
                 "negative_electrode_potential_V": -values[potential_key]}
-        if self.spec.plating.mode == "partially reversible":
-            result["deactivation_rate_mol_s"] = self.spec.plating.deactivation_rate_mol_s(
+        if plating.mode == "partially reversible":
+            result["deactivation_rate_mol_s"] = plating.deactivation_rate_mol_s(
                 result["plated_mol"])
         return result
 
-    def derivatives(self, state, fields):
-        return self.spec.plating.current_derivatives(
+    def derivatives(
+        self, state: CoupledStateView, fields: ParticleFields,
+    ) -> tuple[float, float, float, float]:
+        return cast(LithiumPlatingSpec, self.spec.plating).current_derivatives(
             fields["negative_electrode_potential_V"], state.amounts_mol["plating:Li"],
             state.temperature_K,
             sum(p.area_m2 for n, _, p, _, _ in _plating_bins(self.spec) if n == "negative"))
 
-    def residual(self, state, fields):
+    def residual(self, state: CoupledStateView, fields: ParticleFields) -> float:
         value = self.derivatives(state, fields)[0]
         return (fields["stripping_current_A"]-value) / self.spec.maximum_current_A
 
-    def closure_jacobian(self, state, fields, identities, potential_key):
+    def closure_jacobian(
+        self, state: CoupledStateView, fields: ParticleFields, identities: Sequence[str],
+        potential_key: str,
+    ) -> NDArray[np.float64]:
         _, du, dn, dt = self.derivatives(state, fields)
         index = {key: i for i, key in enumerate(identities)}
         row = np.zeros(len(identities))
@@ -334,15 +370,15 @@ class _PlatingSideReaction:
 class _PlatingSPMAdapter:
     """A single bin per original SPM particle, not a new persistent model."""
 
-    def __init__(self, spec):
+    def __init__(self, spec: BatterySPMSpec) -> None:
         validate_plating_configuration(spec)
         self.spec = spec
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self.spec, name)
 
     @cached_property
-    def particle_bins(self):
+    def particle_bins(self) -> tuple[Population, ...]:
         return tuple((name, 0, getattr(self.spec, name), getattr(self.spec, name).keys(name), name)
                      for name in ("negative", "positive"))
 
@@ -355,22 +391,24 @@ class _PlatingSPMAdapter:
     population_equations = ("battery:bv:negative", "battery:bv:positive")
 
     @cached_property
-    def algebraic_names(self):
+    def algebraic_names(self) -> tuple[str, ...]:
         from chemworld.physchem.battery_models import BATTERY_ALGEBRAIC
 
         return (STRIPPING_CURRENT, PLATING_PHI_E, *BATTERY_ALGEBRAIC)
 
     @cached_property
-    def particle_side_reaction(self):
+    def particle_side_reaction(self) -> _PlatingSideReaction:
         return _PlatingSideReaction(self.spec)
 
     @cached_property
-    def reaction_map(self):
+    def reaction_map(self) -> NDArray[np.float64]:
         from chemworld.physchem import battery_particle_electrodes as shared
 
         return shared.reaction_map(self)
 
-    def population_ocp_derivatives(self, population, theta, current, state):
+    def population_ocp_derivatives(
+        self, population: Population, theta: float, current: float, state: CoupledStateView,
+    ) -> tuple[float, float, float, dict[str, float]]:
         if self.spec.has_directional_ocp:
             from chemworld.physchem.battery_ocp import hysteresis_key
 
@@ -382,17 +420,21 @@ class _PlatingSPMAdapter:
         return (self.spec.ocv(population[0], theta),
                 self.spec.ocv(population[0], theta, derivative=True), 0.0, {})
 
-    def electrode_initial_potential(self, name, state, current):
+    def electrode_initial_potential(
+        self, name: str, state: CoupledStateView, current: float,
+    ) -> float:
         particle = getattr(self.spec, name)
         theta = sum(state.amounts_mol[k] for k in particle.keys(name)) / particle.capacity_mol
         if self.spec.has_directional_ocp:
             return self.spec.operational_ocp(name, theta, current, state)
         return self.spec.ocv(name, theta)
 
-    def validate_particle_owner(self, state):
+    def validate_particle_owner(self, state: CoupledStateView) -> None:
         validate_plating_state(self.spec, state)
 
-    def particle_events(self, fields):
+    def particle_events(
+        self, fields: Callable[[CoupledStateView], ParticleFields],
+    ) -> list[CoupledEvent]:
         from chemworld.physchem import battery_particle_electrodes as shared
 
         # Zero plated/dead Li is an admissible state, not a stopping event.
@@ -420,6 +462,22 @@ class PlatingReadout:
     deactivation_rate_mol_s: float = 0.0
 
 
+class PlatingInventoryLedger(TypedDict):
+    time_s: float
+    plated_mol: float
+    dead_mol: float
+    deactivated_mol: float
+    deactivation_rate_mol_s: float
+    hysteresis: dict[str, float]
+    metal_mol: float
+    initial_metal_mol: float
+    negative_mobile_mol: float
+    negative_total_mol: float
+    discharged_charge_C: float
+    faradaic_residual_mol: float
+    faradaic_residual_C: float
+
+
 @dataclass(frozen=True)
 class PlatingCycleResult:
     """Explicit continuation result for a finite sequence of plating segments.
@@ -431,15 +489,15 @@ class PlatingCycleResult:
 
     initial_state: CoupledState
     final_state: CoupledState
-    segments: tuple[Any, ...]
+    segments: tuple[CoupledAdvanceResult, ...]
     outcome: str
     stopping_event: str | None
 
     @property
-    def duration_s(self):
+    def duration_s(self) -> float:
         return self.final_state.time_s - self.initial_state.time_s
 
-    def inventory_history(self, spec):
+    def inventory_history(self, spec: BatterySPMSpec) -> tuple[PlatingInventoryLedger, ...]:
         """Return one auditable inventory record for each accepted segment endpoint."""
         records = [plating_inventory_ledger(spec, self.initial_state)]
         records.extend(plating_inventory_ledger(spec, segment.final_state)
@@ -447,14 +505,17 @@ class PlatingCycleResult:
         return tuple(records)
 
 
-def _plating_owner(spec):
+def _plating_owner(spec: BatterySPMSpec) -> BatteryMPMSpec | _PlatingSPMAdapter:
     validate_plating_configuration(spec)
     if getattr(spec, "model_family", None) == "mpm-isothermal-v1":
-        return spec
+        return cast("BatteryMPMSpec", spec)
     return _PlatingSPMAdapter(spec)
 
 
-def plating_fields(spec, state, *, current_A=None, program=None):
+def plating_fields(
+    spec: BatterySPMSpec, state: CoupledStateView, *, current_A: float | None = None,
+    program: ScalarControlProgram | None = None,
+) -> PlatingFields:
     from chemworld.physchem import battery_particle_electrodes as shared
 
     if isinstance(state, CoupledState):
@@ -478,13 +539,17 @@ def plating_fields(spec, state, *, current_A=None, program=None):
             "negative_active_area_m2": float(sum(fields["area_m2"][negative]))}
 
 
-def plating_readout(spec, state, current_A):
+def plating_readout(
+    spec: BatterySPMSpec, state: CoupledStateView, current_A: float,
+) -> PlatingReadout:
     f = plating_fields(spec, state, current_A=current_A)
     if getattr(spec, "model_family", None) != "mpm-isothermal-v1":
         # Retain the established one-particle readout arithmetic exactly.
-        return PlatingReadout(f["voltage_V"], f["current_A"], *map(float, f["surface_fraction"]),
-                             *map(float, f["average_fraction"]),
-                             *map(float, f["kinetic_overpotential_V"]), f["stripping_current_A"],
+        return PlatingReadout(f["voltage_V"], f["current_A"],
+                             float(f["surface_fraction"][0]), float(f["surface_fraction"][1]),
+                             float(f["average_fraction"][0]), float(f["average_fraction"][1]),
+                             float(f["kinetic_overpotential_V"][0]),
+                             float(f["kinetic_overpotential_V"][1]), f["stripping_current_A"],
                              f["negative_intercalation_current_A"], f["plated_mol"], f["dead_mol"],
                              f["negative_electrode_potential_V"],
                              f.get("deactivation_rate_mol_s", 0.0))
@@ -497,14 +562,17 @@ def plating_readout(spec, state, current_A):
         surface.append(float(np.average(f["surface_fraction"][mask], weights=areas)))
         average.append(float(np.average(f["average_fraction"][mask], weights=capacities)))
         eta.append(float(np.average(f["kinetic_overpotential_V"][mask], weights=areas)))
-    return PlatingReadout(f["voltage_V"], f["current_A"], *surface, *average, *eta,
+    return PlatingReadout(f["voltage_V"], f["current_A"],
+                         surface[0], surface[1], average[0], average[1], eta[0], eta[1],
                          f["stripping_current_A"],
                          f["negative_intercalation_current_A"], f["plated_mol"], f["dead_mol"],
                          f["negative_electrode_potential_V"],
                          f.get("deactivation_rate_mol_s", 0.0))
 
 
-def plating_particle_flux(spec, state, name, current_A):
+def plating_particle_flux(
+    spec: BatterySPMSpec, state: CoupledStateView, name: str, current_A: float,
+) -> float:
     """Total outward mol/s for an electrode; individual bin fluxes remain in fields."""
     if name not in {"negative", "positive"}:
         raise ValueError("unknown plating electrode")
@@ -513,17 +581,21 @@ def plating_particle_flux(spec, state, name, current_A):
     return float(sum(q for q, n in currents if n == name)) / F
 
 
-def plating_algebraic(spec, program):
+def plating_algebraic(spec: BatterySPMSpec, program: ScalarControlProgram) -> CoupledAlgebraic:
     from chemworld.physchem import battery_particle_electrodes as shared
 
     return shared.particle_algebraic(_plating_owner(spec), program)
 
 
-def plating_control_current(spec, state, program):
+def plating_control_current(
+    spec: BatterySPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> float:
     return float(plating_fields(spec, state, program=program)["current_A"])
 
 
-def plating_control_mode(spec, state, program):
+def plating_control_mode(
+    spec: BatterySPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> tuple[str, float]:
     target = program.value_at(state.time_s)
     f = plating_fields(spec, state, program=program)
     if program.unit == "A":
@@ -535,25 +607,33 @@ def plating_control_mode(spec, state, program):
     return "constant_voltage", target
 
 
-def plating_system(spec, program, *, thermal_device=None, control_events=()):
+def plating_system(
+    spec: BatterySPMSpec, program: ScalarControlProgram, *, thermal_device: object | None = None,
+    control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     from chemworld.physchem import battery_particle_electrodes as shared
 
     return shared.particle_system(_plating_owner(spec), program,
                                   thermal_device=thermal_device, control_events=control_events)
 
 
-def advance_plating(spec, state, program, duration_s, *, evaluation_times_s=None,
-                    thermal_device=None, control_events=()):
+def advance_plating(
+    spec: BatterySPMSpec, state: CoupledState, program: ScalarControlProgram, duration_s: float, *,
+    evaluation_times_s: Sequence[float] | None = None, thermal_device: object | None = None,
+    control_events: Sequence[CoupledEvent] = (),
+) -> CoupledAdvanceResult:
     result = plating_system(spec, program, thermal_device=thermal_device,
                              control_events=control_events).advance(
         state, duration_s, evaluation_times_s=evaluation_times_s)
     mode, _ = plating_control_mode(spec, result.final_state, program)
     return replace(result, solver_diagnostic={**result.solver_diagnostic,
-        "battery_control_mode": mode, "plating_mode": spec.plating.mode,
+        "battery_control_mode": mode, "plating_mode": cast(LithiumPlatingSpec, spec.plating).mode,
         "energy_scope": "isothermal; terminal electrical work only; plating energy is undeclared"})
 
 
-def plating_inventory_ledger(spec, state):
+def plating_inventory_ledger(
+    spec: BatterySPMSpec, state: CoupledStateView,
+) -> PlatingInventoryLedger:
     """Expose the accepted metallic and negative-electrode inventories.
 
     The Faradaic residual is calculated from the actual particle and metal
@@ -561,16 +641,17 @@ def plating_inventory_ledger(spec, state):
     readout only; it never repairs the state or infers inventory from SOC.
     """
     validate_plating_state(spec, state)
+    plating = cast(LithiumPlatingSpec, spec.plating)
     negative_keys = spec.negative.keys("negative")
     negative_mobile_mol = float(sum(state.amounts_mol[key] for key in negative_keys))
     plated_mol = float(state.amounts_mol["plating:Li"])
     dead_mol = float(state.amounts_mol["dead:Li"])
     metal_mol = plated_mol + dead_mol
-    initial_metal_mol = sum(spec.plating.initial_amounts().values())
-    is_constant_decay = spec.plating.mode == "partially reversible"
-    deactivated_mol = (dead_mol - spec.plating.initial_dead_mol
+    initial_metal_mol = sum(plating.initial_amounts().values())
+    is_constant_decay = plating.mode == "partially reversible"
+    deactivated_mol = (dead_mol - plating.initial_dead_mol
                        if is_constant_decay else 0.0)
-    deactivation_rate_mol_s = (spec.plating.deactivation_rate_mol_s(plated_mol)
+    deactivation_rate_mol_s = (plating.deactivation_rate_mol_s(plated_mol)
                                if is_constant_decay else 0.0)
     hysteresis_keys = spec.hysteresis_keys if hasattr(spec, "hysteresis_keys") else ()
     hysteresis = {key: float(state.coordinates[key]) for key in hysteresis_keys}
@@ -597,8 +678,11 @@ def plating_inventory_ledger(spec, state):
     }
 
 
-def advance_plating_cycle(spec, state, segments, *, thermal_device=None,
-                          control_events=()):
+def advance_plating_cycle(
+    spec: BatterySPMSpec, state: CoupledState,
+    segments: Iterable[tuple[ScalarControlProgram, float]], *,
+    thermal_device: object | None = None, control_events: Sequence[CoupledEvent] = (),
+) -> PlatingCycleResult:
     """Advance a finite plating/stripping sequence with exact state hand-off.
 
     ``segments`` is an iterable of ``(program, duration_s)`` pairs.  The
