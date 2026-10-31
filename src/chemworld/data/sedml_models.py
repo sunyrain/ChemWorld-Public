@@ -1,17 +1,18 @@
 """Apply finite SED-ML model preprocessing to original immutable SBML inputs."""
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Callable, Container, Mapping
 from math import isfinite
 from pathlib import PurePosixPath
 from types import MappingProxyType
+from typing import cast
 from xml.etree import ElementTree as ET
 
 from chemworld.data.sbml import SBMLModel
 from chemworld.data.sbml_parser import acyclic_order
 from chemworld.data.scientific_inputs import InputSource
 from chemworld.data.sedml_declarations import SEDMLDocument, finite_number, mathematics, records
-from chemworld.data.sedml_xml import closed_xpath, local_archive_path
+from chemworld.data.sedml_xml import ExperimentXMLNode, closed_xpath, local_archive_path
 from chemworld.data.xml_inputs import bounded_xml
 from chemworld.physchem.data_conflicts import DataSourceProvenance
 from chemworld.physchem.sbml_kinetics import SBMLKinetics
@@ -22,10 +23,13 @@ _NUMERIC_TARGETS = {"parameter": {"value"}, "localParameter": {"value"},
 _SBML = "{http://www.sbml.org/sbml/level3/version2/core}"
 
 
-def _model_target(tree, target, namespaces, *, require_attribute=False):
+def _model_target(
+    tree: ET.Element, target: str, namespaces: Mapping[str, str],
+    *, require_attribute: bool = False,
+) -> tuple[ET.Element, str | None]:
     node, attribute = closed_xpath(tree, target, namespaces, require_attribute=require_attribute)
-    model = tree.find(_SBML+"model")
-    known = []
+    model = cast(ET.Element, tree.find(_SBML+"model"))
+    known: list[ET.Element] = []
     for group in ("listOfParameters", "listOfCompartments", "listOfSpecies", "listOfReactions"):
         container = model.find(_SBML+group)
         if container is not None:
@@ -41,7 +45,7 @@ def _model_target(tree, target, namespaces, *, require_attribute=False):
     return node, attribute
 
 
-def model_reference(source, identities):
+def model_reference(source: str, identities: Container[str]) -> str | None:
     if source.startswith("#"):
         if source[1:] not in identities:
             raise ValueError("experiment inherits an unknown model identity")
@@ -49,7 +53,7 @@ def model_reference(source, identities):
     return source if source in identities else None
 
 
-def source_quantity(model, target, namespaces):
+def source_quantity(model: SBMLModel, target: str, namespaces: Mapping[str, str]) -> float:
     """Read the specified source attribute or the model's initialized symbol basis."""
     tree = bounded_xml(model.to_xml())
     node, attribute = _model_target(tree, target, namespaces)
@@ -62,10 +66,13 @@ def source_quantity(model, target, namespaces):
     context = frame.context(frame.initial_values, 0.)
     if identity not in context:
         raise ValueError("model variable does not select a known initialized symbol")
-    return context[identity]
+    return context[cast(str, identity)]
 
 
-def calculation(node, *, variable_value, extra=None):
+def calculation(
+    node: ExperimentXMLNode, *, variable_value: Callable[[ExperimentXMLNode], float],
+    extra: Mapping[str, float] | None = None,
+) -> float:
     """One shared scalar MathExpression with explicit lexical input bindings."""
     scope = {} if extra is None else dict(extra)
     for parameter in records(node, "listOfParameters"):
@@ -81,7 +88,7 @@ def calculation(node, *, variable_value, extra=None):
     return float(result)
 
 
-def _derived(model, xml, document, identity):
+def _derived(model: SBMLModel, xml: str, document: SEDMLDocument, identity: str) -> SBMLModel:
     parent = model.source.provenance
     provenance = DataSourceProvenance(parent.source_id+":sedml:"+identity, parent.priority,
         parent.citation+"; SED-ML preprocessing from "+document.source.provenance.source_id,
@@ -90,15 +97,17 @@ def _derived(model, xml, document, identity):
                      dict(model.unit_defaults), model.items_per_mole)
 
 
-def _numeric_target(tree, change):
+def _numeric_target(tree: ET.Element, change: ExperimentXMLNode) -> tuple[ET.Element, str]:
     node, attribute = _model_target(tree, change.attributes["target"], change.namespaces,
                                     require_attribute=True)
     if attribute not in _NUMERIC_TARGETS.get(node.tag.rsplit("}", 1)[-1], set()):
         raise ValueError("experiment preprocessing only changes declared numeric model inputs")
-    return node, attribute
+    return node, cast(str, attribute)
 
 
-def resolve_models(document, resources, *, document_location=""):
+def resolve_models(
+    document: SEDMLDocument, resources: Mapping[str, SBMLModel], *, document_location: str = "",
+) -> Mapping[str, SBMLModel]:
     """Resolve all model/compute dependencies before any native experiment begins.
 
     Resources are explicitly supplied SBMLModel objects. No filesystem/network
@@ -112,7 +121,7 @@ def resolve_models(document, resources, *, document_location=""):
         base = str(PurePosixPath(location).parent)
         if base == ".":
             base = ""
-    supplied = {}
+    supplied: dict[str, SBMLModel] = {}
     for location, model in resources.items():
         path = local_archive_path(location)
         if (path.casefold() in {key.casefold() for key in supplied}
@@ -123,7 +132,8 @@ def resolve_models(document, resources, *, document_location=""):
                                                                     "listOfModels")}
     if not 1 <= len(declarations) <= 128:
         raise ValueError("experiment model count must stay within the declared finite budget")
-    dependencies, parents = {}, {}
+    dependencies: dict[str, set[str]] = {}
+    parents: dict[str, str | None] = {}
     for identity, node in declarations.items():
         if node.attributes["language"] not in _LANGUAGES:
             raise ValueError("experiment model language/version is unsupported")
@@ -140,8 +150,8 @@ def resolve_models(document, resources, *, document_location=""):
                         or set(variable.attributes) & {"taskReference", "symbol"}):
                     raise ValueError("model preprocessing variables need explicit model targets")
                 if reference != identity:
-                    dependencies[identity].add(reference)
-    resolved = {}
+                    dependencies[identity].add(cast(str, reference))
+    resolved: dict[str, SBMLModel] = {}
     order = acyclic_order(dependencies, label="SED-ML model preprocessing")
     for identity in order:
         declaration = declarations[identity]
@@ -154,7 +164,10 @@ def resolve_models(document, resources, *, document_location=""):
             if change.local_name == "changeAttribute":
                 value = finite_number(change.attributes["newValue"])
             else:
-                def variable_value(variable, current=current, identity=identity):
+                def variable_value(
+                    variable: ExperimentXMLNode, current: SBMLModel = current,
+                    identity: str = identity,
+                ) -> float:
                     reference = variable.attributes["modelReference"]
                     source = current if reference == identity else resolved[reference]
                     return source_quantity(source, variable.attributes["target"],

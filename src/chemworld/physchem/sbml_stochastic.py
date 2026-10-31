@@ -217,7 +217,7 @@ class SBMLIntegerKinetics:
                         changes[name] = changes.get(name, 0) + sign * n
             law = reaction.of("kineticLaw")[0]
             local = {p.get("id"): p.get("value") for p in law.items("listOfLocalParameters")}
-            node = law.mathematics._root
+            node = cast(MathExpression, law.mathematics)._root
             if self.rules is not None:
                 node = self.rules.expand(node, shadow=frozenset(local))
             coefficient, orders = _monomial(

@@ -4,6 +4,7 @@ No model state is retained here. A functional range reads the caller's current
 model view at the iteration boundary, not an initialized cached substitute.
 """
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -15,7 +16,7 @@ from chemworld.data.sedml_models import calculation
 from chemworld.data.sedml_xml import ExperimentXMLNode
 
 
-def _range_reference(variable):
+def _range_reference(variable: ExperimentXMLNode) -> str | None:
     target = variable.attributes.get("target", "")
     if not target.startswith("#"):
         return None
@@ -28,9 +29,9 @@ def _range_reference(variable):
 class SEDMLRanges:
     task: ExperimentXMLNode
     maximum_values: int = 10000
-    _nodes: object = field(init=False, repr=False, compare=False)
-    _static: object = field(init=False, repr=False, compare=False)
-    _order: tuple = field(init=False, repr=False, compare=False)
+    _nodes: Mapping[str, ExperimentXMLNode] = field(init=False, repr=False, compare=False)
+    _static: Mapping[str, tuple[float, ...]] = field(init=False, repr=False, compare=False)
+    _order: tuple[str, ...] = field(init=False, repr=False, compare=False)
     count: int = field(init=False)
 
     def __post_init__(self) -> None:
@@ -41,7 +42,8 @@ class SEDMLRanges:
         master = self.task.attributes["range"]
         if not nodes or len(nodes) > 128 or master not in nodes:
             raise ValueError("repeated task requires a known master range and bounded range count")
-        graph, static = {}, {}
+        graph: dict[str, set[str]] = {}
+        static: dict[str, tuple[float, ...]] = {}
         for identity, node in nodes.items():
             if node.local_name == "functionalRange":
                 reference = node.attributes["range"]
@@ -97,12 +99,14 @@ class SEDMLRanges:
         object.__setattr__(self, "_order", order)
         object.__setattr__(self, "count", counts[master])
 
-    def values_at(self, index, *, model_value=None):
+    def values_at(
+        self, index: int, *, model_value: Callable[[ExperimentXMLNode], float] | None = None,
+    ) -> Mapping[str, float]:
         if type(index) is not int or not 0 <= index < self.count:
             raise ValueError("range index is outside the finite master grid")
-        values = {}
+        values: dict[str, float] = {}
 
-        def variable_value(variable):
+        def variable_value(variable: ExperimentXMLNode) -> float:
             reference = _range_reference(variable)
             if reference is not None:
                 return values[reference]

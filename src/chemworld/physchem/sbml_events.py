@@ -4,15 +4,19 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from itertools import pairwise
 from types import MappingProxyType
-from typing import Any, cast
+from typing import Any, TypeAlias, cast
 
 from chemworld.physchem.analytic_functions import SMOOTH_FUNCTIONS
 from chemworld.physchem.caloric_math import FirstDerivative, scalar_value
 from chemworld.physchem.coordinate_events import CoordinateEventSpec
 from chemworld.physchem.coordinate_hybrid import CoordinateRoot
 from chemworld.physchem.coupled_system import CoupledState
-from chemworld.physchem.mathml import _COMPARISONS, MathExpression
-from chemworld.physchem.sbml_kinetics import SBMLKinetics
+from chemworld.physchem.mathml import _COMPARISONS, MathExpression, MathNode
+from chemworld.physchem.sbml_kinetics import SBMLKinetics, SBMLScalar
+
+RootComparison: TypeAlias = str | tuple[MathNode, MathNode]
+GuardComparisons: TypeAlias = Mapping[MathNode, tuple[RootComparison, ...]]
+TriggerGuard: TypeAlias = tuple[str, MathExpression, GuardComparisons]
 
 
 def sbml_coordinate_events(frame: SBMLKinetics) -> tuple[CoordinateEventSpec, ...]:
@@ -43,7 +47,7 @@ def sbml_coordinate_events(frame: SBMLKinetics) -> tuple[CoordinateEventSpec, ..
     result = []
     for index, record in enumerate(frame.model.declaration.items("listOfEvents")):
         trigger = record.of("trigger")[0]
-        assignments = {r.get("variable"): r.mathematics
+        assignments = {r.get("variable"): cast(MathExpression, r.mathematics)
                        for r in record.items("listOfEventAssignments")}
         delays, priorities = record.of("delay"), record.of("priority")
 
@@ -78,23 +82,28 @@ class SBMLTriggerRoots:
     """
 
     frame: SBMLKinetics
-    roots: tuple
-    _guards: tuple
+    roots: tuple[CoordinateRoot, ...]
+    _guards: tuple[TriggerGuard, ...]
 
-    def __init__(self, frame):
+    def __init__(self, frame: SBMLKinetics) -> None:
         if not isinstance(frame, SBMLKinetics):
             raise ValueError("SBML roots require a compiled native quantity basis")
         object.__setattr__(self, "frame", frame)
-        roots, shared, guards = [], {}, []
+        roots: list[CoordinateRoot] = []
+        shared: dict[tuple[MathNode, MathNode], str] = {}
+        guards: list[TriggerGuard] = []
         smooth = SMOOTH_FUNCTIONS | {"number", "constant", "symbol", "plus", "times",
                                     "minus", "divide", "power", "root", "log", "call"}
 
-        def scalar(node, locals_=frozenset(), visited=frozenset()):
+        def scalar(
+            node: MathNode, locals_: frozenset[str] = frozenset(),
+            visited: frozenset[str] = frozenset(),
+        ) -> bool:
             if node.operation not in smooth:
                 raise ValueError("unsupported nonsmooth SBML event guard operand "+node.operation)
             dynamic = False
             if node.operation == "symbol" and node.value not in locals_:
-                name = node.value
+                name = cast(str, node.value)
                 if name == "$time":
                     return True
                 if name not in visited:
@@ -117,13 +126,13 @@ class SBMLTriggerRoots:
                         dynamic = scalar(MathNode("symbol", value=dependency),
                                          visited=visited | {name}) or dynamic
             if node.operation == "call":
-                function = frame._functions[node.value]._root
+                function = frame._functions[cast(str, node.value)]._root
                 dynamic = scalar(function.arguments[0], frozenset(function.bindings), visited)
             for argument in node.arguments:
                 dynamic = scalar(argument, locals_, visited) or dynamic
             return dynamic
 
-        def install(expression, left, right):
+        def install(expression: MathExpression, left: MathNode, right: MathNode) -> str:
             # Root evaluation and derivatives consume the original common MathML
             # interpreter and FirstDerivative, including lexical function calls.
             key = (left, right)
@@ -132,7 +141,8 @@ class SBMLTriggerRoots:
             identity = f"sbml_guard:{len(roots)}"
             symbols = (expression._symbols(left) | expression._symbols(right)) - {"$time"}
 
-            def difference(state, derivative=False):
+            def difference(state: CoupledState, derivative: bool = False) -> float:
+                values: Mapping[str, SBMLScalar]
                 if derivative:
                     rates = frame.rates(state.coordinates, state.time_s).coordinate_rates
                     values = {k: FirstDerivative(v, rates[k]) for k, v in state.coordinates.items()}
@@ -149,11 +159,14 @@ class SBMLTriggerRoots:
             shared[key] = identity
             return identity
 
-        def boolean(expression, node, comparisons):
+        def boolean(
+            expression: MathExpression, node: MathNode,
+            comparisons: dict[MathNode, tuple[RootComparison, ...]],
+        ) -> None:
             if node.operation in {"lt", "leq", "gt", "geq"}:
                 dynamic = [scalar(argument) for argument in node.arguments]
                 if any(dynamic):
-                    pairs = []
+                    pairs: list[RootComparison] = []
                     for i, (a, b) in enumerate(pairwise(node.arguments)):
                         if dynamic[i] or dynamic[i+1]:
                             pairs.append(install(expression, a, b))
@@ -167,15 +180,15 @@ class SBMLTriggerRoots:
                 raise ValueError("unsupported SBML event guard; use continuous inequalities")
 
         for index, record in enumerate(frame.model.declaration.items("listOfEvents")):
-            expression = record.of("trigger")[0].mathematics
-            comparisons = {}
+            expression = cast(MathExpression, record.of("trigger")[0].mathematics)
+            comparisons: dict[MathNode, tuple[RootComparison, ...]] = {}
             boolean(expression, expression._root, comparisons)
             guards.append((record.get("id", f"@event:{index}"), expression,
                            MappingProxyType(comparisons)))
         object.__setattr__(self, "roots", tuple(roots))
         object.__setattr__(self, "_guards", tuple(guards))
 
-    def trigger_values(self, state, signs):
+    def trigger_values(self, state: CoupledState, signs: Mapping[str, float]) -> dict[str, bool]:
         scope = self.frame.context(state.coordinates, state.time_s)
         result = {}
         for name, expression, comparisons in self._guards:

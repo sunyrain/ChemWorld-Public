@@ -7,18 +7,23 @@ explicit defaults; symbolic species never acquire an invented chemical formula.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any, cast
 
 from chemworld.data.sbml_parser import SBMLRecord, acyclic_order, parse_sbml, walk_records
 from chemworld.data.sbml_units import (
     SBML_UNIT_KINDS,
+    SBMLUnitSignature,
     SBMLUnitTerm,
     base_unit,
     unit_definition,
 )
 from chemworld.data.scientific_inputs import InputSource
+from chemworld.physchem.mathml import MathExpression
 
 SBML_INPUT_FORMAT = "chemworld_sbml_l3v2_input_v1"
 _DEFAULT_FIELDS = {"substanceUnits", "timeUnits", "volumeUnits", "areaUnits", "lengthUnits",
@@ -26,7 +31,7 @@ _DEFAULT_FIELDS = {"substanceUnits", "timeUnits", "volumeUnits", "areaUnits", "l
 _MATH_ENTITIES = {"compartment", "species", "parameter", "reaction", "speciesReference"}
 
 
-def _unique(records, label):
+def _unique(records: Iterable[SBMLRecord], label: str) -> dict[str, SBMLRecord]:
     records = tuple(records)
     identities = [r.get("id") for r in records if r.get("id") is not None]
     if len(identities) != len(set(identities)):
@@ -34,12 +39,13 @@ def _unique(records, label):
     return {r.get("id"): r for r in records if r.get("id") is not None}
 
 
-def _validate(model):
+def _validate(model: SBMLRecord) -> tuple[dict[str, SBMLRecord], dict[str, SBMLRecord]]:
     records = tuple(walk_records(model))
     global_records = [r for r in records if r.kind not in {"localParameter", "unitDefinition"}]
     identities = _unique(global_records, "global")
     symbols = {name for name, r in identities.items() if r.kind in _MATH_ENTITIES}
-    functions = {r.get("id"): r.mathematics for r in model.items("listOfFunctionDefinitions")}
+    functions = {r.get("id"): cast(MathExpression, r.mathematics)
+                 for r in model.items("listOfFunctionDefinitions")}
     units = _unique(model.items("listOfUnitDefinitions"), "unit")
     if units.keys() & SBML_UNIT_KINDS:
         raise ValueError("SBML unit definitions cannot shadow base unit kinds")
@@ -49,6 +55,7 @@ def _validate(model):
     known_units = units.keys() | SBML_UNIT_KINDS
     reactions = model.items("listOfReactions")
     kinetic_locals = {}
+    local: dict[str, SBMLRecord] | set[str]
     for reaction in reactions:
         law = reaction.of("kineticLaw")[0]
         local = _unique(law.items("listOfLocalParameters"), "local parameter")
@@ -129,13 +136,15 @@ def _validate(model):
                 raise ValueError("SBML event assignment has an invalid or rule-owned target")
         if len(set(targets)) != len(targets):
             raise ValueError("SBML event has duplicate simultaneous assignment targets")
-    derived = {r.get("variable"): set(r.mathematics.symbols)
+    derived = {r.get("variable"): set(cast(MathExpression, r.mathematics).symbols)
                for r in rules if r.kind == "assignmentRule"}
-    derived.update({r.get("id"): set(r.of("kineticLaw")[0].mathematics.symbols)
+    derived.update({r.get("id"): set(cast(MathExpression,
+                                       r.of("kineticLaw")[0].mathematics).symbols)
                     -kinetic_locals[id(r.of("kineticLaw")[0])]
                     for r in reactions if r.get("id") is not None})
     acyclic_order(derived, label="derived assignment/reaction")
-    initialized = {**derived, **{r.get("symbol"): set(r.mathematics.symbols) for r in initial}}
+    initialized = {**derived, **{r.get("symbol"): set(cast(MathExpression, r.mathematics).symbols)
+                                for r in initial}}
     acyclic_order(initialized, label="initial assignment")
     return identities, units
 
@@ -144,11 +153,11 @@ def _validate(model):
 class SBMLModel:
     raw_text: str
     source: InputSource
-    unit_defaults: object = field(default_factory=dict)
+    unit_defaults: Mapping[str, str] = field(default_factory=dict)
     items_per_mole: float | None = None
     declaration: SBMLRecord = field(init=False, repr=False)
-    _identities: object = field(init=False, repr=False, compare=False)
-    _units: object = field(init=False, repr=False, compare=False)
+    _identities: Mapping[str, SBMLRecord] = field(init=False, repr=False, compare=False)
+    _units: Mapping[str, SBMLRecord] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.source, InputSource):
@@ -170,23 +179,26 @@ class SBMLModel:
         object.__setattr__(self, "_units", MappingProxyType(units))
 
     @classmethod
-    def from_file(cls, path, *, source, unit_defaults=None, items_per_mole=None):
+    def from_file(
+        cls, path: str | PathLike[str], *, source: InputSource,
+        unit_defaults: Mapping[str, str] | None = None, items_per_mole: float | None = None,
+    ) -> SBMLModel:
         path = Path(path)
         if path.stat().st_size > 20*1024*1024:
             raise ValueError("SBML input exceeds 20 MiB")
         return cls(path.read_text(encoding="utf-8-sig"), source,
                    {} if unit_defaults is None else unit_defaults, items_per_mole)
 
-    def to_xml(self):
+    def to_xml(self) -> str:
         return self.raw_text
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"format": SBML_INPUT_FORMAT, "raw_text": self.raw_text,
                 "source": self.source.to_dict(), "unit_defaults": dict(self.unit_defaults),
                 "items_per_mole": self.items_per_mole}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Any) -> SBMLModel:
         if (not isinstance(payload, dict) or set(payload) != {
                 "format", "raw_text", "source", "unit_defaults", "items_per_mole"}
                 or payload["format"] != SBML_INPUT_FORMAT):
@@ -194,7 +206,7 @@ class SBMLModel:
         return cls(payload["raw_text"], InputSource.from_dict(payload["source"]),
                    payload["unit_defaults"], payload["items_per_mole"])
 
-    def unit_signature(self, name):
+    def unit_signature(self, name: str) -> SBMLUnitSignature:
         if name not in self._units:
             return base_unit(name, items_per_mole=self.items_per_mole)
         terms = tuple(SBMLUnitTerm(**{key: r.get(key) for key in (
@@ -202,7 +214,7 @@ class SBMLModel:
             for r in self._units[name].items("listOfUnits"))
         return unit_definition(terms, items_per_mole=self.items_per_mole)
 
-    def model_unit(self, attribute):
+    def model_unit(self, attribute: str) -> SBMLUnitSignature:
         if attribute not in _DEFAULT_FIELDS:
             raise ValueError("unknown SBML model unit field")
         name = self.declaration.get(attribute, self.unit_defaults.get(attribute))

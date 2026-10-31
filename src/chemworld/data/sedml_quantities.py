@@ -1,9 +1,13 @@
 """Resolve source quantities to declared native Observation channels and units."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite
+from typing import cast
 
+from chemworld.data.sbml import SBMLModel
 from chemworld.data.sedml_models import _model_target
+from chemworld.data.sedml_xml import ExperimentXMLNode
 from chemworld.data.xml_inputs import bounded_xml
 from chemworld.physchem.sbml_kinetics import SBMLKinetics
 from chemworld.physchem.sbml_system import SBMLObservable, parameter_observable
@@ -26,7 +30,9 @@ class SEDMLQuantity:
                 or not isinstance(self.source_unit, str) or not self.source_unit):
             raise ValueError("quantity mapping needs an explicit unit and positive finite scale")
 
-    def value(self, channels, *, time_s, initial_model_time=0.):
+    def value(
+        self, channels: Mapping[str, float], *, time_s: float, initial_model_time: float = 0.,
+    ) -> float:
         result = (initial_model_time+time_s*self.native_to_source if self.observable is None
                   else channels[self.observable.channel_id]*self.native_to_source)
         if isinstance(result, bool) or not isinstance(result, (int, float)) or not isfinite(result):
@@ -34,14 +40,14 @@ class SEDMLQuantity:
         return float(result)
 
 
-def _unit(model, key):
+def _unit(model: SBMLModel, key: str) -> str:
     name = model.declaration.get(key, model.unit_defaults.get(key))
     if name is None:
         raise ValueError("source quantity has no explicit unit or author default")
     return name
 
 
-def model_quantity(model, variable):
+def model_quantity(model: SBMLModel, variable: ExperimentXMLNode) -> SEDMLQuantity:
     """Select a mathematical model entity; XML literals remain preprocessing inputs.
 
 Time is derived from the existing public laboratory clock. Species selectors
@@ -58,7 +64,7 @@ basis for that species' mathematical symbol.
     node, attribute = _model_target(bounded_xml(model.to_xml()), target, variable.namespaces)
     if attribute is not None:
         raise ValueError("current/output model variables must target mathematical elements")
-    identity, kind = node.get("id"), node.tag.rsplit("}", 1)[-1]
+    identity, kind = cast(str, node.get("id")), node.tag.rsplit("}", 1)[-1]
     frame = SBMLKinetics(model)
     if kind == "species":
         record = frame._species[identity]
@@ -87,6 +93,6 @@ basis for that species' mathematical symbol.
         return SEDMLQuantity(observable, 1/model.unit_signature(source_unit).si_factor, source_unit)
     if kind == "reaction":
         return SEDMLQuantity(SBMLObservable("reaction_rate", identity),
-            frame._time_scale/frame._extent_scale,
+            frame._time_scale/cast(float, frame._extent_scale),
             _unit(model, "extentUnits")+"/"+_unit(model, "timeUnits"))
     raise ValueError("unsupported experiment model quantity")

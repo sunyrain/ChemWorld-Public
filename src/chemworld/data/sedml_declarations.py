@@ -1,8 +1,12 @@
 """Closed SED-ML L1V4 declaration profile, without a simulator or file loader."""
 
+from __future__ import annotations
+
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import isfinite
+from typing import Any
 from xml.etree import ElementTree as ET
 
 from chemworld.data.scientific_inputs import InputSource
@@ -57,13 +61,13 @@ _RULES = {
 _CHILD_REPEAT = {key for key in _RULES if key.startswith("listOf")} | {"vectorRange"}
 
 
-def finite_number(value):
+def finite_number(value: object) -> float:
     if not isinstance(value, str) or not _NUMBER.fullmatch(value) or not isfinite(float(value)):
         raise ValueError("experiment numeric literals must be finite ASCII numbers")
     return float(value)
 
 
-def integer(value, *, minimum=None):
+def integer(value: object, *, minimum: int | None = None) -> int:
     if not isinstance(value, str) or not _INTEGER.fullmatch(value):
         raise ValueError("experiment count/order must be an ASCII integer")
     result = int(value)
@@ -72,19 +76,19 @@ def integer(value, *, minimum=None):
     return result
 
 
-def boolean(value):
+def boolean(value: str) -> bool:
     if value not in {"true", "false", "1", "0"}:
         raise ValueError("experiment Boolean must use XML Boolean syntax")
     return value in {"true", "1"}
 
 
-def records(node, container):
+def records(node: ExperimentXMLNode, container: str) -> tuple[ExperimentXMLNode, ...]:
     groups = [n for n in node.children if n.tag == "{"+SEDML_NAMESPACE+"}"+container]
     return () if not groups else tuple(n for n in groups[0].children
         if n.tag not in {"{"+SEDML_NAMESPACE+"}notes", "{"+SEDML_NAMESPACE+"}annotation"})
 
 
-def mathematics(node):
+def mathematics(node: ExperimentXMLNode) -> MathExpression:
     matches = [n for n in node.children if n.tag == "{"+MATHML_NAMESPACE+"}math"]
     if len(matches) != 1:
         raise ValueError("experiment calculation requires one MathML expression")
@@ -94,14 +98,14 @@ def mathematics(node):
     return result
 
 
-def step_count(attributes):
+def step_count(attributes: Mapping[str, str]) -> int:
     fields = set(attributes) & {"numberOfSteps", "numberOfPoints"}
     if len(fields) != 1:
         raise ValueError("supply exactly one of numberOfSteps or deprecated numberOfPoints")
     return integer(attributes[next(iter(fields))], minimum=1)
 
 
-def _validate(node):
+def _validate(node: ExperimentXMLNode) -> None:
     name, attributes = node.local_name, node.attributes
     if node.tag != "{"+SEDML_NAMESPACE+"}"+name or name not in _RULES:
         raise ValueError("unknown or unsupported experiment element "+node.tag)
@@ -144,7 +148,7 @@ def _validate(node):
         integer(attributes["order"])
     if name == "variable" and not (set(attributes) & {"symbol", "target"}):
         raise ValueError("experiment variable needs an explicit symbol or target")
-    counts = {}
+    counts: dict[str, int] = {}
     for child in node.children:
         if child.tag in {"{"+SEDML_NAMESPACE+"}notes", "{"+SEDML_NAMESPACE+"}annotation"}:
             child_name = child.local_name
@@ -170,8 +174,9 @@ def _validate(node):
             raise ValueError("report dataset labels must be unambiguous")
 
 
-def _unique_identifiers(root):
-    seen, metadata = set(), set()
+def _unique_identifiers(root: ExperimentXMLNode) -> None:
+    seen: set[str] = set()
+    metadata: set[str] = set()
     pending = [root]
     while pending:
         node = pending.pop()
@@ -206,17 +211,17 @@ class SEDMLDocument:
         object.__setattr__(self, "_declaration", declaration)
 
     @property
-    def declaration(self):
+    def declaration(self) -> ExperimentXMLNode:
         return self._declaration
 
-    def to_xml(self):
+    def to_xml(self) -> str:
         return self.xml
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"format": SEDML_INPUT_FORMAT, "xml": self.xml, "source": self.source.to_dict()}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Any) -> SEDMLDocument:
         if (not isinstance(payload, dict) or set(payload) != {"format", "xml", "source"}
                 or payload["format"] != SEDML_INPUT_FORMAT):
             raise ValueError("unknown experiment input fields or format")

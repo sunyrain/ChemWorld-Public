@@ -23,7 +23,7 @@ from chemworld.data.sedml_quantities import SEDMLQuantity, model_quantity
 from chemworld.data.sedml_ranges import _range_reference
 from chemworld.data.sedml_reports import SEDMLReports
 from chemworld.data.sedml_simulations import SEDMLAlgorithm
-from chemworld.data.sedml_stochastic import SEDMLStochasticAlgorithm
+from chemworld.data.sedml_stochastic import IntegerExperimentPolicy, SEDMLStochasticAlgorithm
 from chemworld.data.sedml_tasks import SEDMLTasks
 from chemworld.data.sedml_xml import ExperimentXMLNode
 from chemworld.data.xml_inputs import bounded_xml
@@ -84,7 +84,7 @@ def parameter_target(model: SBMLModel, change: ExperimentXMLNode) -> str:
         change.attributes["target"], change.namespaces)
     if node.tag.rsplit("}", 1)[-1] != "parameter" or attribute not in (None, "value"):
         raise ValueError("live experiment changes require global parameter or value targets")
-    return node.get("id")
+    return cast(str, node.get("id"))
 
 
 def _validate_sequential_inputs(protocol: SEDMLProtocol) -> None:
@@ -222,8 +222,10 @@ class SEDMLProtocol:
             if isinstance(algorithm, SEDMLStochasticAlgorithm):
                 worlds[model_id] = sbml_world(model, initial_model_time=origin, budget=budget,
                     numerical_form="stochastic", solver_method=numerical.method,
-                    seed=numerical.seed, maximum_events=numerical.maximum_events,
-                    tau_policy=numerical.tau_policy, readout_relative_sd=self.readout_relative_sd,
+                    seed=cast(IntegerExperimentPolicy, numerical).seed,
+                    maximum_events=cast(IntegerExperimentPolicy, numerical).maximum_events,
+                    tau_policy=cast(IntegerExperimentPolicy, numerical).tau_policy,
+                    readout_relative_sd=self.readout_relative_sd,
                     controlled_parameters=tuple(sorted(controls.get(model_id, ()))),
                     observables=tuple(sorted(observations[model_id], key=lambda o: o.channel_id)))
                 continue

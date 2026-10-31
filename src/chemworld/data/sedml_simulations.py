@@ -1,11 +1,12 @@
 """Declared algorithm policies and source-time output grids, without substitution."""
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from math import isfinite
 
 import numpy as np
 
-from chemworld.data.sedml_declarations import finite_number, records, step_count
+from chemworld.data.sedml_declarations import SEDMLDocument, finite_number, records, step_count
 from chemworld.data.sedml_stochastic import (
     INTEGER_METHODS,
     INTEGER_PARAMETERS,
@@ -13,6 +14,7 @@ from chemworld.data.sedml_stochastic import (
     parameter_ids,
     stochastic_algorithm,
 )
+from chemworld.data.sedml_xml import ExperimentXMLNode
 from chemworld.physchem.solver_backend import ODESolverPolicy
 
 _METHODS = {"KISAO:0000288": "BDF", "KISAO:0000088": "LSODA"}
@@ -36,10 +38,10 @@ class SEDMLAlgorithm:
             raise ValueError("unsupported SED-ML deterministic algorithm or numerical policy")
 
     @property
-    def method(self):
+    def method(self) -> str:
         return _METHODS[self.kisao_id]
 
-    def native_policy(self, *, seconds_per_source_time):
+    def native_policy(self, *, seconds_per_source_time: float) -> ODESolverPolicy:
         scale = seconds_per_source_time
         if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not isfinite(scale) \
                 or scale <= 0:
@@ -68,14 +70,14 @@ class UniformTimeCourse:
             raise ValueError("uniform experiment must declare a finite ordered source-time grid")
 
     @property
-    def source_times(self):
+    def source_times(self) -> tuple[float, ...]:
         values = np.linspace(self.output_start, self.output_end, self.number_of_steps+1)
         if not np.all(np.isfinite(values)):
             raise ValueError("uniform experiment grid exceeds numeric range")
         return tuple(float(value) for value in values)
 
 
-def _raw_parameters(nodes):
+def _raw_parameters(nodes: Iterable[ExperimentXMLNode]) -> dict[str, str]:
     result = {}
     for node in nodes:
         key = node.attributes["kisaoID"]
@@ -85,7 +87,9 @@ def _raw_parameters(nodes):
     return result
 
 
-def _algorithm(kisao_id, values):
+def _algorithm(
+    kisao_id: str, values: Mapping[str, str],
+) -> SEDMLAlgorithm | SEDMLStochasticAlgorithm:
     if kisao_id in INTEGER_METHODS:
         return stochastic_algorithm(kisao_id, values)
     numbers = {key: finite_number(value) for key, value in values.items()}
@@ -94,9 +98,9 @@ def _algorithm(kisao_id, values):
     return SEDMLAlgorithm(kisao_id, **{_OPTIONS[k]: v for k, v in numbers.items()})
 
 
-def resolve_simulations(document):
+def resolve_simulations(document: SEDMLDocument) -> dict[str, UniformTimeCourse]:
     global_parameters = _raw_parameters(records(document.declaration, "listOfAlgorithmParameters"))
-    used_global = set()
+    used_global: set[str] = set()
     result = {}
     for node in records(document.declaration, "listOfSimulations"):
         algorithm = next(child for child in node.children if child.local_name == "algorithm")

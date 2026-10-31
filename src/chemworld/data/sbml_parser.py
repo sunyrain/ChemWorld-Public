@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from math import isfinite
+from typing import Any, TypeAlias, cast
 from xml.etree import ElementTree as ET
 
 from chemworld.data.xml_inputs import bounded_xml
@@ -15,7 +17,7 @@ _REAL_LITERAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0
 _METADATA = {"id": str, "name": str, "metaid": str, "sboTerm": str}
 _SID_FIELDS = {"id", "compartment", "substanceUnits", "timeUnits", "volumeUnits", "areaUnits",
                "lengthUnits", "extentUnits", "conversionFactor", "units", "symbol", "variable"}
-_LISTS = {
+_LISTS: dict[str, str | tuple[str, ...]] = {
     "listOfFunctionDefinitions": "functionDefinition", "listOfUnitDefinitions": "unitDefinition",
     "listOfUnits": "unit", "listOfCompartments": "compartment", "listOfSpecies": "species",
     "listOfParameters": "parameter", "listOfInitialAssignments": "initialAssignment",
@@ -28,8 +30,12 @@ _LISTS = {
 _MODEL_LISTS = ("listOfFunctionDefinitions", "listOfUnitDefinitions", "listOfCompartments",
     "listOfSpecies", "listOfParameters", "listOfInitialAssignments", "listOfRules",
     "listOfConstraints", "listOfReactions", "listOfEvents")
+AttributeKind: TypeAlias = type[str] | type[float] | type[int] | type[bool]
+DeclarationRule: TypeAlias = tuple[
+    dict[str, AttributeKind], tuple[str, ...], tuple[str, ...], tuple[str, ...]
+]
 # allowed attributes, required attributes, allowed children, required children
-_SCHEMA = {
+_SCHEMA: dict[str, DeclarationRule] = {
     "model": ({"id": str, **dict.fromkeys(("substanceUnits", "timeUnits", "volumeUnits",
         "areaUnits", "lengthUnits", "extentUnits", "conversionFactor"), str)},
         (), _MODEL_LISTS, ()),
@@ -75,25 +81,26 @@ class SBMLRecord:
     mathematics: MathExpression | None = None
     metadata_xml: tuple[str, ...] = ()
 
-    def get(self, name, default=None):
+    def get(self, name: str, default: Any = None) -> Any:
+        # The closed grammar determines the attribute type for each declaration kind.
         return dict(self.attributes).get(name, default)
 
-    def of(self, kind):
+    def of(self, kind: str) -> tuple[SBMLRecord, ...]:
         return tuple(child for child in self.children if child.kind == kind)
 
-    def items(self, list_name):
+    def items(self, list_name: str) -> tuple[SBMLRecord, ...]:
         groups = self.of(list_name)
         return groups[0].children if groups else ()
 
 
-def _kind(element):
+def _kind(element: ET.Element) -> str:
     prefix = "{"+SBML_NS+"}"
     if not element.tag.startswith(prefix):
         raise ValueError("unsupported SBML namespace or extension outside annotation")
     return element.tag[len(prefix):]
 
 
-def _value(text, expected, field):
+def _value(text: str, expected: AttributeKind, field: str) -> str | float | bool:
     try:
         if expected is bool:
             if text not in {"true", "false", "1", "0"}:
@@ -105,7 +112,7 @@ def _value(text, expected, field):
                 raise ValueError("invalid integer")
             if expected is float and not _REAL_LITERAL.fullmatch(text):
                 raise ValueError("invalid XML floating point number")
-            number = expected(text)
+            number = cast(type[int] | type[float], expected)(text)
             if not isfinite(number):
                 raise ValueError("nonfinite numeric attribute")
             return number
@@ -116,12 +123,16 @@ def _value(text, expected, field):
         raise ValueError("invalid SBML attribute "+field) from exc
 
 
-def _record(element):
+def _record(element: ET.Element) -> SBMLRecord:
     kind = _kind(element)
     if kind not in _SCHEMA and kind not in _LISTS:
         raise ValueError("unsupported SBML declaration "+kind)
     if (element.text or "").strip() or any((child.tail or "").strip() for child in element):
         raise ValueError("unexpected text in SBML declaration "+kind)
+    attrs: dict[str, AttributeKind]
+    required: tuple[str, ...]
+    child_kinds: str | tuple[str, ...]
+    required_children: tuple[str, ...]
     if kind in _LISTS:
         attrs, required, child_kinds, required_children = {}, (), _LISTS[kind], ()
         child_kinds = (child_kinds,) if isinstance(child_kinds, str) else child_kinds
@@ -132,7 +143,10 @@ def _record(element):
         raise ValueError("unknown or missing SBML attributes on "+kind)
     attributes = tuple((key, _value(value, attrs[key], key))
                        for key, value in element.attrib.items())
-    children, seen, metadata, mathematics = [], set(), [], None
+    children: list[SBMLRecord] = []
+    seen: set[str] = set()
+    metadata: list[str] = []
+    mathematics: MathExpression | None = None
     for child in element:
         child_kind = "math" if child.tag == "{"+MATHML_NS+"}math" else _kind(child)
         if child_kind in {"notes", "annotation", "message"}:
@@ -165,16 +179,18 @@ def _record(element):
     return result
 
 
-def walk_records(root):
+def walk_records(root: SBMLRecord) -> Iterator[SBMLRecord]:
     yield root
     for child in root.children:
         yield from walk_records(child)
 
 
-def acyclic_order(graph, *, label):
-    active, ordered, done = set(), [], set()
+def acyclic_order(graph: Mapping[str, Collection[str]], *, label: str) -> tuple[str, ...]:
+    active: set[str] = set()
+    ordered: list[str] = []
+    done: set[str] = set()
 
-    def visit(node):
+    def visit(node: str) -> None:
         if node in active:
             raise ValueError("cyclic SBML "+label+" dependency at "+node)
         if node in done:
@@ -195,7 +211,7 @@ def acyclic_order(graph, *, label):
     return tuple(ordered)
 
 
-def parse_sbml(text):
+def parse_sbml(text: str) -> SBMLRecord:
     root = bounded_xml(text)
     if _kind(root) != "sbml" or root.get("level") != "3" or root.get("version") != "2":
         raise ValueError("SBML input must be Level 3 Version 2 Core")
