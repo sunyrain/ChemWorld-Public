@@ -1,15 +1,22 @@
 """Declare continuous reaction SDE chemistry in the original physical world."""
 
+from collections.abc import Mapping
 from dataclasses import replace
+from typing import cast
 
 from chemworld.foundation import WorldState
-from chemworld.foundation.state_ledgers import VesselLedger, VesselRecord
+from chemworld.foundation.state_ledgers import ProcessLedger, VesselLedger, VesselRecord
+from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.stochastic_sde import initial_sde_continuation
+from chemworld.physchem.stochastic_sde_specs import StochasticSDESpec
 from chemworld.world.composition import WorldCompositionSpec
 from chemworld.world.physical_world import CompositionPhysics
 
 
-def stochastic_sde_world(network, spec, amounts_mol, *, seed=0, budget=40):
+def stochastic_sde_world(
+    network: ReactionNetworkSpec, spec: StochasticSDESpec, amounts_mol: Mapping[str, float],
+    *, seed: int = 0, budget: int = 40,
+) -> WorldCompositionSpec:
     from chemworld.world.stochastic_sde_instruments import SDE_ALIQUOT_METER, SDE_ALIQUOT_VOLUME_L
 
     instruments = ["sde_amount_meter"]
@@ -42,7 +49,10 @@ def stochastic_sde_world(network, spec, amounts_mol, *, seed=0, budget=40):
         ),
         units={"amount": "mol", "volume": "L", "temperature": "K", "pressure": "Pa", "time": "s"},
     )
-    state = state.replace(process=replace(state.process, stochastic_continuation=continuation))
+    state = state.replace(process=replace(
+        cast(ProcessLedger, state.process),
+        stochastic_continuation=cast(dict[str, object], continuation),
+    ))
     return WorldCompositionSpec.from_dict(
         {
             "schema_version": "chemworld-world-composition-0.1",

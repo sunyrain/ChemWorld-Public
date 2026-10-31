@@ -1,9 +1,19 @@
 """A calibrated mol gauge, independent of the reaction's process random stream."""
 
-from chemworld.foundation import Instrument, Observation, ObservationChannel
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from chemworld.foundation import Instrument, Observation, ObservationChannel, WorldState
 from chemworld.foundation.discrete_inventory import AVOGADRO
 from chemworld.world.domain_modules import InstrumentSpec
 from chemworld.world.instruments import InstrumentContract
+
+if TYPE_CHECKING:
+    from chemworld.world.composition import WorldCompositionSpec
 
 SDE_METER = "sde_amount_meter"
 SDE_METER_SD_MOL = 1.0 / AVOGADRO
@@ -11,7 +21,9 @@ SDE_ALIQUOT_METER = "sde_aliquot_meter"
 SDE_ALIQUOT_VOLUME_L = 1e-16
 
 
-def sde_observer_factory(composition):
+def sde_observer_factory(
+    composition: WorldCompositionSpec | None,
+) -> Callable[[WorldState, Mapping[str, object], np.random.Generator], Observation]:
     from chemworld.runtime.stochastic_adaptive import AdaptiveHybridStochasticRuntime
     from chemworld.runtime.stochastic_sde import SDEStochasticRuntime
 
@@ -20,7 +32,9 @@ def sde_observer_factory(composition):
     runtime = SDEStochasticRuntime(composition)
     adaptive = AdaptiveHybridStochasticRuntime(composition)
 
-    def read(state, action, rng):
+    def read(
+        state: WorldState, action: Mapping[str, object], rng: np.random.Generator,
+    ) -> Observation:
         (adaptive if adaptive.supports(state) else runtime).validate(state)
         aliquot = action["instrument"] == SDE_ALIQUOT_METER
         fraction = SDE_ALIQUOT_VOLUME_L / state.volume_L if aliquot else 1.0
@@ -44,7 +58,7 @@ def sde_observer_factory(composition):
     return read
 
 
-def sde_instrument_spec():
+def sde_instrument_spec() -> InstrumentSpec:
     definition = Instrument(
         SDE_METER, "Synthetic continuous reaction amount gauge", (), 0.01, 0.0, {}
     )
@@ -77,7 +91,7 @@ def sde_instrument_spec():
     return InstrumentSpec(definition, contract, observer_factory=sde_observer_factory)
 
 
-def sde_aliquot_instrument_spec():
+def sde_aliquot_instrument_spec() -> InstrumentSpec:
     from dataclasses import replace
 
     original = sde_instrument_spec()
