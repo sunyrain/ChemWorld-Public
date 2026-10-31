@@ -1,13 +1,21 @@
 """IF97 on the existing component and phase property reports, without state."""
 
-from dataclasses import dataclass
+from __future__ import annotations
 
-from chemworld.physchem.property_reports import PropertyEvaluation, StatePropertyReport
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
+
+from chemworld.physchem.property_reports import PhaseLabel, PropertyEvaluation, StatePropertyReport
 from chemworld.physchem.water_if97 import (
     WATER_CRITICAL_TEMPERATURE_K,
     WATER_GAS_CONSTANT_J_KG_K,
 )
 from chemworld.physchem.water_if97_solvers import water_if97_tp
+
+if TYPE_CHECKING:
+    from chemworld.physchem.property_packages import ComponentPropertyPackage
+    from chemworld.physchem.specs import ComponentSpec
 
 # Factor is one for mass/intensive fields, molar mass for mass-specific fields.
 _STATE_FIELDS = {
@@ -36,24 +44,28 @@ _TRANSPORT = {"viscosity", "thermal_conductivity", "surface_tension"}
 class IF97WaterModel:
     """Fixed IAPWS release and datum; no mutable parameters or material stock."""
 
-    def validate_component(self, component):
+    def validate_component(self, component: ComponentSpec) -> None:
         if (component.cas_number != "7732-18-5" or component.charge != 0
                 or component.composition != {"H": 2, "O": 1}):
             raise ValueError("IF97 requires an explicitly identified neutral H2O, CAS 7732-18-5")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, str]:
         return {"model": "iapws-if97-2012-water-v1"}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, object]) -> IF97WaterModel:
         if dict(payload) != {"model": "iapws-if97-2012-water-v1"}:
             raise ValueError("unknown or modified IF97 water declaration")
         return cls()
 
 
-def evaluate_if97_property_state(package, model, *, temperature_K, pressure_Pa, phase, quantities):
+def evaluate_if97_property_state(
+    package: ComponentPropertyPackage, model: IF97WaterModel, *, temperature_K: float,
+    pressure_Pa: float, phase: str, quantities: Sequence[str],
+) -> StatePropertyReport:
     if not isinstance(model, IF97WaterModel) or phase not in {"gas", "liquid"}:
         raise ValueError("IF97 properties require the water model and a fluid phase")
+    phase = cast(PhaseLabel, phase)
     model.validate_component(package.component)
     requested = set(quantities)
     if (not requested or len(requested) != len(quantities)
@@ -64,7 +76,7 @@ def evaluate_if97_property_state(package, model, *, temperature_K, pressure_Pa, 
         raise ValueError("IF97 above Tc uses the gas report label for a single fluid")
     selected = None if above_critical_temperature else ("vapor" if phase == "gas" else "liquid")
     state = water_if97_tp(temperature_K, pressure_Pa, phase=selected)
-    mass = package.component.molecular_weight_g_mol / 1000
+    mass = cast(float, package.component.molecular_weight_g_mol) / 1000
     volume = state.specific_volume_m3_kg * mass
     values = {key: (getattr(state, field) * (mass if molar else 1), unit)
               for key, (field, unit, molar) in _STATE_FIELDS.items()}
@@ -79,7 +91,7 @@ def evaluate_if97_property_state(package, model, *, temperature_K, pressure_Pa, 
                                     / (WATER_GAS_CONSTANT_J_KG_K * temperature_K), "dimensionless"),
     })
 
-    def evaluation(key):
+    def evaluation(key: str) -> PropertyEvaluation:
         value, unit = values[key]
         return PropertyEvaluation(key, "iapws-if97-2012", f"IF97_region_{state.region}",
                                   value, unit, {"temperature": state.temperature_K,
