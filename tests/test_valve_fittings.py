@@ -76,6 +76,25 @@ def test_catalog_units_roundtrip_and_nominal_extrapolation():
     assert nominal_size_from_bore(mapping, 0.035, extrapolate=True) == pytest.approx(3)
 
 
+@pytest.mark.parametrize("missing_column", ["inner_diameter", "nominal_size"])
+def test_nominal_mapping_rejects_missing_measurement(missing_column):
+    original = synthetic_table(
+        [("inner_diameter", "mm"), ("nominal_size", "dimensionless")],
+        [(10, 0.5), (20, 1.5)],
+    )
+    # Measurement tables can retain missing cells, unlike parameter tables.
+    rows = tuple(replace(row, split="test") for row in original.rows)
+    values = dict(rows[0].values)
+    values[missing_column] = replace(values[missing_column], value=None, quality="missing")
+    table = replace(
+        original, kind="measurements",
+        columns=tuple(replace(column, role="observation") for column in original.columns),
+        rows=(replace(rows[0], values=values), rows[1]),
+    )
+    with pytest.raises(ValueError, match="numeric bore and size"):
+        nominal_size_from_bore(table, 0.015)
+
+
 def test_valve_thresholds_and_geometry():
     low = crane_valve_coefficient("tilting check 5", pipe_diameter_m=0.2286, friction_factor=0.01)
     high = crane_valve_coefficient("tilting check 15", pipe_diameter_m=0.2286, friction_factor=0.01)

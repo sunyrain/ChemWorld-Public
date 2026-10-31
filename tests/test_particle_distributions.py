@@ -23,7 +23,7 @@ from chemworld.physchem.particle_distributions import (
     InterpolatedDiameterDistribution,
     diameter_spacing,
 )
-from chemworld.physchem.sieve_catalog import SieveCatalog
+from chemworld.physchem.sieve_catalog import SieveCatalog, SieveSpecification
 
 
 def source():
@@ -141,6 +141,15 @@ def test_sieve_catalog_keeps_source_units_aliases_and_missing_fields():
     assert model.spacing("odd", lower_m=0.001, upper_m=0.004) == (0.001, 0.003)
     with pytest.raises(ValueError, match="unknown"):
         model.lookup("ISO", "1")
+
+
+def test_standalone_sieve_does_not_report_a_missing_opening_as_numeric():
+    sieve = SieveSpecification(
+        "TEST", "unknown", "row", "synthetic",
+        {"opening": InputValue(None, "mm", None, "Not available", "missing")},
+    )
+    with pytest.raises(ValueError, match="opening is unavailable"):
+        _ = sieve.opening_m
 
 
 def test_fitting_uses_only_training_rows_and_original_calibration_contract():
