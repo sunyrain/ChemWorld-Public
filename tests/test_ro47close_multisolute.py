@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import replace
+from math import fsum
 
 import pytest
 
@@ -51,7 +52,14 @@ def test_multi_salt_fluxes_keep_every_ion_and_local_neutrality():
         )
     assert report["pressure_drop_Pa"] > 0
     for station in report["stations"]:
-        assert station["charge_flux_mol_m2_s"] == 0
+        charge_terms = [
+            model.properties.charges[key] * station["component_flux_mol_m2_s"][key]
+            for key in model.properties.solute_ids
+        ]
+        # Python 3.11's ordinary sum may retain cancellation roundoff. Verify
+        # the reported sum and exact physical neutrality independently.
+        assert station["charge_flux_mol_m2_s"] == sum(charge_terms)
+        assert fsum(charge_terms) == 0
         assert abs(station["water_flux_residual_m_s"]) < 1e-12
 
 
