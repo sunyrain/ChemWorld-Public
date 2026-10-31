@@ -10,9 +10,22 @@ from chemworld.action_codec import ActionCodec
 from chemworld.agent_interface import action_schema, observation_view
 from chemworld.data.logging import TrajectoryLogger, load_jsonl
 from chemworld.eval.verify import verify_records
-from chemworld.foundation import equipment_settings
-from chemworld.runtime.material_routing import _active
+from chemworld.foundation import WorldState, equipment_settings
+from chemworld.runtime.material_routing import _active, material_routes
 from test_recrystallization_cycles import cycle_actions, total_inventory
+
+
+def test_formal_workspace_is_not_a_physical_sample() -> None:
+    state = WorldState(
+        species_amounts={}, volume_L=0.0, temperature_K=298.15,
+        pressure_Pa=101325.0, phase="formal", vessel_id="workspace",
+        liquid_heat_capacity_J_L_K=None,
+    )
+    before = state.to_dict()
+    assert material_routes(state) == []
+    with pytest.raises(ValueError, match="Formal workspaces"):
+        _active(state)
+    assert state.to_dict() == before
 
 
 def create(slot, capacity=0.1):

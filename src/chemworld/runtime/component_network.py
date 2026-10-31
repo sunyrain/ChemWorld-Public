@@ -6,17 +6,24 @@ the selected vessel; the global ledger records total executed resource use.
 
 from __future__ import annotations
 
+from collections.abc import Container, Mapping
 from copy import deepcopy
 from dataclasses import replace
 from math import isfinite
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.foundation import WorldState
 from chemworld.foundation.material_properties import install_material_properties
 from chemworld.foundation.samples import SampleLedger, StoredSample
 from chemworld.foundation.solvents import SolventAccounting
 from chemworld.foundation.state import Ledger
-from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, VesselLedger
+from chemworld.foundation.state_ledgers import (
+    EquipmentLedger,
+    PhaseLedger,
+    SpeciesLedger,
+    ThermalLedger,
+    VesselLedger,
+)
 from chemworld.foundation.state_ownership import StateSlots
 from chemworld.runtime.material_routing import (
     _active,
@@ -28,9 +35,15 @@ from chemworld.runtime.material_routing import (
 )
 from chemworld.world.component_registry import NETWORK_OPERATIONS, component_operations
 
+if TYPE_CHECKING:
+    from chemworld.runtime.kernel_contracts import ModelProviderResult
+    from chemworld.runtime.material_routing import ChemWorldMaterialRoutingServices
+    from chemworld.world.composition import CompiledWorldComposition, WorldCompositionSpec
+
 
 def _local(state: WorldState) -> WorldState:
-    thermal = state.thermal.vessels[state.vessel_id]
+    # WorldState normalizes these optional constructor inputs in __post_init__.
+    thermal = cast(ThermalLedger, state.thermal).vessels[state.vessel_id]
     return state.replace(
         inactive_vessels={},
         lab_clock=None,
@@ -71,7 +84,7 @@ def _activate(
     )
 
 
-def initialize_network(state: WorldState, compiled: Any) -> WorldState:
+def initialize_network(state: WorldState, compiled: CompiledWorldComposition) -> WorldState:
     from chemworld.world.composition import (
         component_instruments,
         physical_instruments,
@@ -122,7 +135,7 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
         ],
     }
     locals_: dict[str, WorldState] = {}
-    template_vessel = state.vessels.vessels[state.vessel_id]
+    template_vessel = cast(VesselLedger, state.vessels).vessels[state.vessel_id]
     for index, vessel in enumerate(spec.vessels):
         name = vessel["id"]
         if spec.physics is not None:
@@ -144,13 +157,13 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
                     if index == 0
                     else dict.fromkeys(phase.species_amounts_mol, 0.0),
                 )
-                for key, phase in state.phases.phases.items()
+                for key, phase in cast(PhaseLedger, state.phases).phases.items()
             }
         )
         equipment = EquipmentLedger(
             {
                 key: replace(value, attached_vessel_id=name)
-                for key, value in state.equipment.equipment.items()
+                for key, value in cast(EquipmentLedger, state.equipment).equipment.items()
             }
         )
         if index:
@@ -160,7 +173,9 @@ def initialize_network(state: WorldState, compiled: Any) -> WorldState:
             species_amounts=amounts,
             volume_L=state.volume_L if index == 0 else 0.0,
             phases=phases,
-            species=state.species if index == 0 else replace(state.species, initial_amounts_mol={}),
+            species=state.species if index == 0 else replace(
+                cast(SpeciesLedger, state.species), initial_amounts_mol={}
+            ),
             vessels=VesselLedger(
                 {name: replace(template_vessel, vessel_id=name, max_volume_L=vessel["capacity_L"])}
             ),
@@ -207,15 +222,17 @@ def select_vessel(state: WorldState, action: dict[str, Any]) -> WorldState:
 def reconnect_device(state: WorldState, identity: str, destination: str | None) -> WorldState:
     """Move one actual device and owned state; materials remain in place."""
     locals_ = {state.vessel_id: state, **state.inactive_vessels}
-    owners = [key for key, local in locals_.items() if identity in local.equipment.equipment]
+    owners = [key for key, local in locals_.items()
+              if identity in cast(EquipmentLedger, local.equipment).equipment]
     if len(owners) != 1 or (destination is not None and destination not in locals_):
         raise ValueError("equipment needs exactly one owner and a declared destination")
     source = owners[0]
     if source == destination or destination is None:
         local = locals_[source]
-        record = local.equipment.equipment[identity]
+        equipment = cast(EquipmentLedger, local.equipment).equipment
+        record = equipment[identity]
         locals_[source] = local.replace(equipment=EquipmentLedger({
-            **local.equipment.equipment,
+            **equipment,
             identity: replace(
                 record, attached_vessel_id=source if destination is None else destination,
                 status="parked" if destination is None
@@ -225,19 +242,20 @@ def reconnect_device(state: WorldState, identity: str, destination: str | None) 
         active = locals_.pop(state.vessel_id)
         return active.replace(inactive_vessels=locals_)
     src, dst = locals_[source], locals_[destination]
-    record = src.equipment.equipment[identity]
+    source_equipment = cast(EquipmentLedger, src.equipment).equipment
+    record = source_equipment[identity]
     slots = tuple(
         slot for slot in src.state_slots.slots
         if slot.spec.owner_kind == "equipment" and slot.spec.owner_id == identity
     )
     locals_[source] = src.replace(
         equipment=EquipmentLedger(
-            {k: v for k, v in src.equipment.equipment.items() if k != identity}
+            {k: v for k, v in source_equipment.items() if k != identity}
         ),
         state_slots=StateSlots(tuple(slot for slot in src.state_slots.slots if slot not in slots)),
     )
     locals_[destination] = dst.replace(
-        equipment=EquipmentLedger({**dst.equipment.equipment,
+        equipment=EquipmentLedger({**cast(EquipmentLedger, dst.equipment).equipment,
                                    identity: replace(
                                        record, attached_vessel_id=destination,
                                        status=("idle" if record.status == "parked"
@@ -257,7 +275,8 @@ def _index(value: Any, count: int) -> int:
 
 
 def _whole(state: WorldState) -> StoredSample:
-    return _active(state.replace(volume_L=sum(p.volume_L for p in state.phases.phases.values())))
+    phases = cast(PhaseLedger, state.phases).phases
+    return _active(state.replace(volume_L=sum(p.volume_L for p in phases.values())))
 
 
 def _outlet_equipment(
@@ -297,7 +316,9 @@ def _withdraw(
         retained = _portion(whole, 1 - fraction, state.vessel_id)
         after = _install(state, retained)
     else:
-        phase = state.phases.phases.get(port)
+        phase_ledger = cast(PhaseLedger, state.phases)
+        species = cast(SpeciesLedger, state.species)
+        phase = phase_ledger.phases.get(port)
         if phase is None or phase.phase_type != "liquid" or phase.volume_L <= 0:
             raise ValueError("Requested liquid outlet has no available inventory")
         total_moles = sum(state.species_amounts.values())
@@ -332,7 +353,7 @@ def _withdraw(
                     "catalyst_amount_mol": sum(
                         n
                         for k, n in incoming_phase.species_amounts_mol.items()
-                        if "catalyst" in state.species.species_roles.get(k, ())
+                        if "catalyst" in species.species_roles.get(k, ())
                     ),
                     "solvent_volume_L": incoming_phase.volume_L,
                 }
@@ -347,7 +368,7 @@ def _withdraw(
             contents=contents,
         )
         phases = {
-            **state.phases.phases,
+            **phase_ledger.phases,
             port: replace(
                 phase,
                 volume_L=phase.volume_L * (1 - fraction),
@@ -369,7 +390,7 @@ def _withdraw(
             equipment=_outlet_equipment(
                 state.equipment or EquipmentLedger(),
                 PhaseLedger(phases).total_amounts_mol(),
-                state.species.species_roles,
+                species.species_roles,
                 sum(p.volume_L for p in phases.values()),
             ),
             process=replace(
@@ -391,7 +412,9 @@ def _withdraw(
     ), incoming
 
 
-def resolve_material_connection(state, action, *, source_ports=None):
+def resolve_material_connection(
+    state: WorldState, action: Mapping[str, Any], *, source_ports: Container[str] | None = None,
+) -> tuple[dict[str, Any], float]:
     """Resolve the compiled material edge and common transfer constraints once."""
     network = state.metadata["component_network"]
     edge = network["connections"][_index(action.get("connection"), len(network["connections"]))]
@@ -462,7 +485,8 @@ def route_material(state: WorldState, action: dict[str, Any]) -> WorldState:
 
 
 def network_error(
-    state: WorldState, operation: str, action: dict[str, Any], material_router=None
+    state: WorldState, operation: str, action: dict[str, Any],
+    material_router: ChemWorldMaterialRoutingServices | None = None,
 ) -> str | None:
     try:
         if state.terminated:
@@ -478,7 +502,9 @@ def network_error(
     return None
 
 
-def available_connections(state: WorldState, material_router=None) -> tuple[int, ...]:
+def available_connections(
+    state: WorldState, material_router: ChemWorldMaterialRoutingServices | None = None,
+) -> tuple[int, ...]:
     network = state.metadata.get("component_network", {})
     result = []
     for index, edge in enumerate(network.get("connections", [])):
@@ -504,15 +530,16 @@ def available_connections(state: WorldState, material_router=None) -> tuple[int,
                 result.append(index)
             continue
         port = edge["source"]["port"]
+        phases = cast(PhaseLedger, state.phases).phases
         source_volume = (
-            sum(p.volume_L for p in state.phases.phases.values())
+            sum(p.volume_L for p in phases.values())
             if port == "out"
-            else state.phases.phases[port].volume_L
-            if port in state.phases.phases
+            else phases[port].volume_L
+            if port in phases
             else 0.0
         )
-        capacity = target.vessels.vessels[target.vessel_id].max_volume_L
-        room = capacity - sum(p.volume_L for p in target.phases.phases.values())
+        capacity = cast(VesselLedger, target.vessels).vessels[target.vessel_id].max_volume_L
+        room = capacity - sum(p.volume_L for p in cast(PhaseLedger, target.phases).phases.values())
         fraction = min(0.5, room / source_volume) if source_volume > 0 and room > 0 else 0.0
         if (
             fraction > 0
@@ -533,16 +560,21 @@ def available_connections(state: WorldState, material_router=None) -> tuple[int,
 
 
 class ComponentNetworkServices:
-    def __init__(self, material_router, composition=None):
+    def __init__(
+        self, material_router: ChemWorldMaterialRoutingServices,
+        composition: WorldCompositionSpec | None = None,
+    ) -> None:
         self.material_router = material_router
         self.composition = composition
 
     select_vessel = staticmethod(select_vessel)
 
-    def route_material(self, state, action):
+    def route_material(
+        self, state: WorldState, action: dict[str, Any],
+    ) -> WorldState | ModelProviderResult:
         return self.material_router.route_material(state, action)
 
-    def reconnect_heater(self, state, action):
+    def reconnect_heater(self, state: WorldState, action: dict[str, Any]) -> WorldState:
         """Move one disabled finite heater, never a material or process clock."""
         from chemworld.runtime.coupled_thermal import reconnect_thermal_device
         from chemworld.world.composition import physical_operations
@@ -551,7 +583,7 @@ class ComponentNetworkServices:
             raise ValueError("manual heater connection requires native local-clock apparatus")
         locals_ = {state.vessel_id: _local(state), **state.inactive_vessels}
         devices = [record for local in locals_.values()
-                   for record in local.equipment.equipment.values()
+                   for record in cast(EquipmentLedger, local.equipment).equipment.values()
                    if record.equipment_type == "thermal_device"]
         if len(devices) != 1 or devices[0].settings["thermal_device"]["enabled"]:
             raise ValueError("reconnect exactly one disabled heater; pause control first")
@@ -585,7 +617,7 @@ def public_network(state: WorldState) -> dict[str, Any] | None:
     locals_ = {state.vessel_id: state, **state.inactive_vessels}
     capacities = {}
     for name, local in locals_.items():
-        capacities[name] = local.vessels.vessels[name].max_volume_L
+        capacities[name] = cast(VesselLedger, local.vessels).vessels[name].max_volume_L
     return {
         "active_vessel": state.vessel_id,
         "vessels": [

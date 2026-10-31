@@ -85,6 +85,7 @@ def _tasks_show(args: argparse.Namespace) -> None:
 
 def _scenarios_list(args: argparse.Namespace) -> None:
     scenarios = list_scenarios()
+    payload: list[dict[str, object]]
     if args.format == "summary":
         payload = [
             {
@@ -289,7 +290,7 @@ def _inspect_constitution(args: argparse.Namespace) -> None:
         env.close()
 
 
-def _capabilities(args):
+def _capabilities(args: argparse.Namespace) -> None:
     from chemworld.examples.native_capabilities import capability_rows, markdown, summary_rows
 
     if args.format == "markdown":

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from math import isfinite
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.foundation import WorldState, equipment_settings
 from chemworld.foundation.material_properties import (
@@ -30,6 +30,11 @@ from chemworld.foundation.state_ledgers import (
 )
 from chemworld.foundation.state_ownership import StateSlots
 from chemworld.runtime.full_process_contract import population_settings
+
+if TYPE_CHECKING:
+    from chemworld.foundation.balances import MaterialPacket
+    from chemworld.runtime.kernel_contracts import ModelProviderResult
+    from chemworld.world.physical_world import CompositionPhysics
 
 ROUTING_OPERATIONS = ("create_container", "transfer_material")
 
@@ -87,6 +92,11 @@ def _scale(contents: MaterialContents, fraction: float, vessel_id: str) -> Mater
 
 
 def _active(state: WorldState) -> StoredSample:
+    heat_capacity = state.liquid_heat_capacity_J_L_K
+    if heat_capacity is None:
+        raise ValueError("Formal workspaces cannot be routed as physical material")
+    # Construction has already populated the optional ledger inputs.
+    species = cast(SpeciesLedger, state.species)
     settings = equipment_settings(state.equipment, "batch_reactor")
     crystal = equipment_settings(state.equipment, "crystallizer")
     lineage = state.samples.active_lineage or (
@@ -98,7 +108,7 @@ def _active(state: WorldState) -> StoredSample:
     sources = state.samples.active_reference_sources
     shares = state.samples.active_reference_shares
     reference = _reference_amounts(sources, shares)
-    initial = state.species.initial_amounts_mol
+    initial = species.initial_amounts_mol
     if not sources or any(
         abs(reference.get(k, 0) - initial.get(k, 0)) > 1e-12
         for k in reference.keys() | initial.keys()
@@ -121,8 +131,8 @@ def _active(state: WorldState) -> StoredSample:
         capacity_L=capacity,
         lineage=lineage,
         contents=MaterialContents(
-            state.phases,
-            state.species,
+            cast(PhaseLedger, state.phases),
+            species,
             extract_material_properties(state.equipment),
             {}
             if state.process is None
@@ -130,7 +140,7 @@ def _active(state: WorldState) -> StoredSample:
             sources,
             shares,
             state.state_slots.material(),
-            state.liquid_heat_capacity_J_L_K,
+            heat_capacity,
             str(state.metadata.get("mechanism_hash", state.metadata.get("mechanism_id", ""))),
         ),
     )
@@ -454,10 +464,10 @@ def material_routes(state: WorldState, *, first_only: bool = False) -> list[dict
 
 
 class ChemWorldMaterialRoutingServices:
-    def __init__(self, physics=None):
+    def __init__(self, physics: CompositionPhysics | None = None) -> None:
         self.physics = physics
 
-    def uses_native_packets(self, state):
+    def uses_native_packets(self, state: WorldState) -> bool:
         from chemworld.runtime.aqueous_mineral import aqueous_record
         from chemworld.runtime.aqueous_precipitation import precipitation_record
         from chemworld.runtime.condensed_material_routing import background_model
@@ -473,15 +483,19 @@ class ChemWorldMaterialRoutingServices:
             or background_model(state, self.physics) is not None
         )
 
-    def feed_additions(self, state, action):
+    def feed_additions(self, state: WorldState, action: dict[str, Any]) -> dict[str, float]:
         from chemworld.runtime.thermal_material_routing import feed_packet
 
         return feed_packet(state, self.physics, action)[1]
 
-    def executed_feed(self, before, after, action):
+    def executed_feed(
+        self, before: WorldState, after: WorldState, action: dict[str, Any],
+    ) -> MaterialPacket:
         from chemworld.foundation.balances import MaterialPacket
 
-        source_id = self.physics.feed_sources[action["component"]]
+        # Material accounting selects this branch through uses_native_packets.
+        physics = cast("CompositionPhysics", self.physics)
+        source_id = physics.feed_sources[action["component"]]
         receipt = after.metadata.get("last_material_packet")
         if not isinstance(receipt, dict):
             raise ValueError("finite feed requires its executed material packet")
@@ -498,7 +512,7 @@ class ChemWorldMaterialRoutingServices:
         )
         return packet
 
-    def add_finite_feed(self, state, action):
+    def add_finite_feed(self, state: WorldState, action: dict[str, Any]) -> ModelProviderResult:
         from chemworld.runtime.kernel_contracts import ModelProviderResult
         from chemworld.runtime.thermal_material_routing import add_finite_feed
 
@@ -509,7 +523,9 @@ class ChemWorldMaterialRoutingServices:
             diagnostics={"material_packet": candidate.metadata["last_material_packet"]},
         )
 
-    def route_material(self, state, action):
+    def route_material(
+        self, state: WorldState, action: dict[str, Any],
+    ) -> WorldState | ModelProviderResult:
         from chemworld.runtime.aqueous_precipitation import (
             precipitation_record,
             route_precipitation_packet,
@@ -529,7 +545,7 @@ class ChemWorldMaterialRoutingServices:
             )
         return route_material(state, action)
 
-    def feed_error(self, state, action):
+    def feed_error(self, state: WorldState, action: dict[str, Any]) -> str | None:
         try:
             self.add_finite_feed(state, action)
         except (ArithmeticError, RuntimeError, KeyError, ValueError, TypeError) as exc:
@@ -597,17 +613,19 @@ class ChemWorldMaterialRoutingServices:
             "lineage": list(incoming.lineage),
             "new_disposable_tool": True,
         }
-        active = samples.pop("active", None)
         touches_active = "active" in (source, target)
         next_state = state
         active_lineage = state.samples.active_lineage
         reference_sources = state.samples.active_reference_sources
         reference_shares = state.samples.active_reference_shares
         if touches_active:
+            # Both selected addresses were resolved above; the active one exists.
+            active = samples["active"]
             next_state = _install(state, active)
             active_lineage = active.lineage if _occupied(active) else ()
             reference_sources = _contents(active).reference_sources
             reference_shares = _contents(active).reference_shares
+        samples.pop("active", None)
         return next_state.replace(
             samples=replace(
                 state.samples,
