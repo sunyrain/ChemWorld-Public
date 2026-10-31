@@ -1,29 +1,58 @@
 """Project existing phase/cohort ownership into the shared crystal advance."""
 
+from __future__ import annotations
+
 import sys
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from math import isclose
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-from chemworld.foundation import equipment_settings, process_with_metrics, upsert_equipment_record
-from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger
+from chemworld.foundation import (
+    WorldState,
+    equipment_settings,
+    process_with_metrics,
+    upsert_equipment_record,
+)
+from chemworld.foundation.lifecycle import LifecycleTransition
+from chemworld.foundation.state_ledgers import (
+    EquipmentLedger,
+    PhaseLedger,
+    PhaseRecord,
+    VesselLedger,
+)
 from chemworld.physchem.coupled_system import CoupledEvent, HeatFlux
 from chemworld.physchem.crystal_thermal_kinetics import (
     CrystalPopulationState,
+    CrystalThermalAdvance,
+    CrystalThermalSpec,
     ThermalCrystalCohort,
     advance_crystal_population,
 )
 from chemworld.physchem.enthalpy import caloric_temperature
-from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
+from chemworld.physchem.heat_transfer_units import (
+    CondensedBackgroundSpec,
+    ThermalDeviceSpec,
+    ThermalSystemSpec,
+)
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.coupled_thermal import connected_device
 from chemworld.runtime.full_process_contract import population_settings
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 
+if TYPE_CHECKING:
+    from chemworld.physchem.crystal_thermal_kinetics import CrystalNativeThermodynamics
+    from chemworld.physchem.reactor_shared import JacketTemperatureProgram
+    from chemworld.runtime.reaction_thermal_services import ChemWorldReactionThermalServices
+    from chemworld.runtime.species import MechanismSpeciesView
+    from chemworld.world.composition import WorldCompositionSpec
+    from chemworld.world.parameters import ChemWorldParameters
+    from chemworld.world.physical_world import CompositionPhysics
 
-def population_from_state(state, model):
-    phases = state.phases.phases
+
+def population_from_state(state: WorldState, model: CrystalThermalSpec) -> CrystalPopulationState:
+    phases = cast(PhaseLedger, state.phases).phases
     if set(phases) != {"mother_liquor", "solid"}:
         raise ValueError("crystal advance needs a resuspended liquid/solid compartment")
     liquid, solid = phases["mother_liquor"], phases["solid"]
@@ -59,7 +88,8 @@ def population_from_state(state, model):
             continue
         cohorts.append(ThermalCrystalCohort(count, diameter, occluded, seed, n))
     checks = (
-        (sum(c.target_mol for c in cohorts), target_total),
+        # Every retained row above supplies its resolved molecular amount.
+        (sum(cast(float, c.target_mol) for c in cohorts), target_total),
         (sum(c.seed_mol for c in cohorts), seed_total),
         (sum(c.impurity_mol for c in cohorts), impurity_total),
     )
@@ -69,27 +99,35 @@ def population_from_state(state, model):
         dict(liquid.species_amounts_mol),
         tuple(cohorts),
         state.temperature_K,
-        state.volume_L or state.vessels.vessels[state.vessel_id].max_volume_L,
+        state.volume_L or cast(VesselLedger, state.vessels).vessels[state.vessel_id].max_volume_L,
         float(settings.get("dissolved_seed_target_mol", 0.0)),
         state.vessel_elapsed_s.get(state.vessel_id, state.ledger.time_s),
     )
 
 
-def population_thermodynamics(state, thermal):
+def population_thermodynamics(
+    state: WorldState, thermal: ThermalSystemSpec,
+) -> CrystalNativeThermodynamics:
     if thermal.condensed_background is None:
         raise ValueError("crystal contact requires an explicitly declared condensed carrier Cv")
+    calorics = cast("CrystalNativeThermodynamics", thermal.thermodynamics)
     return replace(
-        thermal.thermodynamics,
+        calorics,
         support_heat_capacity_J_K=(
-            thermal.thermodynamics.support_heat_capacity_J_K
+            calorics.support_heat_capacity_J_K
             + state.state_slots.heat_capacity()
             + thermal.condensed_background.volumetric_cv_J_L_K * state.volume_L
         ),
     )
 
 
-def _phase_inventory_energy(phases, temperature, model, thermal, support_capacity):
-    amounts = dict.fromkeys(thermal.thermodynamics.inventory_keys, 0.0)
+def _phase_inventory_energy(
+    phases: Iterable[PhaseRecord], temperature: float, model: CrystalThermalSpec,
+    thermal: ThermalSystemSpec, support_capacity: float,
+) -> float:
+    calorics = cast("CrystalNativeThermodynamics", thermal.thermodynamics)
+    background = cast(CondensedBackgroundSpec, thermal.condensed_background)
+    amounts = dict.fromkeys(calorics.inventory_keys, 0.0)
     for phase in phases:
         for key, n in phase.species_amounts_mol.items():
             property_key = model.solid_property_keys.get(key, key) if (
@@ -97,8 +135,8 @@ def _phase_inventory_energy(phases, temperature, model, thermal, support_capacit
             ) else key
             amounts[property_key] += n
         if phase.phase_type == "liquid":
-            support_capacity += thermal.condensed_background.volumetric_cv_J_L_K * phase.volume_L
-    calorics = replace(thermal.thermodynamics, support_heat_capacity_J_K=support_capacity)
+            support_capacity += background.volumetric_cv_J_L_K * phase.volume_L
+    calorics = replace(calorics, support_heat_capacity_J_K=support_capacity)
     # U is additive in this declared model; the phase volumes enter through
     # the carrier capacity above, not an invented PV term or population reset.
     return calorics.internal_energy_j(
@@ -106,18 +144,25 @@ def _phase_inventory_energy(phases, temperature, model, thermal, support_capacit
     )
 
 
-def phase_material_energy(phase, temperature, model, thermal):
+def phase_material_energy(
+    phase: PhaseRecord, temperature: float, model: CrystalThermalSpec, thermal: ThermalSystemSpec,
+) -> float:
     return _phase_inventory_energy((phase,), temperature, model, thermal, 0.0)
 
 
-def crystal_inventory_energy(state, model, thermal):
+def crystal_inventory_energy(
+    state: WorldState, model: CrystalThermalSpec, thermal: ThermalSystemSpec,
+) -> float:
     return _phase_inventory_energy(
-        state.phases.phases.values(), state.temperature_K, model, thermal,
-        thermal.thermodynamics.support_heat_capacity_J_K + state.state_slots.heat_capacity(),
+        cast(PhaseLedger, state.phases).phases.values(), state.temperature_K, model, thermal,
+        cast("CrystalNativeThermodynamics", thermal.thermodynamics).support_heat_capacity_J_K
+        + state.state_slots.heat_capacity(),
     )
 
 
-def validate_crystal_state(state, model, thermal):
+def validate_crystal_state(
+    state: WorldState, model: CrystalThermalSpec, thermal: ThermalSystemSpec,
+) -> tuple[CrystalPopulationState, CrystalNativeThermodynamics]:
     if state.pressure_Pa > thermal.maximum_pressure_Pa:
         raise ValueError("crystal pressure exceeds its declared compartment domain")
     if not thermal.minimum_temperature_K <= state.temperature_K <= thermal.maximum_temperature_K:
@@ -137,7 +182,8 @@ def validate_crystal_state(state, model, thermal):
     if set(calorics.species) != required or thermal.pressure_law != "fixed_pressure":
         raise ValueError("crystal contact needs explicit liquid/solid calorics at fixed pressure")
     for name in state.species_amounts:
-        actual = sum(p.species_amounts_mol[name] for p in state.phases.phases.values())
+        actual = sum(p.species_amounts_mol[name]
+                     for p in cast(PhaseLedger, state.phases).phases.values())
         if not isclose(actual, state.species_amounts[name], abs_tol=1e-12):
             raise ValueError("crystal phase molecular amounts disagree with bulk inventory")
     model.solubility.solubility_mol_per_l(population.temperature_K)
@@ -158,12 +204,15 @@ def validate_crystal_state(state, model, thermal):
     return population, calorics
 
 
-def reconcile_crystal_initialization(previous, fresh, transition, physics):
+def reconcile_crystal_initialization(
+    previous: WorldState, fresh: WorldState, transition: LifecycleTransition,
+    physics: CompositionPhysics,
+) -> LifecycleTransition:
     scope = transition.receipt["scope"]
     if scope not in {"material", "vessel"}:
         return transition
 
-    def locals_of(state):
+    def locals_of(state: WorldState) -> dict[str, WorldState]:
         return {state.vessel_id: state.replace(inactive_vessels={}), **state.inactive_vessels}
 
     old, templates, current = locals_of(previous), locals_of(fresh), locals_of(transition.state)
@@ -171,10 +220,12 @@ def reconcile_crystal_initialization(previous, fresh, transition, physics):
     for name in transition.receipt["vessels"]:
         if name not in physics.models_of("crystal"):
             continue
-        model, thermal = physics.models_of("crystal")[name], physics.models_of("thermal")[name]
+        model: CrystalThermalSpec = physics.models_of("crystal")[name]
+        thermal: ThermalSystemSpec = physics.models_of("thermal")[name]
         state = current[name]
         initial_t, retained_t = templates[name].temperature_K, old[name].temperature_K
-        capacity = thermal.thermodynamics.support_heat_capacity_J_K if scope == "material" else 0.0
+        capacity = (cast("CrystalNativeThermodynamics", thermal.thermodynamics)
+                    .support_heat_capacity_J_K if scope == "material" else 0.0)
         capacity += sum(
             slot.values[slot.spec.heat_capacity_field]
             for slot in state.state_slots.slots
@@ -186,10 +237,16 @@ def reconcile_crystal_initialization(previous, fresh, transition, physics):
         )
         expected = crystal_inventory_energy(state.replace(temperature_K=initial_t), model, thermal)
         expected += capacity * (retained_t - initial_t)
+        def energy_at(
+            temperature: float, state: WorldState = state, model: CrystalThermalSpec = model,
+            thermal: ThermalSystemSpec = thermal,
+        ) -> float:
+            return crystal_inventory_energy(
+                state.replace(temperature_K=temperature), model, thermal,
+            )
+
         temperature = caloric_temperature(
-            lambda t, state=state, model=model, thermal=thermal: (
-                crystal_inventory_energy(state.replace(temperature_K=t), model, thermal)
-            ),
+            energy_at,
             expected, (thermal.minimum_temperature_K, thermal.maximum_temperature_K),
             energy_basis="internal_energy",
         )
@@ -210,13 +267,16 @@ def reconcile_crystal_initialization(previous, fresh, transition, physics):
     )
 
 
-def install_population(state, model, population):
-    phases = state.phases.phases
+def install_population(
+    state: WorldState, model: CrystalThermalSpec, population: CrystalPopulationState,
+) -> WorldState:
+    phases = cast(PhaseLedger, state.phases).phases
     solid = dict.fromkeys(state.species_amounts, 0.0)
-    solid[model.target_component] = sum(c.target_mol for c in population.cohorts)
+    # Runtime populations have resolved masses from the phase ledger or solver.
+    solid[model.target_component] = sum(cast(float, c.target_mol) for c in population.cohorts)
     if model.impurity_component is not None:
         solid[model.impurity_component] = sum(c.impurity_mol for c in population.cohorts)
-    phases = PhaseLedger(
+    phase_ledger = PhaseLedger(
         {
             "mother_liquor": replace(
                 phases["mother_liquor"], species_amounts_mol=dict(population.liquid_amounts_mol)
@@ -241,8 +301,8 @@ def install_population(state, model, population):
         },
     )
     return state.replace(
-        phases=phases,
-        species_amounts=phases.total_amounts_mol(),
+        phases=phase_ledger,
+        species_amounts=phase_ledger.total_amounts_mol(),
         temperature_K=population.temperature_K,
         equipment=equipment,
     )
@@ -251,49 +311,56 @@ def install_population(state, model, population):
 class CrystalThermalRuntime:
     supported_operations = ("wait",)
 
-    def bind_runtime(self, thermal):
+    def bind_runtime(self, thermal: ChemWorldReactionThermalServices) -> None:
         self.legacy.world = thermal.world
         self.legacy.species_view = thermal.species_view
         self._thermal = thermal
 
-    def temperature_bounds_k(self, state):
+    def temperature_bounds_k(self, state: WorldState) -> tuple[float, float] | None:
         if not self.is_native(state):
             return None
-        model = self.composition.physics.models_of("thermal")[state.vessel_id]
+        physics = cast("CompositionPhysics", cast("WorldCompositionSpec", self.composition).physics)
+        model: ThermalSystemSpec = physics.models_of("thermal")[state.vessel_id]
         return model.minimum_temperature_K, model.maximum_temperature_K
 
-    def reconcile_pressure(self, state):
+    def reconcile_pressure(self, state: WorldState) -> WorldState:
         return state if self.is_native(state) else self._thermal._legacy_risk_and_pressure(state)
 
-    def __init__(self, composition, *, legacy_world=None, species_view=None):
+    def __init__(
+        self, composition: WorldCompositionSpec | None, *,
+        legacy_world: ChemWorldParameters | None = None,
+        species_view: MechanismSpeciesView | None = None,
+    ) -> None:
         self.composition = composition
         from chemworld.runtime.legacy_crystal_thermal import LegacyCrystalThermalRuntime
 
         self.legacy = LegacyCrystalThermalRuntime(legacy_world, species_view)
 
-    def is_native(self, state):
+    def is_native(self, state: WorldState) -> bool:
         return (
             self.composition is not None
             and self.composition.physics is not None
             and state.vessel_id in self.composition.physics.models_of("crystal")
         )
 
-    def legacy_available(self):
+    def legacy_available(self) -> bool:
         return (
             self.composition is None or self.composition.physics is None
         ) and self.legacy.available()
 
-    def supports(self, state):
+    def supports(self, state: WorldState) -> bool:
         return self.is_native(state) or (self.legacy_available() and self.legacy.supports(state))
 
-    def model(self, state):
-        return (
-            self.composition.physics.models_of("crystal")[state.vessel_id]
-            if self.is_native(state)
-            else self.legacy.model(state)
-        )
+    def model(self, state: WorldState) -> CrystalThermalSpec:
+        if self.is_native(state):
+            physics = cast("CompositionPhysics",
+                           cast("WorldCompositionSpec", self.composition).physics)
+            return physics.models_of("crystal")[state.vessel_id]
+        return self.legacy.model(state)
 
-    def seed_population(self, before, after, amount, diameter=100e-6):
+    def seed_population(
+        self, before: WorldState, after: WorldState, amount: float, diameter: float = 100e-6,
+    ) -> WorldState:
         if not self.is_native(before):
             before = self.legacy.prepare(before)
         model = self.model(before)
@@ -310,17 +377,18 @@ class CrystalThermalRuntime:
             )
         return install_population(after, model, population)
 
-    def filter(self, state):
+    def filter(self, state: WorldState) -> ModelProviderResult:
         result = self.advance(
             state, {"operation": "filter_crystals", "duration_s": 480}, heat=False
         )
         if result.state is None or result.outcome != "success":
             return result
         candidate = result.state
-        liquid = candidate.phases.phases["mother_liquor"]
+        phase_ledger = cast(PhaseLedger, candidate.phases)
+        liquid = phase_ledger.phases["mother_liquor"]
         phases = PhaseLedger(
             {
-                **candidate.phases.phases,
+                **phase_ledger.phases,
                 "mother_liquor": replace(
                     liquid,
                     volume_L=liquid.volume_L * 0.92,
@@ -364,14 +432,18 @@ class CrystalThermalRuntime:
             ),
         )
 
-    def resuspend(self, before, action, existing_resuspend):
+    def resuspend(
+        self, before: WorldState, action: dict[str, Any],
+        existing_resuspend: Callable[[WorldState, dict[str, Any]], WorldState],
+    ) -> WorldState:
         model = self.model(before)
-        thermal = self.composition.physics.models_of("thermal")[before.vessel_id]
-        bg = thermal.condensed_background
+        physics = cast("CompositionPhysics", cast("WorldCompositionSpec", self.composition).physics)
+        thermal: ThermalSystemSpec = physics.models_of("thermal")[before.vessel_id]
+        bg = cast(CondensedBackgroundSpec, thermal.condensed_background)
         if int(action["solvent"]) != bg.solvent_index:
             raise ValueError("resuspension carrier needs its declared caloric stock identity")
         old_energy = crystal_inventory_energy(before, model, thermal)
-        filtrate = before.phases.phases["mother_liquor"]
+        filtrate = cast(PhaseLedger, before.phases).phases["mother_liquor"]
         filtrate_energy = phase_material_energy(filtrate, before.temperature_K, model, thermal)
         inlet_energy = (
             bg.volumetric_cv_J_L_K
@@ -398,13 +470,17 @@ class CrystalThermalRuntime:
             metadata={**candidate.metadata, "last_crystal_material_packet": receipt}
         )
 
-    def advance(self, state, action, *, heat, jacket_program=None):
+    def advance(
+        self, state: WorldState, action: dict[str, Any], *, heat: bool,
+        jacket_program: JacketTemperatureProgram | None = None,
+    ) -> ModelProviderResult:
         if not self.is_native(state):
             return self.legacy.advance(state, action, heat=heat, jacket_program=jacket_program)
         if jacket_program is not None:
             raise ValueError("crystal device programs use their existing setpoint controls")
         model = self.model(state)
-        thermal = self.composition.physics.models_of("thermal")[state.vessel_id]
+        physics = cast("CompositionPhysics", cast("WorldCompositionSpec", self.composition).physics)
+        thermal: ThermalSystemSpec = physics.models_of("thermal")[state.vessel_id]
         record, device = connected_device(state, required=False)
         try:
             if heat:
@@ -440,7 +516,7 @@ class CrystalThermalRuntime:
         working = state
         if record is not None:
             device = cast(ThermalDeviceSpec, device)
-            records = dict(state.equipment.equipment)
+            records = dict(cast(EquipmentLedger, state.equipment).equipment)
             records[record.equipment_id] = replace(
                 record, settings={**record.settings, "thermal_device": device.to_dict()}
             )
@@ -494,12 +570,14 @@ class CrystalThermalRuntime:
 
 
 def commit_crystal_advance(
-    state, working, model, result, action, *, heat=False, energy_basis="internal_energy"
-):
+    state: WorldState, working: WorldState, model: CrystalThermalSpec,
+    result: CrystalThermalAdvance, action: dict[str, Any], *, heat: bool = False,
+    energy_basis: Literal["internal_energy", "legacy_condensed_enthalpy"] = "internal_energy",
+) -> ModelProviderResult:
     candidate = install_population(working, model, result.final_state)
     old_settings = equipment_settings(state.equipment, "crystallizer")
-    initial_solid = sum(c.target_mol for c in result.initial_state.cohorts)
-    solid_target = sum(c.target_mol for c in result.final_state.cohorts)
+    initial_solid = sum(cast(float, c.target_mol) for c in result.initial_state.cohorts)
+    solid_target = sum(cast(float, c.target_mol) for c in result.final_state.cohorts)
     seed = sum(c.seed_mol for c in result.final_state.cohorts)
     impurity = sum(c.impurity_mol for c in result.final_state.cohorts)
     grown = max(solid_target - seed, 0.0)
@@ -532,7 +610,7 @@ def commit_crystal_advance(
         for s in result.trajectory
     ]
     history = list(old_settings.get("execution_history", ()))
-    receipt = {
+    receipt: dict[str, Any] = {
         "model_id": "finite-crystal-cohorts-temperature-v1",
         "energy_basis": energy_basis,
         "operation": action.get("operation", "heat" if heat else "wait"),

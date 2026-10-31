@@ -9,7 +9,11 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
-    from chemworld.physchem.coupled_system import CoupledStateView, ProcessContribution
+    from chemworld.physchem.coupled_system import (
+        CaloricInventory,
+        CoupledStateView,
+        ProcessContribution,
+    )
     from chemworld.physchem.eos import CubicEOSSpec
     from chemworld.physchem.equilibrium import ActivityModelSpec
     from chemworld.physchem.helmholtz_solvers import HelmholtzPhaseModel
@@ -285,7 +289,7 @@ class PropertyPackageThermodynamics:
         values = self._at(key, temperature_K, ("internal_energy",), strict=True)
         return values["internal_energy"].value
 
-    def internal_energy_j(self, state: CoupledStateView) -> float:
+    def internal_energy_j(self, state: CaloricInventory) -> float:
         return (self.support_heat_capacity_J_K
                 * (state.temperature_K - self.reference_temperature_K)
                 + sum(state.amounts_mol[key] * self.species_energy_j_mol(key, state.temperature_K)

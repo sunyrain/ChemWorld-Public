@@ -10,16 +10,31 @@ from chemworld.examples.native_crystal_research import (
     synthetic_crystal_thermodynamics,
 )
 from chemworld.foundation import equipment_settings
+from chemworld.physchem.coupled_system import ConstantCvThermodynamics, SpeciesInternalEnergy
 from chemworld.physchem.elements import molecular_weight
 from chemworld.runtime import ChemWorldRuntime
 from chemworld.runtime.crystal_thermal import crystal_inventory_energy, population_from_state
 from chemworld.world.crystal_world import crystal_world_spec
 
 
-def session_for():
+def session_for(*, constant_cv=False):
     model = synthetic_crystal_model(molecular_weight({"C": 6, "H": 12, "O": 1}) / 1000)
+    thermal = synthetic_crystal_thermodynamics()
+    if constant_cv:
+        reference = thermal.reference_temperature_K
+        thermal = ConstantCvThermodynamics(
+            {
+                name: SpeciesInternalEnergy(
+                    thermal.species_energy_j_mol(name, reference),
+                    species.evaluate(reference, ("cv",))["cv"].value,
+                )
+                for name, species in thermal.species.items()
+            },
+            thermal.support_heat_capacity_J_K,
+            reference,
+        )
     world = crystal_world_spec(
-        model, synthetic_crystal_thermodynamics(), {"P": "C6H12O", "I": "C3H8O"}
+        model, thermal, {"P": "C6H12O", "I": "C3H8O"}
     )
     session = ChemWorldRuntime(composition=world)
     session.reset(seed=23)
@@ -32,8 +47,9 @@ def execute(session, **action):
     return result
 
 
-def test_native_cold_warm_and_snapshot_continue_one_clock_without_future_allocation():
-    world, session = session_for()
+@pytest.mark.parametrize("constant_cv", [False, True], ids=["property-package", "constant-cv"])
+def test_native_cold_warm_and_snapshot_continue_one_clock_without_future_allocation(constant_cv):
+    world, session = session_for(constant_cv=constant_cv)
     replay = None
     try:
         execute(session, operation="cool_crystallize", target_temperature_K=278.15, duration_s=60)

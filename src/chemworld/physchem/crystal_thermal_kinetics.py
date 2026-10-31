@@ -15,6 +15,7 @@ from time import monotonic
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 from chemworld.physchem.coupled_system import (
+    ConstantCvThermodynamics,
     CoupledEvent,
     CoupledProcess,
     CoupledState,
@@ -23,6 +24,7 @@ from chemworld.physchem.coupled_system import (
     HeatFlux,
     InternalTransfer,
     ProcessContribution,
+    SpeciesInternalEnergy,
 )
 from chemworld.physchem.crystallization_units import (
     CrystallizationKineticsSpec,
@@ -38,7 +40,8 @@ if TYPE_CHECKING:
         SpeciesCaloricModel,
     )
 
-CrystalThermodynamics: TypeAlias = "PropertyPackageThermodynamics | LegacyCrystalEnthalpy"
+CrystalNativeThermodynamics: TypeAlias = "PropertyPackageThermodynamics | ConstantCvThermodynamics"
+CrystalThermodynamics: TypeAlias = "CrystalNativeThermodynamics | LegacyCrystalEnthalpy"
 LiquidKeys: TypeAlias = Mapping[str, tuple[str, ...]]
 SolidKeys: TypeAlias = Sequence[Mapping[str, str]]
 KineticTerms: TypeAlias = Callable[
@@ -169,7 +172,7 @@ def _layout(
     ):
         raise ValueError("finite liquid and dissolved seed must share the actual molecular stock")
     amounts: dict[str, float] = {}
-    properties: dict[str, SpeciesCaloricModel | float] = {}
+    properties: dict[str, SpeciesCaloricModel | SpeciesInternalEnergy | float] = {}
     liquid_keys: dict[str, tuple[str, ...]] = {}
     # JSON object order is not a physical parameter. Fix the solver coordinate
     # order so a sorted-key trajectory replay takes the same numerical path.
@@ -228,6 +231,10 @@ def _layout(
             )
             if type(thermodynamics) is PropertyPackageThermodynamics
             else replace(thermodynamics, species=caloric_species)
+        )
+    elif isinstance(thermodynamics, ConstantCvThermodynamics):
+        packed_thermal = replace(
+            thermodynamics, species=cast(dict[str, SpeciesInternalEnergy], properties),
         )
     else:
         packed_thermal = replace(thermodynamics, species=cast(dict[str, float], properties))

@@ -1,16 +1,20 @@
 """Authored synthetic crystal phase and caloric inputs, without reference libraries."""
 
+from typing import Any
+
 from chemworld.physchem.crystal_thermal_kinetics import CrystalThermalSpec
 from chemworld.physchem.crystallization_units import (
     CrystallizationKineticsSpec,
     SolubilityCurveSpec,
 )
 from chemworld.physchem.property_packages import PropertyPackageThermodynamics, SpeciesCaloricModel
-from chemworld.physchem.property_reports import CaloricReference
+from chemworld.physchem.property_reports import CaloricReference, PhaseLabel
 from chemworld.physchem.specs import PropertyCorrelation
 
 
-def synthetic_crystal_model(molecular_weight_kg_mol, *, nucleation=2e7):
+def synthetic_crystal_model(
+    molecular_weight_kg_mol: float, *, nucleation: float = 2e7,
+) -> CrystalThermalSpec:
     return CrystalThermalSpec(
         "P",
         "I",
@@ -32,14 +36,15 @@ def synthetic_crystal_model(molecular_weight_kg_mol, *, nucleation=2e7):
     )
 
 
-def synthetic_crystal_thermodynamics():
+def synthetic_crystal_thermodynamics() -> PropertyPackageThermodynamics:
     properties = {}
-    for name, cv, energy, phase in (
+    inputs: tuple[tuple[str, float, float, PhaseLabel], ...] = (
         ("P", 100, 0, "liquid"),
         ("I", 120, 0, "liquid"),
         ("solid:P", 100, -20000, "solid"),
         ("solid:I", 120, 0, "solid"),
-    ):
+    )
+    for name, cv, energy, phase in inputs:
         properties[name] = SpeciesCaloricModel(
             PropertyCorrelation(
                 name + ":synthetic-Cv",
@@ -56,7 +61,7 @@ def synthetic_crystal_thermodynamics():
     return PropertyPackageThermodynamics(properties, 20, 298.15)
 
 
-def run_example():
+def run_example() -> dict[str, Any]:
     """Advance a finite slurry, retain its filtrate, and warm its wet crystals."""
     from chemworld.foundation import equipment_settings
     from chemworld.physchem.elements import molecular_weight

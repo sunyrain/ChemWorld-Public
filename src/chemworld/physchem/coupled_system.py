@@ -43,6 +43,16 @@ def _finite_mapping(values: Mapping[str, float]) -> Mapping[str, float]:
     return MappingProxyType(copied)
 
 
+class CaloricInventory(Protocol):
+    """Amounts and temperature suffice for additive material/support energy."""
+
+    @property
+    def amounts_mol(self) -> Mapping[str, float]: ...
+
+    @property
+    def temperature_K(self) -> float: ...  # noqa: N802 - existing SI-unit field
+
+
 @dataclass(frozen=True)
 class CoupledStateView:
     """Read-only rates view; event roots may inspect signed solver trial amounts.
@@ -360,7 +370,7 @@ class ConstantCvThermodynamics:
     def species_energy_j_mol(self, key: str, temperature_K: float) -> float:
         return self._property_model.species_energy_j_mol(key, temperature_K)
 
-    def internal_energy_j(self, state: CoupledStateView) -> float:
+    def internal_energy_j(self, state: CaloricInventory) -> float:
         return self._property_model.internal_energy_j(state)
 
     def chemical_energy_rate_w(

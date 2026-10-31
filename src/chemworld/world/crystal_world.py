@@ -1,5 +1,9 @@
 """A declared finite liquid/solid crystallizer using existing runtime operations."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+
 from chemworld.foundation import WorldState
 from chemworld.foundation.solvents import SolventInventory
 from chemworld.foundation.state_ledgers import (
@@ -9,6 +13,10 @@ from chemworld.foundation.state_ledgers import (
     PhaseRecord,
     VesselLedger,
     VesselRecord,
+)
+from chemworld.physchem.crystal_thermal_kinetics import (
+    CrystalNativeThermodynamics,
+    CrystalThermalSpec,
 )
 from chemworld.physchem.heat_transfer_units import (
     CondensedBackgroundSpec,
@@ -21,7 +29,10 @@ from chemworld.world.composition import WorldCompositionSpec
 from chemworld.world.physical_world import CompositionPhysics
 
 
-def crystal_world_spec(model, thermodynamics, component_formulas):
+def crystal_world_spec(
+    model: CrystalThermalSpec, thermodynamics: CrystalNativeThermodynamics,
+    component_formulas: Mapping[str, str],
+) -> WorldCompositionSpec:
     target, impurity = model.target_component, model.impurity_component
     if impurity is None or set(component_formulas) != {target, impurity}:
         raise ValueError("research fixture needs authored target and impurity identities")

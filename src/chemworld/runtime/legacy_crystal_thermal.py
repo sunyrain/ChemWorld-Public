@@ -4,11 +4,15 @@ The published liquid Cp model has no general molecular U. Its signed enthalpy
 equation is retained and labelled; no Cp is renamed as Cv or given gas data.
 """
 
+from __future__ import annotations
+
 import sys
 from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
 
+from chemworld.foundation import WorldState
 from chemworld.foundation.state_ledgers import PhaseLedger, PhaseRecord
-from chemworld.physchem.coupled_system import HeatFlux
+from chemworld.physchem.coupled_system import CoupledStateView, HeatFlux
 from chemworld.physchem.crystal_thermal_kinetics import (
     CrystalThermalSpec,
     advance_crystal_population,
@@ -21,7 +25,7 @@ from chemworld.physchem.elements import molecular_weight
 from chemworld.physchem.legacy_crystal_enthalpy import (
     LegacyCrystalEnthalpy as LegacyCrystalEnthalpy,
 )
-from chemworld.physchem.reactor_shared import HeatTransferSpec
+from chemworld.physchem.reactor_shared import HeatTransferSpec, JacketTemperatureProgram
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.world.mixtures import (
     crystallization_medium_modifier,
@@ -29,12 +33,18 @@ from chemworld.world.mixtures import (
     working_solvents,
 )
 
+if TYPE_CHECKING:
+    from chemworld.runtime.species import MechanismSpeciesView
+    from chemworld.world.parameters import ChemWorldParameters
+
 
 class LegacyCrystalThermalRuntime:
-    def __init__(self, world, species_view):
+    def __init__(
+        self, world: ChemWorldParameters | None, species_view: MechanismSpeciesView | None,
+    ) -> None:
         self.world, self.species_view = world, species_view
 
-    def available(self):
+    def available(self) -> bool:
         return (
             self.world is not None
             and self.species_view is not None
@@ -42,24 +52,26 @@ class LegacyCrystalThermalRuntime:
             and bool(self.species_view.impurity_species)
         )
 
-    def supports(self, state):
+    def supports(self, state: WorldState) -> bool:
         return (
             self.available()
             and state.phases is not None
             and {"mother_liquor", "solid"} <= state.phases.phases.keys()
         )
 
-    def model(self, state):
-        world = self.world
+    def model(self, state: WorldState) -> CrystalThermalSpec:
+        # The registry checks available() before selecting this preset adapter.
+        world = cast("ChemWorldParameters", self.world)
+        species_view = cast("MechanismSpeciesView", self.species_view)
         target, impurity = (
-            self.species_view.primary_target_species,
-            self.species_view.primary_impurity_species,
+            species_view.primary_target_species,
+            species_view.primary_impurity_species,
         )
-        species = self.species_view.mechanism.network.species[
-            self.species_view.mechanism.network.species_index[target]
+        species = species_view.mechanism.network.species[
+            species_view.mechanism.network.species_index[target]
         ]
 
-        def modifier(name):
+        def modifier(name: str) -> float:
             return crystallization_medium_modifier(state, world, name)
 
         capacity = float(
@@ -108,7 +120,7 @@ class LegacyCrystalThermalRuntime:
             {target: "crystal-target", impurity: "crystal-impurity"},
         )
 
-    def prepare(self, state):
+    def prepare(self, state: WorldState) -> WorldState:
         if self.supports(state):
             return state
         if state.phases is None or len(state.phases.phases) != 1 or state.phase != "liquid":
@@ -141,7 +153,10 @@ class LegacyCrystalThermalRuntime:
             )
         )
 
-    def advance(self, state, action, *, heat, jacket_program=None):
+    def advance(
+        self, state: WorldState, action: dict[str, Any], *, heat: bool,
+        jacket_program: JacketTemperatureProgram | None = None,
+    ) -> ModelProviderResult:
         from chemworld.runtime.crystal_thermal import commit_crystal_advance, population_from_state
 
         if not state.quenched and str(action.get("operation")) != "cool_crystallize":
@@ -157,7 +172,8 @@ class LegacyCrystalThermalRuntime:
             )
         try:
             original = state
-            capacity = volumetric_heat_capacity(state, self.world.rho_cp_J_per_L_K) * state.volume_L
+            world = cast("ChemWorldParameters", self.world)
+            capacity = volumetric_heat_capacity(state, world.rho_cp_J_per_L_K) * state.volume_L
             state = self.prepare(state)
             model = self.model(state)
             duration = float(action.get("duration_s", 600))
@@ -180,8 +196,8 @@ class LegacyCrystalThermalRuntime:
                 raise ValueError("legacy crystal setpoint lies outside its solubility data")
             thermal = HeatTransferSpec(
                 rho_cp_J_per_L_K=capacity / state.volume_L,
-                ua_W_per_K=float(self.world.ua_W_per_K),
-                environment_temperature_K=float(self.world.environment_temperature_K),
+                ua_W_per_K=float(world.ua_W_per_K),
+                environment_temperature_K=float(world.environment_temperature_K),
                 jacket_ua_W_per_K=4.0 if heat else 0.0,
                 jacket_temperature_K=target if heat else None,
                 maximum_jacket_heating_W=90,
@@ -189,7 +205,7 @@ class LegacyCrystalThermalRuntime:
             )
             start = population.time_s
 
-            def flux(candidate):
+            def flux(candidate: CoupledStateView) -> HeatFlux:
                 if jacket_program is None:
                     power = thermal.jacket_heat_w(candidate.temperature_K)
                 else:
@@ -223,7 +239,7 @@ class LegacyCrystalThermalRuntime:
                 base, hourly = (0.018, 0.018) if operation == "cool_crystallize" else (0.01, 0.015)
                 cost = base + result.actual_duration_s / 3600.0 * hourly
                 cost += abs(result.boundary_heat_J) / 250_000.0
-                final = committed.state
+                final = cast(WorldState, committed.state)
                 committed = replace(
                     committed,
                     state=final.replace(ledger=final.ledger.with_updates(
