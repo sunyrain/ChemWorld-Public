@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -101,7 +102,15 @@ def _candidate_actions(schema: dict[str, Any]) -> list[tuple[str, dict[str, Any]
         if isinstance(bounds, dict):
             low = float(bounds["low"])
             high = float(bounds["high"])
-            base[name] = low + 0.5 * (high - low)
+            if field.get("type") == "integer":
+                integer_low = (math.floor(low) + 1 if field.get("lower_bound_inclusive") is False
+                               else math.ceil(low))
+                integer_high = math.floor(high)
+                if integer_low > integer_high:
+                    raise ValueError(f"No integer value is available for {name}")
+                base[name] = (integer_low + integer_high) // 2
+            else:
+                base[name] = low + 0.5 * (high - low)
         elif isinstance(choices, list) and choices:
             base[name] = choices[0]
 
@@ -117,8 +126,11 @@ def _candidate_actions(schema: dict[str, Any]) -> list[tuple[str, dict[str, Any]
                 origin = f"{name}:{boundary}"
                 if boundary == "low" and field.get("lower_bound_inclusive") is False:
                     high = float(bounds["high"])
-                    value = value + 0.01 * (high - value)
+                    value = (math.floor(value) + 1 if field.get("type") == "integer"
+                             else value + 0.01 * (high - value))
                     origin = f"{name}:near_low_exclusive"
+                if field.get("type") == "integer":
+                    value = math.ceil(value) if boundary == "low" else math.floor(value)
                 candidate[name] = value
                 candidates.append((origin, candidate))
         elif isinstance(choices, list) and choices:
