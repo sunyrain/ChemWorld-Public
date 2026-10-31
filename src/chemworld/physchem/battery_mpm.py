@@ -4,10 +4,16 @@ The ideal uniform electrolyte is the declared MPM reduction. No private time
 integrator, prescribed current fractions or averaged independent cells are used.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import cached_property
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
+from numpy.typing import NDArray
+from scipy import sparse
 
 from chemworld.physchem import battery_particle_electrodes as shared
 from chemworld.physchem.battery_models import (
@@ -15,6 +21,7 @@ from chemworld.physchem.battery_models import (
     BatteryReadout,
     BatterySPMSpec,
     F,
+    ParticleSpec,
     particle_surface_fraction,
 )
 from chemworld.physchem.battery_ocp import (
@@ -22,9 +29,17 @@ from chemworld.physchem.battery_ocp import (
 )
 from chemworld.physchem.battery_particles import ParticleSizeDistribution
 from chemworld.physchem.coupled_system import (
+    CoupledAlgebraic,
+    CoupledEvent,
     CoupledState,
+    CoupledStateView,
+    CoupledSystem,
 )
 from chemworld.physchem.finite_volume import ConservativeDiffusion
+from chemworld.physchem.reactor_shared import ScalarControlProgram
+
+if TYPE_CHECKING:
+    from chemworld.physchem.battery_plating import PlatingReadout, _PlatingSideReaction
 
 MPM_ID = "mpm-isothermal-v1"
 PHI_E = "battery:mpm:electrolyte-potential_V"
@@ -60,15 +75,15 @@ class BatteryMPMSpec(BatterySPMSpec):
             )
 
     @property
-    def model_id(self):
+    def model_id(self) -> str:
         return MPM_ID if self.plating is None else "mpm-plating-isothermal-v1"
 
     @cached_property
-    def particle_bins(self):
-        bins = []
+    def particle_bins(self) -> tuple[shared.Population, ...]:
+        bins: list[shared.Population] = []
         for name in ("negative", "positive"):
-            original = getattr(self, name)
-            distribution = getattr(self, name + "_distribution")
+            original: ParticleSpec = getattr(self, name)
+            distribution: ParticleSizeDistribution | None = getattr(self, name + "_distribution")
             radii = (original.radius_m,) if distribution is None else distribution.radii_m
             weights = (1.0,) if distribution is None else distribution.volume_weights
             for i, (radius, weight) in enumerate(zip(radii, weights, strict=True)):
@@ -80,25 +95,25 @@ class BatteryMPMSpec(BatterySPMSpec):
         return tuple(bins)
 
     @cached_property
-    def inventory_species(self):
+    def inventory_species(self) -> dict[str, str]:
         from chemworld.physchem.battery_plating import PLATING_SPECIES
 
         return {**{key: "Li" for _, _, _, keys, _ in self.particle_bins for key in keys},
                 **({} if self.plating is None else PLATING_SPECIES)}
 
     @cached_property
-    def counts(self):
-        return tuple(
+    def counts(self) -> tuple[int, int]:
+        return cast(tuple[int, int], tuple(
             sum(name == electrode for name, *_ in self.particle_bins)
             for electrode in ("negative", "positive")
-        )
+        ))
 
     @cached_property
-    def current_coordinates(self):
+    def current_coordinates(self) -> shared.CurrentCoordinates:
         return shared.current_coordinates(self)
 
     @cached_property
-    def reaction_keys(self):
+    def reaction_keys(self) -> tuple[str, ...]:
         return tuple(
             f"battery:{name}:size-current:{i}_A"
             for name, (_, free, _) in zip(
@@ -108,24 +123,24 @@ class BatteryMPMSpec(BatterySPMSpec):
         )
 
     @cached_property
-    def algebraic_names(self):
+    def algebraic_names(self) -> tuple[str, ...]:
         from chemworld.physchem.battery_plating import STRIPPING_CURRENT
 
         return (*self.reaction_keys, *((STRIPPING_CURRENT,) if self.plating is not None else ()),
                 PHI_E, *BATTERY_ALGEBRAIC)
 
     @cached_property
-    def particle_side_reaction(self):
+    def particle_side_reaction(self) -> _PlatingSideReaction | None:
         from chemworld.physchem.battery_plating import _PlatingSideReaction
 
         return None if self.plating is None else _PlatingSideReaction(self)
 
     @cached_property
-    def reaction_map(self):
+    def reaction_map(self) -> NDArray[np.float64]:
         return shared.reaction_map(self)
 
-    def initial_state(self):
-        amounts = {}
+    def initial_state(self) -> CoupledState:
+        amounts: dict[str, float] = {}
         for name, _, particle, keys, _ in self.particle_bins:
             theta = getattr(self, "initial_" + name + "_fraction")
             amounts.update(
@@ -144,7 +159,7 @@ class BatteryMPMSpec(BatterySPMSpec):
             coordinates=self.initial_coordinates(),
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         result = super().to_dict()
         for name in ("negative_distribution", "positive_distribution"):
             distribution = getattr(self, name)
@@ -153,7 +168,7 @@ class BatteryMPMSpec(BatterySPMSpec):
 
 
     @property
-    def electrolyte_potential_key(self):
+    def electrolyte_potential_key(self) -> str:
         return PHI_E
 
     @property
@@ -165,43 +180,57 @@ class BatteryMPMSpec(BatterySPMSpec):
         return "battery:mpm-intercalation"
 
     @property
-    def population_equations(self):
+    def population_equations(self) -> tuple[str, ...]:
         return tuple(f"battery:bv:{name}:size:{i}" for name, i, *_ in self.particle_bins)
 
-    def population_ocp_derivatives(self, population, theta, current, state):
+    def population_ocp_derivatives(
+        self, population: shared.Population, theta: float, current: float, state: CoupledStateView,
+    ) -> tuple[float, float, float, dict[str, float]]:
         name = population[0]
         u, slope, di, dh = self.ocp_derivatives(name, theta, current, state)
         return u, slope, di, {hysteresis_key(name): dh}
 
-    def electrode_initial_potential(self, name, state, current):
+    def electrode_initial_potential(
+        self, name: str, state: CoupledStateView, current: float,
+    ) -> float:
         total = sum(state.amounts_mol[k] for n, _, _, keys, _ in self.particle_bins
                     if n == name for k in keys)
         return self.operational_ocp(name, total / getattr(self, name).capacity_mol, current, state)
 
-    def validate_particle_owner(self, state):
+    def validate_particle_owner(self, state: CoupledStateView) -> None:
         if self.plating is not None:
             from chemworld.physchem.battery_plating import validate_plating_state
 
             validate_plating_state(self, state)
         # Historical no-plating MPM checks remain in the shared kernel.
 
-    def particle_events(self, fields):
+    def particle_events(
+        self, fields: Callable[[CoupledStateView], shared.ParticleFields],
+    ) -> list[CoupledEvent]:
         return shared.legacy_particle_events(self, fields)
 
 
-def _fields(spec, state, values):
+def _fields(
+    spec: BatteryMPMSpec, state: CoupledStateView, values: Mapping[str, float],
+) -> shared.ParticleFields:
     return shared._fields(spec, state, values)
 
 
-def mpm_algebraic(spec, program):
+def mpm_algebraic(spec: BatteryMPMSpec, program: ScalarControlProgram) -> CoupledAlgebraic:
     return shared.particle_algebraic(spec, program)
 
 
-def _closure_jacobian(spec, state, program, identities):
+def _closure_jacobian(
+    spec: BatteryMPMSpec, state: CoupledStateView, program: ScalarControlProgram,
+    identities: Sequence[str],
+) -> sparse.csc_matrix:
     return shared._closure_jacobian(spec, state, program, identities)
 
 
-def mpm_fields(spec, state, *, current_A=None, program=None):
+def mpm_fields(
+    spec: BatteryMPMSpec, state: CoupledStateView, *, current_A: float | None = None,
+    program: ScalarControlProgram | None = None,
+) -> shared.ParticleFields:
     if spec.plating is not None:
         from chemworld.physchem.battery_plating import plating_fields
 
@@ -209,12 +238,17 @@ def mpm_fields(spec, state, *, current_A=None, program=None):
     return shared.particle_fields(spec, state, current_A=current_A, program=program)
 
 
-def mpm_system(spec, program, *, thermal_device=None, control_events=()):
+def mpm_system(
+    spec: BatteryMPMSpec, program: ScalarControlProgram, *, thermal_device: object | None = None,
+    control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     return shared.particle_system(spec, program, thermal_device=thermal_device,
                                   control_events=control_events)
 
 
-def mpm_readout(spec, state, current_A):
+def mpm_readout(
+    spec: BatteryMPMSpec, state: CoupledStateView, current_A: float,
+) -> BatteryReadout | PlatingReadout:
     if spec.plating is not None:
         from chemworld.physchem.battery_plating import plating_readout
 
@@ -231,12 +265,15 @@ def mpm_readout(spec, state, current_A):
         eta.append(float(np.average(f["kinetic_overpotential_V"][selection], weights=areas)))
         first += count
     return BatteryReadout(
-        f["voltage_V"], f["current_A"], *surface, *average, *eta, f["current_A"], 0.0, 0.0
+        f["voltage_V"], f["current_A"], surface[0], surface[1], average[0], average[1],
+        eta[0], eta[1], f["current_A"], 0.0, 0.0
     )
 
 
 
-def mpm_dissipation_w(spec, state, current_A):
+def mpm_dissipation_w(
+    spec: BatteryMPMSpec, state: CoupledStateView, current_A: float,
+) -> dict[str, float]:
     from chemworld.physchem.battery_models import battery_chemical_potentials
 
     if spec.plating is not None:

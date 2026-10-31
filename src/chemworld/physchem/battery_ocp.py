@@ -24,6 +24,7 @@ from chemworld.physchem.electrochemistry import FARADAY_C_PER_MOL as F
 if TYPE_CHECKING:
     from chemworld.physchem.battery_composite import BatteryCompositeSPMSpec
     from chemworld.physchem.battery_models import BatterySPMSpec
+    from chemworld.physchem.battery_plating import _PlatingSPMAdapter
 
 OCP_CONVENTION = "pybamm-25.4.2-ocp"
 OCP_UNITS = {
@@ -230,7 +231,7 @@ class ElectrodeOCPSpec:
 
 
 def hysteresis_coordinates(
-    spec: BatterySPMSpec | BatteryCompositeSPMSpec,
+    spec: BatterySPMSpec | BatteryCompositeSPMSpec | _PlatingSPMAdapter,
 ) -> tuple[CoupledCoordinate, ...]:
     # Do not declare endpoint root events: h=+/-1 is an admissible invariant
     # endpoint, not a termination. Strict accepted-state validation is separate.
@@ -238,7 +239,7 @@ def hysteresis_coordinates(
 
 
 def validate_hysteresis(
-    spec: BatterySPMSpec | BatteryCompositeSPMSpec, state: CoupledStateView,
+    spec: BatterySPMSpec | BatteryCompositeSPMSpec | _PlatingSPMAdapter, state: CoupledStateView,
 ) -> None:
     for key in spec.hysteresis_keys:
         if key not in state.coordinates or not isfinite(state.coordinates[key]):
@@ -248,7 +249,8 @@ def validate_hysteresis(
 
 
 def hysteresis_rates(
-    spec: BatterySPMSpec | BatteryCompositeSPMSpec, state: CoupledStateView, current_A: float,
+    spec: BatterySPMSpec | BatteryCompositeSPMSpec | _PlatingSPMAdapter,
+    state: CoupledStateView, current_A: float,
     *, reaction_currents_A: Mapping[str, float] | None = None,
 ) -> dict[str, float]:
     if reaction_currents_A is not None:
@@ -272,7 +274,7 @@ def hysteresis_rates(
     }
 
 
-def validate_ocp_cv(spec: BatterySPMSpec | BatteryCompositeSPMSpec) -> None:
+def validate_ocp_cv(spec: BatterySPMSpec | BatteryCompositeSPMSpec | _PlatingSPMAdapter) -> None:
     if any(
         c is not None and not c.cv_monotone_certified
         for c in (spec.negative_ocp, spec.positive_ocp)

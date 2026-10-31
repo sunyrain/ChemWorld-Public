@@ -4,16 +4,22 @@ MPM and composite material owners supply inventories and OCP derivatives.
 No second physical circuit, time integrator or prescribed current split exists.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from functools import lru_cache
 from math import isfinite
+from typing import TYPE_CHECKING, Any, NotRequired, TypeAlias, TypedDict, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import sparse
 
 from chemworld.physchem.battery_models import (
     BATTERY_ALGEBRAIC,
     BatteryThermodynamics,
     F,
+    ParticleSpec,
     R,
     particle_surface_fraction,
 )
@@ -46,8 +52,40 @@ from chemworld.physchem.residual_system import (
     solve_steady_residual,
 )
 
+if TYPE_CHECKING:
+    from chemworld.physchem.battery_composite import BatteryCompositeSPMSpec
+    from chemworld.physchem.battery_mpm import BatteryMPMSpec
+    from chemworld.physchem.battery_plating import _PlatingSideReaction, _PlatingSPMAdapter
 
-def current_coordinates(spec):
+    ParticleOwner: TypeAlias = BatteryCompositeSPMSpec | BatteryMPMSpec | _PlatingSPMAdapter
+
+Population = tuple[str, int, ParticleSpec, tuple[str, ...], str]
+CurrentCoordinates = tuple[tuple[int, tuple[int, ...], tuple[float, ...]], ...]
+
+
+class ParticleFields(TypedDict):
+    """Derived fields at the shared particle-electrode electrical solution."""
+
+    algebraic_values: dict[str, float]
+    current_A: float
+    voltage_V: float
+    reaction_current_A: NDArray[np.float64]
+    surface_fraction: NDArray[np.float64]
+    average_fraction: NDArray[np.float64]
+    kinetic_overpotential_V: NDArray[np.float64]
+    area_m2: NDArray[np.float64]
+    solid_potential_V: NDArray[np.float64]
+    electrolyte_potential_V: float
+    bv_residual_V: NDArray[np.float64]
+    closure_diagnostic: NotRequired[dict[str, Any]]
+    stripping_current_A: NotRequired[float]
+    plated_mol: NotRequired[float]
+    dead_mol: NotRequired[float]
+    negative_electrode_potential_V: NotRequired[float]
+    deactivation_rate_mol_s: NotRequired[float]
+
+
+def current_coordinates(spec: ParticleOwner) -> CurrentCoordinates:
     """One largest-area balance pivot per electrode, never a physical split."""
     result = []
     for name in ("negative", "positive"):
@@ -59,7 +97,7 @@ def current_coordinates(spec):
     return tuple(result)
 
 
-def reaction_map(spec):
+def reaction_map(spec: ParticleOwner) -> NDArray[np.float64]:
     result = np.zeros((sum(spec.counts), len(spec.algebraic_names)))
     row, column = 0, 0
     for count, sign, (pivot, free, _) in zip(
@@ -71,7 +109,7 @@ def reaction_map(spec):
         result[row + pivot, -2] = sign
         row += count
         column += count - 1
-    side = getattr(spec, "particle_side_reaction", None)
+    side: _PlatingSideReaction | None = getattr(spec, "particle_side_reaction", None)
     if side is not None:
         # A side reaction shares the negative electrode's potential and actual
         # inventory. Its current is independent of the external source bound.
@@ -80,7 +118,9 @@ def reaction_map(spec):
     return result
 
 
-def _fields(spec, state, values):
+def _fields(
+    spec: ParticleOwner, state: CoupledStateView, values: Mapping[str, float],
+) -> ParticleFields:
     current, voltage = (values[key] for key in BATTERY_ALGEBRAIC)
     q = spec.reaction_map @ np.array([values[key] for key in spec.algebraic_names])
     surface, average, eta, area, ocv = [], [], [], [], []
@@ -102,7 +142,7 @@ def _fields(spec, state, values):
         np.zeros(spec.counts[0]),
         np.full(spec.counts[1], voltage + current * spec.series_resistance_ohm),
     ]
-    result = {
+    result: ParticleFields = {
         "algebraic_values": dict(values),
         "current_A": current,
         "voltage_V": voltage,
@@ -116,14 +156,14 @@ def _fields(spec, state, values):
         "bv_residual_V": (solid - values[spec.electrolyte_potential_key]
                           - np.array(ocv) - np.array(eta)),
     }
-    side = getattr(spec, "particle_side_reaction", None)
+    side: _PlatingSideReaction | None = getattr(spec, "particle_side_reaction", None)
     if side is not None:
         result.update(side.fields(state, values, spec.electrolyte_potential_key))
     return result
 
 
 
-def particle_algebraic(spec, program):
+def particle_algebraic(spec: ParticleOwner, program: ScalarControlProgram) -> CoupledAlgebraic:
     if program.unit == "V":
         validate_ocp_cv(spec)
     if program.unit not in {"A", "V"} or any(
@@ -133,7 +173,7 @@ def particle_algebraic(spec, program):
         for _, v in program.setpoints
     ):
         raise ValueError("MPM control programme is outside the declared device domain")
-    side = getattr(spec, "particle_side_reaction", None)
+    side: _PlatingSideReaction | None = getattr(spec, "particle_side_reaction", None)
     variables = (
         *(
             ResidualVariable(k, "A", scale, "algebraic")
@@ -156,9 +196,10 @@ def particle_algebraic(spec, program):
         ResidualEquation("battery:control", "1"),
     )
 
-    def initial_values(state):
+    def initial_values(state: CoupledStateView) -> dict[str, float]:
         current = program.value_at(state.time_s) if program.unit == "A" else 0.0
-        currents, means = [], {}
+        currents: list[float] = []
+        means: dict[str, float] = {}
         for name, sign, (_, free, _) in zip(
             ("negative", "positive"), (1, -1), spec.current_coordinates, strict=True
         ):
@@ -176,7 +217,7 @@ def particle_algebraic(spec, program):
             )
         )
 
-    def residual(state):
+    def residual(state: CoupledStateView) -> NDArray[np.float64]:
         f = _fields(spec, state, state.algebraic_values)
         current, voltage, target = f["current_A"], f["voltage_V"], program.value_at(state.time_s)
         requested = current + spec.maximum_current_A * (voltage - target)
@@ -193,10 +234,13 @@ def particle_algebraic(spec, program):
 
 
 
-def _closure_jacobian(spec, state, program, identities):
+def _closure_jacobian(
+    spec: ParticleOwner, state: CoupledStateView, program: ScalarControlProgram,
+    identities: Sequence[str],
+) -> sparse.csc_matrix:
     index = {name: i for i, name in enumerate(identities)}
     count = sum(spec.counts)
-    side = getattr(spec, "particle_side_reaction", None)
+    side: _PlatingSideReaction | None = getattr(spec, "particle_side_reaction", None)
     jac = np.zeros((count + 1 + int(side is not None), len(identities)))
     columns = [index[key] for key in spec.algebraic_names]
     phi_column = index[spec.electrolyte_potential_key]
@@ -246,7 +290,10 @@ def _closure_jacobian(spec, state, program, identities):
 
 
 
-def particle_fields(spec, state, *, current_A=None, program=None):
+def particle_fields(
+    spec: ParticleOwner, state: CoupledStateView, *, current_A: float | None = None,
+    program: ScalarControlProgram | None = None,
+) -> ParticleFields:
     if isinstance(state, CoupledState):
         validate_hysteresis(spec, state)
     if (current_A is None) == (program is None):
@@ -255,6 +302,8 @@ def particle_fields(spec, state, *, current_A=None, program=None):
         if not isfinite(current_A) or abs(current_A) > spec.maximum_current_A:
             raise ValueError("current is outside battery capability")
         program = ScalarControlProgram(((0.0, current_A),), "A")
+    # The exclusive-input check above guarantees a programme on either path.
+    program = cast(ScalarControlProgram, program)
     closure = particle_algebraic(spec, program)
     names = spec.algebraic_names
     if all(k in state.algebraic_values for k in names) and (
@@ -262,7 +311,7 @@ def particle_fields(spec, state, *, current_A=None, program=None):
     ):
         return _fields(spec, state, state.algebraic_values)
 
-    def view(y):
+    def view(y: NDArray[np.float64]) -> CoupledStateView:
         return CoupledStateView(
             state.amounts_mol,
             state.temperature_K,
@@ -294,11 +343,14 @@ def particle_fields(spec, state, *, current_A=None, program=None):
 
 
 
-def particle_system(spec, program, *, thermal_device=None, control_events=()):
+def particle_system(
+    spec: ParticleOwner, program: ScalarControlProgram, *, thermal_device: object | None = None,
+    control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     if thermal_device is not None:
         raise ValueError("MPM currently requires explicit isothermal physics, no thermal device")
     closure = particle_algebraic(spec, program)
-    side = getattr(spec, "particle_side_reaction", None)
+    side: _PlatingSideReaction | None = getattr(spec, "particle_side_reaction", None)
     processes = [
         ConservativeDiffusion(p.mesh, p.diffusivity_m2_s)
         .couple(keys, process_id=f"battery:{identity}", owner_id="battery")
@@ -306,10 +358,10 @@ def particle_system(spec, program, *, thermal_device=None, control_events=()):
         for _, _, p, keys, identity in spec.particle_bins
     ]
 
-    def fields(state):
+    def fields(state: CoupledStateView) -> ParticleFields:
         return particle_fields(spec, state, program=program)
 
-    def source(state):
+    def source(state: CoupledStateView) -> ProcessContribution:
         f = fields(state)
         amounts = {
             keys[-1]: -q / F
@@ -337,7 +389,7 @@ def particle_system(spec, program, *, thermal_device=None, control_events=()):
             },
         )
 
-    def validate(state):
+    def validate(state: CoupledStateView) -> None:
         spec.validate_particle_owner(state)
         validate_hysteresis(spec, state)
         if (
@@ -362,7 +414,7 @@ def particle_system(spec, program, *, thermal_device=None, control_events=()):
         nkeys.extend(side.inventory_scales)
 
     @lru_cache(maxsize=8)
-    def linear_jacobian(identities):
+    def linear_jacobian(identities: tuple[str, ...]) -> sparse.csc_matrix:
         index = {k: i for i, k in enumerate(identities)}
         result = sparse.lil_matrix((len(identities), len(identities)))
         acols = [index[k] for k in spec.algebraic_names]
@@ -380,7 +432,7 @@ def particle_system(spec, program, *, thermal_device=None, control_events=()):
                 result[index[row], index[column]] += derivative
         return result.tocsc()
 
-    def jacobian(state, identities):
+    def jacobian(state: CoupledStateView, identities: tuple[str, ...]) -> sparse.csc_matrix:
         index = {k: i for i, k in enumerate(identities)}
         rows = np.array([index[k] for k in spec.algebraic_names])
         closure_j = -_closure_jacobian(spec, state, program, identities).tocoo()
@@ -441,8 +493,19 @@ def particle_system(spec, program, *, thermal_device=None, control_events=()):
 
 
 
-def legacy_particle_events(spec, fields):
-    events = []
+def legacy_particle_events(
+    spec: ParticleOwner, fields: Callable[[CoupledStateView], ParticleFields],
+) -> list[CoupledEvent]:
+    events: list[CoupledEvent] = []
+
+    def boundary(selection: slice, lower: bool) -> Callable[[CoupledStateView], float]:
+        def value(state: CoupledStateView) -> float:
+            surface = fields(state)["surface_fraction"][selection]
+            if lower:
+                return float(np.min(surface)) - spec.surface_margin
+            return 1 - spec.surface_margin - float(np.max(surface))
+        return value
+
     first = 0
     for name, count in zip(("negative", "positive"), spec.counts, strict=True):
         selection = slice(first, first + count)
@@ -450,15 +513,11 @@ def legacy_particle_events(spec, fields):
             (
                 CoupledEvent(
                     f"battery:{name}:depleted",
-                    lambda s, sel=selection: (
-                        float(np.min(fields(s)["surface_fraction"][sel])) - spec.surface_margin
-                    ),
+                    boundary(selection, True),
                 ),
                 CoupledEvent(
                     f"battery:{name}:saturated",
-                    lambda s, sel=selection: (
-                        1 - spec.surface_margin - float(np.max(fields(s)["surface_fraction"][sel]))
-                    ),
+                    boundary(selection, False),
                 ),
             )
         )

@@ -756,10 +756,10 @@ def battery_control_mode(spec, state, program):
     if getattr(spec, "model_family", None) == "dfn-isothermal-v1":
         from chemworld.physchem.battery_dfn import dfn_fields
 
-        fields = dfn_fields(spec, state, program=program)
-        if fields["voltage_V"] < target - 1e-9:
+        porous_fields = dfn_fields(spec, state, program=program)
+        if porous_fields["voltage_V"] < target - 1e-9:
             return "negative_current_limit", -spec.maximum_current_A
-        if fields["voltage_V"] > target + 1e-9:
+        if porous_fields["voltage_V"] > target + 1e-9:
             return "positive_current_limit", spec.maximum_current_A
         return "constant_voltage", target
     limit = spec.maximum_current_A
