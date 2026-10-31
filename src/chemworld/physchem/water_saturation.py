@@ -6,8 +6,15 @@ This module is only the finite saturation curve, not the complete IF97 EOS.
 """
 
 from math import inf, isfinite, nextafter
+from typing import Any, TypeVar
 
-from chemworld.physchem.caloric_math import scalar_value
+from chemworld.physchem.caloric_math import FirstDerivative, scalar_value
+from chemworld.physchem.precise_scalar import PreciseScalar
+from chemworld.physchem.second_order_pair import SecondOrderPair
+
+_Temperature = TypeVar(
+    "_Temperature", float, PreciseScalar, SecondOrderPair, FirstDerivative[Any, Any],
+)
 
 IF97_SATURATION_COEFFICIENTS = (
     0.11670521452767e4,
@@ -24,7 +31,7 @@ IF97_SATURATION_COEFFICIENTS = (
 IF97_SATURATION_RANGE_K = (273.15, 647.096)
 
 
-def water_saturation_pressure(temperature_K):
+def water_saturation_pressure(temperature_K: _Temperature) -> _Temperature:
     """IF97 region-4 pressure in Pa; supports the native derivative arithmetic."""
     T = scalar_value(temperature_K)
     if isinstance(T, bool) or not isfinite(T) or not 273.15 <= T <= 647.096:
@@ -37,7 +44,7 @@ def water_saturation_pressure(temperature_K):
     return 1e6 * (2 * c / (-b + (b * b - 4 * a * c) ** 0.5)) ** 4
 
 
-def water_saturation_temperature(pressure_Pa):
+def water_saturation_temperature(pressure_Pa: float) -> float:
     """Explicit inverse, allowing one input ULP of endpoint rounding only."""
     low, high = map(water_saturation_pressure, IF97_SATURATION_RANGE_K)
     if (isinstance(pressure_Pa, bool) or not isfinite(pressure_Pa)

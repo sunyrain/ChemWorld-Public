@@ -95,7 +95,7 @@ def water_if97_internal_energy_derivatives(state: IF97Equilibrium) -> tuple[floa
         return point.cv_J_kg_K, ((point.pressure_Pa - point.temperature_K * dp_dT)
                                 / point.mass_density_kg_m3**2)
     T, p = state.temperature_K, state.pressure_Pa
-    dp_dT = water_saturation_pressure(SecondOrderPair(T, dx=1)).dx
+    dp_dT = cast(float, water_saturation_pressure(SecondOrderPair(T, dx=1)).dx)
 
     def along_saturation(point: IF97State) -> tuple[float, float]:
         volume = point.specific_volume_m3_kg

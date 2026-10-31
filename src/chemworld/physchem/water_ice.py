@@ -9,6 +9,7 @@ liquid and vapor may be more stable. No transport or shear moduli are implied.
 from cmath import log as complex_log
 from dataclasses import asdict, dataclass
 from math import isfinite
+from typing import cast
 
 from chemworld.physchem.second_order_pair import SecondOrderPair
 
@@ -26,7 +27,7 @@ _R2 = (complex(-.725974574329220e2, -.781008427112870e2),
 _ENTROPY_ZERO = {"iapws95": -.332733756492168e4, "absolute": .18913e3}
 
 
-def _temperature_function(tau, coefficient):
+def _temperature_function(tau: float, coefficient: complex) -> tuple[complex, complex, complex]:
     """The bracket in Eq. 1 and its first two tau derivatives.
 
     For |tau/t| < 1/8 the even-power series has <1e-27 truncation error
@@ -47,7 +48,9 @@ def _temperature_function(tau, coefficient):
     return value, first, second
 
 
-def ice_ih_gibbs_derivatives(temperature_K, pressure_Pa, *, entropy_reference="iapws95"):
+def ice_ih_gibbs_derivatives(
+    temperature_K: float, pressure_Pa: float, *, entropy_reference: str = "iapws95",
+) -> SecondOrderPair:
     """Specific g and analytic Hessian in the original (x=p, y=T) container.
 
     Units: g J/kg; dx m³/kg; dy J/(kg K); dxx m³/(kg Pa);
@@ -101,14 +104,16 @@ class IceIhState:
     stability_scope: str = "homogeneous_ice_Ih_only"
 
     @property
-    def specific_volume_m3_kg(self):
+    def specific_volume_m3_kg(self) -> float:
         return 1 / self.mass_density_kg_m3
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, float | str]:
         return {**asdict(self), "specific_volume_m3_kg": self.specific_volume_m3_kg}
 
 
-def ice_ih_state(temperature_K, pressure_Pa, *, entropy_reference="iapws95"):
+def ice_ih_state(
+    temperature_K: float, pressure_Pa: float, *, entropy_reference: str = "iapws95",
+) -> IceIhState:
     """Mass-SI thermodynamics of the specified homogeneous ice-Ih branch.
 
     The default energy/entropy reference is the official IAPWS-95 choice.
@@ -117,14 +122,17 @@ def ice_ih_state(temperature_K, pressure_Pa, *, entropy_reference="iapws95"):
     """
     T, p = temperature_K, pressure_Pa
     g = ice_ih_gibbs_derivatives(T, p, entropy_reference=entropy_reference)
-    cp = -T*g.dyy
-    cv = cp + T*g.dxy*g.dxy/g.dxx
-    kappa = -g.dxx/g.dx
-    kappa_s = kappa if g.dyy == 0 else kappa + g.dxy*g.dxy/(g.dx*g.dyy)
-    if g.dx <= 0 or cp < 0 or cv < 0 or kappa <= 0 or kappa_s <= 0:
+    # The real parts of the complex ice equation produce ordinary float coefficients.
+    value, gp, gt, gpp, gpt, gtt = cast(tuple[float, float, float, float, float, float],
+                                      (g.value, g.dx, g.dy, g.dxx, g.dxy, g.dyy))
+    cp = -T*gtt
+    cv = cp + T*gpt*gpt/gpp
+    kappa = -gpp/gp
+    kappa_s = kappa if gtt == 0 else kappa + gpt*gpt/(gp*gtt)
+    if gp <= 0 or cp < 0 or cv < 0 or kappa <= 0 or kappa_s <= 0:
         raise ValueError("ice Ih homogeneous response is not locally stable")
     return IceIhState(
-        T, p, 1/g.dx, g.value, g.value-p*g.dx, g.value-T*g.dy,
-        g.value-T*g.dy-p*g.dx, -g.dy, cp, cv, g.dxy/g.dx, -g.dxy/g.dxx,
+        T, p, 1/gp, value, value-p*gp, value-T*gt,
+        value-T*gt-p*gp, -gt, cp, cv, gpt/gp, -gpt/gpp,
         kappa, kappa_s, entropy_reference,
     )
