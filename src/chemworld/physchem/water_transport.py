@@ -8,9 +8,16 @@ does not turn arbitrary T/rho inputs into a certified stable water state.
 """
 
 from math import atan, exp, isfinite, log1p, sin, sqrt, tan
+from typing import Any, TypeVar, cast
 
-from chemworld.physchem.caloric_math import exponential
+from chemworld.physchem.caloric_math import FirstDerivative, exponential
 from chemworld.physchem.conductivity_critical import critical_conductivity_shape
+from chemworld.physchem.precise_scalar import PreciseScalar
+from chemworld.physchem.second_order_pair import SecondOrderPair
+
+_Temperature = TypeVar(
+    "_Temperature", float, PreciseScalar, SecondOrderPair, FirstDerivative[Any, Any],
+)
 
 # IAPWS R15-11 Tables 1 and 2 (i rows, j columns), not reference code.
 WATER_CONDUCTIVITY_DILUTE = (.002443221, .01323095, .006770357, -.003454586, .0004096266)
@@ -44,7 +51,7 @@ _REFERENCE_SUSCEPTIBILITY = (
 )
 
 
-def water_viscosity_background(T, rho):
+def water_viscosity_background(T: _Temperature, rho: float) -> _Temperature:
     """IAPWS R12-08 industrial/background equation, Pa s; supports analytic jets.
 
     Internal equation only; the public wrapper or correlation validates input.
@@ -57,7 +64,7 @@ def water_viscosity_background(T, rho):
     return dilute * residual * 1e-6
 
 
-def water_conductivity_background(T, rho):
+def water_conductivity_background(T: _Temperature, rho: float) -> _Temperature:
     """IAPWS R15-11 eqs. 16-17, W/(m K); supports fixed-rho analytic jets."""
     tr, delta = T / 647.096, rho / 322
     dilute = tr**.5 / sum(c / tr**i for i, c in enumerate(WATER_CONDUCTIVITY_DILUTE))
@@ -68,9 +75,10 @@ def water_conductivity_background(T, rho):
 
 
 def water_conductivity_iapws(
-    T, rho, *, Cp=None, Cv=None, mu=None, drho_dP=None, drho_dP_reference=None,
-    reference_approximation=False,
-):
+    T: float, rho: float, *, Cp: float | None = None, Cv: float | None = None,
+    mu: float | None = None, drho_dP: float | None = None,
+    drho_dP_reference: float | None = None, reference_approximation: bool = False,
+) -> float:
     """IAPWS R15-11 W/(m K); mass rho kg/m³, Cp/Cv J/(kg K), mu Pa s.
 
     Background alone is explicit by omitting all critical inputs. Otherwise
@@ -89,6 +97,8 @@ def water_conductivity_iapws(
     if any(v is not None for v in critical) or reference_approximation:
         if any(v is None for v in (Cp, Cv, mu, drho_dP)):
             raise ValueError("water critical enhancement requires Cp, Cv, mu and current drho_dP")
+        Cp, Cv = cast(float, Cp), cast(float, Cv)
+        mu, drho_dP = cast(float, mu), cast(float, drho_dP)
         for value, label in ((Cp, "mass Cp"), (Cv, "mass Cv"), (mu, "viscosity")):
             _positive(value, label)
         if Cp < Cv:
@@ -111,13 +121,13 @@ def water_conductivity_iapws(
         raise ValueError("water conductivity is outside its numerical domain") from exc
 
 
-def _finite_nonnegative(value, label):
+def _finite_nonnegative(value: float, label: str) -> None:
     if (isinstance(value, bool) or not isinstance(value, int | float)
             or not isfinite(value) or value < 0):
         raise ValueError(f"{label} must be finite and nonnegative")
 
 
-def water_reference_compressibility(rho_kg_m3):
+def water_reference_compressibility(rho_kg_m3: float) -> float:
     """R15-11 approximate (drho/dP)_T at 970.644 K, kg/(m³ Pa).
 
     This is the conductivity release's reference-state polynomial, not a
@@ -133,7 +143,9 @@ def water_reference_compressibility(rho_kg_m3):
     return 322 / 22.064e6 / denominator
 
 
-def water_correlation_length_nm(T, rho, drho_dP, drho_dP_reference):
+def water_correlation_length_nm(
+    T: float, rho: float, drho_dP: float, drho_dP_reference: float,
+) -> float:
     """Shared viscosity/conductivity correlation length, R12-08 eqs. 20-21.
 
     Both compressibility inputs are in kg/(m³ Pa); reference T=970.644 K at
@@ -149,7 +161,7 @@ def water_correlation_length_nm(T, rho, drho_dP, drho_dP_reference):
     return .13 * (max(0, susceptibility) / .06)**(.630 / 1.239)
 
 
-def water_viscosity_enhancement(correlation_length_nm):
+def water_viscosity_enhancement(correlation_length_nm: float) -> float:
     """Dimensionless critical multiplier, R12-08 eqs. 14-19; both Y branches."""
     _finite_nonnegative(correlation_length_nm, "correlation length")
     xi = correlation_length_nm
@@ -166,8 +178,10 @@ def water_viscosity_enhancement(correlation_length_nm):
     return exp(.068 * y)
 
 
-def water_viscosity_iapws(T, rho, *, drho_dP=None, drho_dP_reference=None,
-                          reference_approximation=False):
+def water_viscosity_iapws(
+    T: float, rho: float, *, drho_dP: float | None = None,
+    drho_dP_reference: float | None = None, reference_approximation: bool = False,
+) -> float:
     """IAPWS viscosity, Pa s, from T K and mass density kg/m³.
 
     No derivatives selects the industrial/background formula. Supplying both
@@ -184,7 +198,7 @@ def water_viscosity_iapws(T, rho, *, drho_dP=None, drho_dP_reference=None,
     if drho_dP is None:
         if drho_dP_reference is not None or reference_approximation:
             raise ValueError("critical enhancement requires the current drho_dP")
-        enhancement = 1
+        enhancement = 1.0
     else:
         if reference_approximation:
             if drho_dP_reference is not None:

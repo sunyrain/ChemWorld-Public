@@ -2,12 +2,17 @@
 
 from dataclasses import replace
 from math import isclose
+from typing import cast
+
+import numpy as np
+from numpy.typing import NDArray
 
 from chemworld.physchem.residual_system import ResidualVariable, RootPolicy, solve_root
 from chemworld.physchem.second_order_pair import SecondOrderPair
 from chemworld.physchem.water_if97 import (
     WATER_CRITICAL_TEMPERATURE_K,
     WATER_GAS_CONSTANT_J_KG_K,
+    IF97State,
     _gibbs_state,
     _positive,
     water_if97_b23_pressure,
@@ -18,7 +23,7 @@ from chemworld.physchem.water_if97_solvers import IF97Equilibrium, water_if97_tp
 from chemworld.physchem.water_saturation import water_saturation_pressure
 
 
-def water_if97_trho(temperature_K, mass_density_kg_m3):
+def water_if97_trho(temperature_K: float, mass_density_kg_m3: float) -> IF97Equilibrium:
     """Stable fixed-volume fluid state, including mass-quality coexistence."""
     T, rho = temperature_K, mass_density_kg_m3
     _positive(T, "temperature_K")
@@ -51,14 +56,14 @@ def water_if97_trho(temperature_K, mass_density_kg_m3):
     high = 50e6 if region == 5 else (water_if97_b23_pressure(T) if 623.15 < T <= 863.15 else 100e6)
     low = min(1.0, rho * WATER_GAS_CONSTANT_J_KG_K * T * .1)
     if saturation is not None:
-        if rho > saturation.liquid.mass_density_kg_m3:
+        if rho > cast(IF97State, saturation.liquid).mass_density_kg_m3:
             if T > 623.15:
                 raise ValueError("density exceeds the accepted IF97 dense-fluid pressure domain")
             region, low = 1, saturation.pressure_Pa
         else:
             high = min(high, saturation.pressure_Pa)
     # Select the interval's own limiting Gibbs equation at joins.
-    def state_at(pressure):
+    def state_at(pressure: float) -> IF97State:
         return _gibbs_state(T, pressure, region)
 
     left, right = state_at(low), state_at(high)
@@ -67,7 +72,7 @@ def water_if97_trho(temperature_K, mass_density_kg_m3):
     fraction = ((rho - left.mass_density_kg_m3)
                 / (right.mass_density_kg_m3 - left.mass_density_kg_m3))
 
-    def jacobian(point):
+    def jacobian(point: NDArray[np.float64]) -> list[list[float]]:
         state = state_at(point[0])
         return [[state.mass_density_kg_m3 * state.isothermal_compressibility_Pa_inv]]
 
@@ -82,7 +87,7 @@ def water_if97_trho(temperature_K, mass_density_kg_m3):
     return IF97Equilibrium(homogeneous=replace(state, stability_scope="IF97_stable_region"))
 
 
-def water_if97_internal_energy_derivatives(state):
+def water_if97_internal_energy_derivatives(state: IF97Equilibrium) -> tuple[float, float]:
     """Return (du/dT at rho, du/drho at T); includes equilibrium latent heat."""
     if state.homogeneous is not None:
         point = state.homogeneous
@@ -92,18 +97,20 @@ def water_if97_internal_energy_derivatives(state):
     T, p = state.temperature_K, state.pressure_Pa
     dp_dT = water_saturation_pressure(SecondOrderPair(T, dx=1)).dx
 
-    def along_saturation(point):
+    def along_saturation(point: IF97State) -> tuple[float, float]:
         volume = point.specific_volume_m3_kg
         vT = volume * point.thermal_expansion_K_inv
         vp = -volume * point.isothermal_compressibility_Pa_inv
         return (point.cp_J_kg_K - p * vT + (-T * vT - p * vp) * dp_dT,
                 vT + vp * dp_dT)
 
-    uL, vL = along_saturation(state.liquid)
-    uV, vV = along_saturation(state.vapor)
-    quality = state.vapor_mass_fraction
-    volume_gap = state.vapor.specific_volume_m3_kg - state.liquid.specific_volume_m3_kg
-    energy_gap = state.vapor.internal_energy_J_kg - state.liquid.internal_energy_J_kg
+    # IF97Equilibrium validates both endpoints and quality for coexistence.
+    liquid, vapor = cast(IF97State, state.liquid), cast(IF97State, state.vapor)
+    uL, vL = along_saturation(liquid)
+    uV, vV = along_saturation(vapor)
+    quality = cast(float, state.vapor_mass_fraction)
+    volume_gap = vapor.specific_volume_m3_kg - liquid.specific_volume_m3_kg
+    energy_gap = vapor.internal_energy_J_kg - liquid.internal_energy_J_kg
     quality_T = -((1 - quality) * vL + quality * vV) / volume_gap
     return ((1 - quality) * uL + quality * uV + energy_gap * quality_T,
             -energy_gap / (state.mass_density_kg_m3**2 * volume_gap))

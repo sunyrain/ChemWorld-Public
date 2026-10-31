@@ -1,7 +1,15 @@
 """Caller-owned pure water at fixed volume on the original thermal clock."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from chemworld.physchem.coupled_system import CoupledStateView, ProcessContribution
+    from chemworld.physchem.water_if97_solvers import IF97Equilibrium
 
 from chemworld.physchem.specs import ComponentSpec
 from chemworld.physchem.water_if97 import _positive
@@ -29,18 +37,18 @@ class IF97IsochoricThermodynamics:
             raise ValueError("IF97 support heat capacity must be finite and nonnegative")
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str, ...]:
         return (self.component.identifier,)
 
     @property
-    def molar_mass_kg_mol(self):
-        return self.component.molecular_weight_g_mol / 1000
+    def molar_mass_kg_mol(self) -> float:
+        return cast(float, self.component.molecular_weight_g_mol) / 1000
 
-    def validate_temperature_interval(self, low, high):
+    def validate_temperature_interval(self, low: float, high: float) -> None:
         if not 273.15 <= low < high <= 2273.15:
             raise ValueError("thermal bounds leave the IF97 fluid temperature domain")
 
-    def water_state(self, state):
+    def water_state(self, state: CoupledStateView) -> IF97Equilibrium:
         if set(state.amounts_mol) != set(self.inventory_keys):
             raise ValueError("IF97 thermal stock must contain only the declared water component")
         if state.volume_L != self.volume_L:
@@ -50,10 +58,10 @@ class IF97IsochoricThermodynamics:
         return water_if97_trho(state.temperature_K,
                               amount * self.molar_mass_kg_mol / (self.volume_L * 1e-3))
 
-    def validate_state(self, state):
+    def validate_state(self, state: CoupledStateView) -> None:
         self.water_state(state)
 
-    def heat_capacity_j_k(self, state):
+    def heat_capacity_j_k(self, state: CoupledStateView) -> float:
         current = self.water_state(state)
         capacity = water_if97_internal_energy_derivatives(current)[0]
         if not isfinite(capacity) or capacity <= 0:
@@ -61,21 +69,24 @@ class IF97IsochoricThermodynamics:
         return (state.amounts_mol[self.component.identifier] * self.molar_mass_kg_mol * capacity
                 + self.support_heat_capacity_J_K)
 
-    def internal_energy_j(self, state):
+    def internal_energy_j(self, state: CoupledStateView) -> float:
         return (state.amounts_mol[self.component.identifier] * self.molar_mass_kg_mol
                 * self.water_state(state).internal_energy_J_kg + self.support_heat_capacity_J_K
                 * (state.temperature_K - self.reference_temperature_K))
 
-    def pressure_pa(self, state):
+    def pressure_pa(self, state: CoupledStateView) -> float:
         return self.water_state(state).pressure_Pa
 
-    def partial_inventory_energy_j_mol(self, state):
+    def partial_inventory_energy_j_mol(self, state: CoupledStateView) -> float:
         current = self.water_state(state)
         density_derivative = water_if97_internal_energy_derivatives(current)[1]
         return self.molar_mass_kg_mol * (current.internal_energy_J_kg
                                        + current.mass_density_kg_m3 * density_derivative)
 
-    def chemical_energy_rate_w(self, state, derivatives, contributions):
+    def chemical_energy_rate_w(
+        self, state: CoupledStateView, derivatives: Mapping[str, float],
+        contributions: Sequence[ProcessContribution],
+    ) -> float:
         if set(derivatives) - set(self.inventory_keys):
             raise ValueError("IF97 energy rate refers to an undeclared component")
         if any(c.legacy_reaction_energy_W is not None for c in contributions):
@@ -85,14 +96,14 @@ class IF97IsochoricThermodynamics:
             raise ValueError("IF97 inventory rate must be finite")
         return self.partial_inventory_energy_j_mol(state) * rate if rate else 0.0
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"model": "if97-equilibrium-isochoric-v1", "component": self.component.to_dict(),
                 "volume_L": self.volume_L,
                 "support_heat_capacity_J_K": self.support_heat_capacity_J_K,
                 "reference_temperature_K": self.reference_temperature_K}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> IF97IsochoricThermodynamics:
         values = dict(payload)
         if values.pop("model", None) != "if97-equilibrium-isochoric-v1":
             raise ValueError("unknown IF97 thermal declaration")
