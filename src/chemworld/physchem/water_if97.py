@@ -5,10 +5,13 @@ evaluators are not a two-phase flash or an ice model. The shared region-4
 curve is the only saturation-pressure authority. Reference: IAPWS R7-97(2012).
 """
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from math import isclose, isfinite, sqrt
+from typing import Any, TypeVar, cast
 
-from chemworld.physchem.caloric_math import logarithm
+from chemworld.physchem.caloric_math import FirstDerivative, logarithm
+from chemworld.physchem.precise_scalar import PreciseScalar
 from chemworld.physchem.second_order_pair import SecondOrderPair
 from chemworld.physchem.water_if97_coefficients import (
     REGION1,
@@ -30,6 +33,8 @@ WATER_GAS_CONSTANT_J_KG_K = 461.526
 WATER_CRITICAL_TEMPERATURE_K = 647.096
 WATER_CRITICAL_DENSITY_KG_M3 = 322.0
 
+_Scalar = TypeVar("_Scalar", float, PreciseScalar, SecondOrderPair, FirstDerivative[Any, Any])
+
 
 @dataclass(frozen=True)
 class IF97State:
@@ -49,19 +54,19 @@ class IF97State:
     stability_scope: str = "homogeneous_local_only"
 
     @property
-    def specific_volume_m3_kg(self):
+    def specific_volume_m3_kg(self) -> float:
         return 1 / self.mass_density_kg_m3
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, float | str]:
         return {**asdict(self), "specific_volume_m3_kg": self.specific_volume_m3_kg}
 
 
-def _positive(value, name):
+def _positive(value: float, name: str) -> None:
     if isinstance(value, bool) or not isfinite(value) or value <= 0:
         raise ValueError(f"{name} must be finite, positive and non-boolean")
 
 
-def water_if97_b23_pressure(temperature_K):
+def water_if97_b23_pressure(temperature_K: _Scalar) -> _Scalar:
     """Region 2/3 boundary, Pa (Eq. 5); accepts the common derivative seeds."""
     from chemworld.physchem.caloric_math import scalar_value
 
@@ -75,7 +80,7 @@ def water_if97_b23_pressure(temperature_K):
     )
 
 
-def water_if97_region(temperature_K, pressure_Pa):
+def water_if97_region(temperature_K: float, pressure_Pa: float) -> int:
     """Select the IF97 region; 4 means saturation needs a phase or quality."""
     T, p = temperature_K, pressure_Pa
     _positive(T, "temperature_K")
@@ -93,11 +98,15 @@ def water_if97_region(temperature_K, pressure_Pa):
     return 2 if T <= 1073.15 else 5
 
 
-def _polynomial(x, y, terms):
+def _polynomial(
+    x: _Scalar | float, y: _Scalar | float, terms: Sequence[tuple[int, int, float]],
+) -> _Scalar | float:
     return sum(n * x**i * y**j for i, j, n in terms)
 
 
-def _gibbs(T, p, region, metastable=False):
+def _gibbs(
+    T: _Scalar | float, p: _Scalar | float, region: int, metastable: bool = False,
+) -> _Scalar | float:
     """Specific Gibbs energy; all responses differentiate this expression."""
     if region == 1:
         gamma = _polynomial(7.1 - p / 16.53e6, 1386 / T - 1.222, REGION1)
@@ -115,7 +124,9 @@ def _gibbs(T, p, region, metastable=False):
     return WATER_GAS_CONSTANT_J_KG_K * T * gamma
 
 
-def water_if97_liquid_gibbs(temperature_K, pressure_Pa):
+def water_if97_liquid_gibbs(
+    temperature_K: _Scalar | float, pressure_Pa: _Scalar | float,
+) -> _Scalar | float:
     """Region-1 specific G, J/kg, preserving common analytic derivative seeds."""
     from chemworld.physchem.caloric_math import scalar_value
 
@@ -124,7 +135,9 @@ def water_if97_liquid_gibbs(temperature_K, pressure_Pa):
     return _gibbs(temperature_K, pressure_Pa, 1)
 
 
-def water_if97_liquid_density(temperature_K, pressure_Pa):
+def water_if97_liquid_density(
+    temperature_K: _Scalar | float, pressure_Pa: _Scalar | float,
+) -> _Scalar | float:
     """Density from the pressure derivative of the same region-1 Gibbs equation."""
     water_if97_liquid_gibbs(temperature_K, pressure_Pa)
     x, y = 7.1 - pressure_Pa / 16.53e6, 1386 / temperature_K - 1.222
@@ -134,26 +147,33 @@ def water_if97_liquid_density(temperature_K, pressure_Pa):
     return 1 / volume
 
 
-def _gibbs_state(T, p, region, *, metastable=False):
-    g = _gibbs(SecondOrderPair(T, dy=1), SecondOrderPair(p, dx=1), region, metastable)
+def _gibbs_state(T: float, p: float, region: int, *, metastable: bool = False) -> IF97State:
+    g = cast(SecondOrderPair, _gibbs(
+        SecondOrderPair(T, dy=1), SecondOrderPair(p, dx=1), region, metastable))
+    # Ordinary float seeds retain float coefficients in the shared derivative container.
+    value, gp, gt, gpp, gpt, gtt = cast(tuple[float, float, float, float, float, float],
+                                      (g.value, g.dx, g.dy, g.dxx, g.dxy, g.dyy))
     if not all(isfinite(v) for v in (g.value, g.dx, g.dy, g.dxx, g.dxy, g.dyy)):
         raise ValueError("IF97 response exceeds numerical range")
-    v, s, cp = g.dx, -g.dy, -T * g.dyy
-    if v <= 0 or g.dxx >= 0 or cp <= 0:
+    v, s, cp = gp, -gt, -T * gtt
+    if v <= 0 or gpp >= 0 or cp <= 0:
         raise ValueError("IF97 homogeneous state is locally unstable or singular")
-    cv = cp + T * g.dxy**2 / g.dxx
-    sound_squared = -v * v / (g.dxx - g.dxy**2 / g.dyy)
+    cv = cp + T * gpt**2 / gpp
+    sound_squared = -v * v / (gpp - gpt**2 / gtt)
     if cv <= 0 or sound_squared <= 0:
         raise ValueError("IF97 heat capacity or acoustic response is unstable")
-    h = g.value + T * s
+    h = value + T * s
     return IF97State(
         region, T, p, 1 / v, h, h - p * v, s, cp, cv, sqrt(sound_squared),
-        g.value, -g.dxx / v, g.dxy / v,
+        value, -gpp / v, gpt / v,
         "explicit_metastable_vapor" if metastable else "homogeneous_local_only",
     )
 
 
-def water_if97_gibbs_state(temperature_K, pressure_Pa, *, region=None, metastable=False):
+def water_if97_gibbs_state(
+    temperature_K: float, pressure_Pa: float, *, region: int | None = None,
+    metastable: bool = False,
+) -> IF97State:
     """Regions 1/2/5; an explicit region chooses a low-T saturation endpoint.
 
     Metastable steam is opt-in, limited to <=10 MPa and the published 5%
@@ -188,7 +208,7 @@ def water_if97_gibbs_state(temperature_K, pressure_Pa, *, region=None, metastabl
     return _gibbs_state(T, p, selected if region is None else region)
 
 
-def _region3_energy(T, rho):
+def _region3_energy(T: float, rho: float) -> SecondOrderPair:
     density, temperature = SecondOrderPair(rho, dx=1), SecondOrderPair(T, dy=1)
     delta, tau = density / 322, WATER_CRITICAL_TEMPERATURE_K / temperature
     return WATER_GAS_CONSTANT_J_KG_K * temperature * (
@@ -196,7 +216,7 @@ def _region3_energy(T, rho):
     )
 
 
-def water_if97_region3_state(temperature_K, mass_density_kg_m3):
+def water_if97_region3_state(temperature_K: float, mass_density_kg_m3: float) -> IF97State:
     """Region-3 homogeneous T/rho equation, with local stability diagnostics.
 
     A subcritical locally stable density is not a global phase selection. No
@@ -210,18 +230,20 @@ def water_if97_region3_state(temperature_K, mass_density_kg_m3):
     if abs(T - WATER_CRITICAL_TEMPERATURE_K) < 1e-10 and abs(rho - 322) < 1e-8:
         raise ValueError("IF97 critical response is singular")
     f = _region3_energy(T, rho)
-    p = rho * rho * f.dx
+    value, fr, ft, frr, frt, ftt = cast(tuple[float, float, float, float, float, float],
+                                      (f.value, f.dx, f.dy, f.dxx, f.dxy, f.dyy))
+    p = rho * rho * fr
     # Explicit relative tolerance for the polynomial's regional boundary.
     if not water_if97_b23_pressure(T) * (1 - 1e-10) <= p <= 100e6 * (1 + 1e-10):
         raise ValueError("density places the state outside IF97 region 3")
-    dp_drho = 2 * rho * f.dx + rho * rho * f.dxx
-    dp_dT = rho * rho * f.dxy
-    cv = -T * f.dyy
+    dp_drho = 2 * rho * fr + rho * rho * frr
+    dp_dT = rho * rho * frt
+    cv = -T * ftt
     if dp_drho <= 0 or cv <= 0:
         raise ValueError("IF97 region-3 state is locally unstable or singular")
     cp = cv + T * dp_dT**2 / (rho * rho * dp_drho)
-    s = -f.dy
-    u = f.value + T * s
+    s = -ft
+    u = value + T * s
     h = u + p / rho
     return IF97State(
         3, T, p, rho, h, u, s, cp, cv,

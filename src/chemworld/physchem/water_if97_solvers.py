@@ -53,12 +53,12 @@ def _dense_roots(T: float, p: float) -> list[IF97State]:
 
     def pressure_at(point: NDArray[np.float64]) -> float:
         rho = point[0]
-        return rho * rho * _region3_energy(T, rho).dx
+        return rho * rho * cast(float, _region3_energy(T, rho).dx)
 
     def jacobian(point: NDArray[np.float64]) -> list[list[float]]:
         rho = point[0]
         f = _region3_energy(T, rho)
-        return [[2 * rho * f.dx + rho * rho * f.dxx]]
+        return [[2 * rho * cast(float, f.dx) + rho * rho * cast(float, f.dxx)]]
 
     for root in seeds:
         if abs(root.imag) > 1e-7 or root.real <= 0:
