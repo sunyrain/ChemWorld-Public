@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -43,6 +43,9 @@ from chemworld.world.phase_kernel import (
     partition_split,
 )
 from chemworld.world.species_roles import PHASE_PRODUCT_AMOUNT_KEY
+
+if TYPE_CHECKING:
+    from chemworld.runtime.kernel_contracts import ModelProviderResult
 
 
 class ChemWorldPhaseSeparationServices:
@@ -430,7 +433,9 @@ class ChemWorldPhaseSeparationServices:
             removed_impurity_mol=removed_impurity,
         )
 
-    def wash_phase(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+    def wash_phase(
+        self, state: WorldState, action: dict[str, Any],
+    ) -> WorldState | ModelProviderResult:
         if self.liquid_runtime is not None and self.liquid_runtime.supports(state):
             from chemworld.runtime.kernel_contracts import ModelProviderResult
 
@@ -550,7 +555,7 @@ class ChemWorldPhaseSeparationServices:
             removed_impurity_mol=removed_impurity,
         )
 
-    def dry_phase(self, state: WorldState):
+    def dry_phase(self, state: WorldState) -> WorldState | ModelProviderResult:
         from chemworld.physchem.sorbent_kinetics import SORBENT_STATE_TYPE
 
         if (self.thermal is not None and self.thermal.advancer.supports(state)
@@ -659,7 +664,9 @@ class ChemWorldPhaseSeparationServices:
             removed_impurity_mol=removed_impurity,
         )
 
-    def concentrate_phase(self, state: WorldState, action: dict[str, Any]):
+    def concentrate_phase(
+        self, state: WorldState, action: dict[str, Any],
+    ) -> WorldState | ModelProviderResult:
         if self.thermal is not None and self.thermal.concentration.supports(state):
             return self.thermal.advancer.batch(state, action, heat=False)
         duration = float(np.clip(action_float(action, "duration_s", 300.0), 0.0, 3600.0))

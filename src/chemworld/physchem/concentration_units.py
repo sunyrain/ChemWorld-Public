@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite, log
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import numpy as np
 
@@ -438,6 +438,18 @@ class VacuumConcentrationResult:
             "warnings": list(self.warnings),
             "provenance": list(self.provenance),
         }
+
+
+@overload
+def simulate_vacuum_concentration(
+    request: VacuumConcentrationRequest,
+) -> VacuumConcentrationResult: ...
+
+
+@overload
+def simulate_vacuum_concentration(
+    request: CoupledConcentrationRequest,
+) -> CoupledConcentrationResult: ...
 
 
 def simulate_vacuum_concentration(

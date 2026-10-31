@@ -74,7 +74,9 @@ def _source_report(source: Mapping[str, Any] | None) -> tuple[dict[str, Any], li
     }, errors
 
 
-def _parse_master_species(lines: list[str], errors: list[str]) -> list[dict[str, Any]]:
+def _parse_master_species(
+    lines: list[tuple[int, str]], errors: list[str],
+) -> list[dict[str, Any]]:
     records = []
     for line_number, line in lines:
         fields = line.split()
