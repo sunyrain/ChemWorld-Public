@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
 from math import isfinite
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
-from chemworld.physchem.flash_units import FlashSystemSpec, VLEPropertyPackage, phase_advection_rate
+from chemworld.physchem.flash_units import (
+    FlashSystemSpec,
+    TPFlashUnitResult,
+    VLEPropertyPackage,
+    phase_advection_rate,
+)
 from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.phase_inventory import (
     PhaseInventoryAdvance,
@@ -20,6 +27,8 @@ from chemworld.physchem.property_reports import R_J_PER_MOL_K
 
 if TYPE_CHECKING:
     from chemworld.physchem.concentration_units import VacuumConcentratorSpec
+    from chemworld.physchem.equilibrium import ActivityModelSpec
+    from chemworld.physchem.phase_inventory import _PhaseInventoryView
 
 COUPLED_CONCENTRATION_MODEL_ID = "state_coupled_vacuum_concentration_v1"
 
@@ -54,7 +63,7 @@ class CoupledConcentrationSpec:
         if (
             not isinstance(self.equipment, VacuumConcentratorSpec)
             or self.properties.vapor_eos is not None
-            or self.properties.activity_model.model != "ideal"
+            or cast("ActivityModelSpec", self.properties.activity_model).model != "ideal"
             or not self.solvent_component_ids
             or len(set(self.solvent_component_ids)) != len(self.solvent_component_ids)
             or not set(self.solvent_component_ids) <= set(self.properties.gas_references)
@@ -109,7 +118,7 @@ class CoupledConcentrationSpec:
             raise ValueError("liquid-only caloric references must match the fixed pressure")
 
     @property
-    def capacities_j_k(self):
+    def capacities_j_k(self) -> tuple[float, float]:
         return self.pot_capacity_J_K, self.bottle_capacity_J_K
 
     @property
@@ -117,7 +126,7 @@ class CoupledConcentrationSpec:
         return 2
 
     @cached_property
-    def _models(self):
+    def _models(self) -> tuple[FlashSystemSpec, ...]:
         return tuple(
             FlashSystemSpec(
                 self.properties,
@@ -132,26 +141,30 @@ class CoupledConcentrationSpec:
             for capacity in self.capacities_j_k
         )
 
-    def at_tp(self, index, amounts, temperature):
+    def at_tp(
+        self, index: int, amounts: Mapping[str, float], temperature: float,
+    ) -> TPFlashUnitResult:
         return self._models[index].at_tp(amounts, temperature)
 
-    def at_ph(self, index, amounts, enthalpy):
+    def at_ph(
+        self, index: int, amounts: Mapping[str, float], enthalpy: float,
+    ) -> TPFlashUnitResult:
         return self._models[index].at_ph(amounts, enthalpy)
 
-    def enthalpy_bounds(self, index, amounts):
+    def enthalpy_bounds(self, index: int, amounts: Mapping[str, float]) -> tuple[float, float]:
         bounds = self.properties.ideal_enthalpy_bounds(
             amounts, self.pressure_Pa, self.capacities_j_k[index], self.reference_temperature_K
         )
         return (
             bounds
             if bounds is not None
-            else tuple(
+            else cast(tuple[float, float], tuple(
                 self.at_tp(index, amounts, t).total_enthalpy_j
                 for t in self.properties.temperature_bounds_K
-            )
+            ))
         )
 
-    def volume_l(self, phase):
+    def volume_l(self, phase: TPFlashUnitResult) -> float:
         return (
             sum(phase.liquid_amounts_mol.values()) * self.liquid_molar_holdup_L_mol
             + sum(phase.vapor_amounts_mol.values())
@@ -161,7 +174,7 @@ class CoupledConcentrationSpec:
             * 1000
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         from dataclasses import fields
 
         return {
@@ -174,7 +187,7 @@ class CoupledConcentrationSpec:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> CoupledConcentrationSpec:
         from chemworld.physchem.concentration_units import VacuumConcentratorSpec
 
         values = dict(payload)
@@ -224,17 +237,23 @@ class CoupledConcentrationState:
             raise ValueError("concentration references must identify original material amounts")
         object.__setattr__(self, "reference_amounts_mol", dict(reference))
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+_StateView: TypeAlias = "CoupledConcentrationState | _PhaseInventoryView"
+_StopValue: TypeAlias = Callable[[_StateView, Sequence[TPFlashUnitResult]], float]
 
 
 @dataclass(frozen=True)
 class CoupledConcentrationResult(PhaseInventoryAdvance):
+    initial_state: CoupledConcentrationState
+    final_state: CoupledConcentrationState
     spec: CoupledConcentrationSpec = field(kw_only=True)
     requested_duration_s: float = field(kw_only=True)
 
     @property
-    def phases(self):
+    def phases(self) -> tuple[TPFlashUnitResult, ...]:
         return tuple(
             self.spec.at_ph(i, n, h)
             for i, (n, h) in enumerate(
@@ -243,7 +262,7 @@ class CoupledConcentrationResult(PhaseInventoryAdvance):
         )
 
     @property
-    def solvent_remaining_fraction(self):
+    def solvent_remaining_fraction(self) -> float | None:
         initial = sum(
             self.initial_state.reference_amounts_mol[k] for k in self.spec.solvent_component_ids
         )
@@ -255,19 +274,19 @@ class CoupledConcentrationResult(PhaseInventoryAdvance):
         )
 
     @property
-    def endpoint_met(self):
+    def endpoint_met(self) -> bool:
         value = self.solvent_remaining_fraction
         return value is None or value <= self.spec.target_solvent_remaining_fraction + 1e-10
 
     @property
-    def vent_amounts_mol(self):
+    def vent_amounts_mol(self) -> dict[str, float]:
         return {
             k: self.final_state.outlet_amounts_mol.get(k, 0)
             - self.initial_state.outlet_amounts_mol.get(k, 0)
             for k in self.spec.properties.component_ids
         }
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         pot, bottle = self.phases
         return {
             "model_id": COUPLED_CONCENTRATION_MODEL_ID,
@@ -295,7 +314,10 @@ class CoupledConcentrationResult(PhaseInventoryAdvance):
         }
 
 
-def concentration_rates(spec, state, heater: ThermalDeviceSpec, *, flashes, transport_enabled=True):
+def concentration_rates(
+    spec: CoupledConcentrationSpec, state: _StateView, heater: ThermalDeviceSpec,
+    *, flashes: Sequence[TPFlashUnitResult], transport_enabled: bool = True,
+) -> PhaseInventoryRates:
     ids = spec.properties.component_ids
     pot, bottle = flashes
     dn, dh = np.zeros((2, len(ids))), np.zeros(2)
@@ -348,19 +370,19 @@ def concentration_rates(spec, state, heater: ThermalDeviceSpec, *, flashes, tran
 
 
 def advance_coupled_concentration(
-    spec,
-    state,
+    spec: CoupledConcentrationSpec,
+    state: CoupledConcentrationState,
     *,
-    heater,
-    duration_s,
-    transport_enabled=True,
-    enforce_endpoint=True,
-    evaluation_times_s=None,
-    max_step_s=None,
-    rtol=1e-8,
-    progress=None,
-    maximum_volume_L=None,
-):
+    heater: ThermalDeviceSpec,
+    duration_s: float,
+    transport_enabled: bool = True,
+    enforce_endpoint: bool = True,
+    evaluation_times_s: Sequence[float] | NDArray[np.floating[Any]] | None = None,
+    max_step_s: float | None = None,
+    rtol: float = 1e-8,
+    progress: Callable[[float, int], None] | None = None,
+    maximum_volume_L: float | None = None,
+) -> CoupledConcentrationResult:
     if (
         len(state.amounts_mol) != 2
         or any(set(n) != set(spec.properties.component_ids) for n in state.amounts_mol)
@@ -381,9 +403,9 @@ def advance_coupled_concentration(
     ):
         raise ValueError("concentration state exceeds its pot or bottle capacity")
     reference_solvent = sum(state.reference_amounts_mol[k] for k in spec.solvent_component_ids)
-    events = []
+    events: list[tuple[str, _StopValue]] = []
 
-    def event(name, value):
+    def event(name: str, value: _StopValue) -> None:
         events.append((name, value))
 
     if transport_enabled:
@@ -439,19 +461,21 @@ def advance_coupled_concentration(
     # may safely cool from an already reached operating boundary.
     for i in range(2):
         if transport_enabled or (heater.enabled and heater.maximum_power_W):
-            event(
-                f"temperature_limit_{i}",
-                lambda candidate, flashes, index=i: (
-                    spec.equipment.maximum_temperature_K - flashes[index].temperature_K
-                ),
-            )
-            event(
-                f"minimum_temperature_{i}",
-                lambda candidate, flashes, index=i: (
+            def temperature_limit(
+                candidate: _StateView, flashes: Sequence[TPFlashUnitResult], index: int = i,
+            ) -> float:
+                return spec.equipment.maximum_temperature_K - flashes[index].temperature_K
+
+            def minimum_temperature(
+                candidate: _StateView, flashes: Sequence[TPFlashUnitResult], index: int = i,
+            ) -> float:
+                return (
                     candidate.enthalpies_J[index]
                     - spec.enthalpy_bounds(index, candidate.amounts_mol[index])[0]
-                ),
-            )
+                )
+
+            event(f"temperature_limit_{i}", temperature_limit)
+            event(f"minimum_temperature_{i}", minimum_temperature)
     if transport_enabled or (heater.enabled and heater.maximum_power_W):
         event(
             "pot_capacity",
@@ -499,7 +523,9 @@ class CoupledConcentrationRequest:
     enforce_endpoint: bool = True
 
 
-def simulate_coupled_concentration(request):
+def simulate_coupled_concentration(
+    request: CoupledConcentrationRequest,
+) -> CoupledConcentrationResult:
     """Standalone request and native session select the same contribution/solve."""
     return advance_coupled_concentration(
         request.spec,
