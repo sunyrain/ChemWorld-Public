@@ -14,6 +14,39 @@ import traceback
 from contextlib import ExitStack
 from pathlib import Path
 
+PUBLIC_BOUNDARY_PROBE = """
+from chemworld.eval.public_harness import (
+    HarnessPolicy, PublicHarnessError, StudentProtocolError,
+    validate_public_payload, validate_student_response,
+)
+from chemworld.schemas.validation import validate_action_schema
+
+for payload in (
+    {'hidden_parameters': {'theta': [1.0]}},
+    {'private_seed': 99},
+    {'debug_mechanism': {}},
+    {'reward': float('nan')},
+    {'error': 'Traceback (most recent call last): File "private.py"'},
+):
+    try:
+        validate_public_payload(payload, max_bytes=1024)
+    except PublicHarnessError:
+        pass
+    else:
+        raise AssertionError('private or invalid teacher payload was accepted')
+try:
+    validate_student_response(
+        {'ok': True, 'action': {'operation': 'terminate'}, 'debug': 'x'},
+        request_type='act',
+        policy=HarnessPolicy(message_limit_bytes=1024, response_limit_bytes=1024),
+    )
+except StudentProtocolError:
+    pass
+else:
+    raise AssertionError('unexpected student response field was accepted')
+assert not validate_action_schema({'operation': 'not-an-operation'}).valid
+"""
+
 PROBE = """
 import json, sys, platform
 from pathlib import Path
@@ -58,10 +91,12 @@ assert len(native['steps']) == 3
 assert native['steps'][-1]['observation']['native']['channels'][0]['unit'] == 'Pa'
 from chemworld.eval.runner import run_agent
 import chemworld.agents.experiment_documents
+""" + PUBLIC_BOUNDARY_PROBE + """
 print(json.dumps({'package': chemworld.__file__, 'version': chemworld.__version__,
                   'tasks': tasks, 'contracts': readiness['contract_ready_count'],
                   'ui_packages_absent': True, 'console_commands': ['chemworld'],
                   'native_user_actions': len(native['steps']), 'agent_imports': True,
+                  'public_message_boundaries': True,
                   'platform': {'system': platform.system(), 'machine': platform.machine(),
                                'python_version': platform.python_version()},
                   'runtime_semantics_id': RUNTIME_SEMANTICS_ID}))

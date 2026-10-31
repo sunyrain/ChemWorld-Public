@@ -1,4 +1,12 @@
-from scripts.smoke_test_wheel import PROBE, clean_environment
+from scripts.smoke_test_wheel import PROBE, PUBLIC_BOUNDARY_PROBE, clean_environment
+
+
+def test_public_message_boundaries_in_a_separate_process():
+    import subprocess
+    import sys
+
+    subprocess.run([sys.executable, "-c", PUBLIC_BOUNDARY_PROBE],
+                   check=True, capture_output=True, text=True)
 
 
 def test_failed_installed_command_retains_both_streams(tmp_path):

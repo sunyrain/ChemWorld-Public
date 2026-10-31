@@ -8,6 +8,7 @@ from chemworld.foundation import instrument_equipment_id, upsert_equipment_recor
 from chemworld.runtime import (
     make_chemworld_constitution,
 )
+from chemworld.world.operations import OPERATION_TYPES
 from chemworld.world.state_factory import initial_chemworld_state
 
 
@@ -135,6 +136,45 @@ def test_successful_final_assay_terminates_episode() -> None:
             env.step({"operation": "measure", "instrument": "final_assay"})
     finally:
         env.close()
+
+
+def test_terminated_process_rejects_operations_but_allows_final_assay() -> None:
+    with gym.make("ChemWorld", task_id="reaction-to-assay", budget_override=10) as env:
+        env.reset(seed=0)
+        for action in (
+            {"operation": "add_solvent", "volume_L": 0.02, "solvent": 1},
+            {"operation": "add_reagent", "amount_mol": 0.01},
+            {"operation": "terminate"},
+        ):
+            _, _, _, _, info = env.step(action)
+            assert info["transaction_status"] == "committed"
+
+        base = env.unwrapped
+        before = base._state
+        for operation in OPERATION_TYPES:
+            if operation in {"measure", "terminate"}:
+                continue
+            validation = base.operation_validator.operation_affordance(operation, before)
+            assert not validation.is_valid, operation
+            assert "not_terminated" in validation.invalid_reasons, operation
+        assert "measure" in base.operation_validator.valid_operations(before)
+
+        _, reward, ended, truncated, info = env.step(
+            {"operation": "add_reagent", "amount_mol": 0.01}
+        )
+        assert info["transaction_status"] == "rolled_back"
+        assert info["preconditions"]["not_terminated"] is False
+        assert reward == 0.0
+        assert not ended and not truncated
+        assert base._state.species_amounts == before.species_amounts
+        assert base._state.volume_L == before.volume_L
+        assert base._state.ledger.time_s == before.ledger.time_s
+
+        _, _, ended, truncated, info = env.step(
+            {"operation": "measure", "instrument": "final_assay"}
+        )
+        assert info["transaction_status"] == "committed"
+        assert ended and not truncated
 
 
 def test_constitution_rejects_repeated_final_assay() -> None:
