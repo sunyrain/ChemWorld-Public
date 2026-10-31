@@ -46,6 +46,28 @@ def network(*, reversible=True, k=0.1, max_events=1000000):
     )
 
 
+@pytest.mark.parametrize("missing", ["composition", "physics", "stochastic_declaration"])
+def test_missing_physical_declaration_returns_rejection_without_mutating_state(missing):
+    from chemworld.runtime.stochastic import StochasticRuntime
+
+    composition = stochastic_world(network(), {"A": 100}, seed=12)
+    state = composition.physics.initial_states["reactor"]
+    before = state.to_dict()
+    if missing == "composition":
+        composition = None
+    elif missing == "physics":
+        composition = replace(composition, physics=None)
+    else:
+        composition = replace(composition, physics=replace(
+            composition.physics, network=replace(network(), stochastic=None)))
+    result = StochasticRuntime(composition).advance(state, {"duration_s": 1.0})
+    assert not result.success and result.outcome == "rejected"
+    assert result.failure_reason == "ssa_contract_violation"
+    assert "declared stochastic physical network" in result.diagnostics["reason"]
+    assert result.state is None
+    assert state.to_dict() == before
+
+
 @pytest.mark.parametrize("n", [0, 1, 2, 100, 1000, MAX_COUNT])
 def test_integer_roundtrip(n):
     assert mol_to_counts(counts_to_mol({"A": n})) == {"A": n}

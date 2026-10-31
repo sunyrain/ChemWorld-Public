@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, replace
 from functools import cached_property
 from math import isfinite
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import yaml
@@ -20,6 +20,9 @@ from chemworld.physchem import reaction_reference_cases as reference_cases
 from chemworld.physchem import reaction_sensitivity as sensitivity
 from chemworld.physchem.elements import element_matrix
 from chemworld.physchem.stoichiometric_rates import stoichiometric_amount_rates
+
+if TYPE_CHECKING:
+    from chemworld.physchem.stochastic_kinetics import EventChannel
 
 Arrow = network_specs.Arrow
 RateLawSpec = network_specs.RateLawSpec
@@ -166,7 +169,7 @@ class ReactionNetworkSpec:
     reactions: tuple[ReactionSpec, ...]
     units: dict[str, str] = field(default_factory=lambda: {"amount": "mol", "volume": "L"})
     metadata: dict[str, object] = field(default_factory=dict)
-    stochastic: dict[str, object] | None = None
+    stochastic: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.network_id:
@@ -201,7 +204,7 @@ class ReactionNetworkSpec:
             compile_channels(self, spec)
 
     @cached_property
-    def stochastic_channels(self):
+    def stochastic_channels(self) -> tuple[EventChannel, ...]:
         from chemworld.physchem.stochastic_kinetics import StochasticSpec, compile_channels
 
         if self.stochastic is None:
@@ -380,11 +383,14 @@ class ReactionNetworkSpec:
         """Rebuild declared gas thermochemistry once, including after JSON replay."""
         from chemworld.physchem.thermochemistry import species_thermo_from_cantera_yaml
 
+        # The mechanism importer retains the original heterogeneous thermo nodes.
+        declarations = cast(Mapping[str, Mapping[str, Any]],
+                            self.metadata.get("gas_thermochemistry", {}))
         return {
             key: species_thermo_from_cantera_yaml(
                 species_id=key, boundary_policy="continuous-energy", **node
             )
-            for key, node in self.metadata.get("gas_thermochemistry", {}).items()
+            for key, node in declarations.items()
         }
 
     def amount_derivatives(

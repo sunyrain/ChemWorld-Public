@@ -19,8 +19,8 @@ import numpy as np
 from chemworld.physchem.stochastic_kinetics import (
     EventBudgetError,
     EventChannel,
+    EventPolicy,
     StochasticAdvance,
-    StochasticSpec,
     _signature,
     validate_counts,
 )
@@ -75,7 +75,7 @@ def _validate_pending(
 
 def advance_next_reaction(
     channels: tuple[EventChannel, ...], counts: dict[str, int], state: dict[str, Any],
-    spec: StochasticSpec, rng: np.random.Generator, duration_s: float,
+    spec: EventPolicy, rng: np.random.Generator, duration_s: float,
     *, stop_after_boundary: bool = False,
 ) -> StochasticAdvance:
     """Consume the validated, copied original SSA candidate; no second runtime."""

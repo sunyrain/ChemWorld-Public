@@ -3,15 +3,20 @@
 This generic constructor is not a biochemical task, measurement or score preset.
 """
 
+from collections.abc import Mapping
+
 from chemworld.foundation import WorldState
 from chemworld.foundation.state_ledgers import VesselLedger, VesselRecord
+from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.stochastic_kinetics import StochasticSpec, counts_to_mol
 from chemworld.runtime.stochastic import install_stochastic_state
 from chemworld.world.composition import WorldCompositionSpec
 from chemworld.world.physical_world import CompositionPhysics
 
 
-def stochastic_world(network, counts, *, seed=0, budget=40):
+def stochastic_world(
+    network: ReactionNetworkSpec, counts: Mapping[str, int], *, seed: int = 0, budget: int = 40,
+) -> WorldCompositionSpec:
     if network.stochastic is None:
         raise ValueError("stochastic_world requires an explicitly discrete network")
     spec = StochasticSpec(**network.stochastic)

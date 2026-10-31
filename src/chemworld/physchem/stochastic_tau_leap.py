@@ -21,9 +21,9 @@ from chemworld.physchem.stochastic_kinetics import (
     TAU_ALGORITHM,
     EventBudgetError,
     EventChannel,
+    EventPolicy,
     StochasticAdvance,
     StochasticLeap,
-    StochasticSpec,
     _direct_pending,
     _signature,
     validate_counts,
@@ -153,7 +153,7 @@ def _updated(counts: dict[str, int], channels: tuple[EventChannel, ...],
 
 
 def _validate_packet(packet: Any, channels: tuple[EventChannel, ...],
-                     counts: dict[str, int], state: dict[str, Any], spec: StochasticSpec,
+                     counts: dict[str, int], state: dict[str, Any], spec: EventPolicy,
                      signature: str, critical_reaction_ids: frozenset[str] = frozenset(),
                      fluctuation_scaled_tau: bool = False) -> int:
     policy = spec.tau_policy
@@ -206,7 +206,7 @@ def _validate_packet(packet: Any, channels: tuple[EventChannel, ...],
 
 
 def advance_tau_leap(channels: tuple[EventChannel, ...], counts: dict[str, int],
-                     state: dict[str, Any], spec: StochasticSpec, rng: np.random.Generator,
+                     state: dict[str, Any], spec: EventPolicy, rng: np.random.Generator,
                      duration_s: float, signature: str, *,
                      stop_after_boundary: bool = False,
                      critical_reaction_ids: frozenset[str] = frozenset(),

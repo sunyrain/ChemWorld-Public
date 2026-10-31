@@ -1,8 +1,14 @@
 """SSA adapter of the existing physical advance coordinator and transaction."""
 
+from __future__ import annotations
+
 from copy import deepcopy
 from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
 
+from chemworld.foundation import WorldState
+from chemworld.foundation.lifecycle import LifecycleTransition
+from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, ProcessLedger
 from chemworld.physchem.stochastic_kinetics import (
     StochasticSpec,
     advance_stochastic,
@@ -13,12 +19,22 @@ from chemworld.physchem.stochastic_kinetics import (
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 
+if TYPE_CHECKING:
+    from chemworld.physchem.reactor_shared import JacketTemperatureProgram
+    from chemworld.physchem.stochastic_adaptive_hybrid import AdaptiveHybridSpec
+    from chemworld.physchem.stochastic_hybrid import StochasticHybridSpec
+    from chemworld.physchem.stochastic_sde import StochasticSDESpec
+    from chemworld.world.composition import WorldCompositionSpec
+    from chemworld.world.physical_world import CompositionPhysics
 
-def install_stochastic_state(state, *, seed, algorithm="gillespie-direct-v1"):
+
+def install_stochastic_state(
+    state: WorldState, *, seed: int, algorithm: str = "gillespie-direct-v1",
+) -> WorldState:
     mol_to_counts(state.species_amounts)
     return state.replace(
         process=replace(
-            state.process,
+            cast(ProcessLedger, state.process),
             stochastic_continuation=initial_continuation(
                 seed, state.ledger.time_s, algorithm=algorithm,
             ),
@@ -29,7 +45,7 @@ def install_stochastic_state(state, *, seed, algorithm="gillespie-direct-v1"):
 class StochasticRuntime:
     supported_operations = ("wait", "add_component")
 
-    def __init__(self, composition=None):
+    def __init__(self, composition: WorldCompositionSpec | None = None) -> None:
         self.composition = composition
         from chemworld.runtime.stochastic_adaptive import AdaptiveHybridStochasticRuntime
         from chemworld.runtime.stochastic_hybrid import HybridStochasticRuntime
@@ -39,8 +55,8 @@ class StochasticRuntime:
         self.sde = SDEStochasticRuntime(composition)
         self.adaptive = AdaptiveHybridStochasticRuntime(composition)
 
-    def supports(self, state):
-        return (state.process.stochastic_continuation is not None
+    def supports(self, state: WorldState) -> bool:
+        return (cast(ProcessLedger, state.process).stochastic_continuation is not None
                 or state.vessel_id in self.hybrid.models or state.vessel_id in self.sde.models
                 or state.vessel_id in self.adaptive.models)
 
@@ -88,7 +104,7 @@ class StochasticRuntime:
                 {"batch_reactor", "instrument"} if physics.lab_clock else {"batch_reactor"}
             )
             if any(r.equipment_type not in equipment_types
-                   for r in state.equipment.equipment.values()):
+                   for r in cast(EquipmentLedger, state.equipment).equipment.values()):
                 raise ValueError("SSA slice has no continuous equipment coupling")
             from chemworld.world.composition import physical_instruments
 
@@ -101,26 +117,31 @@ class StochasticRuntime:
                         "SSA requires an explicit integer sampler, not fractional withdrawal"
                     )
 
-    def reconcile_initialization(self, transition):
+    def reconcile_initialization(self, transition: LifecycleTransition) -> LifecycleTransition:
         return self.reconcile_initialization_from(transition, None)
 
-    def reconcile_initialization_from(self, transition, previous):
+    def reconcile_initialization_from(
+        self, transition: LifecycleTransition, previous: WorldState | None,
+    ) -> LifecycleTransition:
         if self.composition is None or self.composition.physics is None:
             return transition
+        physics = self.composition.physics
         transition = self.hybrid.reconcile_initialization(transition)
         transition = self.sde.reconcile_initialization(transition, previous=previous)
         transition = self.adaptive.reconcile_initialization(transition, previous=previous)
 
-        def reset_local(state):
-            template = self.composition.physics.initial_states[state.vessel_id]
+        def reset_local(state: WorldState) -> WorldState:
+            template = physics.initial_states[state.vessel_id]
             if (self.hybrid.supports(template) or self.sde.supports(template)
                     or self.adaptive.supports(template)):
                 return state
-            if self.supports(template) and not self.supports(state):
-                continuation = deepcopy(template.process.stochastic_continuation)
+            memory = cast(ProcessLedger, template.process).stochastic_continuation
+            if memory is not None and not self.supports(state):
+                continuation = deepcopy(memory)
                 continuation.update(time_s=state.ledger.time_s, pending=None, signature=None)
                 state = state.replace(
-                    process=replace(state.process, stochastic_continuation=continuation)
+                    process=replace(cast(ProcessLedger, state.process),
+                                    stochastic_continuation=continuation)
                 )
             return state
 
@@ -134,33 +155,40 @@ class StochasticRuntime:
             ),
         )
 
-    def validate(self, state):
+    def validate(
+        self, state: WorldState,
+    ) -> dict[str, int] | AdaptiveHybridSpec | StochasticSDESpec | StochasticHybridSpec:
         if self.adaptive.supports(state):
             return self.adaptive.validate(state)
         if self.sde.supports(state):
             return self.sde.validate(state)
         if self.hybrid.supports(state):
             return self.hybrid.validate(state)
-        network = self.composition.physics.network
+        network = (self.composition.physics.network
+                   if self.composition is not None and self.composition.physics is not None
+                   else None)
+        if network is None or network.stochastic is None:
+            raise ValueError("SSA requires a declared stochastic physical network")
         spec = StochasticSpec(**network.stochastic)
         if state.temperature_K != spec.temperature_K or state.volume_L != spec.volume_L:
             raise ValueError("SSA requires its declared constant temperature and volume")
         if state.quenched or state.terminated:
             raise ValueError("cannot advance stopped stochastic chemistry")
+        phases = cast(PhaseLedger, state.phases).phases
         if (
-            len(state.phases.phases) != 1
+            len(phases) != 1
             or state.phase != "liquid"
-            or next(iter(state.phases.phases.values())).species_amounts_mol != state.species_amounts
+            or next(iter(phases.values())).species_amounts_mol != state.species_amounts
         ):
             raise ValueError("SSA requires a single authoritative well-mixed inventory")
-        continuation = state.process.stochastic_continuation
+        continuation = cast(ProcessLedger, state.process).stochastic_continuation
         if continuation is None or continuation["time_s"] != state.ledger.time_s:
             raise ValueError("SSA process and session clocks disagree")
         counts = mol_to_counts(state.species_amounts)
         advance_stochastic(network, counts, continuation, 0)
         return counts
 
-    def validate_state(self, state):
+    def validate_state(self, state: WorldState) -> None:
         if self.adaptive.supports(state):
             self.adaptive.validate(state)
         elif self.sde.supports(state):
@@ -168,12 +196,15 @@ class StochasticRuntime:
         elif self.hybrid.supports(state):
             self.hybrid.validate(state)
 
-    def reconcile_material_change(self, before, after):
+    def reconcile_material_change(self, before: WorldState, after: WorldState) -> WorldState:
         if self.sde.supports(before):
             return self.sde.reconcile_material_change(before, after)
         return after
 
-    def advance(self, state, action, *, heat=False, jacket_program=None):
+    def advance(
+        self, state: WorldState, action: dict[str, Any], *, heat: bool = False,
+        jacket_program: JacketTemperatureProgram | None = None,
+    ) -> ModelProviderResult:
         if self.adaptive.supports(state):
             return self.adaptive.advance(state, action, heat=heat, jacket_program=jacket_program)
         if self.sde.supports(state):
@@ -189,7 +220,8 @@ class StochasticRuntime:
                 failure_reason="ssa_constant_boundary_only",
             )
         try:
-            counts = self.validate(state)
+            # All continuous/hybrid delegates have already returned above.
+            counts = cast(dict[str, int], self.validate(state))
         except ValueError as exc:
             return ModelProviderResult(
                 {},
@@ -199,16 +231,21 @@ class StochasticRuntime:
                 diagnostics={"reason": str(exc)},
             )
         try:
+            # The discrete validation established the physical declaration and memory.
+            composition = cast("WorldCompositionSpec", self.composition)
+            physics = cast("CompositionPhysics", composition.physics)
+            process = cast(ProcessLedger, state.process)
+            continuation = cast(dict[str, Any], process.stochastic_continuation)
             result = advance_stochastic(
-                self.composition.physics.network,
+                physics.network,
                 counts,
-                state.process.stochastic_continuation,
+                continuation,
                 float(action["duration_s"]),
             )
             candidate = state.replace(
                 species_amounts=counts_to_mol(result.counts),
                 process=replace(
-                    state.process,
+                    process,
                     last_observation_record=None,
                     stochastic_continuation=result.continuation,
                 ),
@@ -227,9 +264,9 @@ class StochasticRuntime:
             state=candidate,
             actual_duration_s=result.actual_duration_s,
             diagnostics={
-                "solver": self.composition.physics.network.stochastic["algorithm"],
+                "solver": continuation["algorithm"],
                 "events_executed": (result.continuation["events_committed"]
-                                    - state.process.stochastic_continuation["events_committed"]),
+                                    - continuation["events_committed"]),
                 "stochastic_work": result.work,
                 "energy_scope": "isothermal kinetics only; heat balance not modelled",
             },

@@ -6,12 +6,15 @@ constant multiplying prod(comb(n_i,r_i)) includes prod(r_i!). No net-rate
 subtraction, fractional molecules, automatic ODE switch or hidden upstream.
 """
 
+from __future__ import annotations
+
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from math import comb, factorial, fsum, isfinite, log
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import numpy as np
 
@@ -22,6 +25,10 @@ from chemworld.foundation.discrete_inventory import (
     mol_to_counts,
     validate_counts,
 )
+
+if TYPE_CHECKING:
+    from chemworld.physchem.reaction_network import ReactionNetworkSpec
+    from chemworld.physchem.stochastic_tau_leap import TauLeapPolicy
 
 __all__ = [
     "AVOGADRO",
@@ -48,7 +55,7 @@ class StochasticSpec:
     temperature_K: float = 298.15
     max_events_per_advance: int = 1_000_000
     algorithm: str = "gillespie-direct-v1"
-    tau_policy: object = None
+    tau_policy: TauLeapPolicy | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if any(not isfinite(x) or x <= 0 for x in (self.volume_L, self.temperature_K)):
@@ -68,13 +75,14 @@ class StochasticSpec:
         elif self.tau_policy is not None:
             raise ValueError("tau_policy requires the explicit tau-leap algorithm")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         # Keep the historical exact-method codec and field order unchanged.
-        result = {"volume_L": self.volume_L, "temperature_K": self.temperature_K,
+        result: dict[str, Any] = {"volume_L": self.volume_L, "temperature_K": self.temperature_K,
                   "max_events_per_advance": self.max_events_per_advance,
                   "algorithm": self.algorithm}
         if self.tau_policy is not None:
-            result["tau_policy"] = self.tau_policy.to_dict()
+            # Construction normalizes source mappings into the immutable policy.
+            result["tau_policy"] = cast("TauLeapPolicy", self.tau_policy).to_dict()
         return result
 
 
@@ -89,7 +97,7 @@ class EventProcessSpec:
     algorithm: str
     max_events_per_advance: int
     context: str
-    tau_policy: object = None
+    tau_policy: TauLeapPolicy | Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.algorithm not in {"gillespie-direct-v1", "gibson-bruck-next-reaction-v1",
@@ -108,11 +116,19 @@ class EventProcessSpec:
             raise ValueError("tau_policy requires the explicit tau-leap algorithm")
 
 
+EventPolicy = StochasticSpec | EventProcessSpec
+
+
+class DirectPending(TypedDict):
+    time_s: float
+    channel: int
+
+
 @dataclass(frozen=True)
 class EventChannel:
     reaction_id: str
-    changes: tuple
-    reactants: tuple
+    changes: tuple[tuple[str, int], ...]
+    reactants: tuple[tuple[str, int], ...]
     constant: float
 
     @property
@@ -131,7 +147,7 @@ class EventChannel:
             default=MAX_COUNT,
         )
 
-    def propensity(self, counts):
+    def propensity(self, counts: Mapping[str, int]) -> float:
         value = self.constant
         for key, order in self.reactants:
             n = counts.get(key, 0)
@@ -143,7 +159,9 @@ class EventChannel:
         return value
 
 
-def compile_channels(network, spec):
+def compile_channels(
+    network: ReactionNetworkSpec, spec: StochasticSpec,
+) -> tuple[EventChannel, ...]:
     if any(
         not float(value).is_integer() for s in network.species for value in s.composition.values()
     ):
@@ -189,7 +207,9 @@ def compile_channels(network, spec):
     return tuple(channels)
 
 
-def initial_continuation(seed, time_s=0.0, *, algorithm="gillespie-direct-v1"):
+def initial_continuation(
+    seed: int, time_s: float = 0.0, *, algorithm: str = "gillespie-direct-v1",
+) -> dict[str, Any]:
     if type(seed) is not int or seed < 0 or not isfinite(time_s) or time_s < 0:
         raise ValueError("SSA seed/time must be explicit nonnegative values")
     if algorithm not in {"gillespie-direct-v1", "gibson-bruck-next-reaction-v1", TAU_ALGORITHM}:
@@ -204,7 +224,10 @@ def initial_continuation(seed, time_s=0.0, *, algorithm="gillespie-direct-v1"):
     }
 
 
-def _signature(counts, channels, spec):
+def _signature(
+    counts: Mapping[str, int], channels: tuple[EventChannel, ...], spec: EventPolicy,
+) -> str:
+    values: list[Any]
     if isinstance(spec, EventProcessSpec):
         values = ["compiled-event-channels-v1", counts, [asdict(c) for c in channels],
                   spec.context, spec.algorithm]
@@ -212,7 +235,8 @@ def _signature(counts, channels, spec):
         # Historical physical-network signatures and draw order stay exact.
         values = [counts, [asdict(c) for c in channels], spec.volume_L, spec.temperature_K]
     if spec.algorithm == TAU_ALGORITHM:
-        values.extend((spec.algorithm, spec.tau_policy.to_dict()))
+        # Both policy constructors normalize this field for the tau algorithm.
+        values.extend((spec.algorithm, cast("TauLeapPolicy", spec.tau_policy).to_dict()))
     return sha256(
         json.dumps(
             values,
@@ -228,24 +252,26 @@ class StochasticLeap:
 
     start_time_s: float
     end_time_s: float
-    reaction_counts: tuple
+    reaction_counts: tuple[tuple[str, int], ...]
 
 
 @dataclass(frozen=True)
 class StochasticAdvance:
-    counts: dict
-    continuation: dict
-    events: tuple
+    counts: dict[str, int]
+    continuation: dict[str, Any]
+    events: tuple[tuple[float, str], ...]
     actual_duration_s: float
-    work: dict = field(default_factory=dict)
-    batches: tuple = ()
+    work: dict[str, int] = field(default_factory=dict)
+    batches: tuple[StochasticLeap, ...] = ()
 
 
 class EventBudgetError(RuntimeError):
     """Numerical work limit, not a physical event; candidate must roll back."""
 
 
-def _direct_pending(propensities, total, time, rng):
+def _direct_pending(
+    propensities: Sequence[float], total: float, time: float, rng: np.random.Generator,
+) -> DirectPending:
     """Original direct draw order, shared with the declared tau SSA fallback."""
     event_time = time - log(1.0 - rng.random()) / total
     if not isfinite(event_time) or event_time <= time:
@@ -261,7 +287,10 @@ def _direct_pending(propensities, total, time, rng):
     return {"time_s": event_time, "channel": index}
 
 
-def advance_stochastic(network, counts, continuation, duration_s):
+def advance_stochastic(
+    network: ReactionNetworkSpec, counts: Mapping[str, int], continuation: dict[str, Any],
+    duration_s: float,
+) -> StochasticAdvance:
     """Pure candidate computation. Inputs and RNG are never mutated on failure."""
     if network.stochastic is None:
         raise ValueError("network has not declared a stochastic strategy")
@@ -271,9 +300,12 @@ def advance_stochastic(network, counts, continuation, duration_s):
                                   counts, continuation, duration_s)
 
 
-def advance_event_channels(channels, species_ids, spec, counts, continuation, duration_s, *,
-                           stop_after_boundary=False, critical_reaction_ids=frozenset(),
-                           calendar_deadline_s=None, fluctuation_scaled_tau=False):
+def advance_event_channels(
+    channels: tuple[EventChannel, ...], species_ids: Sequence[str], spec: EventPolicy,
+    counts: Mapping[str, int], continuation: dict[str, Any], duration_s: float, *,
+    stop_after_boundary: bool = False, critical_reaction_ids: frozenset[str] = frozenset(),
+    calendar_deadline_s: float | None = None, fluctuation_scaled_tau: bool = False,
+) -> StochasticAdvance:
     """Shared pure direct/next/tau kernel; callers retain state and source units."""
     if type(stop_after_boundary) is not bool:
         raise ValueError("event boundary selection must be an explicit Boolean")
@@ -343,7 +375,7 @@ def advance_event_channels(channels, species_ids, spec, counts, continuation, du
     ):
         raise ValueError("invalid pending SSA event")
     time = start
-    events = []
+    events: list[tuple[float, str]] = []
     evaluations = draws = 0
     while duration_s > 0:
         if pending is None:
