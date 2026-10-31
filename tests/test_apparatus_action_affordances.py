@@ -4,12 +4,40 @@ import gymnasium as gym
 import pytest
 
 import chemworld  # noqa: F401 -- registers the preset interface
+from chemworld.action_codec import ActionCodec
 from chemworld.examples.native_distillation_research import (
     initial_column_state,
     synthetic_column_spec,
 )
+from chemworld.operation_validator import OperationValidator
 from chemworld.runtime import ChemWorldRuntime
+from chemworld.runtime.constitution_factory import make_chemworld_constitution
 from chemworld.world.dynamic_column_world import dynamic_column_world_spec
+from chemworld.world.state_factory import initial_chemworld_state
+
+
+@pytest.mark.parametrize("operation", ["heat", "wait", "run_flow"])
+def test_default_registry_resolves_explicit_short_duration_bounds(operation: str) -> None:
+    validator = OperationValidator(
+        constitution=make_chemworld_constitution(),
+        allowed_operations={operation},
+        authored_field_bounds={(operation, "duration_s"): (0.001, 2.0)},
+    )
+    assert validator.public_field_bounds(
+        operation, "duration_s", initial_chemworld_state(), low=1.0, high=14400.0,
+    ) == (0.001, 2.0)
+
+
+def test_named_feed_choices_require_their_routing_physics() -> None:
+    validator = OperationValidator(
+        constitution=make_chemworld_constitution(),
+        allowed_operations={"add_component"},
+        action_codec=ActionCodec(feed_ids=("feed",)),
+    )
+    with pytest.raises(ValueError, match="material-routing physics"):
+        validator.public_field_choices(
+            "add_component", "component", initial_chemworld_state(), choices=("feed",),
+        )
 
 
 def test_shortcut_column_does_not_advertise_or_accept_total_reflux():

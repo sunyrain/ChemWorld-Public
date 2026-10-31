@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.action_codec import ActionCodec
 from chemworld.foundation import (
@@ -16,6 +16,7 @@ from chemworld.foundation import (
     selected_phase_id,
 )
 from chemworld.foundation.state_helpers import equipment_setting_truth
+from chemworld.foundation.state_ledgers import ProcessLedger
 from chemworld.physchem.crystallization_units import (
     DEFAULT_MAXIMUM_COOLING_RATE_K_S,
 )
@@ -34,6 +35,7 @@ from chemworld.runtime.full_process_contract import (
 from chemworld.schemas import validate_action_schema
 from chemworld.world.actions import ELECTROLYTE_PROFILES
 from chemworld.world.control_contract import CONTROL_OPERATIONS
+from chemworld.world.domain_modules import DomainModuleRegistry
 from chemworld.world.operations import (
     CAMPAIGN_CONTROL_OPERATIONS,
     OPERATION_CUMULATIVE_FIELD_LIMITS,
@@ -42,6 +44,10 @@ from chemworld.world.operations import (
     OPERATION_TYPES,
 )
 from chemworld.world.stream_contract import STREAM_OPERATIONS
+
+if TYPE_CHECKING:
+    from chemworld.physchem.crystal_thermal_kinetics import CrystalThermalSpec
+    from chemworld.runtime.material_routing import ChemWorldMaterialRoutingServices
 
 OPERATION_AFFORDANCE_STATE_MACHINE_VERSION = "chemworld-operation-affordance-state-machine-0.7"
 ELECTROCHEMICAL_MIN_ADAPTED_POTENTIAL_DELTA_V = 0.02
@@ -102,7 +108,11 @@ class OperationValidation:
 
 
 class OperationValidator:
-    """Single source of truth for task policy and physical preconditions."""
+    """Single source of truth for task policy and physical preconditions.
+
+    WorldState materializes process ledgers at construction; the ProcessLedger
+    casts express that invariant without adding fallback state during validation.
+    """
 
     def __init__(
         self,
@@ -119,7 +129,7 @@ class OperationValidator:
         operation_types: tuple[str, ...] = OPERATION_TYPES,
         action_codec: ActionCodec | None = None,
         authored_field_bounds: Mapping[tuple[str, str], tuple[float, float]] | None = None,
-        material_router=None,
+        material_router: ChemWorldMaterialRoutingServices | None = None,
     ) -> None:
         self.constitution = constitution
         self.allowed_operations = allowed_operations
@@ -302,7 +312,7 @@ class OperationValidator:
                 and field == "target_temperature_K" and self.material_router is not None
                 and self.material_router.physics is not None):
             bounds = self.material_router.physics.declared_temperature_bounds_k(
-                state, self.action_codec.modules)
+                state, self.action_codec.modules or DomainModuleRegistry.default())
             if bounds is not None:
                 dynamic_low, dynamic_high = bounds
         if (
@@ -336,10 +346,12 @@ class OperationValidator:
                     "lab_schedule" if state.lab_clock is not None and operation_type == "wait"
                     else "thermal"
                 )
-                rule = dict(self.action_codec.modules.components()[owner].parameters)[
+                modules = self.action_codec.modules or DomainModuleRegistry.default()
+                rule = dict(modules.components()[owner].parameters)[
                     "duration_range_s"
                 ]
-                dynamic_low = rule.minimum
+                if rule.minimum is not None:
+                    dynamic_low = rule.minimum
             dynamic_low = max(dynamic_low, authored[0])
             dynamic_high = min(dynamic_high, authored[1])
         if operation_type in {"add_reagent", "add_component"} and field == "amount_mol":
@@ -445,13 +457,15 @@ class OperationValidator:
 
         if operation_type == "add_component" and field == "component":
             if self.action_codec.feed_ids is not None:
+                if physics is None:
+                    raise ValueError("Named feed choices require material-routing physics")
                 return tuple(
                     name
                     for name in self.action_codec.feed_ids
-                    if self.material_router.physics.feed_sources[name] in state.inactive_vessels
+                    if physics.feed_sources[name] in state.inactive_vessels
                     and sum(
                         state.inactive_vessels[
-                            self.material_router.physics.feed_sources[name]
+                            physics.feed_sources[name]
                         ].species_amounts.values()
                     )
                     > 0
@@ -631,6 +645,7 @@ class OperationValidator:
         check_payload: bool = True,
     ) -> dict[str, bool]:
         preconditions = self.constitution.check_preconditions(operation_type, state, payload)
+        physics = None if self.material_router is None else self.material_router.physics
         modules = self.action_codec.modules
         if modules is not None and operation_type in modules.operation_specs():
             preconditions.update(
@@ -650,10 +665,10 @@ class OperationValidator:
         from chemworld.runtime.component_network import operation_available
 
         preconditions["operation_available_in_vessel"] = operation_available(state, operation_type)
-        if operation_type == 'measure' and self._has_sde_model(state):
+        if operation_type == 'measure' and physics is not None and self._has_sde_model(state):
             instrument = self.constitution.instruments.get(str(payload.get('instrument', 'hplc')))
             if instrument is not None and instrument.sample_volume_L:
-                model = self.material_router.physics.models_of('stochastic_sde')[state.vessel_id]
+                model = physics.models_of('stochastic_sde')[state.vessel_id]
                 preconditions['sde_sampling_volume_floor'] = (
                     model.minimum_volume_L is not None
                     and state.volume_L - instrument.sample_volume_L >= model.minimum_volume_L)
@@ -786,7 +801,7 @@ class OperationValidator:
         if operation_type in {"add_reagent", "add_component"}:
             preconditions["reagent_pressure_capacity_available"] = (
                 self._maximum_safe_reagent_amount_mol(state) > (
-                    0 if state.process.stochastic_continuation is not None
+                    0 if cast(ProcessLedger, state.process).stochastic_continuation is not None
                     else self.constitution.tolerance)
             )
         if operation_type == "terminate":
@@ -832,7 +847,7 @@ class OperationValidator:
                     float(state.species_amounts.get(primary_target, 0.0)) - seed_target_mol
                 )
             preconditions["cool_crystallize_target_feed_available"] = (
-                float(state.species_amounts.get(primary_target, 0.0))
+                float(state.species_amounts.get(crystal_model.target_component, 0.0))
                 if crystal_model is not None
                 else dissolved_target_mol
             ) > self.constitution.tolerance
@@ -1096,7 +1111,7 @@ class OperationValidator:
                 return instrument_id
         return permitted[0] if permitted else "hplc"
 
-    def native_crystal_model(self, state):
+    def native_crystal_model(self, state: WorldState) -> CrystalThermalSpec | None:
         physics = None if self.material_router is None else self.material_router.physics
         return None if physics is None else physics.models_of("crystal").get(state.vessel_id)
 
@@ -1135,13 +1150,13 @@ class OperationValidator:
                 checks["payload_electrical_control_valid"] = (
                     electrical_control_error(state, payload) is None
                 )
-            for field in modules.operation_specs()[operation_type].fields:
-                if field.required:
-                    checks[f"payload_has:{field.name}"] = field.name in payload
-                if field.name not in payload:
+            for declared in modules.operation_specs()[operation_type].fields:
+                if declared.required:
+                    checks[f"payload_has:{declared.name}"] = declared.name in payload
+                if declared.name not in payload:
                     continue
-                value = payload[field.name]
-                if field.value_kind == "number_map":
+                value = payload[declared.name]
+                if declared.value_kind == "number_map":
                     from chemworld.world.domain_modules import normalize_number_map
 
                     try:
@@ -1150,26 +1165,26 @@ class OperationValidator:
                         valid_map = False
                     else:
                         valid_map = True
-                    checks[f"payload_numeric_map:{field.name}"] = valid_map
+                    checks[f"payload_numeric_map:{declared.name}"] = valid_map
                     continue
-                if field.choices or field.choice_provider is not None:
-                    choices = field.choice_provider(state, self) \
-                        if field.choice_provider is not None else (
-                            field.runtime_choices or field.choices
+                if declared.choices or declared.choice_provider is not None:
+                    choices = declared.choice_provider(state, self) \
+                        if declared.choice_provider is not None else (
+                            declared.runtime_choices or declared.choices
                         )
-                    checks[f"payload_choice:{field.name}"] = value in choices
+                    checks[f"payload_choice:{declared.name}"] = value in choices
                 else:
                     numeric = (
                         isinstance(value, (int, float))
                         and not isinstance(value, bool)
                         and math.isfinite(value)
                     )
-                    checks[f"payload_numeric:{field.name}"] = numeric
-                    if field.integer:
-                        checks[f"payload_integer:{field.name}"] = numeric and value == int(value)
-                    bounds = field.runtime_bounds or field.bounds
+                    checks[f"payload_numeric:{declared.name}"] = numeric
+                    if declared.integer:
+                        checks[f"payload_integer:{declared.name}"] = numeric and value == int(value)
+                    bounds = declared.runtime_bounds or declared.bounds
                     if numeric and bounds:
-                        checks[f"payload_bounds:{field.name}"] = bounds[0] <= value <= bounds[1]
+                        checks[f"payload_bounds:{declared.name}"] = bounds[0] <= value <= bounds[1]
 
             return checks
 
@@ -1218,10 +1233,10 @@ class OperationValidator:
 
         for (candidate_operation, field), choices in OPERATION_FIELD_CHOICES.items():
             if operation_type == candidate_operation and field in payload:
-                allowed = self.public_field_choices(
+                allowed_choices = self.public_field_choices(
                     operation_type, field, state, choices=choices,
                 )
-                checks[f"payload_choice:{field}"] = payload.get(field) in allowed
+                checks[f"payload_choice:{field}"] = payload.get(field) in allowed_choices
 
         # Optional apparatus controls are declared by the installed module, not
         # by the legacy required-field table above. Use the same choices that
@@ -1263,7 +1278,7 @@ class OperationValidator:
         if operation_type in {"add_reagent", "add_component"} and "amount_mol" in payload:
             if self._has_hybrid_model(state):
                 checks["hybrid_material_input_disabled"] = False
-            elif (state.process.stochastic_continuation is not None
+            elif (cast(ProcessLedger, state.process).stochastic_continuation is not None
                   and not self._has_sde_model(state) and not self._has_adaptive_model(state)):
                 from chemworld.foundation.discrete_inventory import MAX_COUNT, mol_to_counts
 
@@ -1658,21 +1673,21 @@ class OperationValidator:
     def _maximum_safe_reagent_amount_mol(self, state: WorldState, *, single: bool = False) -> float:
         """Invert the public pressure law to bound one reagent charge safely."""
 
+        physics = None if self.material_router is None else self.material_router.physics
         if self._has_hybrid_model(state):
             # The declared fixed partition does not support material dosing;
             # its continuous stock must never be interpreted as integer SSA.
             return 0.0
-        if self._has_adaptive_model(state):
+        if physics is not None and self._has_adaptive_model(state):
             from chemworld.foundation.discrete_inventory import MAX_COUNT
             from chemworld.physchem.stochastic_adaptive_hybrid import (
                 MOLECULAR_QUANTUM,
                 AdaptiveHybridModel,
             )
 
-            physics = self.material_router.physics
-            model = AdaptiveHybridModel(physics.network,
+            adaptive_model = AdaptiveHybridModel(physics.network,
                 physics.models_of("stochastic_hybrid")[state.vessel_id])
-            remaining = MAX_COUNT-sum(model.populations(state.species_amounts).values())
+            remaining = MAX_COUNT-sum(adaptive_model.populations(state.species_amounts).values())
             return max(0., remaining)*MOLECULAR_QUANTUM
         if self._has_sde_model(state):
             from sys import float_info
@@ -1682,18 +1697,18 @@ class OperationValidator:
             # Declared fixed-volume solutes; continuous coordinates have no
             # integer-SSA quantum bound. Finite particle representation still applies.
             return max(0., float_info.max / AVOGADRO - sum(state.species_amounts.values()))
-        if state.process.stochastic_continuation is not None:
+        if cast(ProcessLedger, state.process).stochastic_continuation is not None:
             from chemworld.foundation.discrete_inventory import AVOGADRO, MAX_COUNT, mol_to_counts
 
             # Explicit constant-volume dilute solutes, no legacy gas-pressure
             # proxy. Keep additions within the finite exact count domain.
             return max(0, MAX_COUNT - sum(mol_to_counts(state.species_amounts).values())) / AVOGADRO
 
-        if self.material_router is not None and self.material_router.uses_native_packets(state):
+        if (physics is not None and self.material_router is not None
+                and self.material_router.uses_native_packets(state)):
             from chemworld.physchem.reaction_network import R_J_PER_MOL_K
             from chemworld.runtime.aqueous_mineral import aqueous_record
 
-            physics = self.material_router.physics
             if (state.vessel_id in physics.models_of("flash")
                     or state.vessel_id in physics.models_of("liquid")
                     or aqueous_record(state) is not None):

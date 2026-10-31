@@ -15,7 +15,11 @@ from chemworld.world.control_contract import (
     CONTROL_NUMERIC,
     CONTROL_VECTOR_FIELDS,
 )
-from chemworld.world.domain_modules import DomainModuleRegistry, normalize_number_map
+from chemworld.world.domain_modules import (
+    DomainModuleRegistry,
+    OperationContract,
+    normalize_number_map,
+)
 from chemworld.world.operations import (
     CAMPAIGN_CONTROL_OPERATIONS,
     INSTRUMENTS,
@@ -90,7 +94,9 @@ class ActionCodec:
             )
             object.__setattr__(self, "instruments", self.modules.instrument_order())
 
-    def contracts(self, *, include_campaign_controls: bool = False):
+    def contracts(
+        self, *, include_campaign_controls: bool = False,
+    ) -> dict[str, OperationContract]:
         return operation_contracts(
             include_campaign_controls=include_campaign_controls, modules=self.modules
         )
@@ -113,23 +119,23 @@ class ActionCodec:
             and canonical["operation"] in self.modules.operation_specs()
         ):
             spec = self.modules.operation_specs()[canonical["operation"]]
-            for field in spec.fields:
-                if field.value_kind == "number_map" and field.name in canonical:
-                    canonical[field.name] = normalize_number_map(canonical[field.name])
+            for declared in spec.fields:
+                if declared.value_kind == "number_map" and declared.name in canonical:
+                    canonical[declared.name] = normalize_number_map(canonical[declared.name])
                     continue
-                if field.name in canonical and field.name in {"vessel", "connection"}:
-                    addresses = self.vessels if field.name == "vessel" else self.connections
-                    canonical[field.name] = self._index(canonical[field.name], addresses)
-                categorical = bool(field.choices) or field.choice_provider is not None
-                if field.name in canonical and categorical:
-                    values = np.asarray(canonical[field.name]).reshape(-1)
+                if declared.name in canonical and declared.name in {"vessel", "connection"}:
+                    addresses = self.vessels if declared.name == "vessel" else self.connections
+                    canonical[declared.name] = self._index(canonical[declared.name], addresses)
+                categorical = bool(declared.choices) or declared.choice_provider is not None
+                if declared.name in canonical and categorical:
+                    values = np.asarray(canonical[declared.name]).reshape(-1)
                     if values.size != 1 or values.dtype.kind == "b":
-                        raise ValueError(f"{field.name} must be one declared choice")
-                    canonical[field.name] = values[0].item()
-                if field.name in canonical and not categorical:
-                    if np.asarray(canonical[field.name]).dtype.kind == "b":
-                        raise ValueError(f"{field.name} must be numeric, not boolean")
-                    canonical[field.name] = self._float(canonical, field.name, 0)
+                        raise ValueError(f"{declared.name} must be one declared choice")
+                    canonical[declared.name] = values[0].item()
+                if declared.name in canonical and not categorical:
+                    if np.asarray(canonical[declared.name]).dtype.kind == "b":
+                        raise ValueError(f"{declared.name} must be numeric, not boolean")
+                    canonical[declared.name] = self._float(canonical, declared.name, 0)
             return canonical
         canonical = self._apply_aliases(canonical)
         for field, choices in CONTROL_CHOICES.items():

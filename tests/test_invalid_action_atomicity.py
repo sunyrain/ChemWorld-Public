@@ -6,6 +6,7 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 import pytest
+from tests.fixtures.process_recipes import reference_actions
 
 import chemworld  # noqa: F401
 from chemworld.action_codec import ActionCodec
@@ -99,25 +100,11 @@ def test_cooling_schema_matches_the_current_runtime_temperature_domain() -> None
     env = gym.make("ChemWorld", task_id="reaction-to-crystallization", seed=0)
     try:
         env.reset(seed=0)
-        env.step({"operation": "add_solvent", "volume_L": 0.02, "solvent": 1})
-        env.step({"operation": "add_reagent", "amount_mol": 0.01})
-        env.step(
-            {
-                "operation": "add_catalyst",
-                "catalyst_amount_mol": 0.00025,
-                "catalyst": 1,
-            }
-        )
-        env.step(
-            {
-                "operation": "heat",
-                "target_temperature_K": 340.0,
-                "duration_s": 600.0,
-                "stirring_speed_rpm": 600.0,
-            }
-        )
-        env.step({"operation": "measure", "instrument": "hplc"})
-        env.step({"operation": "seed_crystals", "seed_mass_g": 0.0001})
+        # Prepare actual target material and an accepted seed before testing
+        # temperature admissibility. A rolled-back preparation is not a fixture.
+        for action in reference_actions("reaction-to-crystallization")[:9]:
+            *_, info = env.step(action)
+            assert info["transaction_status"] == "committed", (action, info)
         env.unwrapped._state = env.unwrapped._state.replace(temperature_K=260.0)
 
         schema = env.unwrapped.action_schema("cool_crystallize")

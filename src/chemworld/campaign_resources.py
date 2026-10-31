@@ -16,7 +16,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any
+from typing import Any, TypedDict
 
 from chemworld.data.logging import to_builtin
 from chemworld.resource_receipts import ResourceReceipts
@@ -57,6 +57,27 @@ DEFAULT_PROTECTED_CLOSEOUT_OPERATIONS = frozenset(
 # agent adapters.
 ELECTROCHEMICAL_REAGENT_ACTION_UPPER_MOL = 0.040
 ELECTROCHEMICAL_SOLVENT_ACTION_UPPER_L = 0.080
+
+class _ReceiptTotals(TypedDict):
+    operation_attempts: int
+    vessel_starts: int
+    final_assays: int
+    discarded_batches: int
+    nonfinal_instrument_uses: int
+    instrument_uses: dict[str, int]
+    operation_committed_counts: dict[str, int]
+    stocks_used: dict[str, float]
+    process_time_s: float
+    sample_consumed_L: float
+    physical_cost: float
+    accumulated_risk: float
+    peak_risk: float
+
+
+_ReserveCheckpoint = tuple[
+    object, int, int, float, int, float, dict[str, dict[str, float | int]],
+]
+
 
 class CampaignResourceError(RuntimeError):
     """Base class for campaign resource failures."""
@@ -606,8 +627,8 @@ class CampaignResourceLedger:
         self._events = self._receipts
         self._event_order = self._receipts.order
         self._hash_card = self.card
-        self._receipt_validation = None
-        self._reserve_validation = None
+        self._receipt_validation: tuple[object, int, _ReceiptTotals] | None = None
+        self._reserve_validation: _ReserveCheckpoint | None = None
         self.operation_attempts = 0
         self.vessel_starts = 0
         self.final_assays = 0
@@ -1007,7 +1028,7 @@ class CampaignResourceLedger:
         ledger._refresh_ledger_sha256()
         return ledger
 
-    def _validation_key(self):
+    def _validation_key(self) -> object:
         if self._events is not self._receipts or self._event_order is not self._receipts.order:
             # Private-container replacement cannot reuse the immutable-prefix proof.
             return object()
@@ -1035,7 +1056,7 @@ class CampaignResourceLedger:
         physical_cost = 0.0
         accumulated_risk = 0.0
         peak_risk = 0.0
-        def capture():
+        def capture() -> _ReceiptTotals:
             return {
                 "operation_attempts": attempts,
                 "vessel_starts": vessels,
@@ -1184,7 +1205,7 @@ class CampaignResourceLedger:
             peak_risk = max(peak_risk, actual.observed_risk)
         if not pending:
             checkpoint = (key, len(self._event_order), capture())
-        expected = capture()
+        expected: dict[str, Any] = dict(capture())
         observed: dict[str, Any] = {
             "operation_attempts": self.operation_attempts,
             "vessel_starts": self.vessel_starts,
@@ -1517,7 +1538,7 @@ class CampaignResourceLedger:
             )
             for instrument, limit in self.card.per_instrument_limits.items()
         }
-        payload = {
+        payload: dict[str, Any] = {
             "operation_attempts": self.operation_attempts,
             "vessel_starts": self.vessel_starts,
             "final_assays": self.final_assays,
@@ -1738,7 +1759,9 @@ class CampaignResourceLedger:
         return normalized
 
     @staticmethod
-    def _instrument_reservation(action, reservation):
+    def _instrument_reservation(
+        action: Mapping[str, Any], reservation: Mapping[str, int] | None,
+    ) -> dict[str, int]:
         instruments = dict(_normalized_int_map(reservation or {}, name="instrument_reservation"))
         if instruments and (action.get("operation") not in ("wait", "measure")
                             or "final_assay" in instruments):

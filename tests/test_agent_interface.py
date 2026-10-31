@@ -145,10 +145,9 @@ def test_core_action_contract_matches_effective_runtime_semantics() -> None:
         assert field("add_extractant", "extractant")["choices"] == [0, 1, 2, 3]
         # C materials are anonymous even when a generic extraction schema is queried.
         assert field("add_extractant", "extractant")["choice_labels"]["3"] == "solvent-S3"
-        assert field("separate_phase", "target_phase")["choices"] == [
-            "aqueous",
-            "organic",
-        ]
+        # The initial vessel has no separated aqueous/organic inventory yet.
+        # The schema must advertise retained phases, not every possible label.
+        assert field("separate_phase", "target_phase")["choices"] == []
         assert field("seed_crystals", "seed_mass_g")["bounds"] == {
             "low": 1.0e-6,
             "high": 0.05,

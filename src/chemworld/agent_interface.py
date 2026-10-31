@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextvars import ContextVar
 from copy import deepcopy
 from functools import wraps
-from typing import Any, cast
+from typing import Any, Concatenate, ParamSpec, TypeVar, cast
 
 import numpy as np
 
@@ -25,6 +25,7 @@ from chemworld.materials import material_choice_labels
 from chemworld.operation_validator import (
     ELECTROCHEMICAL_MIN_ADAPTED_CURRENT_DELTA_MA,
     ELECTROCHEMICAL_MIN_ADAPTED_POTENTIAL_DELTA_V,
+    OperationValidation,
 )
 from chemworld.physchem.crystallization_units import (
     DEFAULT_MAXIMUM_COOLING_RATE_K_S,
@@ -38,6 +39,7 @@ from chemworld.runtime.control_program import public_control
 from chemworld.runtime.scheduling import lab_instrument_reservation
 from chemworld.runtime.spectral_settings import public_spectral_settings
 from chemworld.world.control_contract import CONTROL_CHOICES
+from chemworld.world.domain_modules import DomainModuleRegistry
 from chemworld.world.operations import (
     CAMPAIGN_CONTROL_OPERATIONS,
     OPERATION_TYPES,
@@ -57,9 +59,15 @@ _RESOURCE_READ: ContextVar[tuple[Any, Any, Any, dict[str, Any]] | None] = Contex
 )
 
 
-def _resource_read(function):
+_ViewArgs = ParamSpec("_ViewArgs")
+_ViewResult = TypeVar("_ViewResult")
+
+
+def _resource_read(
+    function: Callable[Concatenate[Any, _ViewArgs], _ViewResult],
+) -> Callable[Concatenate[Any, _ViewArgs], _ViewResult]:
     @wraps(function)
-    def read(env, *args, **kwargs):
+    def read(env: Any, *args: _ViewArgs.args, **kwargs: _ViewArgs.kwargs) -> _ViewResult:
         base = _base_env(env)
         ledger = getattr(base, "_campaign_resource_ledger", None)
         state = getattr(base, "_state", None)
@@ -77,7 +85,7 @@ def _resource_read(function):
     return read
 
 
-def _view_affordances(base):
+def _view_affordances(base: Any) -> dict[str, OperationValidation]:
     """One validator traversal for all views in the same synchronous request."""
     active = _RESOURCE_READ.get()
     if active is None or active[0] is not base or active[2] is not base._state:
@@ -376,14 +384,12 @@ def _field_schema(
     *,
     operation: str | None = None,
     task_id: str | None = None,
-    modules=None,
+    modules: DomainModuleRegistry | None = None,
 ) -> dict[str, Any]:
-    from chemworld.world.domain_modules import DomainModuleRegistry
-
     registry = modules or DomainModuleRegistry.default()
-    spec = registry.operation_specs().get(operation)
+    spec = None if operation is None else registry.operation_specs().get(operation)
     declared = None if spec is None else next((f for f in spec.fields if f.name == field), None)
-    payload = {
+    payload: dict[str, Any] = {
         "field": field,
         "unit": "text" if field == "reason" else "unitless",
         "required": True,
@@ -526,7 +532,7 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
         composition = getattr(getattr(base, 'compiled_composition', None), 'spec', None)
         physics = None if composition is None else composition.physics
         spec = None if physics is None else physics.models_of('stochastic_sde').get(state.vessel_id)
-        if spec is not None:
+        if physics is not None and spec is not None:
             model = sde_model(physics.network, spec, state.process.stochastic_continuation)
             for field in fields:
                 if field['field'] == 'values':
@@ -996,7 +1002,7 @@ def _campaign_remaining(base: Any) -> dict[str, Any]:
     local = getattr(base, "_batch_resource_ledger", None)
     if local is not None:
 
-        def intersect(global_values, local_values):
+        def intersect(global_values: dict[str, Any], local_values: Mapping[str, Any]) -> None:
             for key, value in local_values.items():
                 if isinstance(value, dict):
                     intersect(global_values.setdefault(key, {}), value)
