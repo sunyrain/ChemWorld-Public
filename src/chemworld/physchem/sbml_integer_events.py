@@ -1,16 +1,30 @@
 """Pure source-event orchestration on the original integer candidate and queue."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from math import isfinite
+from typing import TYPE_CHECKING, Any
 
 from chemworld.physchem.coordinate_events import (
     CoordinateEventError,
     CoordinateEventMemory,
+    CoordinateEventRecord,
     _check_memory,
     settle_coordinate_events,
 )
-from chemworld.physchem.coupled_system import KineticOnlyThermodynamics
-from chemworld.physchem.sbml_stochastic import MEMORY_FORMAT, PROCESS_FIELDS, initial_memory
+from chemworld.physchem.coupled_system import CoupledState, KineticOnlyThermodynamics
+from chemworld.physchem.sbml_stochastic import (
+    MEMORY_FORMAT,
+    PROCESS_FIELDS,
+    SBMLIntegerKinetics,
+    initial_memory,
+)
+
+if TYPE_CHECKING:
+    from chemworld.physchem.sbml_system import SBMLSystemSpec
+    from chemworld.physchem.stochastic_kinetics import StochasticAdvance, StochasticLeap
 
 BOUNDARY_MEMORY_FORMAT = "chemworld_sbml_integer_events_v1"
 
@@ -19,25 +33,25 @@ BOUNDARY_MEMORY_FORMAT = "chemworld_sbml_integer_events_v1"
 class IntegerEventValidator:
     """Queue validation only; no integrator, inventory, clock or evolving state."""
 
-    integer: object
+    integer: SBMLIntegerKinetics
     thermodynamics: KineticOnlyThermodynamics = field(default_factory=KineticOnlyThermodynamics)
 
-    def validate_state(self, state):
+    def validate_state(self, state: CoupledState) -> None:
         self.integer.compile(state.coordinates, state.time_s)
 
 
 @dataclass(frozen=True)
 class IntegerEventAdvance:
-    coordinates: dict
-    memory: dict
+    coordinates: dict[str, float]
+    memory: dict[str, Any]
     actual_duration_s: float
-    events: tuple
-    batches: tuple
-    source_events: tuple
-    work: dict
+    events: tuple[tuple[float, str], ...]
+    batches: tuple[StochasticLeap, ...]
+    source_events: tuple[CoordinateEventRecord, ...]
+    work: dict[str, int]
 
 
-def initial_boundary_memory(model, seed):
+def initial_boundary_memory(model: SBMLSystemSpec, seed: int) -> dict[str, Any]:
     return {
         "format": BOUNDARY_MEMORY_FORMAT,
         "process": initial_memory(seed, model.solver_method)["process"],
@@ -45,7 +59,9 @@ def initial_boundary_memory(model, seed):
     }
 
 
-def advance_integer_events(model, state, memory, duration_s):
+def advance_integer_events(
+    model: SBMLSystemSpec, state: CoupledState, memory: Mapping[str, Any], duration_s: float,
+) -> IntegerEventAdvance:
     """Settle original queue boundaries between actual kernel reaction/batch steps.
 
     Numerical reaction/batch endpoints at a source deadline precede source-event
@@ -79,11 +95,16 @@ def advance_integer_events(model, state, memory, duration_s):
         or process["events_committed"] < 0
     ):
         raise ValueError("integer source process fields and firing counter must be valid")
-    events, batches, source_events, work = [], [], [], {}
+    events: list[tuple[float, str]] = []
+    batches: list[StochasticLeap] = []
+    source_events: list[CoordinateEventRecord] = []
+    work: dict[str, int] = {}
     segments = 0
     initial_firings = process["events_committed"]
 
-    def step(duration, *, boundary, calendar_deadline_s=None):
+    def step(
+        duration: float, *, boundary: bool, calendar_deadline_s: float | None = None,
+    ) -> StochasticAdvance:
         nonlocal candidate, process
         values, updated, result = integer.advance(
             candidate.coordinates,

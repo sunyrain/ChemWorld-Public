@@ -1,16 +1,27 @@
 """Immutable source-rule proof for a piecewise constant integer process."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
+from typing import TYPE_CHECKING, cast
 
-from chemworld.physchem.mathml import MathExpression
+from chemworld.physchem.mathml import MathExpression, MathNode
+
+if TYPE_CHECKING:
+    from chemworld.physchem.sbml_kinetics import SBMLKinetics
 
 
-def inline(node, assignments, functions, *, shadow=frozenset(), bindings=None, visited=frozenset()):
+def inline(
+    node: MathNode, assignments: Mapping[str, MathExpression],
+    functions: Mapping[str, MathExpression], *, shadow: frozenset[str] = frozenset(),
+    bindings: Mapping[str, MathNode] | None = None, visited: frozenset[str] = frozenset(),
+) -> MathNode:
     """Expand actual source syntax with local shadowing and lexical function bindings."""
     bindings = {} if bindings is None else bindings
     if node.operation == "symbol":
-        name = node.value
+        name = cast(str, node.value)
         if name in bindings:
             return bindings[name]
         if name in assignments and name not in shadow:
@@ -23,7 +34,7 @@ def inline(node, assignments, functions, *, shadow=frozenset(), bindings=None, v
         for a in node.arguments
     )
     if node.operation == "call":
-        function = functions[node.value]._root
+        function = functions[cast(str, node.value)]._root
         if len(arguments) != len(function.bindings):
             raise ValueError("integer source function argument count differs")
         # Source lambdas are lexical; caller globals and local reaction parameters
@@ -39,9 +50,9 @@ def inline(node, assignments, functions, *, shadow=frozenset(), bindings=None, v
 
 @dataclass(frozen=True)
 class SBMLIntegerRules:
-    frame: object
-    assigned: object = field(init=False, repr=False)
-    mutable_coordinates: frozenset = field(init=False)
+    frame: SBMLKinetics
+    assigned: Mapping[str, MathExpression] = field(init=False, repr=False)
+    mutable_coordinates: frozenset[str] = field(init=False)
 
     def __post_init__(self) -> None:
         frame, root = self.frame, self.frame.model.declaration
@@ -56,7 +67,9 @@ class SBMLIntegerRules:
             if "$time" in MathExpression._symbols(self.expand(expression._root)):
                 raise ValueError("integer assignment rules must stay constant between jumps")
         for constraint in root.items("listOfConstraints"):
-            if "$time" in MathExpression._symbols(self.expand(constraint.mathematics._root)):
+            if "$time" in MathExpression._symbols(
+                self.expand(cast(MathExpression, constraint.mathematics)._root)
+            ):
                 raise ValueError(
                     "time-dependent integer constraints need continuous boundary coupling"
                 )
@@ -76,5 +89,5 @@ class SBMLIntegerRules:
         mutable.update("V:" + name for name in targets if name in frame._compartments)
         object.__setattr__(self, "mutable_coordinates", frozenset(mutable))
 
-    def expand(self, node, *, shadow=frozenset()):
+    def expand(self, node: MathNode, *, shadow: frozenset[str] = frozenset()) -> MathNode:
         return inline(node, self.assigned, self.frame._functions, shadow=shadow)

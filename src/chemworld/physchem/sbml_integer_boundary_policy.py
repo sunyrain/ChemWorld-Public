@@ -4,11 +4,18 @@ This module derives immutable channel sets. It has no process, random stream,
 clock or event queue and is not connected to the advancing coordinator yet.
 """
 
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+
 from chemworld.physchem.mathml import MathExpression
 from chemworld.physchem.sbml_jump_triggers import SBMLJumpTriggers
 
+if TYPE_CHECKING:
+    from chemworld.physchem.stochastic_kinetics import EventChannel
 
-def guard_species(triggers):
+def guard_species(triggers: SBMLJumpTriggers) -> frozenset[str]:
     """Find source species used by guards, including derived reaction quantities.
 
     Trigger ASTs already inline source assignment rules and lexical functions.
@@ -18,9 +25,10 @@ def guard_species(triggers):
     if not isinstance(triggers, SBMLJumpTriggers):
         raise ValueError("integer trigger dependencies require compiled jump guards")
     frame = triggers.frame
-    pending = set().union(*(MathExpression._symbols(node)
+    pending: set[str] = set().union(*(MathExpression._symbols(node)
                             for _, _, node, _ in triggers._guards))
-    seen, species = set(), set()
+    seen: set[str] = set()
+    species: set[str] = set()
     while pending:
         name = pending.pop()
         if name in seen:
@@ -33,7 +41,9 @@ def guard_species(triggers):
     return frozenset(species)
 
 
-def guard_critical_reactions(triggers, channels):
+def guard_critical_reactions(
+    triggers: SBMLJumpTriggers, channels: Iterable[EventChannel],
+) -> frozenset[str]:
     """Conservatively mark reactions whose net updates can change a guard.
 
     Full reactants are not net updates: a regenerated catalyst cannot change

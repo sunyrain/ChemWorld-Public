@@ -5,18 +5,32 @@ Time guards must prove affine comparison operands; no endpoint polling guesses
 at a crossing. Numerical ties use the common coordinate queue's eight-ulp scale.
 """
 
+from __future__ import annotations
+
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from itertools import pairwise
 from math import isfinite, ulp
+from typing import TYPE_CHECKING, TypeAlias, cast
 
-from chemworld.physchem.mathml import _COMPARISONS, MathExpression
+from chemworld.physchem.mathml import _COMPARISONS, MathExpression, MathNode
+
+if TYPE_CHECKING:
+    from chemworld.physchem.coordinate_hybrid import CoordinateRoot
+    from chemworld.physchem.coupled_system import CoupledState
+    from chemworld.physchem.sbml_integer_rules import SBMLIntegerRules
+    from chemworld.physchem.sbml_kinetics import SBMLKinetics
+
+_Comparison: TypeAlias = tuple[MathNode, MathNode, MathNode, int]
+_Guard: TypeAlias = tuple[str, MathExpression, MathNode, tuple[_Comparison, ...]]
+_GuardPair: TypeAlias = tuple[MathNode, bool, float | None]
 
 
-def tolerance(left, right):
+def tolerance(left: float, right: float) -> float:
     return 8 * max(ulp(left), ulp(right))
 
 
-def _degree(node):
+def _degree(node: MathNode) -> int:
     if "$time" not in MathExpression._symbols(node):
         return 0
     if node.operation == "symbol" and node.value == "$time":
@@ -35,7 +49,10 @@ def _degree(node):
     raise ValueError("integer source-time guards require provably affine comparison operands")
 
 
-def _linear(node, expression, scope, functions):
+def _linear(
+    node: MathNode, expression: MathExpression, scope: Mapping[str, float],
+    functions: Mapping[str, MathExpression],
+) -> tuple[float, float]:
     if _degree(node) == 0:
         value = expression.evaluate(scope, functions=functions, subtree=node)
         return 0.0, float(value)
@@ -64,19 +81,19 @@ def _linear(node, expression, scope, functions):
 
 @dataclass(frozen=True)
 class SBMLJumpTriggers:
-    frame: object
-    rules: object
-    _guards: tuple = field(init=False, repr=False)
-    roots: tuple = ()
+    frame: SBMLKinetics
+    rules: SBMLIntegerRules
+    _guards: tuple[_Guard, ...] = field(init=False, repr=False)
+    roots: tuple[CoordinateRoot, ...] = ()
 
     def __post_init__(self) -> None:
         guards = []
         for index, event in enumerate(self.frame.model.declaration.items("listOfEvents")):
-            expression = event.of("trigger")[0].mathematics
+            expression = cast(MathExpression, event.of("trigger")[0].mathematics)
             node = self.rules.expand(expression._root)
-            comparisons = []
+            comparisons: list[_Comparison] = []
 
-            def boolean(current, comparisons=comparisons):
+            def boolean(current: MathNode, comparisons: list[_Comparison] = comparisons) -> None:
                 if current.operation in _COMPARISONS:
                     for left, right in pairwise(current.arguments):
                         degree = max(_degree(left), _degree(right))
@@ -97,10 +114,12 @@ class SBMLJumpTriggers:
             )
         object.__setattr__(self, "_guards", tuple(guards))
 
-    def _pairs(self, state):
+    def _pairs(self, state: CoupledState) -> Iterator[
+        tuple[str, MathExpression, MathNode, list[_GuardPair], dict[str, float]]
+    ]:
         scope = self.frame.context(state.coordinates, state.time_s)
         for identity, expression, node, comparisons in self._guards:
-            pairs = []
+            pairs: list[_GuardPair] = []
             for comparison, left, right, degree in comparisons:
                 if degree:
                     a, b = _linear(left, expression, scope, self.frame._functions)
@@ -134,10 +153,12 @@ class SBMLJumpTriggers:
                 pairs.append((comparison, bool(truth), crossing))
             yield identity, expression, node, pairs, scope
 
-    def trigger_values(self, state, _signs=None):
+    def trigger_values(
+        self, state: CoupledState, _signs: Mapping[str, float] | None = None,
+    ) -> dict[str, bool]:
         result = {}
         for identity, expression, node, pairs, scope in self._pairs(state):
-            overrides = {}
+            overrides: dict[MathNode, bool] = {}
             for comparison, truth, _ in pairs:
                 overrides[comparison] = overrides.get(comparison, True) and truth
             result[identity] = expression.evaluate(
@@ -145,7 +166,7 @@ class SBMLJumpTriggers:
             )
         return result
 
-    def next_boundary(self, state):
+    def next_boundary(self, state: CoupledState) -> float | None:
         future = [
             crossing
             for _, _, _, pairs, _ in self._pairs(state)
