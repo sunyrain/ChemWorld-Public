@@ -27,7 +27,9 @@ from chemworld.physchem.incompressible_properties import IncompressibleMaterialM
 from chemworld.physchem.packed_beds import PackedBedSpec, packed_bed_pressure
 from chemworld.physchem.phase_inventory import (
     PhaseInventoryAdvance,
+    PhaseInventoryRate,
     PhaseInventoryRates,
+    PhaseInventoryStop,
     integrate_phase_inventory,
 )
 from chemworld.physchem.property_packages import ComponentPropertyPackage, evaluate_property_state
@@ -730,10 +732,11 @@ def advance_transport(
         spec,
         state,
         duration_s=duration_s,
-        rates=rates,
+        # Both tanks are closed at PH; their closure values are temperatures.
+        rates=cast(PhaseInventoryRate[float], rates),
         closure_indices=(0, 1),
         enthalpy_bounds=bounds,
-        stop_functions=tuple(stops),
+        stop_functions=cast(Sequence[tuple[str, PhaseInventoryStop[float]]], tuple(stops)),
         max_step_s=max_step_s,
         initial_boundary="stop",
         solver_id="finite_pump_tanks_bdf_v1",

@@ -8,6 +8,7 @@ inventory. This numerical strategy is independent of the session/transactions.
 from collections.abc import Callable
 from dataclasses import dataclass
 from math import isfinite
+from typing import cast
 
 import numpy as np
 from scipy.sparse import lil_matrix
@@ -259,7 +260,7 @@ def column_rates(spec, state, heater, reflux_ratio, *, flashes=None):
 
 
 @dataclass(frozen=True)
-class DynamicColumnResult(PhaseInventoryAdvance):
+class DynamicColumnResult(PhaseInventoryAdvance[DynamicColumnState]):
     """Common numerical report with actual collector increments."""
 
     @property
@@ -420,7 +421,7 @@ def advance_dynamic_column(
     mask[-2, [0, 1, count * 2]] = True
     c = spec.condenser_index
     mask[-1, [c * 2, c * 2 + 1, count * 2 + c]] = True
-    return integrate_phase_inventory(
+    result = integrate_phase_inventory(
         spec,
         state,
         duration_s=duration_s,
@@ -442,3 +443,4 @@ def advance_dynamic_column(
         operating_limit_error=ColumnOperatingLimitError,
         reuse_cell_closures=type(spec) is DynamicColumnSpec,
     )
+    return cast(DynamicColumnResult, result)

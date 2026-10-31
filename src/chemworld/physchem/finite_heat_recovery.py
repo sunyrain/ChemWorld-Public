@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Mapping
 from math import exp, expm1, isclose, log1p
 from typing import Any, cast
 
@@ -308,8 +309,10 @@ def advance_finite_heat_recovery(
         shaft += s["shaft_power_W"]
         loss += s["external_loss_W"]
 
-    def bounds(index: int, n: dict) -> tuple[float, ...]:
-        return tuple(spec.enthalpy(index, n, t) for t in spec.properties.temperature_bounds_K)
+    def bounds(index: int, n: Mapping[str, float]) -> tuple[float, float]:
+        return cast(tuple[float, float], tuple(
+            spec.enthalpy(index, n, t) for t in spec.properties.temperature_bounds_K
+        ))
 
     def volume(index: int, s: Any, temperatures: Any) -> float:
         n = s.amounts_mol[index]

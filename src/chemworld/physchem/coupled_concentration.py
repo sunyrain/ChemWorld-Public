@@ -21,6 +21,7 @@ from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.phase_inventory import (
     PhaseInventoryAdvance,
     PhaseInventoryRates,
+    PhaseInventoryStop,
     integrate_phase_inventory,
 )
 from chemworld.physchem.property_reports import R_J_PER_MOL_K
@@ -246,7 +247,7 @@ _StopValue: TypeAlias = Callable[[_StateView, Sequence[TPFlashUnitResult]], floa
 
 
 @dataclass(frozen=True)
-class CoupledConcentrationResult(PhaseInventoryAdvance):
+class CoupledConcentrationResult(PhaseInventoryAdvance[CoupledConcentrationState]):
     initial_state: CoupledConcentrationState
     final_state: CoupledConcentrationState
     spec: CoupledConcentrationSpec = field(kw_only=True)
@@ -490,15 +491,18 @@ def advance_coupled_concentration(
                 maximum_volume_L - sum(spec.volume_l(phase) for phase in flashes)
             ),
         )
-    return integrate_phase_inventory(
+    result = integrate_phase_inventory(
         spec,
         state,
         duration_s=duration_s,
         rates=lambda candidate, flashes: concentration_rates(
-            spec, candidate, heater, flashes=flashes, transport_enabled=transport_enabled
+            spec, candidate, heater,
+            flashes=cast(tuple[TPFlashUnitResult, ...], flashes),
+            transport_enabled=transport_enabled,
         ),
         closure_indices=range(2),
-        stop_functions=events,
+        # Both declared cells have a non-null TP/PH closure in this model.
+        stop_functions=cast(Sequence[tuple[str, PhaseInventoryStop[TPFlashUnitResult]]], events),
         enthalpy_bounds=spec.enthalpy_bounds,
         result_type=lambda *args: CoupledConcentrationResult(
             *args, spec=spec, requested_duration_s=duration_s
@@ -511,6 +515,7 @@ def advance_coupled_concentration(
         open_outlet=True,
         initial_boundary="stop",
     )
+    return cast(CoupledConcentrationResult, result)
 
 
 @dataclass(frozen=True)

@@ -5,22 +5,84 @@ This numerical strategy owns no session or persisted inventory. Outgoing
 boundary integrals are measurements, separate from retained compartment n/H.
 """
 
-from dataclasses import dataclass, field, replace
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import Field, dataclass, field, replace
 from math import isfinite
-from typing import Any
+from typing import Any, ClassVar, Generic, Literal, Protocol, TypeAlias, TypeVar, cast, overload
 
 import numpy as np
+from numpy.typing import NDArray
+from scipy.sparse import spmatrix
 
 from chemworld.physchem.solver_backend import ODESolverPolicy, solve_ode
 
 
+class PhaseInventoryState(Protocol):
+    """Caller-owned dataclass inventory; optional work/outlet ports are separate."""
+
+    __dataclass_fields__: ClassVar[dict[str, Field[Any]]]
+
+    @property
+    def amounts_mol(self) -> tuple[dict[str, float], ...]: ...
+
+    @property
+    def enthalpies_J(self) -> tuple[float, ...]: ...  # noqa: N802 - existing SI field
+
+    @property
+    def time_s(self) -> float: ...
+
+    @property
+    def heater_energy_J(self) -> float: ...  # noqa: N802 - existing SI field
+
+    @property
+    def condenser_energy_J(self) -> float: ...  # noqa: N802 - existing SI field
+
+
+class _OutletInventory(Protocol):
+    @property
+    def outlet_amounts_mol(self) -> Mapping[str, float]: ...
+
+    @property
+    def outlet_enthalpy_J(self) -> float: ...  # noqa: N802 - existing SI field
+
+
+class _WorkInventory(Protocol):
+    @property
+    def shaft_import_energy_J(self) -> float: ...  # noqa: N802 - existing SI field
+
+    @property
+    def shaft_export_energy_J(self) -> float: ...  # noqa: N802 - existing SI field
+
+
+class _InventoryComponents(Protocol):
+    @property
+    def component_ids(self) -> Sequence[str]: ...
+
+
+class PhaseInventorySpec(Protocol):
+    @property
+    def properties(self) -> _InventoryComponents: ...
+
+
+_State = TypeVar("_State", bound=PhaseInventoryState)
+_Phase = TypeVar("_Phase")
+_Phase_co = TypeVar("_Phase_co", covariant=True)
+_Vector: TypeAlias = NDArray[np.float64]
+
+
+class _InventoryClosure(Protocol[_Phase_co]):
+    def at_ph(self, index: int, amounts: Mapping[str, float], enthalpy: float) -> _Phase_co: ...
+
+
 @dataclass(frozen=True)
 class PhaseInventoryRates:
-    amounts_mol_s: np.ndarray
-    enthalpy_W: np.ndarray
+    amounts_mol_s: _Vector
+    enthalpy_W: _Vector
     heater_W: float
     condenser_W: float
-    streams: tuple[dict, ...]
+    streams: tuple[dict[str, Any], ...]
     outlet_amounts_mol_s: dict[str, float] = field(default_factory=dict, kw_only=True)
     outlet_enthalpy_W: float = field(default=0.0, kw_only=True)
     shaft_import_W: float = field(default=0.0, kw_only=True)
@@ -28,17 +90,17 @@ class PhaseInventoryRates:
 
 
 @dataclass(frozen=True)
-class PhaseInventoryAdvance:
-    initial_state: Any
-    final_state: Any
-    trajectory: tuple
+class PhaseInventoryAdvance(Generic[_State]):
+    initial_state: _State
+    final_state: _State
+    trajectory: tuple[_State, ...]
     stopping_event: str | None
-    solver_diagnostic: dict
+    solver_diagnostic: dict[str, Any]
     component_residuals_mol: dict[str, float]
     enthalpy_residual_J: float
 
     @property
-    def actual_duration_s(self):
+    def actual_duration_s(self) -> float:
         return self.final_state.time_s - self.initial_state.time_s
 
 
@@ -49,31 +111,48 @@ class _PhaseInventoryView:
     time_s: float
 
 
+PhaseInventoryStop: TypeAlias = Callable[[_PhaseInventoryView, tuple[_Phase | None, ...]], float]
+PhaseInventoryRate: TypeAlias = Callable[
+    [_PhaseInventoryView, tuple[_Phase | None, ...]], PhaseInventoryRates,
+]
+_ResultFactory: TypeAlias = Callable[
+    [_State, _State, tuple[_State, ...], str | None, dict[str, Any], dict[str, float], float],
+    PhaseInventoryAdvance[_State],
+]
+
+
+class _EventCallback(Protocol):
+    terminal: bool
+    direction: int
+
+    def __call__(self, time: float, scaled: _Vector) -> float: ...
+
+
 def integrate_phase_inventory(
-    spec,
-    state,
+    spec: PhaseInventorySpec,
+    state: _State,
     *,
-    duration_s,
-    rates,
-    closure_indices,
-    stop_functions,
-    enthalpy_bounds,
-    result_type=PhaseInventoryAdvance,
-    evaluation_times_s=None,
-    max_step_s=None,
-    rtol=1e-8,
-    progress=None,
-    jac_sparsity=None,
-    solver_id="finite_phase_inventory_bdf_v1",
-    open_outlet=False,
-    balance_scale_mol=None,
-    diagnostic_counters=None,
-    operating_limit_error=ValueError,
-    initial_boundary="reject",
-    constant_amounts=False,
-    include_shaft_work=False,
-    reuse_cell_closures=False,
-):
+    duration_s: float,
+    rates: PhaseInventoryRate[_Phase],
+    closure_indices: Iterable[int],
+    stop_functions: Sequence[tuple[str, PhaseInventoryStop[_Phase]]],
+    enthalpy_bounds: Callable[[int, Mapping[str, float]], tuple[float, float]] | None,
+    result_type: _ResultFactory[_State] = PhaseInventoryAdvance,
+    evaluation_times_s: Sequence[float] | NDArray[np.floating[Any]] | None = None,
+    max_step_s: float | None = None,
+    rtol: float = 1e-8,
+    progress: Callable[[float, int], None] | None = None,
+    jac_sparsity: NDArray[Any] | spmatrix | None = None,
+    solver_id: str = "finite_phase_inventory_bdf_v1",
+    open_outlet: bool = False,
+    balance_scale_mol: float | None = None,
+    diagnostic_counters: dict[str, int] | None = None,
+    operating_limit_error: type[Exception] = ValueError,
+    initial_boundary: Literal["reject", "stop"] = "reject",
+    constant_amounts: bool = False,
+    include_shaft_work: bool = False,
+    reuse_cell_closures: bool = False,
+) -> PhaseInventoryAdvance[_State]:
     """One solve for retained n/H, utility heat and explicit outlet integrals.
 
     ``rates`` contributes a single candidate derivative. PH is algebraic;
@@ -133,17 +212,31 @@ def integrate_phase_inventory(
     counters = diagnostic_counters if diagnostic_counters is not None else {}
     counters.setdefault("trial_domain_extensions", 0)
     minimum_trial_counters = [0.0] * utility_count
-    corrections_J, corrections_mol = {}, {}
-    cache = [None, None]
+    corrections_J: dict[str, float] = {}
+    corrections_mol: dict[str, float] = {}
+    cache: tuple[
+        tuple[float, tuple[float, ...]],
+        tuple[_PhaseInventoryView, tuple[_Phase | None, ...]],
+    ] | None = None
     # A finite-difference trial usually changes only one compartment. Each
     # constitutive closure depends on that cell's n/H, not on the global
     # clock or utility integrals. Keep one exact point per cell for this solve
     # only; rates and event functions still see every candidate and time.
-    cell_bounds = [None] * count
-    cell_flashes = [None] * count
+    cell_bounds: list[tuple[tuple[float, ...], tuple[float, float]] | None] = [None] * count
+    cell_flashes: list[tuple[tuple[tuple[float, ...], float], _Phase] | None] = [None] * count
     evaluations = [0]
 
-    def unpack(vector, *, accepted=False, time=0):
+    @overload
+    def unpack(vector: _Vector, *, accepted: Literal[True], time: float = 0) -> _State: ...
+
+    @overload
+    def unpack(
+        vector: _Vector, *, accepted: Literal[False] = False, time: float = 0,
+    ) -> _PhaseInventoryView: ...
+
+    def unpack(
+        vector: _Vector, *, accepted: bool = False, time: float = 0,
+    ) -> _State | _PhaseInventoryView:
         raw = initial_n if constant_amounts else vector[:n_end].reshape((count, width))
         if accepted and np.min(raw) < -1e-12:
             raise RuntimeError("accepted phase state has a negative inventory")
@@ -165,7 +258,7 @@ def integrate_phase_inventory(
             if value < 0:
                 corrections_J[f"utility:{j}@{time}"] = -value
                 increments[j] = 0.0
-        outlet = {}
+        outlet: dict[str, Any] = {}
         if open_outlet:
             raw_out = vector[q_end : q_end + width]
             if np.min(raw_out) < -1e-12:
@@ -173,17 +266,20 @@ def integrate_phase_inventory(
             for j, value in enumerate(raw_out):
                 if value < 0:
                     corrections_mol[f"outlet:{ids[j]}@{time}"] = float(-value)
-            previous = state.outlet_amounts_mol
+            outlet_state = cast(_OutletInventory, state)
+            previous = outlet_state.outlet_amounts_mol
             outlet = {
                 "outlet_amounts_mol": {
                     key: previous.get(key, 0) + max(float(raw_out[j]), 0.0)
                     for j, key in enumerate(ids)
                 },
-                "outlet_enthalpy_J": state.outlet_enthalpy_J + float(vector[-1]),
+                "outlet_enthalpy_J": outlet_state.outlet_enthalpy_J + float(vector[-1]),
             }
         shaft = {} if not include_shaft_work else {
-            "shaft_import_energy_J": state.shaft_import_energy_J + increments[2],
-            "shaft_export_energy_J": state.shaft_export_energy_J + increments[3],
+            "shaft_import_energy_J": cast(_WorkInventory, state).shaft_import_energy_J
+            + increments[2],
+            "shaft_export_energy_J": cast(_WorkInventory, state).shaft_export_energy_J
+            + increments[3],
         }
         return replace(
             state,
@@ -196,19 +292,25 @@ def integrate_phase_inventory(
             **outlet,
         )
 
-    def evaluate(scaled, time):
+    def evaluate(
+        scaled: _Vector, time: float,
+    ) -> tuple[_PhaseInventoryView, tuple[_Phase | None, ...]]:
+        nonlocal cache
         vector = scaled * scales
         candidate = unpack(vector, time=time)
         key = (time, tuple(scaled[:h_end]))
-        if cache[0] == key:
+        if cache is not None and cache[0] == key:
             return cache[1]
-        flashes = [None] * count
+        flashes: list[_Phase | None] = [None] * count
         for i in closure_indices:
             n, h = candidate.amounts_mol[i], candidate.enthalpies_J[i]
             n_key = tuple(n[k] for k in ids)
             bounds = cell_bounds[i]
             if not reuse_cell_closures or bounds is None or bounds[0] != n_key:
-                bounds = (n_key, enthalpy_bounds(i, n))
+                bound_function = cast(
+                    Callable[[int, Mapping[str, float]], tuple[float, float]], enthalpy_bounds,
+                )
+                bounds = (n_key, bound_function(i, n))
                 cell_bounds[i] = bounds
             low, high = bounds[1]
             if not low <= h <= high:
@@ -217,13 +319,16 @@ def integrate_phase_inventory(
             key_i = (n_key, bounded_h)
             cached = cell_flashes[i]
             if not reuse_cell_closures or cached is None or cached[0] != key_i:
-                cached = (key_i, spec.at_ph(i, n, bounded_h))
+                # Only declared closure cells require at_ph. Zero-closure models
+                # supply their own isothermal rates and have no phase evaluator.
+                closure = cast(_InventoryClosure[_Phase], spec)
+                cached = (key_i, closure.at_ph(i, n, bounded_h))
                 cell_flashes[i] = cached
             flashes[i] = cached[1]
-        cache[:] = [key, (candidate, tuple(flashes))]
+        cache = (key, (candidate, tuple(flashes)))
         return cache[1]
 
-    def rhs(time, scaled):
+    def rhs(time: float, scaled: _Vector) -> _Vector:
         candidate, flashes = evaluate(scaled, time)
         contribution = rates(candidate, flashes)
         if constant_amounts and np.any(contribution.amounts_mol_s != 0):
@@ -259,17 +364,21 @@ def integrate_phase_inventory(
             progress(time, evaluations[0])
         return derivative / scales
 
-    names, events = [], []
+    names: list[str] = []
+    events: list[_EventCallback] = []
     for name, function in stop_functions:
 
-        def root(time, scaled, value=function):
+        def root(
+            time: float, scaled: _Vector, value: PhaseInventoryStop[_Phase] = function,
+        ) -> float:
             return value(*evaluate(scaled, time))
 
-        root.terminal, root.direction = True, -1
+        callback = cast(_EventCallback, root)
+        callback.terminal, callback.direction = True, -1
         names.append(name)
-        events.append(root)
-    for name, function in zip(names, events, strict=True):
-        if function(0, initial / scales) <= 0:
+        events.append(callback)
+    for name, event_function in zip(names, events, strict=True):
+        if event_function(0, initial / scales) <= 0:
             if initial_boundary == "reject":
                 raise operating_limit_error(f"phase system starts at or outside {name}")
             return result_type(
@@ -323,7 +432,8 @@ def integrate_phase_inventory(
         dict.fromkeys(ids, 0.0)
         if not open_outlet
         else {
-            key: final.outlet_amounts_mol.get(key, 0) - state.outlet_amounts_mol.get(key, 0)
+            key: cast(_OutletInventory, final).outlet_amounts_mol.get(key, 0)
+            - cast(_OutletInventory, state).outlet_amounts_mol.get(key, 0)
             for key in ids
         }
     )
@@ -340,12 +450,14 @@ def integrate_phase_inventory(
         + state.heater_energy_J
         + final.condenser_energy_J
         - state.condenser_energy_J
-        + (final.outlet_enthalpy_J - state.outlet_enthalpy_J if open_outlet else 0)
+        + (cast(_OutletInventory, final).outlet_enthalpy_J
+           - cast(_OutletInventory, state).outlet_enthalpy_J if open_outlet else 0)
     )
     if include_shaft_work:
+        final_work, initial_work = cast(_WorkInventory, final), cast(_WorkInventory, state)
         energy_residual += (
-            -(final.shaft_import_energy_J - state.shaft_import_energy_J)
-            + final.shaft_export_energy_J - state.shaft_export_energy_J
+            -(final_work.shaft_import_energy_J - initial_work.shaft_import_energy_J)
+            + final_work.shaft_export_energy_J - initial_work.shaft_export_energy_J
         )
     material_scale = (
         sum(map(sum, (n.values() for n in state.amounts_mol)))
@@ -357,8 +469,8 @@ def integrate_phase_inventory(
     if include_shaft_work:
         energy_scale = max(
             energy_scale,
-            final.shaft_import_energy_J - state.shaft_import_energy_J,
-            final.shaft_export_energy_J - state.shaft_export_energy_J,
+            final_work.shaft_import_energy_J - initial_work.shaft_import_energy_J,
+            final_work.shaft_export_energy_J - initial_work.shaft_export_energy_J,
             final.condenser_energy_J - state.condenser_energy_J,
         )
     if max(map(abs, residuals.values())) > 1e-8 * max(material_scale, 1e-8) or abs(

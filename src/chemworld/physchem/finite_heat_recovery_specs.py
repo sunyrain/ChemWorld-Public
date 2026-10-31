@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from math import isfinite
@@ -102,12 +103,12 @@ class FiniteHeatRecoverySpec:
         ):
             raise ValueError("heat-recovery slice requires declared neutral single-liquid species")
 
-    def enthalpy(self, index: int, amounts: dict, temperature: float) -> float:
+    def enthalpy(self, index: int, amounts: Mapping[str, float], temperature: float) -> float:
         return self.properties.enthalpy(amounts, temperature) + self.capacities_J_K[index] * (
             temperature - self.reference_temperature_K
         )
 
-    def at_ph(self, index: int, amounts: dict, enthalpy: float) -> float:
+    def at_ph(self, index: int, amounts: Mapping[str, float], enthalpy: float) -> float:
         return caloric_temperature(
             lambda t: self.enthalpy(index, amounts, t),
             enthalpy,
