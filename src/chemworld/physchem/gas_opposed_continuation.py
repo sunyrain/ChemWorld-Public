@@ -8,15 +8,16 @@ the fixed-ratio feed parameter column and numerical hyperplane are analytic.
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from math import isfinite
 from time import perf_counter, process_time
 from traceback import format_exc
-from typing import ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypeAlias, TypedDict, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import sparse
 
 from chemworld.physchem.gas_opposed_flow import (
@@ -27,17 +28,67 @@ from chemworld.physchem.gas_opposed_flow import (
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.residual_system import (
     DEFAULT_ROOT_POLICY,
+    Matrix,
+    MatrixInput,
     ResidualDerivatives,
     ResidualDomainError,
+    ResidualEquation,
     ResidualEvaluator,
     ResidualNumericalError,
     ResidualSystem,
     ResidualVariable,
+    RootOutcome,
     RootPolicy,
+    RootProgress,
     bounds,
     linear_solve,
     solve_root,
 )
+
+FloatArray: TypeAlias = NDArray[np.float64]
+Progress: TypeAlias = Callable[[dict[str, Any]], None]
+StateScales: TypeAlias = Mapping[str, float] | Sequence[float] | FloatArray
+Layout: TypeAlias = tuple[
+    tuple[tuple[str, str, str, float | None, float | None], ...],
+    tuple[tuple[str, str], ...],
+]
+
+
+class _QueryOptions(TypedDict):
+    derivative_step: float
+    maximum_unknowns: int
+    species_tolerance_mol_s: float
+    energy_tolerance_W: float
+    pressure_tolerance_Pa: float
+    mass_tolerance_kg_s: float
+    momentum_tolerance_kg_s2: float
+    element_tolerance_mol_s: float
+    jacobian_strategy: str
+    thermo_memo_max_entries: int | None
+    residual_only_trials: bool
+
+
+if TYPE_CHECKING:
+    class _BranchProblem(Protocol):
+        """Numerical continuation also accepts authored, nonphysical test problems."""
+
+        @property
+        def variables(self) -> Sequence[ResidualVariable]: ...
+        @property
+        def equations(self) -> Sequence[ResidualEquation]: ...
+        @property
+        def initial(self) -> FloatArray: ...
+        @property
+        def scope(self) -> str: ...
+        def value(self, y: FloatArray, alpha: float) -> FloatArray: ...
+        def jacobian(self, y: FloatArray, alpha: float, fixed_scales: FloatArray) -> Matrix: ...
+        def parameter_column(self, y: FloatArray, alpha: float) -> FloatArray: ...
+        def fresh(
+            self, y: FloatArray, alpha: float, root_policy: RootPolicy,
+        ) -> tuple[FloatArray, dict[str, Any], dict[str, bool]]: ...
+        def spec_record(self, alpha: float) -> dict[str, Any]: ...
+        def statistics(self) -> dict[str, Any]: ...
+
 
 MODEL = "opposed-gas-flow-pseudo-arclength-v1"
 _FRESH_NAMES = (
@@ -60,7 +111,7 @@ _FRESH_NAMES = (
     "global_enthalpy",
     "axial_centerline_low_Mach",
 )
-_QUERY_DEFAULTS = {
+_QUERY_DEFAULTS: _QueryOptions = {
     "derivative_step": 6e-6,
     "maximum_unknowns": 512,
     "species_tolerance_mol_s": 1e-9,
@@ -75,7 +126,7 @@ _QUERY_DEFAULTS = {
 }
 
 
-def _number(value, name, *, positive=False):
+def _number(value: Any, name: str, *, positive: bool = False) -> float:
     if type(value) not in (int, float) or not isfinite(value) or (positive and value <= 0):
         raise ValueError(
             f"{name} must be an explicit finite {'positive ' if positive else ''}number"
@@ -83,15 +134,15 @@ def _number(value, name, *, positive=False):
     return float(value)
 
 
-def _integer(value, name, *, minimum=1):
+def _integer(value: Any, name: str, *, minimum: int = 1) -> int:
     if type(value) is not int or value < minimum:
         raise ValueError(f"{name} must be an integer >= {minimum}")
     return value
 
 
-def _options(options):
+def _options(options: Mapping[str, Any] | None) -> _QueryOptions:
     if options is None:
-        return dict(_QUERY_DEFAULTS)
+        return cast(_QueryOptions, dict(_QUERY_DEFAULTS))
     if not isinstance(options, Mapping) or set(options) - set(_QUERY_DEFAULTS):
         raise ValueError("unknown opposed query option")
     result = {**_QUERY_DEFAULTS, **options}
@@ -112,10 +163,10 @@ def _options(options):
         raise ValueError("residual_only_trials must be boolean")
     if result["thermo_memo_max_entries"] is not None:
         _integer(result["thermo_memo_max_entries"], "thermo_memo_max_entries")
-    return result
+    return cast(_QueryOptions, result)
 
 
-def _plain(value):
+def _plain(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return value.tolist()
     if isinstance(value, np.generic):
@@ -127,7 +178,7 @@ def _plain(value):
     return value
 
 
-def _exception(error):
+def _exception(error: BaseException) -> dict[str, str]:
     return {
         "type": f"{type(error).__module__}.{type(error).__qualname__}",
         "message": str(error),
@@ -135,7 +186,7 @@ def _exception(error):
     }
 
 
-def _feed_parameter_column(assembly, base_spec):
+def _feed_parameter_column(assembly: _OpposedResidual, base_spec: GasOpposedFlowSpec) -> FloatArray:
     """Exact F_alpha at fixed physical y, including both signed G boundaries."""
     expected = {
         f"feed:{side}:{species}": sign
@@ -163,13 +214,18 @@ def _feed_parameter_column(assembly, base_spec):
     return np.asarray([expected.get(name, 0.0) for name in names])
 
 
-def _scaled_matrix(jacobian, parameter_column, state_scales, row_scales, alpha_scale):
+def _scaled_matrix(
+    jacobian: MatrixInput, parameter_column: FloatArray, state_scales: FloatArray,
+    row_scales: FloatArray, alpha_scale: float,
+) -> sparse.csc_matrix:
     state = sparse.diags(1 / row_scales) @ sparse.csc_matrix(jacobian) @ sparse.diags(state_scales)
     parameter = sparse.csc_matrix((parameter_column * alpha_scale / row_scales)[:, None])
     return sparse.hstack((state, parameter), format="csc")
 
 
-def _tangent(matrix, previous, direction, tolerance):
+def _tangent(
+    matrix: sparse.csc_matrix, previous: FloatArray | None, direction: int, tolerance: float,
+) -> tuple[FloatArray, float, float]:
     """A sparse square solve; never dense SVD, pseudo-inverse or least squares."""
     size = matrix.shape[1]
     if matrix.shape[0] + 1 != size:
@@ -205,7 +261,7 @@ class _OpposedBranchProblem:
     """
 
     scope = "original-opposed-BVP-with-original-18-fresh-checks"
-    derivative_modes: ClassVar = {
+    derivative_modes: ClassVar[dict[str, str]] = {
         "state": "finite_difference",
         "feed_scale": "analytic",
         "arclength_row": "analytic",
@@ -213,16 +269,16 @@ class _OpposedBranchProblem:
 
     def __init__(
         self,
-        spec,
-        network,
-        initial,
-        seed_alpha,
-        options,
-        maximum_evaluations,
-        maximum_wall_time_s,
-        cache_entries,
-        progress,
-    ):
+        spec: GasOpposedFlowSpec,
+        network: ReactionNetworkSpec,
+        initial: Mapping[str, Any],
+        seed_alpha: float,
+        options: _QueryOptions,
+        maximum_evaluations: int,
+        maximum_wall_time_s: float,
+        cache_entries: int,
+        progress: Progress | None,
+    ) -> None:
         self.spec = GasOpposedFlowSpec.from_dict(deepcopy(spec.to_dict()))
         self.network = ReactionNetworkSpec.from_dict(deepcopy(network.to_dict()))
         self.initial_profile = deepcopy(initial)
@@ -234,9 +290,10 @@ class _OpposedBranchProblem:
         self.started, self.cpu_started = perf_counter(), process_time()
         self.calls, self.assembly_builds, self.evictions = 0, 0, 0
         self.jacobian_calls, self.parameter_calls = 0, 0
-        self.derivative_records = []
-        self.cache, self.build_records = OrderedDict(), []
-        self.last_trial = None
+        self.derivative_records: list[dict[str, Any]] = []
+        self.cache: OrderedDict[float, _OpposedResidual] = OrderedDict()
+        self.build_records: list[dict[str, Any]] = []
+        self.last_trial: dict[str, Any] | None = None
         first = self._assembly(seed_alpha)
         self.variables, self.equations = tuple(first.variables), tuple(first.equations)
         self.initial = first.initial.copy()
@@ -264,7 +321,7 @@ class _OpposedBranchProblem:
         )
 
     @staticmethod
-    def _layout(assembly):
+    def _layout(assembly: _OpposedResidual) -> Layout:
         return (
             tuple((v.name, v.unit, v.role, v.lower, v.upper) for v in assembly.variables),
             tuple((e.name, e.unit) for e in assembly.equations),
@@ -274,7 +331,7 @@ class _OpposedBranchProblem:
         if perf_counter() - self.started > self.maximum_wall_time_s:
             raise ResidualDomainError("continuation_cooperative_wall_budget")
 
-    def _assembly(self, alpha):
+    def _assembly(self, alpha: float) -> _OpposedResidual:
         self.check_budget()
         _number(alpha, "actual feed scale", positive=True)
         if alpha in self.cache:
@@ -312,7 +369,7 @@ class _OpposedBranchProblem:
         self.check_budget()
         return result
 
-    def _begin(self, y, alpha, kind):
+    def _begin(self, y: FloatArray, alpha: float, kind: str) -> None:
         self.check_budget()
         if self.calls >= self.maximum_evaluations:
             raise ResidualDomainError("continuation_total_F_budget")
@@ -334,16 +391,16 @@ class _OpposedBranchProblem:
                 }
             )
 
-    def value(self, y, alpha):
+    def value(self, y: FloatArray, alpha: float) -> FloatArray:
         self._begin(y, alpha, "residual")
         result = self._assembly(alpha).evaluate(
             y, retain_details=not self.options["residual_only_trials"]
         )[0]
-        self.last_trial["F"] = result.tolist()
+        cast(dict[str, Any], self.last_trial)["F"] = result.tolist()
         self.check_budget()
         return result
 
-    def jacobian(self, y, alpha, fixed_scales):
+    def jacobian(self, y: FloatArray, alpha: float, fixed_scales: FloatArray) -> Matrix:
         self.jacobian_calls += 1
         assembly = self._assembly(alpha)
         variables = tuple(
@@ -374,15 +431,17 @@ class _OpposedBranchProblem:
         finally:
             self.derivative_records.append({"alpha": alpha, **evaluator.diagnostics()})
 
-    def parameter_column(self, y, alpha):
+    def parameter_column(self, y: FloatArray, alpha: float) -> FloatArray:
         self.parameter_calls += 1
         return self.parameter.copy()
 
-    def fresh(self, y, alpha, root_policy):
+    def fresh(
+        self, y: FloatArray, alpha: float, root_policy: RootPolicy,
+    ) -> tuple[FloatArray, dict[str, Any], dict[str, bool]]:
         self._begin(y, alpha, "complete-fresh-candidate")
         assembly = self._assembly(alpha)
         residual, profile = assembly.evaluate(y)
-        self.last_trial["F"] = residual.tolist()
+        cast(dict[str, Any], self.last_trial)["F"] = residual.tolist()
         checks = _opposed_fresh_checks(
             assembly,
             profile,
@@ -406,7 +465,7 @@ class _OpposedBranchProblem:
         self.check_budget()
         return residual, profile, checks
 
-    def readout(self, profile, alpha):
+    def readout(self, profile: Mapping[str, Any], alpha: float) -> dict[str, Any]:
         assembly = self._assembly(alpha)
         left = assembly.response(
             assembly.spec.left_inlet_temperature_K, profile["left_inlet_trace_mole_fractions"]
@@ -435,14 +494,14 @@ class _OpposedBranchProblem:
             "local_differentiability_certified": False,
         }
 
-    def spec_record(self, alpha):
+    def spec_record(self, alpha: float) -> dict[str, Any]:
         return replace(
             self.spec,
             left_mass_flux_kg_m2_s=alpha * self.spec.left_mass_flux_kg_m2_s,
             right_mass_flux_kg_m2_s=alpha * self.spec.right_mass_flux_kg_m2_s,
         ).to_dict()
 
-    def statistics(self):
+    def statistics(self) -> dict[str, Any]:
         return {
             "total_F_evaluations_including_fresh": self.calls,
             "maximum_evaluations": self.maximum_evaluations,
@@ -469,23 +528,23 @@ class _OpposedBranchProblem:
 
 
 def _trace_problem(
-    problem,
+    problem: _BranchProblem,
     *,
-    seed_alpha,
-    feed_scale_bounds,
-    feed_scale_metric,
-    state_scales,
-    direction,
-    step_size,
-    minimum_step,
-    maximum_points,
-    maximum_retries,
-    root_policy,
-    tangent_tolerance,
-    maximum_correction_ratio,
-    minimum_tangent_alignment,
-    progress=None,
-):
+    seed_alpha: float,
+    feed_scale_bounds: Sequence[float],
+    feed_scale_metric: float,
+    state_scales: StateScales | None,
+    direction: int,
+    step_size: float,
+    minimum_step: float,
+    maximum_points: int,
+    maximum_retries: int,
+    root_policy: RootPolicy,
+    tangent_tolerance: float,
+    maximum_correction_ratio: float,
+    minimum_tangent_alignment: float,
+    progress: Progress | None = None,
+) -> dict[str, Any]:
     """Shared-root continuation core; authored test adapters are not gas physics."""
     variables = tuple(problem.variables)
     count = len(variables)
@@ -515,8 +574,10 @@ def _trace_problem(
     if e.shape != (count,) or not np.all(np.isfinite(e)) or np.any(e <= 0):
         raise ValueError("seed equation scales must be positive finite and complete")
     low, high = bounds(variables)
-    attempts, points, folds = [], [], []
-    result = {
+    attempts: list[dict[str, Any]] = []
+    points: list[dict[str, Any]] = []
+    folds: list[dict[str, Any]] = []
+    result: dict[str, Any] = {
         "schema": MODEL,
         "scope": problem.scope,
         "success": False,
@@ -578,10 +639,10 @@ def _trace_problem(
     }
     origin = problem.initial.copy()
 
-    def coordinates(u):
+    def coordinates(u: FloatArray) -> tuple[FloatArray, float]:
         return origin + d * np.asarray(u[:-1]), seed_alpha + feed_scale_metric * float(u[-1])
 
-    def jacobian(y, alpha):
+    def jacobian(y: FloatArray, alpha: float) -> sparse.csc_matrix:
         return _scaled_matrix(
             problem.jacobian(y, alpha, d),
             problem.parameter_column(y, alpha),
@@ -590,8 +651,11 @@ def _trace_problem(
             feed_scale_metric,
         )
 
-    def root_call(initial, prior_tangent, predictor, attempt):
-        def residual(u):
+    def root_call(
+        initial: FloatArray, prior_tangent: FloatArray | None,
+        predictor: FloatArray | None, attempt: dict[str, Any],
+    ) -> RootOutcome:
+        def residual(u: FloatArray) -> FloatArray:
             y, alpha = coordinates(u) if prior_tangent is not None else (np.asarray(u), seed_alpha)
             attempt["last_evaluated_trial"] = {
                 "value": y.tolist(),
@@ -603,12 +667,12 @@ def _trace_problem(
             raw = problem.value(y, alpha)
             attempt["last_evaluated_trial"]["F"] = raw.tolist()
             return (
-                np.r_[raw / e, prior_tangent @ (u - predictor)]
+                np.r_[raw / e, prior_tangent @ (u - cast(FloatArray, predictor))]
                 if prior_tangent is not None
                 else raw / e
             )
 
-        def derivative(u):
+        def derivative(u: FloatArray) -> sparse.csc_matrix:
             if prior_tangent is None:
                 return sparse.diags(1 / e) @ sparse.csc_matrix(problem.jacobian(u, seed_alpha, d))
             y, alpha = coordinates(u)
@@ -616,7 +680,7 @@ def _trace_problem(
                 (jacobian(y, alpha), sparse.csc_matrix(prior_tangent[None, :])), format="csc"
             )
 
-        def root_progress(event):
+        def root_progress(event: RootProgress) -> None:
             attempt["root_progress"].append(_plain(event))
             if progress is not None:
                 progress({**event, "continuation_attempt": len(attempts) - 1})
@@ -673,9 +737,9 @@ def _trace_problem(
         }
         return solved
 
-    def fresh_candidate(y, alpha, attempt):
+    def fresh_candidate(y: FloatArray, alpha: float, attempt: dict[str, Any]) -> dict[str, Any]:
         raw, profile, checks = problem.fresh(y, alpha, root_policy)
-        candidate = {
+        candidate: dict[str, Any] = {
             "alpha": alpha,
             "value": y.tolist(),
             "spec": problem.spec_record(alpha),
@@ -712,7 +776,7 @@ def _trace_problem(
         y = np.asarray(solved.value)
         candidate = fresh_candidate(y, seed_alpha, seed)
         origin = y.copy()
-        u = np.zeros(count + 1)
+        u: FloatArray = np.zeros(count + 1)
         tangent, _, defect = _tangent(jacobian(y, seed_alpha), None, direction, tangent_tolerance)
         candidate.update(
             index=0,
@@ -818,7 +882,7 @@ def _trace_problem(
     return _finish(result, problem)
 
 
-def _finish(result, problem):
+def _finish(result: dict[str, Any], problem: _BranchProblem) -> dict[str, Any]:
     result["statistics"] = problem.statistics()
     result["last_evaluated_trial"] = deepcopy(getattr(problem, "last_trial", None))
     result["accepted_points"] = len(result["points"])
@@ -827,29 +891,29 @@ def _finish(result, problem):
 
 
 def trace_opposed_gas_branch(
-    spec,
-    network,
-    initial_profile,
+    spec: GasOpposedFlowSpec,
+    network: ReactionNetworkSpec,
+    initial_profile: Mapping[str, Any],
     *,
-    seed_alpha=1.0,
-    feed_scale_bounds,
-    feed_scale_metric,
-    state_scales=None,
-    direction=1,
-    step_size=0.05,
-    minimum_step=0.001,
-    maximum_points=32,
-    maximum_retries=4,
-    maximum_evaluations=100000,
-    maximum_wall_time_s=900.0,
-    root_policy=DEFAULT_ROOT_POLICY,
-    query_options=None,
-    assembly_cache_entries=2,
-    tangent_tolerance=1e-7,
-    maximum_correction_ratio=0.5,
-    minimum_tangent_alignment=0.85,
-    progress=None,
-):
+    seed_alpha: float = 1.0,
+    feed_scale_bounds: Sequence[float],
+    feed_scale_metric: float,
+    state_scales: StateScales | None = None,
+    direction: int = 1,
+    step_size: float = 0.05,
+    minimum_step: float = 0.001,
+    maximum_points: int = 32,
+    maximum_retries: int = 4,
+    maximum_evaluations: int = 100000,
+    maximum_wall_time_s: float = 900.0,
+    root_policy: RootPolicy = DEFAULT_ROOT_POLICY,
+    query_options: Mapping[str, Any] | None = None,
+    assembly_cache_entries: int = 2,
+    tangent_tolerance: float = 1e-7,
+    maximum_correction_ratio: float = 0.5,
+    minimum_tangent_alignment: float = 0.85,
+    progress: Progress | None = None,
+) -> dict[str, Any]:
     """Trace a finite fixed-ratio-feed branch, retaining failed and fresh candidates.
 
     A completed point budget is a numerical trace completion, not evidence for
