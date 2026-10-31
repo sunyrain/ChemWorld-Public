@@ -423,8 +423,8 @@ class OperationValidator:
             if declared is not None and declared.choice_provider is not None:
                 return tuple(declared.choice_provider(state, self))
         if operation_type == "separate_phase" and field == "target_phase":
-            available = () if state.phases is None else state.phases.phases
-            return tuple(choice for choice in choices if choice in available)
+            phase_names = () if state.phases is None else state.phases.phases
+            return tuple(choice for choice in choices if choice in phase_names)
         physics = None if self.material_router is None else self.material_router.physics
         if operation_type == "distill" and field == "full_reflux":
             column_installed = (
