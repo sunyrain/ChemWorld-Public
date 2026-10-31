@@ -199,7 +199,11 @@ GOLDEN: dict[str, dict[str, Any]] = {
     "reaction-to-crystallization": {
         "mechanism_id": "simple_batch_reaction",
         "steps": 12,
-        "score": 0.4095446795240686,
+        # 2026-10-31 (008fd2709): finite crystal cooling now settles its
+        # previously omitted cost. Physical states and other final readings
+        # are unchanged; cost increases by 0.0452268971600068, reducing the
+        # former 0.4095446795240686 score by 0.25 * 0.15 * that amount.
+        "score": 0.4078486708806845,
     },
     "reaction-to-distillation": {
         "mechanism_id": "reactive_distillation_lite",
