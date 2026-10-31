@@ -256,7 +256,8 @@ def advance_electrical_program(state, action, advance):
     )
     if isinstance(result, WorldState):
         result = ModelProviderResult(
-            {}, state=result, actual_duration_s=result.ledger.time_s - state.ledger.time_s
+            {}, diagnostics={}, state=result,
+            actual_duration_s=result.ledger.time_s - state.ledger.time_s,
         )
     return replace(result, diagnostics={**result.diagnostics, "control_transitions": events})
 

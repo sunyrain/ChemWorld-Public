@@ -168,7 +168,8 @@ class AdaptiveHybridStochasticRuntime:
             or state.terminated
         ):
             return ModelProviderResult(
-                {}, success=False, outcome="rejected", failure_reason="adaptive_fixed_boundary_only"
+                {}, diagnostics={}, success=False, outcome="rejected",
+                failure_reason="adaptive_fixed_boundary_only",
             )
         try:
             spec = self.validate(state, numerical=False)

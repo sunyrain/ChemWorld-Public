@@ -109,7 +109,7 @@ class LiquidEquilibriumRuntime:
     def advance(self, state, action, *, heat=False, jacket_program=None, mixing=False):
         if heat or jacket_program is not None:
             return ModelProviderResult({}, success=False, outcome="rejected",
-                                       failure_reason="liquid_model_is_isothermal")
+                                       failure_reason="liquid_model_is_isothermal", diagnostics={})
         try:
             model = self.model(state)
             validate_liquid_state(state, model, require_equilibrium=False)

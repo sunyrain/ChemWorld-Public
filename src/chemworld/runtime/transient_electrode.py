@@ -175,6 +175,7 @@ class TransientElectrodeRuntime:
                 success=False,
                 outcome="rejected",
                 failure_reason="electrode_isothermal_boundary",
+                diagnostics={},
             )
         try:
             self.validate(state)

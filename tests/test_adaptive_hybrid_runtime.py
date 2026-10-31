@@ -64,6 +64,32 @@ def committed(session, action):
     return result
 
 
+@pytest.mark.parametrize(
+    "state_changes,action,options",
+    [
+        ({}, {"operation": "wait", "duration_s": 0.25}, {"heat": True}),
+        ({}, {"operation": "wait", "duration_s": 0.25}, {"jacket_program": {}}),
+        ({}, {"operation": "heat", "duration_s": 0.25}, {}),
+        ({"terminated": True}, {"operation": "wait", "duration_s": 0.25}, {}),
+        ({"quenched": True}, {"operation": "wait", "duration_s": 0.25}, {}),
+    ],
+)
+def test_unsupported_adaptive_advance_returns_rejection_without_mutation(
+    state_changes, action, options
+):
+    from chemworld.runtime.stochastic_adaptive import AdaptiveHybridStochasticRuntime
+
+    world = composition()
+    state = world.physics.initial_states["reactor"].replace(**state_changes)
+    before = state.to_dict()
+    result = AdaptiveHybridStochasticRuntime(world).advance(state, action, **options)
+    assert not result.success and result.outcome == "rejected"
+    assert result.failure_reason == "adaptive_fixed_boundary_only"
+    assert result.actual_duration_s == 0 and result.state is None
+    assert result.to_dict()["diagnostics"] == {}
+    assert state.to_dict() == before
+
+
 @pytest.mark.parametrize("method", ["RK4", "LSODA"])
 def test_real_wait_matches_pure_candidate_and_sole_phase(method):
     session = runtime(method)

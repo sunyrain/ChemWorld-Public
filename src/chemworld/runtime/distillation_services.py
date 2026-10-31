@@ -192,8 +192,10 @@ class ChemWorldDistillationServices:
             return self.thermal.advancer.batch(state,action,heat=True)
         if action.get("full_reflux",0):
             from chemworld.runtime.kernel_contracts import ModelProviderResult
-            return ModelProviderResult({},success=False,outcome="rejected",
-                failure_reason="shortcut_full_reflux_unsupported")
+            return ModelProviderResult(
+                {}, diagnostics={}, success=False, outcome="rejected",
+                failure_reason="shortcut_full_reflux_unsupported",
+            )
         duration = float(np.clip(action_float(action, "duration_s", 1200.0), 0.0, 14_400.0))
         target_temperature = float(
             np.clip(action_float(action, "target_temperature_K", 345.15), 298.15, 430.0)
