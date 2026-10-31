@@ -67,18 +67,28 @@ def test_resource_snapshot_scope_refreshes_after_spend_and_exception():
         obs, info = env.reset(seed=0)
         base = env.unwrapped
         ledger = base._campaign_resource_ledger
-        with patch.object(ledger, "snapshot", wraps=ledger.snapshot) as snapshots:
+        with (
+            patch.object(ledger, "snapshot", wraps=ledger.snapshot) as snapshots,
+            patch.object(ledger, "bounded_state", wraps=ledger.bounded_state) as bounded,
+        ):
             agent_view_bundle(env, obs, info)
-            # One scoped schema snapshot plus two public campaign-state snapshots.
-            assert snapshots.call_count == 3
+            # Public reads use bounded state, never serialize/replay full history.
+            assert snapshots.call_count == 0
+            assert 0 < bounded.call_count <= 3
         obs, _, _, _, info = env.step({"operation": "add_solvent", "solvent": 2, "volume_L": 0.028})
         assert "add_solvent" not in {a["operation"] for a in available_actions(env)}
-        # Integrity checks still execute on the next read. Exceptions clear scope.
+        # Full snapshots retain their integrity check; bounded reads do not audit
+        # historical events. A failed read must still clear the request scope.
         attempts = ledger.operation_attempts
         ledger.operation_attempts += 1
         with pytest.raises(CampaignResourceIntegrityError):
-            available_actions(env)
+            ledger.snapshot()
         ledger.operation_attempts = attempts
+        with (
+            patch.object(ledger, "bounded_state", side_effect=RuntimeError("view unavailable")),
+            pytest.raises(RuntimeError, match="view unavailable"),
+        ):
+            available_actions(env)
         assert "add_solvent" not in {a["operation"] for a in available_actions(env)}
         obs, info = env.reset(seed=0)
         assert "add_solvent" in {a["operation"] for a in available_actions(env)}
