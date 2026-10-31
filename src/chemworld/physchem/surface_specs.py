@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from math import exp, isclose, isfinite
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
+
+if TYPE_CHECKING:
+    from chemworld.physchem.catalysis_network import CatalyticMechanismSpec
 
 from chemworld.foundation.state_ownership import (
     CapacityConstraint,
@@ -83,7 +88,7 @@ class SurfaceMechanismSpec:
             + hashlib.sha256(payload.encode()).hexdigest()[:16]
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": "legacy-five-step",
             **asdict(self),
@@ -136,13 +141,13 @@ class MultisiteSurfaceSpec:
             raise ValueError("multisite parameters leave the finite synthetic model domain")
 
     @property
-    def mechanism_id(self):
+    def mechanism_id(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
         return (
             "synthetic-reversible-multisite-v1:" + hashlib.sha256(payload.encode()).hexdigest()[:16]
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": "reversible-multisite",
             **asdict(self),
@@ -151,7 +156,12 @@ class MultisiteSurfaceSpec:
         }
 
 
-def surface_spec_from_dict(payload):
+SyntheticSurfaceSpec: TypeAlias = SurfaceMechanismSpec | MultisiteSurfaceSpec
+
+
+def surface_spec_from_dict(
+    payload: Mapping[str, Any],
+) -> SyntheticSurfaceSpec | CatalyticMechanismSpec:
     if payload.get("model") == "descriptor-catalysis-v1":
         from chemworld.physchem.catalysis_network import CatalyticMechanismSpec
 
@@ -168,7 +178,9 @@ def surface_spec_from_dict(payload):
 DEFAULT_SURFACE_MECHANISM = SurfaceMechanismSpec()
 
 
-def surface_species(spec=DEFAULT_SURFACE_MECHANISM) -> tuple[SpeciesSpec, ...]:
+def surface_species(
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
+) -> tuple[SpeciesSpec, ...]:
     return tuple(
         SpeciesSpec(name, formula, phase=phase)
         for name, formula, phase in (
@@ -187,7 +199,9 @@ def surface_species(spec=DEFAULT_SURFACE_MECHANISM) -> tuple[SpeciesSpec, ...]:
     )
 
 
-def surface_species_energies(spec=DEFAULT_SURFACE_MECHANISM) -> dict[str, SpeciesInternalEnergy]:
+def surface_species_energies(
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
+) -> dict[str, SpeciesInternalEnergy]:
     """The sole species U/Cv table, referenced to 350 K, including bound atoms."""
     energies = {
         "CO": SpeciesInternalEnergy(-110_000, 20.8),
@@ -215,7 +229,7 @@ def make_surface_slot(
     second_coverages: tuple[float, float] = (0.0, 0.0),
     heat_capacity_J_K: float = 0.0,
     phase_id: str | None = None,
-    spec: SurfaceMechanismSpec = DEFAULT_SURFACE_MECHANISM,
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
 ) -> StateSlot:
     if not isfinite(area_m2) or not 0.001 <= area_m2 <= 0.1:
         raise ValueError("initial catalyst area must be in [0.001, 0.1] m2")
@@ -232,13 +246,14 @@ def make_surface_slot(
     if not fixed and not phase_id:
         raise ValueError("movable catalytic material needs an explicit material phase")
     multi = isinstance(spec, MultisiteSurfaceSpec)
+    multisite = cast(MultisiteSurfaceSpec, spec)  # Read only in the selected multi-site branches.
     if (
         len(second_coverages) != 2
         or any(not isfinite(v) or v < 0 for v in second_coverages)
         or sum(second_coverages) > 1
     ):
         raise ValueError("second-site coverages must be finite, nonnegative and sum to at most one")
-    if any(second_coverages) and (not multi or spec.second_site_ratio == 0):
+    if any(second_coverages) and (not multi or multisite.second_site_ratio == 0):
         raise ValueError("second-site adsorbates require a positive declared second site inventory")
     extra_fields = (
         (
@@ -272,7 +287,8 @@ def make_surface_slot(
         + ((CapacityConstraint("sites_B_mol", (("CO_B", 1), ("O_B", 1))),) if multi else ()),
         energy_interactions=(
             InventoryInteractionSpec(
-                MULTISITE_ADSORBATES, ("sites_mol", "sites_B_mol"), spec.interaction_matrix_J_mol
+                MULTISITE_ADSORBATES, ("sites_mol", "sites_B_mol"),
+                multisite.interaction_matrix_J_mol
             ),
         )
         if multi
@@ -291,9 +307,9 @@ def make_surface_slot(
             "heat_capacity_J_K": heat_capacity_J_K,
             **(
                 {
-                    "sites_B_mol": sites * spec.second_site_ratio,
-                    "CO_B": sites * spec.second_site_ratio * second_coverages[0],
-                    "O_B": sites * spec.second_site_ratio * second_coverages[1],
+                    "sites_B_mol": sites * multisite.second_site_ratio,
+                    "CO_B": sites * multisite.second_site_ratio * second_coverages[0],
+                    "O_B": sites * multisite.second_site_ratio * second_coverages[1],
                 }
                 if multi
                 else {}
@@ -304,7 +320,7 @@ def make_surface_slot(
 
 def validate_surface_slot(
     slot: StateSlot,
-    spec: SurfaceMechanismSpec = DEFAULT_SURFACE_MECHANISM,
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
 ) -> None:
     multi = isinstance(spec, MultisiteSurfaceSpec)
     state_type = MULTISITE_STATE_TYPE if multi else SURFACE_STATE_TYPE
@@ -345,7 +361,7 @@ def validate_surface_slot(
         raise ValueError("surface area, site density and inventory disagree")
     if multi and not isclose(
         slot.values["sites_B_mol"],
-        spec.second_site_ratio * slot.values["sites_mol"],
+        cast(MultisiteSurfaceSpec, spec).second_site_ratio * slot.values["sites_mol"],
         rel_tol=1e-12,
         abs_tol=1e-24,
     ):

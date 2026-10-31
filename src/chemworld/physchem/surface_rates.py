@@ -19,6 +19,7 @@ from chemworld.physchem.coupled_system import (
 )
 from chemworld.physchem.inventory_interactions import (
     InventoryInteraction,
+    InventoryThermodynamics,
     with_inventory_interactions,
 )
 from chemworld.physchem.reaction_network import R_J_PER_MOL_K
@@ -32,7 +33,7 @@ from chemworld.physchem.surface_specs import (
     SURFACE_REACTION_IDS,
     SURFACE_STOICHIOMETRY,
     MultisiteSurfaceSpec,
-    SurfaceMechanismSpec,
+    SyntheticSurfaceSpec,
     bulk_co_oxidation_network,
     surface_species_energies,
     validate_surface_slot,
@@ -45,7 +46,7 @@ def adsorbate_key(slot: StateSlot, species_id: str) -> str:
     return f"{slot.spec.slot_id}:{species_id}"
 
 
-def surface_adsorbates(slot):
+def surface_adsorbates(slot: StateSlot) -> tuple[str, ...]:
     return MULTISITE_ADSORBATES if slot.spec.state_type == MULTISITE_STATE_TYPE else ADSORBATES
 
 
@@ -116,7 +117,7 @@ MULTISITE_REACTIONS = (
 )
 
 
-def standard_surface_gibbs(spec, temperature):
+def standard_surface_gibbs(spec: MultisiteSurfaceSpec, temperature: float) -> dict[str, float]:
     """Standard Gibbs potentials from the same U/Cv and reference G.
 
     Gas standard H=U+RT and Cp=Cv+R; bound species have no PV term. Ideal
@@ -137,7 +138,9 @@ def standard_surface_gibbs(spec, temperature):
     return {**values, "vac_A": 0.0, "vac_B": 0.0}
 
 
-def _evaluate_multisite_rates(state, slot, spec, *, solver_trial):
+def _evaluate_multisite_rates(
+    state: CoupledStateView, slot: StateSlot, spec: MultisiteSurfaceSpec, *, solver_trial: bool,
+) -> SurfaceRates:
     if not 300 <= state.temperature_K <= 450:
         raise ValueError("synthetic surface temperature domain is 300-450 K")
     amounts = {k: state.amounts_mol[k] for k in GAS_SPECIES}
@@ -168,7 +171,8 @@ def _evaluate_multisite_rates(state, slot, spec, *, solver_trial):
     derivatives = dict.fromkeys(
         (*GAS_SPECIES, *(adsorbate_key(slot, k) for k in MULTISITE_ADSORBATES)), 0.0
     )
-    forward_reverse, per_site = [], []
+    forward_reverse: list[float] = []
+    per_site: list[float] = []
     for reactants, products, site in MULTISITE_REACTIONS:
         delta = sum(v * potential[k] for k, v in products.items()) - sum(
             v * potential[k] for k, v in reactants.items()
@@ -209,7 +213,7 @@ def _evaluate_multisite_rates(state, slot, spec, *, solver_trial):
 def _evaluate_surface_rates(
     state: CoupledStateView,
     slot: StateSlot,
-    spec: SurfaceMechanismSpec,
+    spec: SyntheticSurfaceSpec,
     *,
     solver_trial: bool,
 ) -> SurfaceRates:
@@ -281,7 +285,7 @@ def _evaluate_surface_rates(
 def evaluate_surface_rates(
     state: CoupledStateView,
     slot: StateSlot,
-    spec: SurfaceMechanismSpec = DEFAULT_SURFACE_MECHANISM,
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
 ) -> SurfaceRates:
     validate_surface_slot(slot, spec)
     return _evaluate_surface_rates(state, slot, spec, solver_trial=False)
@@ -289,7 +293,7 @@ def evaluate_surface_rates(
 
 def surface_process(
     slot: StateSlot,
-    spec: SurfaceMechanismSpec = DEFAULT_SURFACE_MECHANISM,
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
 ) -> CoupledProcess:
     validate_surface_slot(slot, spec)
     # Copy static carrier parameters at bind time. The evolving adsorbate and
@@ -324,7 +328,7 @@ def surface_process(
 def updated_surface_slot(
     slot: StateSlot,
     state: CoupledStateView,
-    spec: SurfaceMechanismSpec = DEFAULT_SURFACE_MECHANISM,
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
 ) -> StateSlot:
     validate_surface_slot(slot, spec)
     # StateSlot's own capacity/ownership rules validate accepted inventories;
@@ -344,8 +348,8 @@ def surface_thermodynamics(
     slots: Sequence[StateSlot],
     *,
     support_heat_capacity_J_K: float = 20.0,
-    spec: SurfaceMechanismSpec = DEFAULT_SURFACE_MECHANISM,
-) -> ConstantCvThermodynamics:
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
+) -> InventoryThermodynamics:
     if not isfinite(support_heat_capacity_J_K) or support_heat_capacity_J_K < 0:
         raise ValueError("fixed support heat capacity must be finite and nonnegative")
     energies = surface_species_energies(spec)
@@ -365,8 +369,8 @@ def surface_thermodynamics(
 
 
 def surface_conservation_laws(slots: Sequence[StateSlot]) -> dict[str, dict[str, float]]:
-    carbon = {"CO": 1, "CO2": 1}
-    oxygen = {"CO": 1, "O2": 2, "CO2": 2}
+    carbon: dict[str, float] = {"CO": 1, "CO2": 1}
+    oxygen: dict[str, float] = {"CO": 1, "O2": 2, "CO2": 2}
     for slot in slots:
         carbon[adsorbate_key(slot, "CO_ads")] = 1
         oxygen[adsorbate_key(slot, "CO_ads")] = 1
@@ -384,7 +388,7 @@ def make_surface_system(
     include_bulk: bool = False,
     isothermal: bool = False,
     support_heat_capacity_J_K: float = 20.0,
-    spec: SurfaceMechanismSpec = DEFAULT_SURFACE_MECHANISM,
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
 ) -> CoupledSystem:
     """Independent composition convenience; runtime uses the same contributions."""
     processes = tuple(surface_process(slot, spec) for slot in slots)
@@ -414,7 +418,7 @@ def simulate_surface(
     slots: Sequence[StateSlot],
     duration_s: float,
     *,
-    spec: SurfaceMechanismSpec = DEFAULT_SURFACE_MECHANISM,
+    spec: SyntheticSurfaceSpec = DEFAULT_SURFACE_MECHANISM,
     isothermal: bool = True,
     include_bulk: bool = False,
     evaluation_times_s: Sequence[float] | None = None,
