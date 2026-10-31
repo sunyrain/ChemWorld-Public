@@ -8,15 +8,22 @@ constants from species Gibbs energies.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import pairwise
 from math import exp, fsum, isfinite, log
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.physchem.property_reports import CaloricReference
 from chemworld.physchem.reaction_network import R_J_PER_MOL_K
 from chemworld.physchem.thermochemistry_cards import thermochemistry_model_cards
+
+if TYPE_CHECKING:
+    from chemworld.physchem.enthalpy import PhaseTransitionSpec
+    from chemworld.physchem.heat_capacity import PiecewiseHeatCapacity
+    from chemworld.physchem.mechanism_thermochemistry import GasSpeciesThermo
+    from chemworld.physchem.property_reports import PhaseLabel
+    from chemworld.physchem.specs import PropertyCorrelation
 
 _EXPONENT_LIMIT = 700.0
 
@@ -27,7 +34,7 @@ def species_thermo_from_cantera_yaml(
     reference_pressure_Pa: float = 101_325.0,
     units: Mapping[str, str] | None = None,
     boundary_policy: str = "source",
-) -> Any:
+) -> NASA7SpeciesThermo | GasSpeciesThermo:
     """Load all selected gas thermo families into the common native state contract."""
     if thermo.get("model") == "NASA7":
         return NASA7SpeciesThermo.from_cantera_yaml_thermo(
@@ -41,7 +48,9 @@ def species_thermo_from_cantera_yaml(
                            dict(composition or {}), dict(units or {}))
 
 
-def species_thermo_from_dict(payload: Mapping[str, Any]) -> Any:
+def species_thermo_from_dict(
+    payload: Mapping[str, Any],
+) -> NASA7SpeciesThermo | CorrelationSpeciesThermo | GasSpeciesThermo:
     """Restore the shared species thermochemistry formats without a runtime fork."""
     if "thermo" in payload:
         from chemworld.physchem.mechanism_thermochemistry import GasSpeciesThermo
@@ -299,7 +308,9 @@ class NASA7SpeciesThermo:
             coefficients[6] += (
                 left_state.entropy_J_mol_K - right_state.entropy_J_mol_K
             ) / R_J_PER_MOL_K
-            corrected.append(replace(segment, coefficients=tuple(coefficients)))
+            corrected.append(replace(segment, coefficients=cast(
+                tuple[float, float, float, float, float, float, float], tuple(coefficients),
+            )))
         return tuple(corrected)
 
     def select_segment(self, temperature_K: float) -> NASA7TemperatureSegment:
@@ -417,7 +428,7 @@ class CorrelationSpeciesThermo:
     """
 
     species_id: str
-    heat_capacity: Any
+    heat_capacity: PropertyCorrelation | PiecewiseHeatCapacity
     reference: CaloricReference
     composition: dict[str, float] = field(default_factory=dict)
 
@@ -429,10 +440,10 @@ class CorrelationSpeciesThermo:
         self.evaluate(self.reference.temperature_K)
 
     @property
-    def reference_pressure_Pa(self):  # noqa: N802 -- existing species thermochemistry protocol
+    def reference_pressure_Pa(self) -> float:  # noqa: N802 -- existing thermo protocol
         return self.reference.pressure_Pa
 
-    def evaluate(self, temperature_K):
+    def evaluate(self, temperature_K: float) -> SpeciesThermoState:
         from chemworld.physchem.property_packages import evaluate_caloric_correlation
 
         values = evaluate_caloric_correlation(self.heat_capacity, reference=self.reference,
@@ -444,14 +455,14 @@ class CorrelationSpeciesThermo:
             enthalpy/(R_J_PER_MOL_K*temperature_K), entropy/R_J_PER_MOL_K,
             cp, enthalpy, entropy, gibbs, self.heat_capacity.correlation_id)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"model": "correlation-species-thermo-v1", "species_id": self.species_id,
                 "heat_capacity": self.heat_capacity.to_dict(),
                 "reference": self.reference.to_dict(),
                 "composition": dict(self.composition)}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> CorrelationSpeciesThermo:
         from chemworld.physchem.heat_capacity import heat_capacity_from_dict
 
         if payload["model"] != "correlation-species-thermo-v1":
@@ -460,7 +471,9 @@ class CorrelationSpeciesThermo:
                    CaloricReference(**payload["reference"]), dict(payload["composition"]))
 
 
-def formation_entropy(*, formation_enthalpy_J_mol, formation_gibbs_J_mol, temperature_K=298.15):
+def formation_entropy(
+    *, formation_enthalpy_J_mol: float, formation_gibbs_J_mol: float, temperature_K: float = 298.15,
+) -> float:
     """(Hf-Gf)/T: formation entropy, distinct from absolute standard entropy."""
     _positive(temperature_K, "temperature_K")
     _finite(formation_enthalpy_J_mol, "formation_enthalpy_J_mol")
@@ -468,7 +481,10 @@ def formation_entropy(*, formation_enthalpy_J_mol, formation_gibbs_J_mol, temper
     return (formation_enthalpy_J_mol-formation_gibbs_J_mol)/temperature_K
 
 
-def formation_gibbs_energy(reference, elemental_references, elemental_coefficients):
+def formation_gibbs_energy(
+    reference: CaloricReference, elemental_references: Iterable[CaloricReference],
+    elemental_coefficients: Iterable[float],
+) -> float:
     """Gibbs energy of one mole formed from explicit elemental reference species.
 
     All H/S data must share temperature, pressure and enthalpy basis. Nonzero
@@ -488,14 +504,17 @@ def formation_gibbs_energy(reference, elemental_references, elemental_coefficien
             raise ValueError("formation references require matching T/P and explicit phase/H/S")
     delta_h = reference.energy_J_mol-fsum(c*r.energy_J_mol
                                         for c, r in zip(coefficients, references, strict=True))
-    delta_s = reference.entropy_J_mol_K-fsum(c*r.entropy_J_mol_K
-                                           for c, r in zip(coefficients, references, strict=True))
+    delta_s = cast(float, reference.entropy_J_mol_K)-fsum(
+        c*cast(float, r.entropy_J_mol_K) for c, r in zip(coefficients, references, strict=True)
+    )
     return delta_h-reference.temperature_K*delta_s
 
 
-def formation_enthalpy_basis(*, vaporization_enthalpy_J_mol,
-                             liquid_formation_enthalpy_J_mol=None,
-                             gas_formation_enthalpy_J_mol=None, temperature_K=298.15):
+def formation_enthalpy_basis(
+    *, vaporization_enthalpy_J_mol: float,
+    liquid_formation_enthalpy_J_mol: float | None = None,
+    gas_formation_enthalpy_J_mol: float | None = None, temperature_K: float = 298.15,
+) -> float:
     """Convert liquid/gas Hf using Hvap at the SAME explicitly declared temperature."""
     _positive(temperature_K, "temperature_K")
     _finite(vaporization_enthalpy_J_mol, "vaporization_enthalpy_J_mol")
@@ -506,12 +525,16 @@ def formation_enthalpy_basis(*, vaporization_enthalpy_J_mol,
     if liquid_formation_enthalpy_J_mol is not None:
         _finite(liquid_formation_enthalpy_J_mol, "liquid_formation_enthalpy_J_mol")
         return liquid_formation_enthalpy_J_mol+vaporization_enthalpy_J_mol
-    _finite(gas_formation_enthalpy_J_mol, "gas_formation_enthalpy_J_mol")
-    return gas_formation_enthalpy_J_mol-vaporization_enthalpy_J_mol
+    gas = cast(float, gas_formation_enthalpy_J_mol)
+    _finite(gas, "gas_formation_enthalpy_J_mol")
+    return gas-vaporization_enthalpy_J_mol
 
 
-def formation_reference_phase_change(reference, *, component_id, target_phase,
-                                     heat_capacity_correlations, transitions):
+def formation_reference_phase_change(
+    reference: CaloricReference, *, component_id: str, target_phase: PhaseLabel,
+    heat_capacity_correlations: Mapping[str, PropertyCorrelation],
+    transitions: Sequence[PhaseTransitionSpec],
+) -> CaloricReference:
     """Convert the phase of Hf at the same T using the existing Cp/latent-heat path.
 
     Entropy of a new phase is not inferred from enthalpy. Its datum is left absent
@@ -537,7 +560,7 @@ def reaction_thermochemistry(
     *,
     reaction_id: str,
     stoichiometry: Mapping[str, float],
-    species_thermo: Mapping[str, NASA7SpeciesThermo | CorrelationSpeciesThermo],
+    species_thermo: Mapping[str, NASA7SpeciesThermo | CorrelationSpeciesThermo | GasSpeciesThermo],
     temperature_K: float,
 ) -> ReactionThermoResult:
     """Evaluate reaction Delta H, Delta S, Delta G, and K from species thermo."""
