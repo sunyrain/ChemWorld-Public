@@ -8,8 +8,9 @@ does not claim measured-material or variable-thickness accuracy.
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
-from chemworld.agents.base import BaseAgent
+from chemworld.agents.base import BaseAgent, HistoryRecord
 from chemworld.data.logging import load_jsonl
 from chemworld.data.scientific_inputs import (
     InputSource,
@@ -28,9 +29,12 @@ from chemworld.physchem.battery_materials import ElectrodeOCV
 from chemworld.physchem.battery_models import ParticleSpec
 from chemworld.physchem.data_conflicts import DataSourceProvenance
 from chemworld.world.battery_world import battery_world_spec
+from chemworld.world.composition import WorldCompositionSpec
 
 
-def default_spec(*, cells=8, metal_thickness_m=15e-6):
+def default_spec(
+    *, cells: int = 8, metal_thickness_m: float = 15e-6,
+) -> BatteryHalfCellSPMSpec:
     source = InputSource(DataSourceProvenance(
         "chemworld:synthetic-half-cell-example", 0,
         "Authored finite lithium-metal example; not measured material parameters",
@@ -60,7 +64,9 @@ def default_spec(*, cells=8, metal_thickness_m=15e-6):
     )
 
 
-def workflow(spec=None):
+def workflow(
+    spec: BatteryHalfCellSPMSpec | None = None,
+) -> tuple[WorldCompositionSpec, tuple[dict[str, Any], ...]]:
     spec = default_spec() if spec is None else spec
     return battery_world_spec(spec), (
         {"operation": "configure_electrical_control", "current_A": .2},
@@ -77,7 +83,10 @@ def workflow(spec=None):
     )
 
 
-def run(output, *, spec=None, noise="keyed"):
+def run(
+    output: str | Path, *, spec: BatteryHalfCellSPMSpec | None = None,
+    noise: str = "keyed",
+) -> dict[str, str | int | float]:
     output = Path(output)
     if output.exists():
         raise FileExistsError("preserve the earlier trajectory; choose a new output path")
@@ -85,7 +94,7 @@ def run(output, *, spec=None, noise="keyed"):
     world, actions = workflow(spec)
 
     class FixedSequence(BaseAgent):
-        def act(self, history):
+        def act(self, history: list[HistoryRecord]) -> dict[str, Any]:
             return actions[len(history)]
 
     run_agent(env_id="ChemWorld", agent=FixedSequence(), composition=world.to_dict(),

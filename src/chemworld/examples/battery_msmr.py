@@ -8,8 +8,9 @@ commercial cell, a thermal model, or a mechanistic inference experiment.
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
-from chemworld.agents.base import BaseAgent
+from chemworld.agents.base import BaseAgent, HistoryRecord
 from chemworld.data.logging import load_jsonl
 from chemworld.data.scientific_inputs import (
     InputSource,
@@ -25,9 +26,10 @@ from chemworld.physchem.battery_msmr import BatteryMSMRSPMSpec
 from chemworld.physchem.battery_msmr_materials import MSMRMaterialSpec
 from chemworld.physchem.data_conflicts import DataSourceProvenance
 from chemworld.world.battery_world import battery_world_spec
+from chemworld.world.composition import WorldCompositionSpec
 
 
-def material_spec(electrode):
+def material_spec(electrode: str) -> MSMRMaterialSpec:
     """Two authored reactions with independent occupancies and exchange currents."""
     source = InputSource(DataSourceProvenance(
         "chemworld:synthetic-msmr-example", 0,
@@ -51,7 +53,7 @@ def material_spec(electrode):
     return MSMRMaterialSpec(table, tuple(row.row_id for row in rows), electrode)
 
 
-def default_spec(*, cells=8):
+def default_spec(*, cells: int = 8) -> BatteryMSMRSPMSpec:
     particle = ParticleSpec(cells=cells, mesh_exponent=1., diffusivity_m2_s=1e-13)
     return BatteryMSMRSPMSpec(
         negative=particle, positive=particle,
@@ -61,7 +63,9 @@ def default_spec(*, cells=8):
     )
 
 
-def workflow(spec=None):
+def workflow(
+    spec: BatteryMSMRSPMSpec | None = None,
+) -> tuple[WorldCompositionSpec, tuple[dict[str, Any], ...]]:
     spec = default_spec() if spec is None else spec
     return battery_world_spec(spec), (
         {"operation": "configure_electrical_control", "current_A": .2},
@@ -78,7 +82,10 @@ def workflow(spec=None):
     )
 
 
-def run(output, *, spec=None, noise="keyed"):
+def run(
+    output: str | Path, *, spec: BatteryMSMRSPMSpec | None = None,
+    noise: str = "keyed",
+) -> dict[str, str | int | float]:
     output = Path(output)
     if output.exists():
         raise FileExistsError("preserve the earlier trajectory; choose a new output path")
@@ -86,7 +93,7 @@ def run(output, *, spec=None, noise="keyed"):
     world, actions = workflow(spec)
 
     class FixedSequence(BaseAgent):
-        def act(self, history):
+        def act(self, history: list[HistoryRecord]) -> dict[str, Any]:
             return actions[len(history)]
 
     run_agent(env_id="ChemWorld", agent=FixedSequence(), composition=world.to_dict(),

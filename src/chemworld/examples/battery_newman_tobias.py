@@ -7,24 +7,28 @@ inventory, and no claim of calibrated commercial-cell performance.
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
-from chemworld.agents.base import BaseAgent
+from chemworld.agents.base import BaseAgent, HistoryRecord
 from chemworld.data.logging import load_jsonl
 from chemworld.eval.runner import run_agent
 from chemworld.eval.verify import verify_records
 from chemworld.physchem.battery_newman_tobias import BatteryNewmanTobiasSpec
 from chemworld.physchem.battery_porous_electrical import PorousElectrodeGeometrySpec
 from chemworld.world.battery_world import battery_world_spec
+from chemworld.world.composition import WorldCompositionSpec
 
 
-def default_spec(*, cells=(6, 3, 6)):
+def default_spec(*, cells: tuple[int, int, int] = (6, 3, 6)) -> BatteryNewmanTobiasSpec:
     return BatteryNewmanTobiasSpec(
         geometry=PorousElectrodeGeometrySpec(cells=cells),
         provenance="synthetic-Newman-Tobias-example-v1",
     )
 
 
-def workflow(spec=None):
+def workflow(
+    spec: BatteryNewmanTobiasSpec | None = None,
+) -> tuple[WorldCompositionSpec, tuple[dict[str, Any], ...]]:
     spec = default_spec() if spec is None else spec
     return battery_world_spec(spec), (
         {"operation": "configure_electrical_control", "current_A": .2},
@@ -41,7 +45,10 @@ def workflow(spec=None):
     )
 
 
-def run(output, *, spec=None, noise="keyed"):
+def run(
+    output: str | Path, *, spec: BatteryNewmanTobiasSpec | None = None,
+    noise: str = "keyed",
+) -> dict[str, str | int | float]:
     output = Path(output)
     if output.exists():
         raise FileExistsError("preserve the earlier trajectory; choose a new output path")
@@ -49,7 +56,7 @@ def run(output, *, spec=None, noise="keyed"):
     world, actions = workflow(spec)
 
     class FixedSequence(BaseAgent):
-        def act(self, history):
+        def act(self, history: list[HistoryRecord]) -> dict[str, Any]:
             return actions[len(history)]
 
     run_agent(env_id="ChemWorld", agent=FixedSequence(), composition=world.to_dict(),
