@@ -63,6 +63,9 @@ notebooks = [
 rl = [
   "stable-baselines3>=2.9,<3.0",
 ]
+battery-ref = [
+  "pybamm==25.4.2",
+]
 physchem-ref = [
   "cantera>=3.0,<4.0",
   "chemicals>=1.3",
@@ -71,6 +74,11 @@ physchem-ref = [
   "teqp==0.23.2",
   "thermo>=0.4",
 ]
+
+[tool.uv]
+# The pinned battery reference requires NumPy 1.x; PhasePy requires NumPy 2.x.
+# Keep these optional comparison environments separate from the product runtime.
+conflicts = [[{ extra = "battery-ref" }, { extra = "physchem-ref" }]]
 
 [project.scripts]
 chemworld = "chemworld.cli:main"

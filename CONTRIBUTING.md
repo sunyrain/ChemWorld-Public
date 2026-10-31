@@ -19,7 +19,7 @@ Develop against current main with the locked environment:
 uv sync --locked --extra dev --extra docs
 uv run --no-sync ruff check src tests scripts examples
 uv run --no-sync mypy src/chemworld
-uv run --no-sync pytest -q
+uv run --no-sync pytest tests/test_domain_modules.py tests/test_lab_clock.py -q
 uv run --no-sync mkdocs build --strict
 uv run --no-sync python scripts/build_explorer_site.py --output site/explore
 ```
@@ -29,6 +29,21 @@ Use focused tests while implementing. For packaging changes, run
 wheel and sdist and install them outside the checkout with locked dependencies.
 This checks the installed CLI, resources, native workflows and replay examples.
 Run the corresponding check on other platforms before claiming their validation.
+
+The example above checks product behavior, not every optional reference library.
+Battery comparisons require `battery-ref` (PyBaMM 25.4.2 and its locked dependencies).
+This extra requires NumPy 1.x, while `physchem-ref` includes PhasePy with NumPy 2.x;
+install them in separate environments rather than using `--all-extras`.
+Missing dependencies, platform skips and numerical failures must remain distinct.
+For example, in PowerShell from this checkout:
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT = '../ChemWorld-reference-envs/battery'
+$env:PYBAMM_DISABLE_TELEMETRY = 'true'
+uv sync --locked --python 3.11 --extra dev --extra battery-ref
+uv run --no-sync pytest tests/reference/test_battery_parameters45_pybamm.py
+Remove-Item Env:UV_PROJECT_ENVIRONMENT
+```
 
 Preserve material/energy accounting, rejected requests and exact replay. A model
 change may invalidate historical numerical evidence; do not overwrite that
