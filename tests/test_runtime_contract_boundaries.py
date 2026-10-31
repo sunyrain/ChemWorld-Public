@@ -19,9 +19,78 @@ from chemworld.world.scoring import (
     ELECTROCHEMICAL_S0_BALANCED_EFFICIENCY_V2,
     PARTITION_S0_EXTRACTION_EFFICIENCY_V2,
     PARTITION_S0_EXTRACTION_EFFICIENCY_V3,
+    TASK_DERIVED_SCORING_CONTRACT,
     TaskScoringContract,
 )
 from chemworld.world.separation_kernel import downstream_truth_values
+
+
+@pytest.mark.parametrize(
+    "contract_id",
+    [
+        TASK_DERIVED_SCORING_CONTRACT,
+        PARTITION_S0_EXTRACTION_EFFICIENCY_V2,
+        PARTITION_S0_EXTRACTION_EFFICIENCY_V3,
+    ],
+)
+def test_partition_assay_retains_initial_product_charge(contract_id: str) -> None:
+    """An extraction-only feed has product, but no initial reaction reagent."""
+    import numpy as np
+
+    from chemworld.agents.task_recipes import (
+        task_recipe_dimension,
+        task_recipe_from_unit_vector,
+    )
+
+    scores, observed = [], []
+    for interventions in (
+        [],
+        [{"kind": "mechanism_family", "mode": "constitutive_law_family", "severity": 0.8}],
+    ):
+        with gym.make(
+            "ChemWorld", task_id="partition-discovery", seed=0,
+            scoring_contract_id=contract_id, world_interventions=interventions,
+        ) as env:
+            env.reset(seed=0)
+            base = env.unwrapped
+            view = MechanismSpeciesView(base.scenario_instance.compiled_mechanism)
+            initial = base._state.species.initial_amounts_mol
+            charge = sum(initial.get(key, 0.0) for key in view.target_species)
+            assert charge > 0.0
+            assert view.initial_reactant_amount(base._state) == 0.0
+            task_info = base.task_info()
+            recipe = task_recipe_from_unit_vector(
+                task_info, np.full(task_recipe_dimension(task_info), 0.5),
+            )
+            for action in recipe["steps"]:
+                observation, _, _, _, info = env.step(action)
+                assert info["transaction_status"] == "committed"
+                if action["operation"] not in {"mix", "separate_phase"}:
+                    continue
+                state = base._state
+                organic = state.phases.phases["organic"].species_amounts_mol
+                # Sampling carries its share of the reference charge away;
+                # use the retained material's ledger, not its current product yield.
+                retained_charge = sum(
+                    state.species.initial_amounts_mol.get(key, 0.0)
+                    for key in view.target_species
+                )
+                assert 0.0 < retained_charge <= charge
+                expected = (
+                    sum(organic.get(key, 0.0) for key in view.target_species) / retained_charge
+                )
+                truth = base.observation_kernel._truth_values(state)
+                assert 0.0 < expected < 1.0
+                assert truth["product_in_organic"] == pytest.approx(expected, abs=1e-12)
+                assert truth["recovery"] == pytest.approx(expected, abs=1e-12)
+                if contract_id != PARTITION_S0_EXTRACTION_EFFICIENCY_V3:
+                    # Preserve the existing preset's P_org-only observable scope.
+                    assert truth["product_in_aqueous"] == 0.0
+                assert state.process.metrics["process_mass_balance_error"] <= 1e-8
+            scores.append(info["leaderboard_score"])
+            observed.append(float(observation["product_in_organic"][0]))
+    assert abs(scores[1] - scores[0]) > 1e-8
+    assert abs(observed[1] - observed[0]) > 1e-8
 
 
 def test_rejected_empty_assay_does_not_evaluate_physical_truth(monkeypatch):

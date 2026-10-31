@@ -566,6 +566,15 @@ class ChemWorldObservationKernel:
 
     def _truth_values(self, state: WorldState) -> dict[str, float]:
         truth = self.species_view.truth_values(state)
+        initial_product_amount = self.species_view.initial_reactant_amount(state)
+        if initial_product_amount <= 0.0 and state.species is not None:
+            # Separation-only feeds charge product directly, without a reaction
+            # reagent. Retain that charge basis rather than normalizing by the
+            # current recovered amount, which would report complete recovery.
+            initial_product_amount = sum(
+                state.species.initial_amounts_mol.get(species_id, 0.0)
+                for species_id in self.species_view.target_species
+            )
         downstream = (
             self._partition_v3_truth_values(state)
             if self.scoring_contract.contract_id == PARTITION_S0_EXTRACTION_EFFICIENCY_V3
@@ -573,7 +582,7 @@ class ChemWorldObservationKernel:
                 state,
                 product_amount_mol=self.species_view.target_amount(state),
                 impurity_amount_mol=self.species_view.impurity_amount(state),
-                initial_product_mol=max(self.species_view.initial_reactant_amount(state), 1.0e-12),
+                initial_product_mol=max(initial_product_amount, 1.0e-12),
                 target_species=self.species_view.target_species_for_state(state),
                 impurity_species=self.species_view.impurity_species_for_state(state),
             )
