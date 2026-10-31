@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from math import fsum, isfinite
 from numbers import Integral, Real
+from typing import cast
 
-from chemworld.physchem.atomic_data import AtomicEstimate, element_data, isotope_data
+from chemworld.physchem.atomic_data import AtomicEstimate, IsotopeData, element_data, isotope_data
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ class ElementSpec:
             not isinstance(self.symbol, str)
             or re.fullmatch(r"[A-Z][a-z]?", self.symbol) is None
             or isinstance(self.atomic_number, bool)
-            or not isinstance(self.atomic_number, Integral)
+            or not isinstance(cast(object, self.atomic_number), Integral)
             or not 1 <= self.atomic_number <= 118
         ):
             raise ValueError("element requires a symbol and atomic number in 1..118")
@@ -35,7 +36,7 @@ class ElementSpec:
         ):
             raise ValueError("atomic weight must be positive and finite, or explicitly unavailable")
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, str | float | None]:
         return {
             "symbol": self.symbol,
             "atomic_number": self.atomic_number,
@@ -119,7 +120,7 @@ def get_element(identity: object) -> ElementSpec:
     return matches[0]
 
 
-def get_isotope(identity, mass_number=None):
+def get_isotope(identity: object, mass_number: object = None) -> IsotopeData:
     if mass_number is not None:
         if isinstance(mass_number, bool) or not isinstance(mass_number, Integral):
             raise ValueError("isotope mass number must be an integer")
@@ -135,7 +136,7 @@ def get_isotope(identity, mass_number=None):
         raise ValueError(f"Unknown isotope: {identity}") from exc
 
 
-def _atom(label):
+def _atom(label: str) -> tuple[str, int, int]:
     label = _ALIASES.get(label, label)
     if label in ELEMENTS:
         return label, ELEMENTS[label].atomic_number, 0
@@ -145,7 +146,7 @@ def _atom(label):
     return isotope.label, isotope.atomic_number, isotope.mass_number
 
 
-def _weight(label):
+def _weight(label: str) -> float:
     label, _, mass_number = _atom(label)
     value = get_isotope(label).mass.value if mass_number else ELEMENTS[label].atomic_weight_g_mol
     if value is None:
@@ -153,7 +154,7 @@ def _weight(label):
     return value
 
 
-def _split_charge(formula):
+def _split_charge(formula: str) -> tuple[str, int, bool]:
     if not isinstance(formula, str) or not formula.strip():
         raise ValueError("Formula cannot be empty")
     formula = formula.strip()
@@ -179,11 +180,11 @@ def parse_formula(formula: str) -> dict[str, float]:
     or Fe^3+ for explicit trivalent iron. D/T canonicalize to [2H]/[3H].
     """
     cleaned, _, _ = _split_charge(formula)
-    parsed = {}
+    parsed: dict[str, float] = {}
     for term in cleaned.split("·"):
         position = 0
 
-        def multiplier(term=term):
+        def multiplier(term: str = term) -> float:
             nonlocal position
             match = _COUNTS.match(term, position)
             if match is None:
@@ -194,9 +195,9 @@ def parse_formula(formula: str) -> dict[str, float]:
                 raise ValueError("Formula multipliers must be positive and finite")
             return value
 
-        def group(closing=None, term=term):
+        def group(closing: str | None = None, term: str = term) -> dict[str, float]:
             nonlocal position
-            counts = {}
+            counts: dict[str, float] = {}
             while position < len(term):
                 character = term[position]
                 if character in ")]}":
@@ -229,18 +230,18 @@ def parse_formula(formula: str) -> dict[str, float]:
     return parsed
 
 
-def formula_charge(formula):
+def formula_charge(formula: str) -> int:
     parse_formula(formula)
     return _split_charge(formula)[1]
 
 
-def explicit_formula_charge(formula):
+def explicit_formula_charge(formula: str) -> int | None:
     """Return None when the formula does not declare a charge."""
     _, charge, declared = _split_charge(formula)
     return charge if declared else None
 
 
-def serialize_formula(formula):
+def serialize_formula(formula: str) -> str:
     charge = formula_charge(formula)
     return hill_formula(parse_formula(formula)) + (
         ""
@@ -249,12 +250,12 @@ def serialize_formula(formula):
     )
 
 
-def _composition(composition):
-    answer = {}
+def _composition(composition: Mapping[str, float]) -> dict[str, float]:
+    answer: dict[str, float] = {}
     for symbol, count in composition.items():
         if (
             isinstance(count, bool)
-            or not isinstance(count, Real)
+            or not isinstance(cast(object, count), Real)
             or not isfinite(count)
             or count < 0
         ):
@@ -267,7 +268,7 @@ def _composition(composition):
     return answer
 
 
-def molecular_weight(composition: dict[str, float]) -> float:
+def molecular_weight(composition: Mapping[str, float]) -> float:
     """Return molecular weight in g/mol from an element-count mapping."""
 
     weight = fsum(_weight(symbol) * count for symbol, count in _composition(composition).items())
@@ -276,20 +277,20 @@ def molecular_weight(composition: dict[str, float]) -> float:
     return weight
 
 
-def atom_fractions(composition: dict[str, float]) -> dict[str, float]:
+def atom_fractions(composition: Mapping[str, float]) -> dict[str, float]:
     composition = _composition(composition)
     total = fsum(composition.values())
     return {symbol: count / total for symbol, count in composition.items()}
 
 
-def mass_fractions_from_formula(composition: dict[str, float]) -> dict[str, float]:
+def mass_fractions_from_formula(composition: Mapping[str, float]) -> dict[str, float]:
     composition = _composition(composition)
     weight = molecular_weight(composition)
     return {symbol: _weight(symbol) * count / weight for symbol, count in composition.items()}
 
 
 def element_matrix(
-    compositions: Iterable[dict[str, float]],
+    compositions: Iterable[Mapping[str, float]],
     element_order: tuple[str, ...] | None = None,
 ) -> tuple[tuple[tuple[float, ...], ...], tuple[str, ...]]:
     rows = [_composition(row) for row in compositions]
@@ -306,13 +307,13 @@ def element_matrix(
     return matrix, tuple(symbols)
 
 
-def hill_formula(composition: dict[str, float]) -> str:
+def hill_formula(composition: Mapping[str, float]) -> str:
     """Return a Hill-system formula string for display and stable IDs."""
 
     composition = _composition(composition)
     carbon = any(_atom(symbol)[1] == 6 for symbol in composition)
 
-    def order(symbol):
+    def order(symbol: str) -> tuple[int, str, int]:
         _, number, mass = _atom(symbol)
         base = get_element(number).symbol
         priority = (0 if base == "C" else 1 if base == "H" else 2) if carbon else 0
@@ -340,7 +341,9 @@ def _format_count(count: float) -> str:
     return format(Decimal(str(float(count))), "f")
 
 
-def mixture_atomic_composition(compositions, mole_fractions):
+def mixture_atomic_composition(
+    compositions: Iterable[Mapping[str, float]], mole_fractions: Iterable[float],
+) -> dict[str, float]:
     rows, fractions = list(compositions), tuple(mole_fractions)
     if len(rows) != len(fractions) or any(
         isinstance(z, bool) or not isfinite(z) or z < 0 for z in fractions
@@ -348,7 +351,7 @@ def mixture_atomic_composition(compositions, mole_fractions):
         raise ValueError("mixture requires one finite nonnegative mole fraction per composition")
     if abs(fsum(fractions) - 1) > 1e-12:
         raise ValueError("mixture mole fractions must sum to one")
-    answer = {}
+    answer: dict[str, float] = {}
     for composition, fraction in zip(rows, fractions, strict=True):
         values = _composition(composition)
         if fraction > 0:
@@ -356,13 +359,13 @@ def mixture_atomic_composition(compositions, mole_fractions):
     return answer
 
 
-def similarity_variable(composition):
+def similarity_variable(composition: Mapping[str, float]) -> float:
     composition = _composition(composition)
     return fsum(composition.values()) / molecular_weight(composition)
 
 
-def index_hydrogen_deficiency(composition):
-    atoms = {}
+def index_hydrogen_deficiency(composition: Mapping[str, float]) -> float:
+    atoms: dict[str, float] = {}
     for symbol, count in _composition(composition).items():
         base = get_element(_atom(symbol)[1]).symbol
         if base not in {"C", "H", "N", "O", "S", "F", "Cl", "Br", "I"}:

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
 from math import isfinite
 from types import MappingProxyType
+from typing import Any, Literal, Protocol, TextIO, cast
 
 ATOMIC_DATA_VERSION = "chemworld-atomic-data-1"
 
@@ -35,7 +37,7 @@ class AtomicEstimate:
             object.__setattr__(self, "interval", (low, high))
 
     @property
-    def available(self):
+    def available(self) -> bool:
         return self.value is not None or self.interval is not None
 
 
@@ -59,23 +61,30 @@ class IsotopeData:
     abundance_source: str = "CIAAW2021/periodictable-2.1.0"
 
     @property
-    def label(self):
+    def label(self) -> str:
         return f"[{self.mass_number}{self.symbol}]"
 
 
-def _resource(name):
-    return files("chemworld.physchem").joinpath("atomic_data", name)
+class _AtomicResource(Protocol):
+    # Resource files support text-open keywords; older Traversable stubs omit newline.
+    def open(self, mode: Literal["r"], *, encoding: str, newline: str) -> TextIO: ...
+
+    def read_text(self, encoding: str) -> str: ...
 
 
-def atomic_data_provenance():
+def _resource(name: str) -> _AtomicResource:
+    return cast(_AtomicResource, files("chemworld.physchem").joinpath("atomic_data", name))
+
+
+def atomic_data_provenance() -> dict[str, Any]:
     return json.loads(_resource("provenance.json").read_text(encoding="utf-8"))
 
 
-def _number(text):
+def _number(text: str) -> float | None:
     return None if text == "" else float(text)
 
 
-def _estimate(value, uncertainty, low="", high=""):
+def _estimate(value: str, uncertainty: str, low: str = "", high: str = "") -> AtomicEstimate:
     if bool(low) != bool(high):
         raise ValueError("atomic interval needs both bounds")
     return AtomicEstimate(
@@ -84,8 +93,8 @@ def _estimate(value, uncertainty, low="", high=""):
 
 
 @cache
-def element_data():
-    result = {}
+def element_data() -> Mapping[str, ElementData]:
+    result: dict[str, ElementData] = {}
     with _resource("elements.csv").open("r", encoding="utf-8", newline="") as stream:
         for row in csv.DictReader(stream):
             item = ElementData(
@@ -106,8 +115,8 @@ def element_data():
 
 
 @cache
-def isotope_data():
-    result = {}
+def isotope_data() -> Mapping[str, IsotopeData]:
+    result: dict[str, IsotopeData] = {}
     for_version = element_data()
     with _resource("isotopes.csv").open("r", encoding="utf-8", newline="") as stream:
         for row in csv.DictReader(stream):
