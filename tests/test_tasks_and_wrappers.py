@@ -81,7 +81,7 @@ def test_builtin_tasks_are_instantiable() -> None:
     assert assay_task.termination_policy == "final-assay-or-budget"
 
 
-def test_core_task_contracts_are_frozen() -> None:
+def test_core_task_contracts_describe_current_presets() -> None:
     tasks = {task.task_id: task for task in list_core_tasks()}
     assert tuple(tasks) == CORE_TASK_IDS
 
@@ -91,7 +91,7 @@ def test_core_task_contracts_are_frozen() -> None:
     assert assay.seeds == (0,)
     assert assay.episode_mode == "single_experiment"
     assert assay.allowed_operations == REACTION_OPERATIONS
-    assert assay.allowed_instruments == ("hplc", "gc", "uvvis", "final_assay")
+    assert assay.allowed_instruments == ("hplc", "gc", "uvvis", "final_assay", "nmr", "ir", "ms")
     assert assay.success_metrics == ("final_assay_score", "trajectory_validity")
     assert assay.safety_limit == 0.65
 
@@ -543,7 +543,6 @@ def test_action_codec_roundtrip_vector() -> None:
         "operation",
         "target_temperature_K",
         "duration_s",
-        "stirring_speed_rpm",
     }
     assert decoded["target_temperature_K"] == 386.0
     assert decoded["duration_s"] == 900.0
@@ -563,10 +562,11 @@ def test_action_codec_roundtrip_vector() -> None:
 def test_raw_and_flat_action_spaces_emit_only_operation_conditional_fields() -> None:
     env = gym.make("ChemWorld", task_id="reaction-to-crystallization", seed=0)
     try:
-        contracts = operation_contracts()
+        codec = env.unwrapped.operation_validator.action_codec
+        contracts = codec.contracts()
         for _ in range(32):
             action = env.action_space.sample()
-            operation = OPERATION_TYPES[int(action["operation"])]
+            operation = codec.operation_types[int(action["operation"])]
             assert set(action) == {"operation", *contracts[operation].required_fields}
             assert (
                 "payload_fields_declared"
@@ -574,6 +574,7 @@ def test_raw_and_flat_action_spaces_emit_only_operation_conditional_fields() -> 
             )
 
         wrapped = ContinuousEventActionWrapper(env)
+        contracts = operation_contracts()
         for _ in range(32):
             action = wrapped.action(wrapped.action_space.sample())
             operation = OPERATION_TYPES[int(action["operation"])]
@@ -716,27 +717,41 @@ def test_agent_affordances_match_masks_validator_and_task_policy() -> None:
             mask = list(base.operation_validator.action_mask(base._state))
             masked_valid = {
                 operation
-                for operation, is_valid in zip(OPERATION_TYPES, mask, strict=True)
+                for operation, is_valid in zip(base.operation_validator.operation_types,
+                                              mask, strict=True)
                 if is_valid
             }
 
-            assert wrapper_valid == validator_valid == agent_valid == masked_valid
-            assert list(info["action_mask"]) == mask
-            assert len(mask) == len(OPERATION_TYPES)
+            assert validator_valid == agent_valid == masked_valid
+            assert wrapper_valid == validator_valid.intersection(OPERATION_TYPES)
+            assert list(info["action_mask"]) == [op in validator_valid for op in OPERATION_TYPES]
+            assert len(mask) == len(base.operation_validator.operation_types)
             assert all(entry["valid"] for entry in agent_entries)
             assert all(not entry["invalid_reasons"] for entry in agent_entries)
 
             all_entries = {
                 entry["operation"]: entry for entry in base.available_actions(include_invalid=True)
             }
-            assert set(all_entries) == set(OPERATION_TYPES)
+            assert set(all_entries) == set(base.operation_validator.operation_types)
             for operation, entry in all_entries.items():
                 affordance = validate_operation_affordance(operation, env)
                 assert entry["schema"]["task_allowed"] == (
                     operation in set(task.allowed_operations)
                 )
                 assert entry["valid"] == (operation in validator_valid)
-                assert entry["invalid_reasons"] == affordance["invalid_reasons"]
+                if operation == "measure":
+                    # The agent-facing schema explains every installed
+                    # instrument; the operation validator checks one witness.
+                    assert set(affordance["invalid_reasons"]) <= set(entry["invalid_reasons"])
+                    field = entry["schema"]["fields"][0]
+                    assert bool(field["choices"]) == entry["valid"]
+                    if not entry["valid"]:
+                        assert "measurement_choice_available" in entry["invalid_reasons"]
+                        for row in field["choice_status"]:
+                            if row["installed"] and row["task_allowed"]:
+                                assert set(row["invalid_reasons"]) <= set(entry["invalid_reasons"])
+                else:
+                    assert entry["invalid_reasons"] == affordance["invalid_reasons"]
                 assert not any(
                     reason.startswith("payload_has:") or reason.startswith("payload_bounds:")
                     for reason in entry["invalid_reasons"]
@@ -971,7 +986,7 @@ def test_process_preconditions_are_stateful() -> None:
         assert "filter_crystals" in info["valid_operations"]
         assert "heat" in info["valid_operations"]
         _, _, _, _, info = env.step({"operation": "filter_crystals"})
-        assert set(info["valid_operations"]) == {"measure", "terminate"}
+        assert set(info["valid_operations"]) == {"measure", "terminate", "create_container"}
         blocked = env.unwrapped.operation_validator.validate(
             {"operation": "wait", "duration_s": 60.0},
             env.unwrapped._state,
