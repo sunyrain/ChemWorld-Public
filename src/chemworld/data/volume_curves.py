@@ -301,8 +301,9 @@ def source_volumes(record):
                 }.get(eq, "unresolved_chemsep_" + str(eq))
                 # Density coefficients in kmol/m3 -> mol/m3 before taking reciprocal.
                 for k in keys if eq in {"2", "100"} else "A":
-                    if params[k] is not None:
-                        params[k] *= 1000
+                    coefficient = params[k]
+                    if coefficient is not None:
+                        params[k] = coefficient * 1000
                 if eq == "106":
                     params["Tc"] = n("CriticalTemperature")
                 prop = phase + "_molar_volume"

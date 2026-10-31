@@ -1,15 +1,22 @@
 """Source coefficients and explicit interpolation become existing native curves."""
 
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 from math import isfinite
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, SupportsFloat, SupportsIndex, cast
 from xml.etree import ElementTree
 
 from chemworld.data.constant_catalog import XML_UNIT_NAMES
 from chemworld.data.constants import ConstantRecord, SourceCorrelation
 from chemworld.physchem.heat_capacity import PiecewiseHeatCapacity
 from chemworld.physchem.specs import PropertyCorrelation
+
+if TYPE_CHECKING:
+    from chemworld.data.scientific_inputs import QuantityColumn, ScientificTable
 
 _PHASE_PROPERTY = {
     "gas": "ideal_gas_heat_capacity",
@@ -18,11 +25,11 @@ _PHASE_PROPERTY = {
 }
 
 
-def number(value):
+def number(value: object) -> float | None:
     if value is None or isinstance(value, bool) or value == "":
         return None
     try:
-        result = float(value)
+        result = float(cast(str | bytes | bytearray | SupportsFloat | SupportsIndex, value))
     except (TypeError, ValueError):
         return None
     return result if isfinite(result) else None
@@ -40,7 +47,7 @@ class HeatCapacityData:
     curve_key: str
     phase: str
     equation_id: str
-    coefficients: dict[str, float | None] = field(default_factory=dict)
+    coefficients: Mapping[str, float | None] = field(default_factory=dict)
     source_bounds_K: tuple[float | None, float | None] | None = None
     required_parameters: tuple[str, ...] = ()
     condition: str = "isobaric"
@@ -57,11 +64,11 @@ class HeatCapacityData:
         object.__setattr__(self, "coefficients", MappingProxyType(dict(self.coefficients)))
 
     @property
-    def curve_id(self):
+    def curve_id(self) -> str:
         return f"{self.record.record_id}:{self.curve_key}"
 
     @property
-    def metadata(self):
+    def metadata(self) -> dict[str, object]:
         return {
             "phase": self.phase,
             "subphase": self.subphase,
@@ -73,7 +80,10 @@ class HeatCapacityData:
             "source_version": self.record.source.provenance.version,
         }
 
-    def build(self, *, parameters=None, temperature_bounds_K=None, interpolation=None):
+    def build(
+        self, *, parameters: Mapping[str, float] | None = None,
+        temperature_bounds_K: Sequence[float] | None = None, interpolation: str | None = None,
+    ) -> PropertyCorrelation | PiecewiseHeatCapacity:
         supplied = {} if parameters is None else dict(parameters)
         if set(supplied) != set(self.required_parameters):
             raise ValueError(f"{self.curve_id}: supply exactly {self.required_parameters}")
@@ -82,9 +92,11 @@ class HeatCapacityData:
             bounds is None
             or len(bounds) != 2
             or any(not isinstance(v, int | float) or number(v) is None for v in bounds)
-            or not 0 < bounds[0] < bounds[1]
+            or not 0 < cast(float, bounds[0]) < cast(float, bounds[1])
         ):
             raise ValueError("select an explicit finite positive temperature range for this source")
+        # The checks above exclude missing bounds without replacing source values.
+        bounds = cast(Sequence[float], bounds)
         if self.source_bounds_K is not None:
             low, high = self.source_bounds_K
             if (low is not None and bounds[0] < low) or (high is not None and bounds[1] > high):
@@ -99,7 +111,8 @@ class HeatCapacityData:
         if missing:
             raise ValueError(f"{self.curve_id}: missing or invalid source coefficients {missing}")
         correlation = self._correlation(
-            self.curve_key, self.equation_id, {**self.coefficients, **supplied}, bounds
+            self.curve_key, self.equation_id,
+            {**cast(Mapping[str, float], self.coefficients), **supplied}, bounds
         )
         correlation.metadata.update(
             caller_parameters=supplied,
@@ -111,7 +124,9 @@ class HeatCapacityData:
         )
         return correlation
 
-    def _correlation(self, key, equation, coefficients, bounds):
+    def _correlation(
+        self, key: str, equation: str, coefficients: dict[str, float], bounds: Sequence[float],
+    ) -> PropertyCorrelation:
         return PropertyCorrelation(
             f"{self.record.record_id}:{key}",
             equation,
@@ -119,17 +134,20 @@ class HeatCapacityData:
             {"temperature": "K"},
             self.output_unit,
             _PHASE_PROPERTY[self.phase],
-            {"temperature": tuple(bounds)},
+            {"temperature": cast(tuple[float, float], tuple(bounds))},
             self.record.source.provenance.citation + f"; record={self.record.record_id}",
             self.metadata,
         )
 
-    def _linear_curve(self, bounds):
+    def _linear_curve(self, bounds: Sequence[float]) -> PiecewiseHeatCapacity:
         temperatures, values = self.temperatures_K, self.capacities_J_mol_K
         if len(temperatures) != len(values) or len(temperatures) < 2:
             raise ValueError("tabulated capacity needs aligned temperature and value arrays")
-        if any(T is None for T in temperatures) or any(b < a for a, b in pairwise(temperatures)):
+        if any(T is None for T in temperatures) or any(
+            b < a for a, b in pairwise(cast(tuple[float, ...], temperatures))
+        ):
             raise ValueError("tabulated temperatures cannot decrease; no sorting/merging")
+        temperatures = cast(tuple[float, ...], temperatures)
         if bounds[0] < temperatures[0] or bounds[1] > temperatures[-1]:
             raise ValueError("tabulated range cannot extrapolate")
         # Repeated source temperatures can be distinct phase/subphase limits.
@@ -164,7 +182,10 @@ class HeatCapacityData:
             self.record.source.provenance.citation + "; linear interpolation",
         )
 
-    def scientific_table(self, *, temperature_column, capacity_column, dataset_id, group_id, split):
+    def scientific_table(
+        self, *, temperature_column: QuantityColumn, capacity_column: QuantityColumn,
+        dataset_id: str, group_id: str, split: str,
+    ) -> ScientificTable:
         """Every original table point, including zero temperature and missing Cp."""
         from chemworld.data.scientific_inputs import (
             InputSource,
@@ -209,11 +230,13 @@ class HeatCapacityData:
         )
 
 
-def _bounds(raw, low="Tmin", high="Tmax"):
+def _bounds(
+    raw: Mapping[str, object], low: str = "Tmin", high: str = "Tmax",
+) -> tuple[float | None, float | None]:
     return number(raw.get(low)), number(raw.get(high))
 
 
-def _qualities(values):
+def _qualities(values: Iterable[object]) -> tuple[str, ...]:
     return tuple(
         "valid"
         if number(value) is not None
@@ -224,7 +247,7 @@ def _qualities(values):
     )
 
 
-def _perry_curve(record, key, raw):
+def _perry_curve(record: ConstantRecord, key: str, raw: Mapping[str, Any]) -> HeatCapacityData:
     phase = {"c": "solid", "gls": "solid", "l": "liquid", "g": "gas"}.get(raw["Phase"])
     if phase is None:
         raise ValueError(f"{record.record_id}: unsupported original Perry phase {raw['Phase']!r}")
@@ -259,10 +282,10 @@ def _perry_curve(record, key, raw):
     )
 
 
-def source_heat_capacities(record):
+def source_heat_capacities(record: ConstantRecord) -> tuple[HeatCapacityData, ...]:
     """Return every declared range in this record; no method ranking or deduplication."""
     source = record.source_id
-    raw = dict(zip(record.field_names, record.raw_fields, strict=True))
+    raw: dict[str, Any] = dict(zip(record.field_names, record.raw_fields, strict=True))
     if source == "CHEMSEP_XML":
         return _chemsep_curves(record)
     if source == "JOBACK":
@@ -342,7 +365,7 @@ def source_heat_capacities(record):
                         phase,
                         "shomate_cp",
                         dict(zip("ABCDE", map(number, segment[2:]), strict=True)),
-                        tuple(map(number, segment[:2])),
+                        cast(tuple[float | None, float | None], tuple(map(number, segment[:2]))),
                     )
                 )
         return tuple(result)
@@ -414,7 +437,7 @@ def source_heat_capacities(record):
     return ()  # Thermodynamic scalar tables are not invented temperature curves.
 
 
-def _chemsep_curves(record):
+def _chemsep_curves(record: ConstantRecord) -> tuple[HeatCapacityData, ...]:
     result = []
     for field_id, phase in (
         ("LiquidHeatCapacityCp", "liquid"),
@@ -431,7 +454,7 @@ def _chemsep_curves(record):
         data = {child.tag: child.get("value") for child in node}
         code = data["eqno"]
         if code in {"1", "3", "4", "5", "100"}:
-            keys = "ABCDE"[: 5 if code == "100" else int(code)]
+            keys = "ABCDE"[: 5 if code == "100" else int(cast(str, code))]
             equation = "dippr100"
         elif code == "102":
             keys, equation = "ABCD", "dippr102"
@@ -446,7 +469,8 @@ def _chemsep_curves(record):
         invalid = tuple(
             key for key, v in zip(("Tmin", "Tmax"), bounds, strict=True) if v is None or v <= 0
         )
-        bounds = tuple(v if v is not None and v > 0 else None for v in bounds)
+        bounds = cast(tuple[float | None, float | None], tuple(
+            v if v is not None and v > 0 else None for v in bounds))
         notes = (
             (f"Source has unavailable positive bounds {invalid}; explicitly supply a range",)
             if invalid
