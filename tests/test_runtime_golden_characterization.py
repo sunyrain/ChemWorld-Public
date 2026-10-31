@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import Any
 
 import gymnasium as gym
@@ -195,6 +196,11 @@ GOLDEN: dict[str, dict[str, Any]] = {
         "mechanism_id": "simple_batch_reaction",
         "steps": 7,
         "score": 0.34336651316585537,
+        # Default reactor LSODA uses rtol=1e-8, atol=1e-12. At that policy,
+        # SciPy 1.17.1 differs from the converged score by 5.60e-9 (1.18.0:
+        # 5.07e-10). The two tighter policies below retain the 1e-9 reference
+        # check; their cross-environment difference is below 5e-13.
+        "score_abs_tolerance": 1e-8,
     },
     "reaction-to-crystallization": {
         "mechanism_id": "simple_batch_reaction",
@@ -281,7 +287,8 @@ def test_runtime_v2_golden_scripted_final_assay(
         assert final_info["kernel_id"] == "chemworld.operation.measure"
         assert final_info["leaderboard_score"] == pytest.approx(
             expected["score"],
-            abs=1e-9,
+            abs=expected.get("score_abs_tolerance", 1e-9),
+            rel=0.0,
         )
         assert final_info["remaining_budget"] == task.budget - expected["steps"]
         assert final_info["world_events"][0]["event_type"] == "operation_applied"
@@ -336,3 +343,26 @@ def test_runtime_v2_golden_scripted_final_assay(
             assert math.isfinite(float(observation[key][0])), key
     finally:
         env.close()
+
+
+@pytest.mark.parametrize("rtol,atol", [(1e-10, 1e-14), (1e-12, 1e-16)])
+def test_assay_score_converges_to_the_numeric_reference(
+    monkeypatch: pytest.MonkeyPatch, rtol: float, atol: float,
+) -> None:
+    """Distinguish default solver precision from changes to model or scoring."""
+    from chemworld.physchem import reactor_solvers
+
+    monkeypatch.delenv("CHEMWORLD_PRIVATE_EVAL_SALT", raising=False)
+    monkeypatch.setattr(
+        reactor_solvers, "DEFAULT_REACTOR_ODE_POLICY",
+        replace(reactor_solvers.DEFAULT_REACTOR_ODE_POLICY, rtol=rtol, atol=atol),
+    )
+    task = next(task for task in list_tasks() if task.task_id == "reaction-to-assay")
+    with gym.make("ChemWorld", task_id=task.task_id, seed=task.seeds[0]) as env:
+        env.reset(seed=task.seeds[0])
+        for action in REACTION_FINAL:
+            _, _, _, _, info = env.step(action)
+            assert info["transaction_status"] == "committed"
+        assert info["leaderboard_score"] == pytest.approx(
+            GOLDEN[task.task_id]["score"], abs=1e-9, rel=0.0,
+        )
