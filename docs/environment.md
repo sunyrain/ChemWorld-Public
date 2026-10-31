@@ -82,9 +82,9 @@ these interfaces and their dedicated backends, and do not register `chemworld-la
 Use the Python API, `chemworld` environment CLI or agent tools. The static documentation
 site provides guides and recorded examples.
 
-See [native sessions](https://github.com/sunyrain/ChemWorld/blob/main/docs/native_foundation.md),
-[domain workflows](https://github.com/sunyrain/ChemWorld/blob/main/docs/native_domains.md),
-[shared laboratories](https://github.com/sunyrain/ChemWorld/blob/main/docs/native_shared_lab.md)
+See [native sessions](native_foundation.md),
+[domain workflows](native_domains.md),
+[shared laboratories](native_shared_lab.md)
 and [distribution scope](community_release.md).
 [Offline research](offline_research.md) demonstrates one optional evaluation template.
 Historical rankings, baselines and step-wise LLM adapters have [explicit legacy entry points](legacy.md).

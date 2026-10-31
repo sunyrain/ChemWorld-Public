@@ -6,7 +6,7 @@
 下面保留的任务例子是可选研究模板，各自有完成规则，不代表全环境必须终检、打分或提交排行榜。
 
 本页针对当前开发运行时，不复现论文旧物理。软件世界不是真实实验操作指南。
-[English source](https://github.com/sunyrain/ChemWorld/blob/main/docs/getting_started.en.md) · [发行范围与验证边界](community_release.md)
+[English source](getting_started.md) · [发行范围与验证边界](community_release.md)
 
 ## 选择入口
 
@@ -81,5 +81,5 @@ finally:
 ```
 
 支持操作以 `task_info()` 为准，当前可用性以 `available_actions()` 和 `validate_action()` 为准。
-查看[操作语言](operations.md)、[Agent API](https://github.com/sunyrain/ChemWorld/blob/main/docs/agent_interface.md)和
-[贡献说明](https://github.com/sunyrain/ChemWorld/blob/main/CONTRIBUTING.md)。
+查看[操作语言](operations.md)、[Agent API](agents.md)和
+[贡献说明](https://github.com/sunyrain/ChemWorld-Public/blob/main/CONTRIBUTING.md)。

@@ -48,8 +48,8 @@ finally:
 Save the script and `world.json` in your own working directory. Parsing and runtime
 compilation check compatibility and parameters; naming a module does not install a
 new physical capability. For other domains, consult the
-[domain workflows](https://github.com/sunyrain/ChemWorld/blob/main/docs/native_domains.md)
-and [installed capabilities](https://github.com/sunyrain/ChemWorld/blob/main/docs/native_capabilities.md)
+[domain workflows](native_domains.md)
+and [installed capabilities](native_capabilities.md)
 before choosing a supported builder or model declaration.
 
 ## Let your agent operate the environment

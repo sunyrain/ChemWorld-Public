@@ -87,4 +87,4 @@ finally:
 
 `task_info()` declares support; `available_actions()` and `validate_action()` give
 current legality. Use schema field names and units. See
-[operations](operations.md) and the [contribution guide](https://github.com/sunyrain/ChemWorld/blob/main/CONTRIBUTING.md).
+[operations](operations.md) and the [contribution guide](https://github.com/sunyrain/ChemWorld-Public/blob/main/CONTRIBUTING.md).

@@ -38,5 +38,5 @@ records limitations and competing explanations: thermal lag, kinetics and
 measurement depletion. Two errors cannot calibrate a prediction interval or
 establish a general law. An unexecuted follow-up is labelled unexecuted.
 
-See the [source](https://github.com/sunyrain/ChemWorld/blob/main/examples/demo_offline_research.py)
-and the [bilingual detailed design](https://github.com/sunyrain/ChemWorld/blob/main/docs/offline_research.md).
+See the [source](https://github.com/sunyrain/ChemWorld-Public/blob/main/examples/demo_offline_research.py)
+and the [bilingual detailed design](offline_research.md).

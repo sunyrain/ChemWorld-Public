@@ -2,11 +2,9 @@
 
 # Native physical sessions
 
-The [property and source delivery catalog](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/22/README.md)
-connects all 32 chemicals 1.5.2 public modules to native entry points, retained
-qualification results and separate EOS/flash responsibilities. It also lists the
-existing data adapters and shared sources. This is a responsibility map, not a
-claim of drop-in upstream API compatibility or empirical accuracy for every material.
+Native property methods use explicit data adapters and shared sources; EOS and
+flash calculations have separate responsibilities. This does not imply drop-in
+compatibility with the chemicals 1.5.2 API or empirical accuracy for every material.
 External source files remain caller-supplied; production does not import chemicals.
 
 ## Design and operate a finite process graph
@@ -77,9 +75,8 @@ are outside this declared model.
 Development qualification covers 43 graph cases, 42 finite-world cases, 22 steady
 design cases (including six expected refusals), and 22 trajectory/control cases.
 The installed package also passes all six declared consumers, including actual
-fresh-process continuation. [The delivery report](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/33/README.md)
-lists independent references, exact checks, costs and retained failures. Numerical
-search is bounded and can be expensive: inspect the reported evaluations and
+fresh-process continuation. Numerical search is bounded and can be expensive:
+inspect the reported evaluations and
 failure reason, and execute a plan only when its verified result succeeds.
 
 ## Inspect and choose property methods
@@ -161,7 +158,7 @@ When the identifier tables have no exact record, pass an explicit `ComponentSpec
 with reviewed identity evidence to the existing property input API. Do not copy
 the structure of the first alias search result.
 
-The [reviewed CRC component inputs](https://github.com/sunyrain/ChemWorld/blob/main/examples/fixtures/crc_electro_optical_components.json)
+The [reviewed CRC component inputs](https://github.com/sunyrain/ChemWorld-Public/blob/main/examples/fixtures/crc_electro_optical_components.json)
 cover 200 identities and 246 original dielectric/refractive-index rows.
 They retain the source CAS, available full InChI, cited public records, documented
 stereochemical scope, and explicit superseded-CAS relationships. Their default phase is unknown.
@@ -259,7 +256,7 @@ Their connectivity-only InChI does not encode that material definition by itself
 the full `ComponentSpec` metadata and provenance must accompany the input.
 No absolute enantiomer is selected and no SRac conversion is claimed for this group.
 
-Run the [cis/trans example](https://github.com/sunyrain/ChemWorld/blob/main/examples/crc_electro_optical_inputs.py) with your
+Run the [cis/trans example](https://github.com/sunyrain/ChemWorld-Public/blob/main/examples/crc_electro_optical_inputs.py) with your
 directory containing the original external CRC source tables:
 
 ```text
@@ -766,8 +763,7 @@ to the original solid-equilibrium API with explicit element-reference shifts.
 It supplies onset tangents and solid-consumer seeds, not a coupled fluid/solid
 precipitation inventory.
 
-The [current development qualification](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/28-general/README.md)
-covers explicit PR mixtures and analytic regular-solution controls, original
+Development qualification covered explicit PR mixtures and analytic regular-solution controls, original
 runtime consumers and the solid interface. It does not qualify every EOS or
 every state in a declared rectangular domain.
 
@@ -810,11 +806,10 @@ real-data development block uses Rolo et al.'s alkane measurements in saturated
 air and explicitly approximates the boundary by hydrocarbon VLE with no
 noncondensable air; its errors must be read with that modeling assumption.
 
-The [completed development qualification](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/29-general/README.md)
-covers pure, binary, ternary, singular and near-critical profiles, independent
+Development qualification covered pure, binary, ternary, singular and near-critical profiles, independent
 PhasePy comparisons, original inventory consumers, installed-package use and the
 complete measured-data fit with held-out predictions and mesh/domain convergence.
-The earlier failed fitting attempts remain available. Several fitted parameters
+Earlier fitting attempts failed. Several fitted parameters
 reach their declared bounds; this qualification does not remove that limitation
 or establish same-boundary experimental validation for the omitted air phase.
 
@@ -1121,8 +1116,7 @@ module runs from an installed wheel. This is a finite development example, not
 a fitted real column: three synthetic analytes, symmetric peaks, lumped residue,
 fixed offline duration and a non-evolving host. Continuous mobile-phase usage,
 column spatial transport and instrument thermal utilities are not modelled, so
-no energy-closure or general gradient-column claim is made. See
-[development acceptance](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/archive/20261020-native-extension/evidence/NATIVE_CHROMATOGRAPHY_ACCEPTANCE.md).
+no energy-closure or general gradient-column claim is made.
 
 ## Native single-particle lithium battery
 
@@ -3296,7 +3290,7 @@ Neutral optional CPU declarations preserve real saved v2 checkpoints, with the
 four-entry block, whole protocols and installed wheel requalified after the fix.
 Non-default and unknown execution contracts remain strict.
 Retained independent SDK disagreements remain separate from continuation correctness;
-see the [supported scope and full results](https://github.com/sunyrain/ChemWorld/blob/main/workstreams/world_foundation/reports/convergence/50/README.md).
+exact continuation does not establish agreement with an external simulator.
 
 ## Multifluid mixtures, local criticality and fitting
 
