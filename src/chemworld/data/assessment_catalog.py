@@ -1,5 +1,6 @@
 """Versioned public environmental and safety source declarations, no source algorithms."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -41,13 +42,13 @@ class AssessmentMethod:
     source_id: str
     field_id: str
     unit: str | None = "dimensionless"
-    conditions: dict = field(default_factory=dict)
+    conditions: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "conditions", MappingProxyType(dict(self.conditions)))
 
 
-def _climate_methods():
+def _climate_methods() -> list[AssessmentMethod]:
     methods = []
     for prop, years in (
         ("GWP", {2007: (20, 100, 500), 2014: (20, 100), 2021: (20, 100, 500)}),
@@ -88,7 +89,7 @@ def _climate_methods():
     return methods
 
 
-def _methods():
+def _methods() -> tuple[AssessmentMethod, ...]:
     methods = _climate_methods()
     for version in (1, 2):
         for suffix, column, unit in (

@@ -1,7 +1,9 @@
 """Nine complete external fuel tables on the existing lazy constant database."""
 
 from dataclasses import dataclass, fields
+from pathlib import Path
 from types import MappingProxyType
+from typing import cast
 
 from chemworld.data.assessments import AssessmentValue
 from chemworld.data.constant_catalog import ConstantField, ConstantSource
@@ -11,6 +13,7 @@ from chemworld.data.constants import (
     ConstantRecord,
     UnknownConstantMethodError,
 )
+from chemworld.foundation.units import Quantity
 from chemworld.physchem.combustion import ignition_delay_quality, octane_index
 from chemworld.physchem.property_reports import PropertyEvaluation
 
@@ -69,10 +72,10 @@ _UNITS = {
 @dataclass(frozen=True)
 class FuelRecord(ConstantRecord):
     @property
-    def source(self):
+    def source(self) -> ConstantSource:
         return _SOURCES[self.source_id]
 
-    def descriptor(self, field_id):
+    def descriptor(self, field_id: str) -> ConstantField:
         self.raw(field_id)
         return ConstantField(
             field_id,
@@ -84,13 +87,13 @@ class FuelRecord(ConstantRecord):
 
 class FuelDatabase(ConstantDatabase):
     @property
-    def catalog(self):
+    def catalog(self) -> tuple[ConstantSource, ...]:
         return FUEL_SOURCES
 
-    def source(self, source_id):
+    def source(self, source_id: str) -> ConstantSource:
         return _SOURCES.get(source_id) or super().source(source_id)
 
-    def _read_records(self, source, path):
+    def _read_records(self, source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         records = super()._read_records(source, path)
         if source.source_id not in _SOURCES:
             return records
@@ -99,7 +102,7 @@ class FuelDatabase(ConstantDatabase):
             for r in records
         )
 
-    def fuel_value(self, identity, property_id, *, method):
+    def fuel_value(self, identity: object, property_id: str, *, method: str) -> AssessmentValue:
         try:
             source_id = FUEL_METHODS[property_id][method]
         except KeyError as exc:
@@ -120,10 +123,6 @@ class FuelDatabase(ConstantDatabase):
                 "ECNet bundled property dataset cards: cloud/pour point targets in degC; "
                 "https://github.com/ecrl/ecnet/blob/master/docs/source/data.rst"
             )
-        if unit is None:
-            conditions["unit_status"] = (
-                "Original numeric text; source unit not independently established"
-            )
         try:
             record = self.record(identity, method=source_id)
         except ConstantIdentityNotFoundError:
@@ -140,12 +139,8 @@ class FuelDatabase(ConstantDatabase):
                 conditions,
                 ("Not listed in this source",),
             )
-        if unit is None:
-            raw = record.raw(field_id)
-            value, quality = (str(raw), "valid") if raw not in ("", None) else (None, "missing")
-        else:
-            cell = record.value(field_id)
-            value, quality, raw = cell.value, cell.quality, cell.raw_value
+        cell = record.value(field_id)
+        value, quality, raw = cell.value, cell.quality, cell.raw_value
         return AssessmentValue(
             property_id,
             method,
@@ -164,7 +159,7 @@ class FuelDatabase(ConstantDatabase):
             ),
         )
 
-    def fuel_methods(self, identity, property_id):
+    def fuel_methods(self, identity: object, property_id: str) -> tuple[str, ...]:
         if property_id not in FUEL_METHODS:
             raise UnknownConstantMethodError(f"unknown fuel property {property_id}")
         return tuple(
@@ -177,7 +172,9 @@ class FuelDatabase(ConstantDatabase):
         )
 
 
-def source_octane_index(ron, mon, *, quantity="AKI"):
+def source_octane_index(
+    ron: AssessmentValue, mon: AssessmentValue, *, quantity: str = "AKI",
+) -> PropertyEvaluation:
     if (
         ron.property_id != "RON"
         or mon.property_id != "MON"
@@ -196,15 +193,15 @@ def source_octane_index(ron, mon, *, quantity="AKI"):
         ron.method,
         value,
         "dimensionless",
-        {"RON": ron.value, "MON": mon.value},
+        {"RON": cast(float, ron.value), "MON": cast(float, mon.value)},
         tuple(dict.fromkeys((*ron.warnings, *mon.warnings))),
     )
 
 
-def source_ignition_quality(delay, *, quantity):
+def source_ignition_quality(delay: AssessmentValue, *, quantity: str) -> PropertyEvaluation:
     if delay.property_id != "ignition_delay" or delay.quality != "valid":
         raise ValueError("a valid source ignition delay is required")
-    seconds = delay.input_value().to("s").value
+    seconds = cast(float, delay.input_value().to("s").value)
     value = ignition_delay_quality(seconds, quantity=quantity)
     warnings = (*delay.warnings, "Empirical derived index; not measured octane/cetane number")
     if quantity in {"RON", "MON"} and not 0.0036 <= seconds <= 0.067:
@@ -220,7 +217,9 @@ def source_ignition_quality(delay, *, quantity):
     )
 
 
-def fuel_quality_comparison(value, criterion, *, relation):
+def fuel_quality_comparison(
+    value: AssessmentValue, criterion: Quantity, *, relation: str,
+) -> dict[str, object]:
     """One source property versus an explicit engineering threshold, no auto-approval.
 
     Returned ratio is dimensionless for quality indices; temperatures use a
@@ -233,7 +232,8 @@ def fuel_quality_comparison(value, criterion, *, relation):
         raise ValueError("select minimum or maximum criterion")
     cell = value.input_value()
     threshold = criterion.to(cell.unit).value
-    passes = cell.value >= threshold if relation == "minimum" else cell.value <= threshold
+    numeric_value = cast(float, cell.value)
+    passes = numeric_value >= threshold if relation == "minimum" else numeric_value <= threshold
     return {
         "property_id": value.property_id,
         "source": value.to_dict(),

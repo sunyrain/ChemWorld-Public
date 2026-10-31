@@ -5,10 +5,14 @@ listings are explicit; all numeric observations use the original InputValue.
 No regulatory currency, exposure duration or material state is inferred.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from math import isfinite
+from pathlib import Path
 from types import MappingProxyType
-from typing import SupportsInt, cast
+from typing import Any, SupportsInt, cast
 
 from chemworld.data.assessment_catalog import (
     ASSESSMENT_METHODS,
@@ -16,8 +20,9 @@ from chemworld.data.assessment_catalog import (
     ASSESSMENT_SOURCES,
     IARC_CLASSIFICATIONS,
     NTP_CLASSIFICATIONS,
+    AssessmentMethod,
 )
-from chemworld.data.constant_catalog import TABULAR_FIELDS, ConstantField
+from chemworld.data.constant_catalog import TABULAR_FIELDS, ConstantField, ConstantSource
 from chemworld.data.constants import (
     ConstantDatabase,
     ConstantIdentityNotFoundError,
@@ -40,7 +45,7 @@ class AssessmentValue:
     quality: str
     source: DataSourceProvenance
     raw_value: object
-    conditions: dict
+    conditions: Mapping[str, object]
     warnings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -61,7 +66,7 @@ class AssessmentValue:
         object.__setattr__(self, "conditions", MappingProxyType(dict(self.conditions)))
         object.__setattr__(self, "warnings", tuple(self.warnings))
 
-    def input_value(self):
+    def input_value(self) -> InputValue:
         if self.unit is None or isinstance(self.value, str | bool):
             raise ValueError("text/classification is not a numeric observation")
         return InputValue(
@@ -72,7 +77,7 @@ class AssessmentValue:
             "missing" if self.quality == "not_listed" else self.quality,
         )
 
-    def evaluate(self):
+    def evaluate(self) -> PropertyEvaluation:
         if self.quality != "valid":
             raise ValueError(f"assessment is {self.quality}")
         cell = self.input_value()
@@ -80,13 +85,13 @@ class AssessmentValue:
             self.property_id,
             self.record_id,
             self.method,
-            cell.value,
+            cast(float, cell.value),
             cell.unit,
-            {k: v for k, v in self.conditions.items() if type(v) in (int, float)},
+            {k: cast(float, v) for k, v in self.conditions.items() if type(v) in (int, float)},
             self.warnings,
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": "source-assessment-1",
             **{
@@ -102,7 +107,7 @@ class AssessmentValue:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> AssessmentValue:
         if (
             set(payload) != {"model", *(f.name for f in fields(cls))}
             or payload["model"] != "source-assessment-1"
@@ -116,10 +121,10 @@ class AssessmentValue:
 @dataclass(frozen=True)
 class AssessmentRecord(ConstantRecord):
     @property
-    def source(self):
+    def source(self) -> ConstantSource:
         return ASSESSMENT_SOURCE_MAP[self.source_id]
 
-    def descriptor(self, field_id):
+    def descriptor(self, field_id: str) -> ConstantField:
         self.raw(field_id)
         unit = None
         if (
@@ -151,13 +156,13 @@ class AssessmentRecord(ConstantRecord):
 
 class AssessmentDatabase(ConstantDatabase):
     @property
-    def catalog(self):
+    def catalog(self) -> tuple[ConstantSource, ...]:
         return ASSESSMENT_SOURCES
 
-    def source(self, source_id):
+    def source(self, source_id: str) -> ConstantSource:
         return ASSESSMENT_SOURCE_MAP.get(source_id) or super().source(source_id)
 
-    def _read_records(self, source, path):
+    def _read_records(self, source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         original = super()._read_records(source, path)
         if source.source_id == "WIKIDATA" or source.source_id not in ASSESSMENT_SOURCE_MAP:
             return original
@@ -167,13 +172,15 @@ class AssessmentDatabase(ConstantDatabase):
         )
 
     @staticmethod
-    def method_specs(property_id):
+    def method_specs(property_id: str) -> tuple[AssessmentMethod, ...]:
         result = tuple(m for m in ASSESSMENT_METHODS if m.property_id == property_id)
         if not result:
             raise UnknownConstantMethodError(f"unknown assessment property {property_id!r}")
         return result
 
-    def assessment(self, identity, property_id, *, method, unit=None):
+    def assessment(
+        self, identity: object, property_id: str, *, method: str, unit: str | None = None,
+    ) -> AssessmentValue:
         specs = [m for m in self.method_specs(property_id) if m.method == method]
         if not specs:
             raise UnknownConstantMethodError(f"unknown {property_id} method {method!r}")
@@ -249,7 +256,9 @@ class AssessmentDatabase(ConstantDatabase):
                 key: record.raw(f"ODP{version}{suffix}")
                 for key, suffix in (("text", ""), ("minimum", " Min"), ("maximum", " Max"))
             }
-        warnings = ("Historical source snapshot; no assertion of current regulatory limits",)
+        warnings: tuple[str, ...] = (
+            "Historical source snapshot; no assertion of current regulatory limits",
+        )
         if (property_id in {"LFL", "UFL"} and value is not None
                 and not 0 < cast(float, value) <= 1):
             warnings += (
@@ -269,7 +278,7 @@ class AssessmentDatabase(ConstantDatabase):
             warnings,
         )
 
-    def assessment_methods(self, identity, property_id):
+    def assessment_methods(self, identity: object, property_id: str) -> tuple[str, ...]:
         specs = self.method_specs(property_id)
         if property_id == "Carcinogen":
             return tuple(m.method for m in specs)
@@ -282,13 +291,16 @@ class AssessmentDatabase(ConstantDatabase):
             )
         )
 
-    def exposure_source_records(self, identity):
+    def exposure_source_records(self, identity: object) -> tuple[ConstantRecord, ...]:
         """All exact source-label matches; never merge several CAS/agent rows."""
         record = self.record(identity, method="ONTARIO")
         name = record.raw("Name")
         return tuple(r for r in self.records("ONTARIO_RAW") if r.raw("Agent [CAS No.]") == name)
 
-    def flammability_methods(self, identity, *, limit, heat_of_combustion_J_mol=None, atoms=None):
+    def flammability_methods(
+        self, identity: object, *, limit: str, heat_of_combustion_J_mol: float | None = None,
+        atoms: Mapping[str, float] | None = None,
+    ) -> tuple[str, ...]:
         """Source methods plus estimates whose required inputs are supplied.
 
         Availability is not validation of an estimate's physical applicability.
@@ -306,8 +318,9 @@ class AssessmentDatabase(ConstantDatabase):
         return methods
 
     def flammability_value(
-        self, identity, *, limit, method, heat_of_combustion_J_mol=None, atoms=None
-    ):
+        self, identity: object, *, limit: str, method: str,
+        heat_of_combustion_J_mol: float | None = None, atoms: Mapping[str, float] | None = None,
+    ) -> PropertyEvaluation:
         """Selected data or estimate -> the original property report, no fallback."""
         if limit not in {"LFL", "UFL"}:
             raise ValueError("select LFL or UFL")
@@ -322,9 +335,9 @@ class AssessmentDatabase(ConstantDatabase):
             atoms=atoms,
         )
         inputs = (
-            {"combustion_enthalpy_J_mol": heat_of_combustion_J_mol}
+            {"combustion_enthalpy_J_mol": cast(float, heat_of_combustion_J_mol)}
             if method == ESTIMATION_METHODS[0]
-            else {"atoms:" + k: v for k, v in atoms.items()}
+            else {"atoms:" + k: v for k, v in cast(Mapping[str, float], atoms).items()}
         )
         return PropertyEvaluation(
             limit,

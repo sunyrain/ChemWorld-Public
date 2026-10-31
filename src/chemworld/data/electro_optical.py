@@ -4,9 +4,13 @@ Only the CRC dielectric table is a new source. RI and dipole records retain
 the same database, identities, values, candidates and source provenance.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from math import isfinite
-from typing import cast
+from pathlib import Path
+from typing import Any, Literal, cast, overload
 
 from chemworld.data.constant_catalog import CONSTANT_SOURCES, ConstantField, ConstantSource
 from chemworld.data.constants import ConstantDatabase, ConstantRecord
@@ -15,7 +19,7 @@ from chemworld.physchem.data_conflicts import DataSourceProvenance
 from chemworld.physchem.property_inputs import PropertyInputCard
 from chemworld.physchem.property_packages import ComponentPropertyPackage
 from chemworld.physchem.property_reports import PropertyEvaluation
-from chemworld.physchem.specs import ComponentUncertainty, PropertyCorrelation
+from chemworld.physchem.specs import ComponentSpec, ComponentUncertainty, PropertyCorrelation
 
 DIPOLE_SOURCES = ("CCCBDB", "MULLER", "POLING", "PSI4_DIPOLE")
 REFRACTIVE_INDEX_SOURCES = ("CRC_RI", "WIKIDATA")
@@ -32,7 +36,7 @@ ELECTRO_OPTICAL_SOURCES = (
 )
 
 
-def _metadata(record):
+def _metadata(record: ConstantRecord) -> dict[str, Any]:
     return {
         "source": record.source.provenance.to_dict(),
         "source_record": {
@@ -43,7 +47,10 @@ def _metadata(record):
     }
 
 
-def _point_curve(identity, prop, temperature, value, note, metadata):
+def _point_curve(
+    identity: str, prop: str, temperature: float, value: float, note: str,
+    metadata: dict[str, Any],
+) -> PropertyCorrelation:
     return PropertyCorrelation(
         identity + ":" + prop,
         "dimensionless_source_point",
@@ -60,10 +67,10 @@ def _point_curve(identity, prop, temperature, value, note, metadata):
 @dataclass(frozen=True)
 class PermittivityRecord(ConstantRecord):
     @property
-    def source(self):
+    def source(self) -> ConstantSource:
         return _CRC_PERMITTIVITY
 
-    def descriptor(self, field_id):
+    def descriptor(self, field_id: str) -> ConstantField:
         self.raw(field_id)
         return ConstantField(
             field_id,
@@ -76,11 +83,19 @@ class PermittivityRecord(ConstantRecord):
             "22F2",
         )
 
-    def correlation(self, *, source_point=False, temperature_bounds_K=None):
+    def correlation(
+        self, *, source_point: bool = False, temperature_bounds_K: Sequence[float] | None = None,
+    ) -> PropertyCorrelation:
         if type(source_point) is not bool:
             raise ValueError("source_point must be boolean")
 
-        def number(key, required=False):
+        @overload
+        def number(key: str, required: Literal[True]) -> float: ...
+
+        @overload
+        def number(key: str, required: Literal[False] = False) -> float | None: ...
+
+        def number(key: str, required: bool = False) -> float | None:
             v = self.value(key)
             if v.quality == "invalid":
                 raise ValueError(f"invalid dielectric field {key}")
@@ -106,17 +121,17 @@ class PermittivityRecord(ConstantRecord):
                 metadata,
             )
         p = {"A": number("A", True)}
-        omitted = []
+        omitted: list[str] = []
         for key in "BCD":
-            value = number(key)
-            if value is None:
+            term = number(key)
+            if term is None:
                 # Source convention: the highest supplied term is the degree.
                 # An interior gap is not an omitted high-order coefficient.
                 if any(number(k) is not None for k in "BCD"["BCD".index(key) + 1 :]):
                     raise ValueError(f"interior missing dielectric polynomial coefficient {key}")
-                value = 0
+                term = 0
                 omitted.append(key)
-            p[key] = value
+            p[key] = term
         source_bounds = number("Tmin"), number("Tmax")
         bounds = tuple(temperature_bounds_K) if temperature_bounds_K is not None else source_bounds
         if (
@@ -125,11 +140,12 @@ class PermittivityRecord(ConstantRecord):
                 isinstance(t, bool) or not isinstance(t, int | float) or not isfinite(t)
                 for t in bounds
             )
-            or not 0 < bounds[0] < bounds[1]
+            or not 0 < cast(float, bounds[0]) < cast(float, bounds[1])
         ):
             raise ValueError(
                 "dielectric fit needs an explicit finite positive temperature interval"
             )
+        bounds = cast(tuple[float, float], bounds)
         if any(
             s is not None and (b < s if i == 0 else b > s)
             for i, (b, s) in enumerate(zip(bounds, source_bounds, strict=True))
@@ -174,7 +190,7 @@ class RefractiveIndexObservation:
                 raise ValueError("RI observation and temperature must be positive if supplied")
 
     @classmethod
-    def from_record(cls, record):
+    def from_record(cls, record: ConstantRecord) -> RefractiveIndexObservation:
         if record.source_id not in REFRACTIVE_INDEX_SOURCES:
             raise ValueError("select a CRC or Wikidata refractive-index record")
         return cls(
@@ -185,12 +201,13 @@ class RefractiveIndexObservation:
             record.record_id,
         )
 
-    def evaluate(self):
+    def evaluate(self) -> PropertyEvaluation:
         if self.index.quality != "valid" or self.index.value is None:
             raise ValueError("source refractive index is missing or invalid")
         if self.temperature.quality not in {"valid", "missing"}:
             raise ValueError("source refractive-index temperature is invalid")
-        inputs, warnings = {}, ()
+        inputs: dict[str, float] = {}
+        warnings: tuple[str, ...] = ()
         if self.temperature.value is not None:
             inputs["temperature"] = cast(float, self.temperature.to("K").value)
         else:
@@ -205,7 +222,7 @@ class RefractiveIndexObservation:
             warnings,
         )
 
-    def correlation(self):
+    def correlation(self) -> PropertyCorrelation:
         report = self.evaluate()
         if "temperature" not in report.inputs:
             raise ValueError(
@@ -224,7 +241,7 @@ class RefractiveIndexObservation:
             },
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": "refractive-index-observation-1",
             "component_id": self.component_id,
@@ -235,7 +252,7 @@ class RefractiveIndexObservation:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> RefractiveIndexObservation:
         if set(payload) != {
             "model",
             "component_id",
@@ -256,13 +273,13 @@ class RefractiveIndexObservation:
 
 class ElectroOpticalDatabase(ConstantDatabase):
     @property
-    def catalog(self):
+    def catalog(self) -> tuple[ConstantSource, ...]:
         return ELECTRO_OPTICAL_SOURCES
 
-    def source(self, source_id):
+    def source(self, source_id: str) -> ConstantSource:
         return _CRC_PERMITTIVITY if source_id == "CRC_PERMITTIVITY" else super().source(source_id)
 
-    def _read_records(self, source, path):
+    def _read_records(self, source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         records = super()._read_records(source, path)
         if source.source_id != "CRC_PERMITTIVITY":
             return records
@@ -271,12 +288,13 @@ class ElectroOpticalDatabase(ConstantDatabase):
             for r in records
         )
 
-    def refractive_index(self, identity, *, method):
+    def refractive_index(self, identity: object, *, method: str) -> RefractiveIndexObservation:
         return RefractiveIndexObservation.from_record(self.record(identity, method=method))
 
     def property_input(
-        self, identity, component, *, method, source_point=False, temperature_bounds_K=None
-    ):
+        self, identity: object, component: ComponentSpec, *, method: str,
+        source_point: bool = False, temperature_bounds_K: Sequence[float] | None = None,
+    ) -> PropertyInputCard:
         if type(source_point) is not bool:
             raise ValueError("source_point must be boolean")
         record = self.record(identity, method=method)
