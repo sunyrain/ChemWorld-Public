@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import gymnasium as gym
 import pytest
 
 import chemworld  # noqa: F401
+from chemworld.agents.base import BaseAgent, HistoryRecord
+from chemworld.data.logging import load_jsonl
+from chemworld.eval.runner import run_agent
+from chemworld.eval.verify import verify_records
 from chemworld.foundation import equipment_settings
 from chemworld.physchem.batch_reactors import DynamicBatchReactorModel
 from chemworld.physchem.reaction_adapter_manifest import (
     reaction_reactor_runtime_adapter_manifest,
     reaction_reactor_runtime_provider_contract,
 )
-from chemworld.world.reaction_kernel import integrate_compiled_reaction_ode
+from chemworld.world.reaction_kernel import ReactionValidityError, integrate_compiled_reaction_ode
 
 
 def _charge(
@@ -241,7 +246,7 @@ def test_invalid_and_runaway_domains_fail_closed() -> None:
                 for reaction in runaway_reactions
             },
         )
-        with pytest.raises(RuntimeError, match="validity domain"):
+        with pytest.raises(ReactionValidityError, match="validity domain"):
             integrate_compiled_reaction_ode(
                 state=state,
                 world=env.unwrapped.world,
@@ -253,6 +258,47 @@ def test_invalid_and_runaway_domains_fail_closed() -> None:
             )
     finally:
         env.close()
+
+
+@pytest.mark.parametrize("task", ["reaction-to-crystallization", "reaction-to-distillation"])
+@pytest.mark.parametrize("duration", [1.0, 60.0, 900.0, 7200.0])
+def test_resolved_thermal_limit_rejects_short_and_long_requests_atomically(
+    task: str, duration: float,
+) -> None:
+    with gym.make("ChemWorld", task_id=task, budget_override=8) as env:
+        env.reset(seed=0)
+        for action in (
+            {"operation": "add_solvent", "volume_L": 0.025, "solvent": 2},
+            {"operation": "add_reagent", "amount_mol": 0.0165},
+        ):
+            assert env.step(action)[-1]["transaction_status"] == "committed"
+        before = env.unwrapped._state
+        action = {"operation": "heat", "target_temperature_K": 360.0,
+                  "duration_s": duration, "stirring_speed_rpm": 650.0}
+        assert env.unwrapped.operation_validator.validate(action, before).is_valid
+        _, reward, ended, truncated, info = env.step(action)
+        after = env.unwrapped._state
+        assert info["transaction_status"] == "rolled_back"
+        assert info["operation_outcome"] == info["rollback_reason"] == "rejected"
+        assert info["actual_duration_s"] == 0.0
+        assert reward == 0.0 and not ended and not truncated
+        diagnostic = info["outcome_diagnostics"]
+        assert diagnostic["failure_reason"] == "reaction_validity_domain_exceeded"
+        assert diagnostic["validity_violations"] == ["thermal_runaway_rate_exceeds_limit"]
+        assert diagnostic["reactor_diagnostic"]["maximum_temperature_rate_K_s"] > 2.0
+        assert diagnostic["validity_domain"]["maximum_temperature_rate_K_s"] == 2.0
+        assert after.species_amounts == before.species_amounts
+        assert after.temperature_K == before.temperature_K
+        assert after.volume_L == before.volume_L
+        assert after.ledger.time_s == before.ledger.time_s
+        assert after.ledger.energy_jacket_J == before.ledger.energy_jacket_J
+        assert after.ledger.heat_reaction_J == before.ledger.heat_reaction_J
+        assert after.ledger.heat_loss_J == before.ledger.heat_loss_J
+        assert after.ledger.cost > before.ledger.cost
+        # A lower setpoint stays inside the same unmodified physical rate limit.
+        assert env.step({**action, "target_temperature_K": 305.0})[-1][
+            "transaction_status"
+        ] == "committed"
 
 
 def test_model_failure_rolls_back_without_physical_or_time_mutation(
@@ -292,6 +338,37 @@ def test_model_failure_rolls_back_without_physical_or_time_mutation(
         assert after.ledger.risk > before.ledger.risk
     finally:
         env.close()
+
+
+def test_physical_rejection_and_safe_retry_replay_exactly(tmp_path: Path) -> None:
+    actions = [
+        {"operation": "add_solvent", "volume_L": 0.025, "solvent": 2},
+        {"operation": "add_reagent", "amount_mol": 0.0165},
+        {"operation": "heat", "target_temperature_K": 360.0,
+         "duration_s": 900.0, "stirring_speed_rpm": 650.0},
+        {"operation": "heat", "target_temperature_K": 305.0,
+         "duration_s": 900.0, "stirring_speed_rpm": 650.0},
+    ]
+
+    class Sequence(BaseAgent):
+        def act(self, history: list[HistoryRecord]) -> dict[str, Any]:
+            return dict(actions[len(history)])
+
+    path = tmp_path / "thermal-rejection.jsonl"
+    run_agent(
+        env_id="ChemWorld", agent=Sequence(), world_split="public-dev",
+        budget=4, budget_override=4, objective="balanced", seed=0,
+        task_id="reaction-to-distillation", output_path=path,
+    )
+    records = load_jsonl(path)
+    assert len(records) == 4
+    assert [row["environment_outcome"]["transaction_status"] for row in records] == [
+        "committed", "committed", "rolled_back", "committed",
+    ]
+    replay = verify_records(records, tolerance=0.0)
+    assert replay.verified, replay.mismatches
+    assert replay.checked_steps == 4
+    assert replay.max_abs_error == 0.0
 
 
 def test_runtime_adapter_explicitly_replaces_both_lite_model_ids() -> None:

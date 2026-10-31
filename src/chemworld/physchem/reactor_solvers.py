@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -67,6 +67,7 @@ def _integrate_result(
         y0,
         duration_s=duration_s,
         evaluation_times_s=evaluation_times_s,
+        dense_output=True,
     )
     amounts = {
         species_id: tuple(_validated_amount(float(value), species_id) for value in result.y[idx])
@@ -126,6 +127,7 @@ def _integrate_result(
             else ()
         ),
         validity_domain=validity_domain,
+        resolved_temperature_rate_K_s=_resolved_temperature_rate(rhs, result, temperature_index),
         metadata={
             "solver_diagnostic": result.diagnostic.to_dict(),
             "pressure_boundary": (
@@ -146,13 +148,14 @@ def _solve(
     *,
     duration_s: float,
     evaluation_times_s: Sequence[float] | None,
+    dense_output: bool = False,
 ) -> ODESolveReport:
     result = solve_ode(
         rhs,
         y0,
         time_span_s=(0.0, duration_s),
         evaluation_times_s=evaluation_times_s,
-        policy=DEFAULT_REACTOR_ODE_POLICY,
+        policy=replace(DEFAULT_REACTOR_ODE_POLICY, dense_output=dense_output),
     )
     result.raise_for_failure("Reactor integration")
     return result
@@ -171,10 +174,36 @@ def _solve_interval(
         y0,
         time_span_s=(start_s, end_s),
         evaluation_times_s=evaluation_times_s,
-        policy=DEFAULT_REACTOR_ODE_POLICY,
+        policy=replace(DEFAULT_REACTOR_ODE_POLICY, dense_output=True),
     )
     result.raise_for_failure("Reactor integration")
     return result
+
+
+def _resolved_temperature_rate(
+    rhs: Callable[[float, np.ndarray], np.ndarray],
+    result: ODESolveReport,
+    temperature_index: int,
+) -> float:
+    """Check accepted solver states and their midpoints, independent of display samples.
+
+    Trial RHS evaluations may be rejected by the solver; they are not physical
+    states. Dense output retains the accepted adaptive mesh without changing the
+    requested output grid, integration tolerances, or physical equations.
+    """
+    solution = result.raw_result.sol
+    if solution is None:
+        raise RuntimeError("reactor rate diagnostics require dense solver output")
+    knots = np.asarray(solution.ts, dtype=float)
+    times = np.unique(np.concatenate((knots, (knots[:-1] + knots[1:]) * 0.5)))
+    states = solution(times)
+    rates = [
+        abs(float(rhs(float(time), state)[temperature_index]))
+        for time, state in zip(times, states.T, strict=True)
+    ]
+    if not np.all(np.isfinite(rates)):
+        raise RuntimeError("reactor returned nonfinite resolved temperature rates")
+    return max(rates, default=0.0)
 
 
 def _segment_evaluation_times(

@@ -4,8 +4,9 @@ The audit deliberately stays outside benchmark scoring.  It builds reachable
 states with the public task-recipe interface, samples only values advertised by
 ``action_schema``, and then checks the validator, transactional runtime, and
 observation kernel in that order.  This separates agent errors from contract
-holes where a public action is declared executable but can only fail deeper in
-the stack.
+holes. Converged trajectories outside explicit physical limits are retained as
+rejections when the runtime reports the violation and rolls back atomically;
+legal input syntax does not guarantee a successful physical experiment.
 """
 
 from __future__ import annotations
@@ -28,9 +29,10 @@ from chemworld.agents.task_recipes import (
     task_recipe_from_unit_vector,
 )
 from chemworld.data.logging import to_builtin
+from chemworld.foundation import WorldState
 from chemworld.tasks import SERIOUS_TASK_IDS
 
-AUDIT_SCHEMA_VERSION = "chemworld-runtime-domain-affordance-audit-0.4"
+AUDIT_SCHEMA_VERSION = "chemworld-runtime-domain-affordance-audit-0.5"
 GUARDED_SOURCE_PATHS = (
     "src/chemworld/action_codec.py",
     "src/chemworld/agent_interface.py",
@@ -149,11 +151,64 @@ def _candidate_actions(schema: dict[str, Any]) -> list[tuple[str, dict[str, Any]
     return unique
 
 
+def _physical_domain_rejection(
+    before: WorldState, after: WorldState, info: dict[str, Any],
+) -> bool:
+    """Recognize a proven physical limit, without accepting arbitrary rollbacks."""
+    diagnostic = info.get("outcome_diagnostics", {})
+    if not (
+        info.get("transaction_status") == "rolled_back"
+        and info.get("operation_outcome") == "rejected"
+        and info.get("rollback_reason") == "rejected"
+        and info.get("actual_duration_s") == 0.0
+        and diagnostic.get("failure_reason") == "reaction_validity_domain_exceeded"
+    ):
+        return False
+    observed = diagnostic.get("reactor_diagnostic", {})
+    limits = diagnostic.get("validity_domain", {})
+    violations = diagnostic.get("validity_violations", [])
+    if not (
+        violations and observed.get("within_validity_domain") is False
+        and observed.get("material_balance_closed") is True
+        and observed.get("nonnegative_species") is True
+    ):
+        return False
+    try:
+        values = [float(observed[key]) for key in (
+            "minimum_temperature_K", "maximum_temperature_K", "maximum_temperature_rate_K_s",
+        )] + [float(limits[key]) for key in (
+            "minimum_temperature_K", "maximum_temperature_K", "maximum_temperature_rate_K_s",
+            "minimum_pressure_Pa", "maximum_pressure_Pa",
+        )]
+        if not all(math.isfinite(value) for value in values):
+            return False
+        low, high, rate, low_limit, high_limit, rate_limit, p_low, p_high = values
+        breached = {
+            "thermal_runaway_rate_exceeds_limit": rate > rate_limit,
+            "temperature_outside_validity_domain": low < low_limit or high > high_limit,
+            "pressure_outside_validity_domain": not p_low <= before.pressure_Pa <= p_high,
+        }
+        if not all(breached.get(reason, False) for reason in violations):
+            return False
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+    # Only the existing failure cost/risk may change; material, energy, time,
+    # equipment, phase state and all other fields must remain unchanged.
+    left, right = before.to_dict(), after.to_dict()
+    for payload in (left, right):
+        for key in ("ledger", "process"):
+            if isinstance(payload.get(key), dict):
+                payload[key].pop("cost", None)
+                payload[key].pop("risk", None)
+    return (left == right and after.ledger.cost >= before.ledger.cost
+            and after.ledger.risk >= before.ledger.risk)
+
+
 def _reachable_states(
     task_id: str,
     *,
     seed: int,
-) -> tuple[Any, list[ReachableState], list[dict[str, Any]]]:
+) -> tuple[Any, list[ReachableState], list[dict[str, Any]], list[dict[str, Any]]]:
     env = gym.make(
         "ChemWorld",
         task_id=task_id,
@@ -171,9 +226,23 @@ def _reachable_states(
     recipe = task_recipe_from_unit_vector(base.task_info(), vector)
     states: list[ReachableState] = [ReachableState(0, base._state)]
     failures: list[dict[str, Any]] = []
+    physical_rejections: list[dict[str, Any]] = []
     for step_index, action in enumerate(recipe["steps"], start=1):
+        before = base._state
         _observation, _reward, terminated, truncated, info = env.step(action)
         if info.get("transaction_status") != "committed":
+            if _physical_domain_rejection(before, base._state, info):
+                physical_rejections.append({
+                    "step_index": step_index, "action": action,
+                    "violations": info["outcome_diagnostics"]["validity_violations"],
+                    "outcome_diagnostics": info["outcome_diagnostics"],
+                    "rollback_atomic": True,
+                })
+                states.append(ReachableState(step_index, base._state))
+                # Keep the original stop-at-first-rejection preparation rule.
+                # Later recipe steps do not have the material this step failed
+                # to produce; do not manufacture a successful prefix for them.
+                break
             failures.append(
                 {
                     "step_index": step_index,
@@ -191,7 +260,7 @@ def _reachable_states(
         states.append(ReachableState(step_index, base._state))
         if info.get("leaderboard_score") is not None or terminated or truncated:
             break
-    return env, states, failures
+    return env, states, failures, physical_rejections
 
 
 def _finding(
@@ -234,19 +303,24 @@ def audit_runtime_domain_affordances(
     selected_tasks = tuple(str(task_id) for task_id in task_ids)
     findings: list[dict[str, Any]] = []
     preparation_failures: dict[str, list[dict[str, Any]]] = {}
+    preparation_rejections: dict[str, list[dict[str, Any]]] = {}
+    physical_rejections: list[dict[str, Any]] = []
     task_summaries: dict[str, dict[str, Any]] = {}
     total_candidates = 0
     total_validator_valid = 0
     total_runtime_committed = 0
 
     for task_id in selected_tasks:
-        env, states, task_preparation_failures = _reachable_states(task_id, seed=seed)
+        env, states, task_preparation_failures, task_preparation_rejections = _reachable_states(
+            task_id, seed=seed
+        )
         base = env.unwrapped
         per_operation_schema_counts: Counter[str] = Counter()
         task_candidates = 0
         task_valid = 0
         task_committed = 0
         task_findings_start = len(findings)
+        task_rejections_start = len(physical_rejections)
         try:
             for reachable in states:
                 base._state = reachable.state
@@ -332,6 +406,22 @@ def audit_runtime_domain_affordances(
                             )
                             continue
                         if result.kernel_result.transaction_status != "committed":
+                            if _physical_domain_rejection(
+                                reachable.state, result.state, result.info_payload(),
+                            ):
+                                physical_rejections.append(_finding(
+                                    kind="physical_domain_rejection", task_id=task_id,
+                                    operation=operation, state_step_index=reachable.step_index,
+                                    schema_digest=digest, candidate_origin=origin, action=action,
+                                    details={
+                                        "violations": result.kernel_result.diagnostics[
+                                            "validity_violations"
+                                        ],
+                                        "outcome_diagnostics": result.kernel_result.diagnostics,
+                                        "rollback_atomic": True,
+                                    },
+                                ))
+                                continue
                             findings.append(
                                 _finding(
                                     kind="validator_valid_runtime_rollback",
@@ -379,8 +469,12 @@ def audit_runtime_domain_affordances(
 
         if task_preparation_failures:
             preparation_failures[task_id] = task_preparation_failures
+        if task_preparation_rejections:
+            preparation_rejections[task_id] = task_preparation_rejections
         task_findings = findings[task_findings_start:]
         task_summaries[task_id] = {
+            "preparation_completed": not task_preparation_failures
+            and not task_preparation_rejections,
             "reachable_state_count": len(states),
             "schema_count": sum(per_operation_schema_counts.values()),
             "operation_count": len(
@@ -389,6 +483,7 @@ def audit_runtime_domain_affordances(
             "candidate_count": task_candidates,
             "validator_valid_count": task_valid,
             "runtime_committed_count": task_committed,
+            "physical_rejection_count": len(physical_rejections) - task_rejections_start,
             "finding_count": len(task_findings),
             "finding_counts": dict(
                 sorted(Counter(item["kind"] for item in task_findings).items())
@@ -401,7 +496,7 @@ def audit_runtime_domain_affordances(
         findings_by_operation[str(item["operation"])] += 1
     checks = {
         "all_serious_tasks_covered": selected_tasks == tuple(SERIOUS_TASK_IDS),
-        "reachable_recipe_preparation_clean": not preparation_failures,
+        "preparation_without_unexpected_failure": not preparation_failures,
         "public_schema_boundaries_match_validator": finding_counts.get(
             "advertised_payload_rejected", 0
         )
@@ -433,15 +528,22 @@ def audit_runtime_domain_affordances(
         "checks": checks,
         "summary": {
             "task_count": len(selected_tasks),
+            "preparation_completed_count": sum(
+                bool(task["preparation_completed"]) for task in task_summaries.values()
+            ),
             "candidate_count": total_candidates,
             "validator_valid_count": total_validator_valid,
             "runtime_committed_count": total_runtime_committed,
+            "physical_rejection_count": len(physical_rejections),
+            "preparation_physical_rejection_count": sum(map(len, preparation_rejections.values())),
             "finding_count": len(findings),
             "finding_counts": finding_counts,
             "findings_by_operation": dict(sorted(findings_by_operation.items())),
         },
         "tasks": task_summaries,
         "preparation_failures": preparation_failures,
+        "preparation_physical_rejections": preparation_rejections,
+        "physical_rejections": physical_rejections,
         "findings": findings,
         "benchmark_claim_allowed": False,
         "publication_ready": False,
@@ -449,6 +551,10 @@ def audit_runtime_domain_affordances(
             "This is a deterministic boundary/conformance audit, not an exhaustive proof over "
             "the continuous action-state space.",
             "The audit does not evaluate algorithm quality or benchmark performance.",
+            "Physical-limit rejections are counted separately; "
+            "they are not successful experiments.",
+            "Preparation stops at its first rejection. Later recipe states are not covered; "
+            "preparation_completed_count reports this sampling limitation.",
             "Optional maintainer-only payload extensions outside the public action schema are "
             "not sampled.",
         ],

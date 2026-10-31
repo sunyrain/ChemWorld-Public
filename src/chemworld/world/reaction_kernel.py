@@ -26,6 +26,20 @@ from chemworld.world.thermal_control import REACTION_THERMAL_CONTROL_ID
 R_GAS = 8.31446261815324
 
 
+class ReactionValidityError(ValueError):
+    """A converged, conservative trajectory exceeded its physical operating limits."""
+
+    def __init__(self, violations: list[str], result: ReactorResult) -> None:
+        super().__init__(f"dynamic batch reactor left its validity domain: {violations}")
+        self.diagnostics: dict[str, object] = {
+            "validity_violations": violations,
+            "reactor_diagnostic": result.diagnostics.to_dict(),
+            "validity_domain": (
+                result.validity_domain.to_dict() if result.validity_domain is not None else {}
+            ),
+        }
+
+
 @dataclass(frozen=True)
 class ReactionIntegrationResult:
     species_amounts: dict[str, float]
@@ -341,6 +355,11 @@ def _raise_for_failed_reactor_contract(result: ReactorResult) -> None:
             "dynamic batch reactor material balance failed: "
             f"{diagnostics.material_balance_error_mol:.6g} mol"
         )
+    solver_diagnostics = result.metadata.get("solver_diagnostics")
+    if not isinstance(solver_diagnostics, list) or not solver_diagnostics:
+        raise RuntimeError("dynamic batch reactor returned no solver diagnostics")
+    if any(not bool(item.get("success")) for item in solver_diagnostics if isinstance(item, dict)):
+        raise RuntimeError("dynamic batch reactor solver did not converge")
     fatal_warnings = {
         "temperature_outside_validity_domain",
         "pressure_outside_validity_domain",
@@ -348,12 +367,7 @@ def _raise_for_failed_reactor_contract(result: ReactorResult) -> None:
     }
     failures = sorted(fatal_warnings.intersection(diagnostics.warnings))
     if failures:
-        raise RuntimeError(f"dynamic batch reactor left its validity domain: {failures}")
-    solver_diagnostics = result.metadata.get("solver_diagnostics")
-    if not isinstance(solver_diagnostics, list) or not solver_diagnostics:
-        raise RuntimeError("dynamic batch reactor returned no solver diagnostics")
-    if any(not bool(item.get("success")) for item in solver_diagnostics if isinstance(item, dict)):
-        raise RuntimeError("dynamic batch reactor solver did not converge")
+        raise ReactionValidityError(failures, result)
 
 
 def _maximum_invariant_drift(

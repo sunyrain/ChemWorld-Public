@@ -153,7 +153,12 @@ GOLDEN: dict[str, dict[str, Any]] = {
     "low-budget-characterization": {
         "mechanism_id": "autocatalytic_reaction",
         "steps": 7,
-        "score": 0.2254381139292035,
+        # The unchanged fourth action reaches 2.439 K/s, above the existing
+        # 2 K/s limit. Resolving the accepted solver mesh now rejects it;
+        # only the following 900 s wait advances physics. The old score
+        # 0.2254381139292035 included the incorrectly committed heating.
+        "rejected_steps": (4,),
+        "score": 0.41831820592731117,
     },
     "partition-discovery": {
         "mechanism_id": "reaction_extraction",
@@ -180,7 +185,10 @@ GOLDEN: dict[str, dict[str, Any]] = {
     "reaction-mechanism-explanation": {
         "mechanism_id": "autocatalytic_reaction",
         "steps": 7,
-        "score": 0.22979798353945266,
+        # Same fixed recipe: its fourth action reaches 2.335 K/s and rolls
+        # back. The former 0.22979798353945266 included invalid heating.
+        "rejected_steps": (4,),
+        "score": 0.4253052081209714,
     },
     "reaction-optimization-standard": {
         "mechanism_id": "simple_batch_reaction",
@@ -275,10 +283,30 @@ def test_runtime_v2_golden_scripted_final_assay(
         final_info: dict[str, Any] = {}
         final_terminated = False
         final_truncated = False
-        for action in actions:
+        rejected_steps = expected.get("rejected_steps", ())
+        for step_index, action in enumerate(actions, start=1):
+            before = env.unwrapped._state
             observation, _, final_terminated, final_truncated, final_info = env.step(action)
             assert not final_info["constraint_flags"]["precondition_failed"], action
-            assert final_info["transaction_status"] == "committed"
+            if step_index in rejected_steps:
+                assert action["operation"] == "heat"
+                assert final_info["transaction_status"] == "rolled_back"
+                assert final_info["operation_outcome"] == "rejected"
+                assert final_info["actual_duration_s"] == 0.0
+                diagnostic = final_info["outcome_diagnostics"]
+                assert diagnostic["failure_reason"] == "reaction_validity_domain_exceeded"
+                assert diagnostic["validity_violations"] == ["thermal_runaway_rate_exceeds_limit"]
+                assert diagnostic["reactor_diagnostic"]["maximum_temperature_rate_K_s"] > 2.0
+                assert diagnostic["validity_domain"]["maximum_temperature_rate_K_s"] == 2.0
+                after = env.unwrapped._state
+                assert after.species_amounts == before.species_amounts
+                assert after.temperature_K == before.temperature_K
+                assert after.ledger.time_s == before.ledger.time_s
+                assert after.ledger.energy_jacket_J == before.ledger.energy_jacket_J
+            else:
+                assert final_info["transaction_status"] == "committed"
+            if rejected_steps and action["operation"] == "wait":
+                assert env.unwrapped._state.ledger.time_s == 900.0
             assert final_info["kernel_id"].startswith("chemworld.operation.")
             assert "mechanism_hash" not in final_info
 

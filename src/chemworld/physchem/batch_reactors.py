@@ -22,6 +22,7 @@ from chemworld.physchem.reactor_solvers import (
     _amount_vector,
     _integrate_result,
     _material_balance_error,
+    _resolved_temperature_rate,
     _segment_evaluation_times,
     _solve_interval,
     _validated_amount,
@@ -331,6 +332,7 @@ class DynamicBatchReactorModel:
         material_out = dict.fromkeys(self.network.species_ids, 0.0)
         sample_records: list[dict[str, object]] = []
         solver_diagnostics: list[dict[str, object]] = []
+        maximum_temperature_rate = 0.0
         times: list[float] = []
         states: list[np.ndarray] = []
         volumes: list[float] = []
@@ -367,6 +369,9 @@ class DynamicBatchReactorModel:
                     ),
                 )
                 append_solution(segment)
+                maximum_temperature_rate = max(
+                    maximum_temperature_rate, _resolved_temperature_rate(rhs, segment, n_species)
+                )
                 solver_diagnostics.append(segment.diagnostic.to_dict())
                 y_current = np.array(segment.y[:, -1], dtype=float)
                 current_time = next_time
@@ -460,6 +465,7 @@ class DynamicBatchReactorModel:
                 else ()
             ),
             validity_domain=validity_domain,
+            resolved_temperature_rate_K_s=maximum_temperature_rate,
             metadata={
                 "heat_source": (
                     "nasa7_reaction_enthalpy" if species_thermo is not None else "reaction_delta_h"

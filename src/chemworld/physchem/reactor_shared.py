@@ -360,6 +360,7 @@ class ReactorResult:
     pressures_Pa: tuple[float, ...] = ()
     validity_domain: ReactorValidityDomain | None = None
     metadata: dict[str, object] = field(default_factory=dict)
+    resolved_temperature_rate_K_s: float | None = None
 
     def __post_init__(self) -> None:
         point_count = len(self.times_s)
@@ -383,6 +384,8 @@ class ReactorResult:
                 raise ValueError(f"{label} must be finite and positive")
         if self.material_balance_error_mol < 0 or not isfinite(self.material_balance_error_mol):
             raise ValueError("material_balance_error_mol must be finite and nonnegative")
+        if self.resolved_temperature_rate_K_s is not None:
+            _nonnegative_finite(self.resolved_temperature_rate_K_s, "resolved_temperature_rate_K_s")
 
     @property
     def diagnostics(self) -> ReactorDiagnostics:
@@ -399,6 +402,10 @@ class ReactorResult:
         minimum_temperature = min(self.temperatures_K, default=self.final_state.temperature_K)
         maximum_temperature = max(self.temperatures_K, default=self.final_state.temperature_K)
         maximum_temperature_rate = _maximum_rate(self.times_s, self.temperatures_K)
+        if self.resolved_temperature_rate_K_s is not None:
+            maximum_temperature_rate = max(
+                maximum_temperature_rate, self.resolved_temperature_rate_K_s
+            )
         if (
             minimum_temperature < domain.minimum_temperature_K
             or maximum_temperature > domain.maximum_temperature_K

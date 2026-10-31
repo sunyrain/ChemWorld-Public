@@ -22,7 +22,7 @@ from chemworld.runtime.full_process_contract import (
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.world.parameters import ChemWorldParameters
-from chemworld.world.reaction_kernel import integrate_compiled_reaction_ode
+from chemworld.world.reaction_kernel import ReactionValidityError, integrate_compiled_reaction_ode
 from chemworld.world.thermal_kernel import account_temperature_transition, pressure_and_risk
 
 
@@ -210,6 +210,14 @@ class ChemWorldReactionThermalServices:
                 heat=heat,
                 stirring_speed_rpm=stirring_speed,
                 jacket_program=jacket_program,
+            )
+        except ReactionValidityError as exc:
+            return ModelProviderResult(
+                outputs={},
+                diagnostics=exc.diagnostics,
+                outcome="rejected",
+                success=False,
+                failure_reason="reaction_validity_domain_exceeded",
             )
         except (ArithmeticError, RuntimeError, ValueError) as exc:
             return ModelProviderResult(
