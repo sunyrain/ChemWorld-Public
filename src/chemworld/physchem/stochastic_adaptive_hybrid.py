@@ -4,12 +4,15 @@ This module currently defines the adaptive model and its pure rate/classificatio
 view. It does not yet advance a native world or own any material, time or RNG.
 """
 
+from __future__ import annotations
+
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field, fields
 from hashlib import sha256
 from math import isfinite, prod, ulp
 from numbers import Real
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -19,15 +22,20 @@ from chemworld.foundation.discrete_inventory import (
     MAX_COUNT,
 )
 from chemworld.physchem.reaction_rate_laws import mass_action_rate
-from chemworld.physchem.stochastic_elementary import compile_elementary_channels
+from chemworld.physchem.stochastic_elementary import ElementaryChannel, compile_elementary_channels
 from chemworld.physchem.stoichiometric_rates import stoichiometric_amount_rates
+
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike, NDArray
+
+    from chemworld.physchem.reaction_network import ReactionNetworkSpec
 
 ADAPTIVE_HYBRID_SCHEMA = "native-adaptive-hybrid-v1"
 ADAPTIVE_HYBRID_ALGORITHM = CONTINUOUS_ADAPTIVE_ALGORITHM
 MOLECULAR_QUANTUM = 1 / AVOGADRO
 
 
-def _real(value, name, *, positive=False):
+def _real(value: object, name: str, *, positive: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, Real) or not isfinite(value):
         raise ValueError(name + " must be a finite real number")
     if value < 0 or (positive and value == 0):
@@ -73,14 +81,14 @@ class AdaptiveHybridSpec:
             raise ValueError("adaptive geometry or partition interval overflows")
 
     @property
-    def partition_interval_s(self):
+    def partition_interval_s(self) -> float:
         return self.step_s * self.partition_steps
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"schema": ADAPTIVE_HYBRID_SCHEMA, **asdict(self)}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> AdaptiveHybridSpec:
         if not isinstance(payload, Mapping):
             raise ValueError("adaptive hybrid declaration must be an object")
         values = dict(payload)
@@ -100,9 +108,9 @@ class AdaptivePartition:
 
 @dataclass(frozen=True)
 class AdaptiveHybridModel:
-    network: object
+    network: ReactionNetworkSpec
     spec: AdaptiveHybridSpec
-    channels: tuple = field(init=False)
+    channels: tuple[ElementaryChannel, ...] = field(init=False)
     signature: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -124,7 +132,7 @@ class AdaptiveHybridModel:
             ).hexdigest(),
         )
 
-    def populations(self, amounts_mol):
+    def populations(self, amounts_mol: Mapping[str, float]) -> dict[str, float]:
         if not isinstance(amounts_mol, Mapping) or set(amounts_mol) != set(
             self.network.species_ids
         ):
@@ -141,7 +149,9 @@ class AdaptiveHybridModel:
             values[key] = float(integer) if integer * MOLECULAR_QUANTUM == amount else value
         return values
 
-    def partition(self, amounts_mol, *, previous_low=None):
+    def partition(
+        self, amounts_mol: Mapping[str, float], *, previous_low: Iterable[str] | None = None
+    ) -> AdaptivePartition:
         values = self.populations(amounts_mol)
         if previous_low is None:
             middle = (self.spec.lower_limit + self.spec.upper_limit) / 2
@@ -167,7 +177,7 @@ class AdaptiveHybridModel:
             tuple(k for k in self.network.species_ids if k in low), jumps, deterministic
         )
 
-    def _vector(self, populations, *, signed=False):
+    def _vector(self, populations: ArrayLike, *, signed: bool = False) -> dict[str, float]:
         values = np.asarray(populations)
         if values.dtype.kind not in "iuf" or values.shape != (len(self.network.species_ids),):
             raise ValueError("adaptive stage populations must match the original species")
@@ -175,7 +185,9 @@ class AdaptiveHybridModel:
             raise ValueError("adaptive stage populations must be finite and physically nonnegative")
         return dict(zip(self.network.species_ids, map(float, values), strict=True))
 
-    def deterministic_drift(self, populations, stochastic_reactions):
+    def deterministic_drift(
+        self, populations: ArrayLike, stochastic_reactions: Iterable[str]
+    ) -> NDArray[np.float64]:
         values = self._vector(populations, signed=True)
         jumps = set(stochastic_reactions)
         if not jumps <= set(self.network.reaction_ids):
@@ -203,7 +215,9 @@ class AdaptiveHybridModel:
             raise ArithmeticError("adaptive deterministic rate is nonfinite")
         return result
 
-    def propensities(self, populations, stochastic_reactions):
+    def propensities(
+        self, populations: ArrayLike, stochastic_reactions: Iterable[str]
+    ) -> tuple[float, ...]:
         values = self._vector(populations)
         jumps = set(stochastic_reactions)
         if not jumps <= set(self.network.reaction_ids):

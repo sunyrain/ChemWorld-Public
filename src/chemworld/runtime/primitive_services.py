@@ -184,7 +184,8 @@ class ChemWorldPrimitiveOperationServices:
             if model is None:
                 raise ValueError("adaptive dosing requires its actual physical model declaration")
             process = replace(process, stochastic_continuation=rebind_adaptive_continuation(
-                physics.network, model, state.species_amounts, species, continuation,
+                physics.network, model, state.species_amounts, species,
+                cast(Mapping[str, object], continuation),
             ).continuation)
         return state.replace(
             species_amounts=species,

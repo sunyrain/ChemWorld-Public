@@ -1,15 +1,22 @@
 """Install an adaptive variant in the original chemical world and stochastic strategy."""
 
+from collections.abc import Mapping
 from dataclasses import replace
+from typing import cast
 
 from chemworld.foundation import WorldState
-from chemworld.foundation.state_ledgers import VesselLedger, VesselRecord
+from chemworld.foundation.state_ledgers import ProcessLedger, VesselLedger, VesselRecord
+from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.physchem.stochastic_adaptive_advance import initial_adaptive_continuation
+from chemworld.physchem.stochastic_adaptive_hybrid import AdaptiveHybridSpec
 from chemworld.world.composition import WorldCompositionSpec
 from chemworld.world.physical_world import CompositionPhysics
 
 
-def stochastic_adaptive_world(network, spec, amounts_mol, *, seed=0, budget=40):
+def stochastic_adaptive_world(
+    network: ReactionNetworkSpec, spec: AdaptiveHybridSpec, amounts_mol: Mapping[str, float],
+    *, seed: int = 0, budget: int = 40,
+) -> WorldCompositionSpec:
     memory = initial_adaptive_continuation(network, spec, amounts_mol, seed=seed)
     state = WorldState(
         dict(amounts_mol),
@@ -34,7 +41,9 @@ def stochastic_adaptive_world(network, spec, amounts_mol, *, seed=0, budget=40):
         ),
         units={"amount": "mol", "volume": "L", "temperature": "K", "pressure": "Pa", "time": "s"},
     )
-    state = state.replace(process=replace(state.process, stochastic_continuation=memory))
+    state = state.replace(process=replace(
+        cast(ProcessLedger, state.process), stochastic_continuation=cast(dict[str, object], memory),
+    ))
     return WorldCompositionSpec.from_dict(
         {
             "schema_version": "chemworld-world-composition-0.1",

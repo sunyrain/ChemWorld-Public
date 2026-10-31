@@ -5,11 +5,15 @@ while a channel is deterministic; no material is rounded when its label changes.
 The caller remains responsible for the original transaction and shared clock.
 """
 
+from __future__ import annotations
+
 import json
+from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 from math import isfinite, log1p
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, TypedDict, cast
 
 import numpy as np
 
@@ -19,21 +23,71 @@ from chemworld.physchem.stochastic_adaptive_hybrid import (
     ADAPTIVE_HYBRID_ALGORITHM,
     MOLECULAR_QUANTUM,
     AdaptiveHybridModel,
+    AdaptiveHybridSpec,
     _real,
 )
 from chemworld.physchem.stochastic_kinetics import EventBudgetError
 
+if TYPE_CHECKING:
+    from numpy.typing import ArrayLike, NDArray
+
+    from chemworld.physchem.reaction_network import ReactionNetworkSpec
+
+
+class AdaptivePending(TypedDict):
+    schema: str
+    channel_ids: list[str]
+    left_time_s: float
+    left_populations: list[float]
+    propensities: list[float]
+    times_s: list[float | None]
+    dormant_hazards: list[float | None]
+
+
+class _AdaptiveCounters(TypedDict):
+    events_committed: int
+    segments_committed: int
+    partition_checks: int
+    draws_committed: int
+
+
+class AdaptiveContinuation(_AdaptiveCounters):
+    algorithm: str
+    model_signature: str
+    inventory_signature: str
+    time_s: float
+    grid_index: int
+    low_species: list[str]
+    rng_state: Mapping[str, Any]
+    pending: AdaptivePending | None
+    firings: dict[str, int]
+
+
+class AdaptivePartitionChange(TypedDict):
+    time_s: float
+    before: tuple[str, ...]
+    after: tuple[str, ...]
+
+
 _PENDING_SCHEMA = "adaptive-frozen-reaction-clocks-v1"
-_COUNTERS = ("events_committed", "segments_committed", "partition_checks", "draws_committed")
+_ClockCounterKey: TypeAlias = Literal[
+    "events_committed", "segments_committed", "partition_checks", "draws_committed", "grid_index"
+]
+_COUNTERS: tuple[
+    Literal["events_committed", "segments_committed", "partition_checks", "draws_committed"], ...
+] = ("events_committed", "segments_committed", "partition_checks", "draws_committed")
 
 
-def _signature(model, amounts, time):
+def _signature(model: AdaptiveHybridModel, amounts: Mapping[str, float], time: float) -> str:
     return sha256(
         json.dumps([model.signature, amounts, time], sort_keys=True, allow_nan=False).encode()
     ).hexdigest()
 
 
-def initial_adaptive_continuation(network, spec, amounts_mol, *, seed):
+def initial_adaptive_continuation(
+    network: ReactionNetworkSpec, spec: AdaptiveHybridSpec,
+    amounts_mol: Mapping[str, float], *, seed: int,
+) -> AdaptiveContinuation:
     model = AdaptiveHybridModel(network, spec)
     model.populations(amounts_mol)
     if type(seed) is not int or seed < 0:
@@ -48,12 +102,12 @@ def initial_adaptive_continuation(network, spec, amounts_mol, *, seed):
         "rng_state": deepcopy(np.random.PCG64(seed).state),
         "pending": None,
         "firings": dict.fromkeys(network.reaction_ids, 0),
-        **dict.fromkeys(_COUNTERS, 0),
+        **cast(_AdaptiveCounters, dict.fromkeys(_COUNTERS, 0)),
     }
 
 
 class _Work:
-    def __init__(self, model):
+    def __init__(self, model: AdaptiveHybridModel) -> None:
         self.model = model
         self.values = {
             "drift_evaluations": 0,
@@ -64,26 +118,29 @@ class _Work:
             "random_draws": 0,
         }
 
-    def rates(self, populations, jumps):
+    def rates(self, populations: ArrayLike, jumps: Iterable[str]) -> tuple[float, ...]:
         self.charge("propensity_evaluations", len(self.model.channels))
         return self.model.propensities(populations, jumps)
 
-    def drift(self, populations, jumps):
+    def drift(self, populations: ArrayLike, jumps: Iterable[str]) -> NDArray[np.float64]:
         self.charge("drift_evaluations", 1)
         return self.model.deterministic_drift(populations, jumps)
 
-    def charge(self, field, count):
+    def charge(self, field: str, count: int) -> None:
         self.values[field] += count
         total = self.values["drift_evaluations"] + self.values["propensity_evaluations"]
         if total > self.model.spec.max_evaluations_per_advance:
             raise EventBudgetError("adaptive rate evaluation budget exhausted")
 
 
-def _jumps(model, low):
+def _jumps(model: AdaptiveHybridModel, low: Iterable[str]) -> tuple[str, ...]:
     return tuple(c.reaction_id for c in model.channels if c.participants & set(low))
 
 
-def _continuation(model, amounts, continuation, work, *, verify_rates=True):
+def _continuation(
+    model: AdaptiveHybridModel, amounts: Mapping[str, float],
+    continuation: Mapping[str, object], work: _Work, *, verify_rates: bool = True,
+) -> tuple[AdaptiveContinuation, np.random.Generator]:
     expected = {
         "algorithm",
         "model_signature",
@@ -96,14 +153,15 @@ def _continuation(model, amounts, continuation, work, *, verify_rates=True):
         "firings",
         *_COUNTERS,
     }
-    state = deepcopy(dict(continuation))
+    state = cast(AdaptiveContinuation, deepcopy(dict(continuation)))
     if set(state) != expected or state["algorithm"] != ADAPTIVE_HYBRID_ALGORITHM:
         raise ValueError("unsupported adaptive hybrid continuation")
     time = _real(state["time_s"], "adaptive continuation time")
     if (
         state["model_signature"] != model.signature
         or state["inventory_signature"] != _signature(model, amounts, time)
-        or any(type(state[k]) is not int or state[k] < 0 for k in (*_COUNTERS, "grid_index"))
+        or any(type(state[k]) is not int or state[k] < 0
+               for k in cast(tuple[_ClockCounterKey, ...], (*_COUNTERS, "grid_index")))
     ):
         raise ValueError("adaptive continuation differs from the original model/inventory")
     start, end = (
@@ -177,22 +235,31 @@ def _continuation(model, amounts, continuation, work, *, verify_rates=True):
     return state, rng
 
 
-def validate_adaptive_continuation(network, spec, amounts_mol, continuation, *, numerical=True):
+def validate_adaptive_continuation(
+    network: ReactionNetworkSpec, spec: AdaptiveHybridSpec,
+    amounts_mol: Mapping[str, float], continuation: Mapping[str, object],
+    *, numerical: bool = True,
+) -> None:
     model = AdaptiveHybridModel(network, spec)
     model.populations(amounts_mol)
     _continuation(model, amounts_mol, continuation, _Work(model), verify_rates=numerical)
 
 
-def _pending(model, values, time, low, old, rng, work, fired=None):
+def _pending(
+    model: AdaptiveHybridModel, values: Sequence[float] | NDArray[np.float64],
+    time: float, low: Iterable[str], old: AdaptivePending | None,
+    rng: np.random.Generator, work: _Work, fired: int | None = None,
+) -> AdaptivePending:
     rates = work.rates(values, _jumps(model, low))
-    times, dormant = [], []
+    times: list[float | None] = []
+    dormant: list[float | None] = []
     for index, rate in enumerate(rates):
         hazard = None
         same_time = None
         if old is not None and index != fired:
             previous, when = old["propensities"][index], old["times_s"][index]
             if previous > 0:
-                hazard = previous * (when - time)
+                hazard = previous * (cast(float, when) - time)
                 if hazard <= 0 or not isfinite(hazard):
                     raise ArithmeticError("adaptive residual hazard cannot be represented")
                 if rate == previous:
@@ -226,24 +293,26 @@ def _pending(model, values, time, low, old, rng, work, fired=None):
 
 @dataclass(frozen=True)
 class AdaptiveHybridAdvance:
-    amounts_mol: dict
-    continuation: dict
+    amounts_mol: dict[str, float]
+    continuation: AdaptiveContinuation
     actual_duration_s: float
-    events: tuple
-    work: dict
-    partition_changes: tuple
+    events: tuple[tuple[float, str], ...]
+    work: dict[str, int]
+    partition_changes: tuple[AdaptivePartitionChange, ...]
 
 
 @dataclass(frozen=True)
 class AdaptiveHybridRebind:
-    continuation: dict
-    work: dict
-    partition_change: dict | None
+    continuation: AdaptiveContinuation
+    work: dict[str, int]
+    partition_change: AdaptivePartitionChange | None
 
 
 def rebind_adaptive_continuation(
-    network, spec, old_amounts_mol, new_amounts_mol, continuation, *, force_refresh=False
-):
+    network: ReactionNetworkSpec, spec: AdaptiveHybridSpec,
+    old_amounts_mol: Mapping[str, float], new_amounts_mol: Mapping[str, float],
+    continuation: Mapping[str, object], *, force_refresh: bool = False,
+) -> AdaptiveHybridRebind:
     """Rebind after the caller's actual material transaction; never move its stock.
 
     The old clock's unspent hazard survives both rate changes and mode changes.
@@ -269,13 +338,16 @@ def rebind_adaptive_continuation(
     state["rng_state"] = deepcopy(rng.bit_generator.state)
     state["draws_committed"] += work.values["random_draws"]
     state["inventory_signature"] = _signature(model, new_amounts_mol, state["time_s"])
-    change = (
+    change: AdaptivePartitionChange | None = (
         {"time_s": state["time_s"], "before": before, "after": after} if before != after else None
     )
     return AdaptiveHybridRebind(state, dict(work.values), change)
 
 
-def advance_adaptive_hybrid(network, spec, amounts_mol, continuation, duration_s):
+def advance_adaptive_hybrid(
+    network: ReactionNetworkSpec, spec: AdaptiveHybridSpec,
+    amounts_mol: Mapping[str, float], continuation: Mapping[str, object], duration_s: float,
+) -> AdaptiveHybridAdvance:
     model = AdaptiveHybridModel(network, spec)
     populations = model.populations(amounts_mol)
     values = np.array([populations[k] for k in network.species_ids])
@@ -287,9 +359,10 @@ def advance_adaptive_hybrid(network, spec, amounts_mol, continuation, duration_s
     target = time + duration
     if not isfinite(target) or (duration > 0 and target <= time):
         raise ValueError("adaptive requested endpoint is not representable")
-    events, transitions = [], []
+    events: list[tuple[float, str]] = []
+    transitions: list[AdaptivePartitionChange] = []
 
-    def amounts():
+    def amounts() -> dict[str, float]:
         return {
             key: amounts_mol[key]
             if values[i] == initial[i]
@@ -300,7 +373,7 @@ def advance_adaptive_hybrid(network, spec, amounts_mol, continuation, duration_s
     if duration and state["pending"] is None:
         state["pending"] = _pending(model, values, time, state["low_species"], None, rng, work)
     while time < target:
-        pending = state["pending"]
+        pending = cast(AdaptivePending, state["pending"])
         grid_end = (state["grid_index"] + 1) * spec.step_s
         when, index = min(
             ((t, i) for i, t in enumerate(pending["times_s"]) if t is not None),
@@ -314,7 +387,9 @@ def advance_adaptive_hybrid(network, spec, amounts_mol, continuation, duration_s
         jumps = _jumps(model, state["low_species"])
         if len(jumps) < len(model.channels):
 
-            def rhs(_at, y, _jumps=jumps):
+            def rhs(
+                _at: float, y: NDArray[np.float64], _jumps: tuple[str, ...] = jumps,
+            ) -> NDArray[np.float64]:
                 return work.drift(y, _jumps)
 
             if spec.method == "RK4":
@@ -347,7 +422,7 @@ def advance_adaptive_hybrid(network, spec, amounts_mol, continuation, duration_s
         if when == time:
             if work.values["events"] >= spec.max_events_per_advance:
                 raise EventBudgetError("adaptive stochastic event budget exhausted")
-            channel = model.channels[index]
+            channel = model.channels[cast(int, index)]
             candidate = values.copy()
             for key, change in channel.changes:
                 position = network.species_ids.index(key)
