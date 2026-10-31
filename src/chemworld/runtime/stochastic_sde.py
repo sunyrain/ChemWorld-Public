@@ -149,7 +149,8 @@ class SDEStochasticRuntime:
     def apply_parameters(self, state, action):
         if state.terminated or state.quenched:
             return ModelProviderResult(
-                {}, success=False, outcome="rejected", failure_reason="sde_control_stopped"
+                {}, diagnostics={}, success=False, outcome="rejected",
+                failure_reason="sde_control_stopped",
             )
         try:
             spec = self.validate(state, numerical=False)
@@ -253,7 +254,8 @@ class SDEStochasticRuntime:
             or state.terminated
         ):
             return ModelProviderResult(
-                {}, success=False, outcome="rejected", failure_reason="sde_fixed_boundary_only"
+                {}, diagnostics={}, success=False, outcome="rejected",
+                failure_reason="sde_fixed_boundary_only",
             )
         try:
             spec = self.validate(state, numerical=False)

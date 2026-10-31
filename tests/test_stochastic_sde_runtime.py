@@ -14,6 +14,7 @@ from chemworld.foundation.lab_clock import LabClockSpec
 from chemworld.physchem.stochastic_sde import initial_sde_continuation
 from chemworld.physchem.stochastic_sde_specs import SDE_ALGORITHM, StochasticSDESpec
 from chemworld.runtime import ChemWorldRuntime
+from chemworld.runtime.stochastic_sde import SDEStochasticRuntime
 from chemworld.world.biochemical_worlds import biochemical_network, biochemical_world
 from chemworld.world.composition import WorldCompositionSpec
 from chemworld.world.stochastic_sde_world import stochastic_sde_world
@@ -37,6 +38,43 @@ def committed(instance, action):
     result = instance.execute(action)
     assert result.info["transaction_status"] == "committed", result.info
     return result
+
+
+@pytest.mark.parametrize("stop_flag", ["terminated", "quenched"])
+def test_stopped_sde_control_returns_rejection_without_mutation(stop_flag):
+    world = composition()
+    state = world.physics.initial_states["reactor"].replace(**{stop_flag: True})
+    before = state.to_dict()
+    result = SDEStochasticRuntime(world).apply_parameters(
+        state, {"operation": "set_sde_parameters", "values": {"unused": 1}},
+    )
+    assert not result.success and result.outcome == "rejected"
+    assert result.failure_reason == "sde_control_stopped"
+    assert result.actual_duration_s == 0 and result.state is None
+    assert result.to_dict()["diagnostics"] == {}
+    assert state.to_dict() == before
+
+
+@pytest.mark.parametrize(
+    "state_changes,action,options",
+    [
+        ({}, {"operation": "wait", "duration_s": 0.125}, {"heat": True}),
+        ({}, {"operation": "wait", "duration_s": 0.125}, {"jacket_program": {}}),
+        ({}, {"operation": "heat", "duration_s": 0.125}, {}),
+        ({"terminated": True}, {"operation": "wait", "duration_s": 0.125}, {}),
+        ({"quenched": True}, {"operation": "wait", "duration_s": 0.125}, {}),
+    ],
+)
+def test_unsupported_sde_advance_returns_rejection_without_mutation(state_changes, action, options):
+    world = composition()
+    state = world.physics.initial_states["reactor"].replace(**state_changes)
+    before = state.to_dict()
+    result = SDEStochasticRuntime(world).advance(state, action, **options)
+    assert not result.success and result.outcome == "rejected"
+    assert result.failure_reason == "sde_fixed_boundary_only"
+    assert result.actual_duration_s == 0 and result.state is None
+    assert result.to_dict()["diagnostics"] == {}
+    assert state.to_dict() == before
 
 
 def test_real_world_wait_and_sole_phase_mol_inventory():
