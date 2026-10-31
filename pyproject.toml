@@ -68,6 +68,7 @@ physchem-ref = [
   "chemicals>=1.3",
   "fluids>=1.1",
   "phasepy>=0.0.56,<0.1",
+  "teqp==0.23.2",
   "thermo>=0.4",
 ]
 

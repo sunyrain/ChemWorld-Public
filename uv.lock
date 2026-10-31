@@ -480,6 +480,7 @@ physchem-ref = [
     { name = "chemicals" },
     { name = "fluids" },
     { name = "phasepy" },
+    { name = "teqp" },
     { name = "thermo" },
 ]
 rl = [
@@ -513,6 +514,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.4,<1.9" },
     { name = "scipy", specifier = ">=1.10,<1.19" },
     { name = "stable-baselines3", marker = "extra == 'rl'", specifier = ">=2.9,<3.0" },
+    { name = "teqp", marker = "extra == 'physchem-ref'", specifier = "==0.23.2" },
     { name = "thermo", marker = "extra == 'physchem-ref'", specifier = ">=0.4" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
 ]
@@ -3319,6 +3321,30 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/d3/803453b36afefb7c2bb238361cd4ae6125a569b4db67cd9e79846ba2d68c/sympy-1.14.0.tar.gz", hash = "sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517", size = 7793921, upload-time = "2025-04-27T18:05:01.611Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl", hash = "sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5", size = 6299353, upload-time = "2025-04-27T18:04:59.103Z" },
+]
+
+[[package]]
+name = "teqp"
+version = "0.23.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/29/4ecfbd53e7964f3d171617e55eaefdc9033d29f6823fb922d4095c4f9e76/teqp-0.23.2.tar.gz", hash = "sha256:3c7f546a1b6450050b65069d9a8c65df03b91a2120a2ebf1488ca9e0424f5f37", size = 19109592, upload-time = "2026-07-22T07:03:47.644Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/31/44/12a2205b241ceb414b5d34b1c31e14d070856f8054688148d8e6d7c0b743/teqp-0.23.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:313562e1165a07127643610e0032d278287ffefaaea07d343bd9da697f86db62", size = 12115227, upload-time = "2026-07-22T07:03:00.287Z" },
+    { url = "https://files.pythonhosted.org/packages/72/6d/1569be013e72e8d94ccc5632a63e7737c69f6bc98dd0b1f8028bfbcd21b4/teqp-0.23.2-cp311-cp311-macosx_11_0_x86_64.whl", hash = "sha256:e064a38c2d5ccaeb3266cf805834f3b1af55681e3fd2c5e147cbe5bda59ad3b1", size = 13745980, upload-time = "2026-07-22T07:03:02.6Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/88/e5bdab44b5d4b1a29caa878a151dc21dfee3e2bc3ddd918765a4fc8e5420/teqp-0.23.2-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:24a82b0f1032a28bd840a80ecdafee405f9c281e7fe0e43dc6ee8e3e6bd8bc91", size = 13105353, upload-time = "2026-07-22T07:03:04.704Z" },
+    { url = "https://files.pythonhosted.org/packages/77/fe/a8c909a38504d6a4248998202db7c59a6b37c7f04235b76dc9c0ea3909a5/teqp-0.23.2-cp311-cp311-win_amd64.whl", hash = "sha256:33fe44e227a3298dd6c591cfc6d5465c9ddb40cadd94fae049a9c77934399ae0", size = 7682560, upload-time = "2026-07-22T07:03:07Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/ae/85434026512687d7797201a381b7776c2ea4cb30714fd1b7706914b8fb0f/teqp-0.23.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:0000844fa8289d188e07e796625a6e7a3438770456fb6cd709b3847001454e96", size = 12114484, upload-time = "2026-07-22T07:03:08.886Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/d0/d2ef269b518f96f61946997032564ef886cf02221decf8f3c5d43aed5932/teqp-0.23.2-cp312-cp312-macosx_11_0_x86_64.whl", hash = "sha256:7fbe090a016841843b1e6d34246eca6844235dac799da28df5a861500dfb2124", size = 13747260, upload-time = "2026-07-22T07:03:11.046Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/c0/72a3086d3acff92b6a37c40e1336dcb940219337466c31cb00eab8409f08/teqp-0.23.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5eef8c574ea1dcce537378484f2f09fa0b75dd0c070b8af48d8a3ee90614ad71", size = 13105623, upload-time = "2026-07-22T07:03:13.583Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/a2/9ce6b58d0a8bf853b40b8b3acf5a52b34c6a4e5063c90ece2ba23a079641/teqp-0.23.2-cp312-cp312-win_amd64.whl", hash = "sha256:2f11ff782478a070bff0d39980510cf0f24bcd46da8226510d80058585f3865c", size = 7690389, upload-time = "2026-07-22T07:03:16.004Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/7b/b40d37ea99b498c945b3dc96f423df32b350485ec83b88ad44840a130e8d/teqp-0.23.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:9c9be85ed2ed92971983f715f4c05ba25b3441220f195024344548df47c86c76", size = 12114655, upload-time = "2026-07-22T07:03:18.82Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/2f/9a039c61e6bc9273de1086fb4407eefed79b5de4ce3448b54a373fce1b7c/teqp-0.23.2-cp313-cp313-macosx_11_0_x86_64.whl", hash = "sha256:77aade53287c0600996f6c7185e30c498f7c2965b8065cf39e4503c9b203576a", size = 13747505, upload-time = "2026-07-22T07:03:21.393Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/ee/952c1b9ba2c50ec741c4ec2fe399fc4752a2db190212ba9793a11787ba5b/teqp-0.23.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:231b53fc360f105f4c41286b6a449c86bccb34139805e284505089a0befa25e1", size = 13105571, upload-time = "2026-07-22T07:03:23.813Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/30/306870398632ab7114403f357a64172691030cab201f334f4f589dd2823b/teqp-0.23.2-cp313-cp313-win_amd64.whl", hash = "sha256:f042b597e8fa4aef42c31a145d0f9267e67387ea0c29d27123f33bd3e256d2e0", size = 7690700, upload-time = "2026-07-22T07:03:26.055Z" },
+    { url = "https://files.pythonhosted.org/packages/36/41/94e32917971e206badaca7aa7997afb91a0963125baa4c00009a3ad02a76/teqp-0.23.2-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:e7736643968ff352afe2257590891266c33e48e36aa5fb887b305a27a14f320e", size = 12115443, upload-time = "2026-07-22T07:03:28.175Z" },
+    { url = "https://files.pythonhosted.org/packages/53/20/49688f35fc54bf7fe25fd762ebc0a1f282d1e22ea86e6a379fdb4148d4e0/teqp-0.23.2-cp314-cp314-macosx_11_0_x86_64.whl", hash = "sha256:8c4bd460ea69e4e831628d3538c62e4bc0eefbd89b4a206c5db618a581501694", size = 13747560, upload-time = "2026-07-22T07:03:31.103Z" },
+    { url = "https://files.pythonhosted.org/packages/91/c4/19dcd1fd4c819eefba2cbda8329f4f4bbcf7e172ad5f57f9125d7ca6c1ff/teqp-0.23.2-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a02759974e06ab57ccbebf87d3f726a4ed472e1af38e4b025812014c5ebd81b1", size = 13105599, upload-time = "2026-07-22T07:03:34.032Z" },
+    { url = "https://files.pythonhosted.org/packages/49/a2/46dc4da9808695b5094f60055340ad2077a9079bc60cec9a31013d9e7582/teqp-0.23.2-cp314-cp314-win_amd64.whl", hash = "sha256:338a6c1ad9f17c798934c616102e9a21918f1a156015caccdd0382f619e29a43", size = 7861917, upload-time = "2026-07-22T07:03:36.602Z" },
 ]
 
 [[package]]
