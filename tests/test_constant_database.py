@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from chemworld.data.conductivity import ConductivityDatabase
 from chemworld.data.constant_catalog import CONSTANT_SOURCES
 from chemworld.data.constants import (
     AmbiguousConstantIdentityError,
@@ -23,12 +24,15 @@ from chemworld.data.constants import (
     SourceCorrelation,
     UnknownConstantMethodError,
 )
+from chemworld.data.interface import InterfaceDatabase
 from chemworld.data.scientific_inputs import QuantityColumn, ScientificTable
+from chemworld.data.viscosity import ViscosityDatabase
 from chemworld.foundation.dimensions import (
     DimensionVector,
     dimension_definition,
     unmapped_supported_unit_dimensions,
 )
+from chemworld.physchem.specs import ComponentSpec
 
 
 def put(root, method, content):
@@ -67,6 +71,22 @@ def test_fractional_dimensions_roundtrip_and_physical_relations():
     assert all(type(v) is int for v in vector("pressure").to_dict().values())
     assert DimensionVector.from_dict({"mass": "0.25"}).mass == .25
     assert unmapped_supported_unit_dimensions() == ()
+
+
+@pytest.mark.parametrize("database_type,query", [
+    (ViscosityDatabase, "viscosity"),
+    (ConductivityDatabase, "thermal_conductivity"),
+    (InterfaceDatabase, "surface_tension"),
+])
+def test_constant_rows_remain_readable_but_are_not_property_correlations(db, database_type, query):
+    specialized = database_type(db.source_directory)
+    assert specialized.record("Water", method="HEOS").value("Tc").value == 647.096
+    with pytest.raises(ValueError, match="correlation source"):
+        getattr(specialized, query)("Water", method="HEOS")
+    with pytest.raises(ValueError, match="correlation source"):
+        specialized.property_input(
+            "Water", ComponentSpec("water", "H2O", cas_number="7732-18-5"), method="HEOS",
+        )
 
 
 @pytest.mark.parametrize("bad", [True, None, "1", float("nan"), float("inf"), -float("inf")])
