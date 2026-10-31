@@ -6,21 +6,28 @@ second persistent inventory; all commits and resources use the existing runtime.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from math import isclose
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from chemworld.foundation import WorldState
-from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger
+from chemworld.foundation.state_ledgers import (
+    EquipmentLedger,
+    EquipmentRecord,
+    PhaseLedger,
+    VesselLedger,
+)
 from chemworld.foundation.state_ownership import StateSlots
 from chemworld.physchem.coupled_system import (
     DEFAULT_COUPLED_ODE_POLICY,
     CoupledEvent,
     CoupledState,
     CoupledSystem,
+    CoupledThermodynamics,
     HeatFlux,
 )
-from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
+from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec, ThermalSystemSpec
 from chemworld.physchem.inventory_interactions import with_inventory_interactions
 from chemworld.physchem.reaction_network import R_J_PER_MOL_K
 from chemworld.runtime.advance_paths import advance_ledger
@@ -30,6 +37,12 @@ from chemworld.runtime.thermal_feedback import (
     thermal_feedback_report,
     with_thermal_feedback,
 )
+
+if TYPE_CHECKING:
+    from chemworld.physchem.heat_transfer_units import EOSThermodynamics, SpeciesThermodynamics
+    from chemworld.world.composition import WorldComponentRequest, WorldCompositionSpec
+    from chemworld.world.domain_modules import DomainModuleRegistry
+    from chemworld.world.physical_world import CompositionPhysics
 
 
 @dataclass(frozen=True)
@@ -41,10 +54,24 @@ class ProcessFactoryContext:
     physics: Any = None
 
 
-def connected_device(state: WorldState, *, required: bool = True):
+@overload
+def connected_device(
+    state: WorldState, *, required: Literal[True] = True,
+) -> tuple[EquipmentRecord, ThermalDeviceSpec]: ...
+
+
+@overload
+def connected_device(
+    state: WorldState, *, required: bool,
+) -> tuple[EquipmentRecord, ThermalDeviceSpec] | tuple[None, None]: ...
+
+
+def connected_device(
+    state: WorldState, *, required: bool = True,
+) -> tuple[EquipmentRecord, ThermalDeviceSpec] | tuple[None, None]:
     devices = [
         record
-        for record in state.equipment.equipment.values()
+        for record in cast(EquipmentLedger, state.equipment).equipment.values()
         if record.equipment_type == "thermal_device"
         and record.attached_vessel_id == state.vessel_id
         and record.status != "parked"
@@ -62,7 +89,7 @@ def thermal_control(state: WorldState) -> ThermalDeviceSpec | None:
         record.equipment_type == "thermal_device" and "thermal_device" in record.settings
         and record.attached_vessel_id == state.vessel_id
         and record.status != "parked"
-        for record in state.equipment.equipment.values()
+        for record in cast(EquipmentLedger, state.equipment).equipment.values()
     ):
         return connected_device(state)[1]
     return None
@@ -70,7 +97,7 @@ def thermal_control(state: WorldState) -> ThermalDeviceSpec | None:
 
 def set_thermal_enabled(state: WorldState, enabled: bool) -> WorldState:
     record, device = connected_device(state)
-    equipment = dict(state.equipment.equipment)
+    equipment = dict(cast(EquipmentLedger, state.equipment).equipment)
     equipment[record.equipment_id] = replace(
         record,
         settings={
@@ -82,7 +109,7 @@ def set_thermal_enabled(state: WorldState, enabled: bool) -> WorldState:
 
 
 def reconnect_thermal_device(state: WorldState, device_id: str, destination: str,
-                             *, park_idle=False) -> WorldState:
+                             *, park_idle: bool = False) -> WorldState:
     """Return a zero-time candidate reconnecting one device, preserving identity.
 
     Like the material-routing helpers this is a state transform; a caller must
@@ -92,15 +119,16 @@ def reconnect_thermal_device(state: WorldState, device_id: str, destination: str
     locals_ = {state.vessel_id: state, **state.inactive_vessels}
     if destination not in locals_:
         raise ValueError("thermal destination must be a declared vessel")
-    sources = [name for name, local in locals_.items() if device_id in local.equipment.equipment]
+    equipment = {name: cast(EquipmentLedger, local.equipment) for name, local in locals_.items()}
+    sources = [name for name in locals_ if device_id in equipment[name].equipment]
     if len(sources) != 1:
         raise ValueError("thermal device identity must have exactly one owner")
     source = sources[0]
-    device = locals_[source].equipment.equipment[device_id]
+    device = equipment[source].equipment[device_id]
     if device.equipment_type != "thermal_device":
         raise ValueError("reconnection requires a thermal device")
     blocking = [
-        record for record in locals_[destination].equipment.equipment.values()
+        record for record in equipment[destination].equipment.values()
         if record.equipment_type == "thermal_device"
         and record.attached_vessel_id == destination and record.equipment_id != device_id
         and record.status != "parked"
@@ -118,7 +146,7 @@ def reconnect_thermal_device(state: WorldState, device_id: str, destination: str
     return reconnect_device(state, device_id, destination)
 
 
-def material_inventory(state):
+def material_inventory(state: WorldState) -> tuple[dict[str, float], dict[str, str]]:
     amounts = dict(state.species_amounts)
     species = {key: key for key in amounts}
     for slot in state.state_slots.slots:
@@ -132,31 +160,36 @@ def material_inventory(state):
     return amounts, species
 
 
-def local_thermodynamics(state, model):
+def local_thermodynamics(
+    state: WorldState, model: ThermalSystemSpec,
+) -> tuple[CoupledThermodynamics, CoupledState]:
     amounts, species_ids = material_inventory(state)
     if model.uses_eos_pressure:
+        eos = cast("EOSThermodynamics", model.thermodynamics)
         # One original bulk inventory; only non-material support capacity may
         # accompany it. The adapter itself validates fixed V and composition.
         if amounts != state.species_amounts or set(amounts) != set(
-            model.thermodynamics.inventory_keys
+            eos.inventory_keys
         ):
             raise ValueError(
                 "EOS thermal world requires its one declared bulk inventory")
-        thermo = replace(model.thermodynamics, support_heat_capacity_J_K=(
-            model.thermodynamics.support_heat_capacity_J_K + state.state_slots.heat_capacity()))
+        thermo = replace(eos, support_heat_capacity_J_K=(
+            eos.support_heat_capacity_J_K + state.state_slots.heat_capacity()))
         packed = CoupledState(amounts, state.temperature_K, state.volume_L,
             state.vessel_elapsed_s.get(state.vessel_id, state.ledger.time_s))
         thermo.validate_state(packed)
         return thermo, packed
-    if set(species_ids.values()) - model.thermodynamics.species.keys():
+    species_thermo = cast("SpeciesThermodynamics", model.thermodynamics)
+    if set(species_ids.values()) - species_thermo.species.keys():
         raise ValueError("every physical inventory requires internal energy and heat capacity")
-    thermo = replace(
-        model.thermodynamics,
-        species={
-            key: model.thermodynamics.species[species] for key, species in species_ids.items()
-        },
+    caloric = replace(
+        species_thermo,
+        # Remapping keys preserves the concrete model's species value type.
+        species=cast(Any, {
+            key: species_thermo.species[species] for key, species in species_ids.items()
+        }),
         support_heat_capacity_J_K=(
-            model.thermodynamics.support_heat_capacity_J_K
+            species_thermo.support_heat_capacity_J_K
             + state.state_slots.heat_capacity()
             + (
                 0
@@ -165,11 +198,11 @@ def local_thermodynamics(state, model):
             )
         ),
     )
-    return with_inventory_interactions(thermo, state.state_slots.slots), CoupledState(
+    return with_inventory_interactions(caloric, state.state_slots.slots), CoupledState(
         amounts,
         state.temperature_K,
         (
-            state.vessels.vessels[state.vessel_id].max_volume_L
+            cast(VesselLedger, state.vessels).vessels[state.vessel_id].max_volume_L
             if state.volume_L == 0 and model.condensed_background is not None
             else state.volume_L
         ),
@@ -177,14 +210,18 @@ def local_thermodynamics(state, model):
     )
 
 
-def assemble_local_system(state, physics, modules, components):
-    model = physics.models_of("thermal")[state.vessel_id]
+def assemble_local_system(
+    state: WorldState, physics: CompositionPhysics, modules: DomainModuleRegistry,
+    components: Sequence[WorldComponentRequest],
+) -> tuple[CoupledSystem, CoupledState]:
+    model = cast(ThermalSystemSpec, physics.models_of("thermal")[state.vessel_id])
     _, device = connected_device(state, required=False)
-    if len(state.phases.phases) != 1:
+    phases = cast(PhaseLedger, state.phases)
+    if len(phases.phases) != 1:
         raise ValueError("local coupled thermal adapter requires one bulk phase")
     if model.condensed_background is not None:
         carrier = model.condensed_background
-        phase = next(iter(state.phases.phases.values()))
+        phase = next(iter(phases.phases.values()))
         if (
             state.phase != "liquid"
             or not isclose(phase.solvents.volume_L, state.volume_L, rel_tol=0, abs_tol=1e-12)
@@ -224,12 +261,14 @@ def assemble_local_system(state, physics, modules, components):
         )
     )
     network_species = {s.species_id: s for s in physics.network.species}
-    laws = {}
+    laws: dict[str, dict[str, float]] = {}
     for key, species in species_ids.items():
         for element, coefficient in network_species[species].composition.items():
             laws.setdefault(element, {})[key] = coefficient
     isothermal = device is not None and device.enabled and device.mode == "isothermal"
-    if isothermal and not isclose(device.setpoint_K, state.temperature_K, rel_tol=0, abs_tol=1e-9):
+    if isothermal and not isclose(
+        cast(ThermalDeviceSpec, device).setpoint_K, state.temperature_K, rel_tol=0, abs_tol=1e-9,
+    ):
         raise ValueError(
             "isothermal reference must start at its setpoint; use finite power for a ramp"
         )
@@ -259,7 +298,7 @@ def assemble_local_system(state, physics, modules, components):
                         lambda candidate: (
                             model.maximum_pressure_Pa
                             - (
-                                thermo.pressure_pa(candidate)
+                                cast("EOSThermodynamics", thermo).pressure_pa(candidate)
                                 if model.uses_eos_pressure else
                                 sum(candidate.amounts_mol[key] for key in state.species_amounts)
                                 * R_J_PER_MOL_K * candidate.temperature_K
@@ -285,11 +324,11 @@ def assemble_local_system(state, physics, modules, components):
     return with_thermal_feedback(state, system, initial, physics=physics)
 
 
-def pressure_for_state(state, model):
+def pressure_for_state(state: WorldState, model: ThermalSystemSpec) -> float:
     if model.pressure_law == "fixed_pressure":
         return state.pressure_Pa
     if model.uses_eos_pressure:
-        return model.thermodynamics.pressure_pa(CoupledState(
+        return cast("EOSThermodynamics", model.thermodynamics).pressure_pa(CoupledState(
             state.species_amounts, state.temperature_K, state.volume_L))
     return (
         sum(state.species_amounts.values())
@@ -302,29 +341,35 @@ def pressure_for_state(state, model):
 class CoupledThermalRuntime:
     supported_operations = ("wait",)
 
-    def supported_operations_for_state(self, state):
+    def supported_operations_for_state(self, state: WorldState) -> tuple[str, ...]:
         if self._uses_chemostatted_catalysis(state):
             return self.chemostatted_catalysis.supported_operations
         return self.supported_operations
 
-    def temperature_bounds_k(self, state):
-        model = self.composition.physics.models_of("thermal")[state.vessel_id]
+    def temperature_bounds_k(self, state: WorldState) -> tuple[float, float]:
+        composition = cast("WorldCompositionSpec", self.composition)
+        physics = cast("CompositionPhysics", composition.physics)
+        model = physics.models_of("thermal")[state.vessel_id]
         return model.minimum_temperature_K, model.maximum_temperature_K
 
-    def reconcile_pressure(self, state):
+    def reconcile_pressure(self, state: WorldState) -> WorldState:
         if self._uses_chemostatted_catalysis(state):
             return self.chemostatted_catalysis.reconcile_pressure(state)
-        model = self.composition.physics.models_of("thermal")[state.vessel_id]
+        composition = cast("WorldCompositionSpec", self.composition)
+        physics = cast("CompositionPhysics", composition.physics)
+        model = physics.models_of("thermal")[state.vessel_id]
         return state.replace(pressure_Pa=pressure_for_state(state, model))
 
-    def __init__(self, composition, modules):
+    def __init__(
+        self, composition: WorldCompositionSpec | None, modules: DomainModuleRegistry | None,
+    ) -> None:
         from chemworld.runtime.chemostatted_catalysis import ChemostattedCatalysisRuntime
 
         self.composition = composition
         self.modules = modules
         self.chemostatted_catalysis = ChemostattedCatalysisRuntime(composition, modules)
 
-    def _uses_chemostatted_catalysis(self, state):
+    def _uses_chemostatted_catalysis(self, state: WorldState) -> bool:
         if self.chemostatted_catalysis.supports(state):
             return True
         if self.composition is None or self.composition.physics is None:
@@ -332,7 +377,7 @@ class CoupledThermalRuntime:
         original = self.composition.physics.initial_states.get(state.vessel_id)
         return original is not None and self.chemostatted_catalysis.supports(original)
 
-    def supports(self, state):
+    def supports(self, state: WorldState) -> bool:
         return (
             self.composition is not None
             and self.composition.physics is not None
@@ -340,19 +385,23 @@ class CoupledThermalRuntime:
             and state.vessel_id not in self.composition.physics.models_of("crystal")
         )
 
-    def validate_state(self, state):
+    def validate_state(self, state: WorldState) -> None:
         """Validate saved owned inventory through its original process declarations."""
         if self._uses_chemostatted_catalysis(state):
             return self.chemostatted_catalysis.validate_state(state)
+        composition = cast("WorldCompositionSpec", self.composition)
         system, initial = assemble_local_system(
             state,
-            self.composition.physics,
-            self.modules,
-            self.composition.components,
+            cast("CompositionPhysics", composition.physics),
+            cast("DomainModuleRegistry", self.modules),
+            composition.components,
         )
         system.validate_state(initial)
 
-    def advance(self, state, action, *, heat, jacket_program=None):
+    def advance(
+        self, state: WorldState, action: dict[str, Any], *, heat: bool,
+        jacket_program: object | None = None,
+    ) -> ModelProviderResult:
         if self._uses_chemostatted_catalysis(state):
             return self.chemostatted_catalysis.advance(
                 state, action, heat=heat, jacket_program=jacket_program
@@ -363,7 +412,8 @@ class CoupledThermalRuntime:
                 "control-program migration is separate"
             )
         record, device = connected_device(state, required=False)
-        physics = self.composition.physics
+        composition = cast("WorldCompositionSpec", self.composition)
+        physics = cast("CompositionPhysics", composition.physics)
         try:
             if heat:
                 if device is None:
@@ -396,13 +446,13 @@ class CoupledThermalRuntime:
                 success=False,
                 failure_reason="invalid_thermal_control",
             )
-        equipment = dict(state.equipment.equipment)
+        equipment = dict(cast(EquipmentLedger, state.equipment).equipment)
         if record is not None:
             equipment[record.equipment_id] = replace(
                 record,
                 settings={
                     **record.settings,
-                    "thermal_device": device.to_dict(),
+                    "thermal_device": cast(ThermalDeviceSpec, device).to_dict(),
                 },
             )
         working = state.replace(equipment=EquipmentLedger(equipment))
@@ -410,8 +460,8 @@ class CoupledThermalRuntime:
             system, initial = assemble_local_system(
                 working,
                 physics,
-                self.modules,
-                self.composition.components,
+                cast("DomainModuleRegistry", self.modules),
+                composition.components,
             )
             result = system.advance(initial, float(action["duration_s"]))
         except (ArithmeticError, RuntimeError, ValueError) as exc:
@@ -443,7 +493,7 @@ class CoupledThermalRuntime:
         phases = PhaseLedger(
             {
                 key: replace(phase, species_amounts_mol=amounts)
-                for key, phase in state.phases.phases.items()
+                for key, phase in cast(PhaseLedger, state.phases).phases.items()
             }
         )
         candidate = working.replace(

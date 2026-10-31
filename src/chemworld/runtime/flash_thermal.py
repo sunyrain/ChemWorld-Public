@@ -6,10 +6,12 @@ resource ledger, observation loop or persistent duplicate material inventory.
 
 from dataclasses import replace
 from math import isclose
+from typing import cast
 
 from chemworld.foundation import species_with_added_initial_amounts
 from chemworld.foundation.balances import MaterialPacket
 from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, PhaseRecord
+from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.property_reports import R_J_PER_MOL_K
 from chemworld.physchem.solver_backend import ODESolverPolicy, solve_ode
 from chemworld.runtime.advance_paths import advance_ledger
@@ -205,6 +207,7 @@ class FlashThermalRuntime:
             result = model.at_ph(state.species_amounts, float(vector[0]))
             equipment = dict(state.equipment.equipment)
             if record is not None:
+                device = cast(ThermalDeviceSpec, device)
                 equipment[record.equipment_id] = replace(
                     record, settings={**record.settings, "thermal_device": device.to_dict()})
             candidate = install_flash(state, model, result).replace(

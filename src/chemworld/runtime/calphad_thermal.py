@@ -18,6 +18,7 @@ from chemworld.physchem.calphad_caloric_equilibrium import (
 )
 from chemworld.physchem.calphad_equilibrium_search import PhaseSurface
 from chemworld.physchem.elements import ELEMENTS
+from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.solver_backend import ODESolverPolicy, solve_ode
 from chemworld.physchem.tdb_expressions import TDB_GAS_CONSTANT_J_MOL_K as R
 from chemworld.runtime.advance_paths import advance_ledger
@@ -537,6 +538,7 @@ class CalphadThermalRuntime:
                 raise ValueError("CALPHAD same-reference first law failed")
             equipment = dict(state.equipment.equipment)
             if record is not None:
+                device = cast(ThermalDeviceSpec, device)
                 equipment[record.equipment_id] = replace(
                     record, settings={**record.settings, "thermal_device": device.to_dict()}
                 )

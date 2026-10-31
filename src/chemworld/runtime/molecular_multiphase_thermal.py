@@ -10,6 +10,7 @@ from typing import Any, cast
 import numpy as np
 
 from chemworld.foundation.state_ledgers import EquipmentLedger
+from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.molecular_multiphase import (
     MolecularMultiphaseResult,
     MolecularMultiphaseSeed,
@@ -400,6 +401,7 @@ class MolecularMultiphaseThermalRuntime:
                 raise ValueError("molecular multiphase thermal first law failed")
             equipment = dict(state.equipment.equipment)
             if record is not None:
+                device = cast(ThermalDeviceSpec, device)
                 equipment[record.equipment_id] = replace(
                     record, settings={**record.settings, "thermal_device": device.to_dict()})
             candidate = candidate.replace(

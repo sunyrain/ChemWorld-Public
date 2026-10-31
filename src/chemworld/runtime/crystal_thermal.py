@@ -4,6 +4,7 @@ import sys
 from dataclasses import replace
 from math import isclose
 from types import SimpleNamespace
+from typing import cast
 
 from chemworld.foundation import equipment_settings, process_with_metrics, upsert_equipment_record
 from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger
@@ -14,6 +15,7 @@ from chemworld.physchem.crystal_thermal_kinetics import (
     advance_crystal_population,
 )
 from chemworld.physchem.enthalpy import caloric_temperature
+from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.runtime.advance_paths import advance_ledger
 from chemworld.runtime.coupled_thermal import connected_device
 from chemworld.runtime.full_process_contract import population_settings
@@ -437,6 +439,7 @@ class CrystalThermalRuntime:
             )
         working = state
         if record is not None:
+            device = cast(ThermalDeviceSpec, device)
             records = dict(state.equipment.equipment)
             records[record.equipment_id] = replace(
                 record, settings={**record.settings, "thermal_device": device.to_dict()}

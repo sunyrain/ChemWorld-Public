@@ -2,12 +2,14 @@
 
 from dataclasses import replace
 from math import isclose
+from typing import cast
 
 import numpy as np
 
 from chemworld.foundation.state_helpers import attached_device_record
 from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, PhaseRecord
 from chemworld.physchem.calphad_material import CefMaterialSpec
+from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.phase_inventory import PhaseInventoryRates, integrate_phase_inventory
 from chemworld.physchem.solid_solutions import SolidSolutionSpec
 from chemworld.physchem.transport_devices import TransportInventory
@@ -360,6 +362,7 @@ class SolidSolutionRuntime:
             equilibrium = model.at_ph(0, final.amounts_mol[0], final.enthalpies_J[0])
             equipment = dict(state.equipment.equipment)
             if record is not None:
+                device = cast(ThermalDeviceSpec, device)
                 equipment[record.equipment_id] = replace(
                     record, settings={**record.settings, "thermal_device": device.to_dict()}
                 )

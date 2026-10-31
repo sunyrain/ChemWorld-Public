@@ -1,8 +1,9 @@
 """Equipment-owned electrochemical inventory and one shared advance strategy."""
 
 from dataclasses import replace
+from typing import cast
 
-from chemworld.foundation.state_ledgers import EquipmentLedger
+from chemworld.foundation.state_ledgers import EquipmentLedger, EquipmentRecord
 from chemworld.foundation.state_ownership import (
     StateFieldSpec,
     StateSlot,
@@ -236,6 +237,7 @@ class BatteryRuntime:
                     device, setpoint_K=float(action["target_temperature_K"]), enabled=True
                 )
                 records = dict(state.equipment.equipment)
+                thermal_record = cast(EquipmentRecord, thermal_record)
                 records[thermal_record.equipment_id] = replace(
                     thermal_record,
                     settings={**thermal_record.settings, "thermal_device": device.to_dict()},

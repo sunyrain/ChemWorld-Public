@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from chemworld.foundation.state_ledgers import EquipmentLedger, PhaseLedger, PhaseRecord
+from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.molecular_caloric_flash import (
     MolecularCaloricFlashResult,
     MolecularCaloricFlashSeed,
@@ -412,6 +413,7 @@ class MolecularFlashThermalRuntime:
             candidate = install_molecular_caloric_flash(state, spec, result)
             equipment = dict(state.equipment.equipment)
             if record is not None:
+                device = cast(ThermalDeviceSpec, device)
                 equipment[record.equipment_id] = replace(
                     record, settings={**record.settings, "thermal_device": device.to_dict()}
                 )

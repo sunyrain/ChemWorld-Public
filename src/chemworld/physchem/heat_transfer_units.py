@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from math import exp, isfinite, log, pi
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
+
+from chemworld.physchem.coupled_system import ConstantCvThermodynamics, SpeciesInternalEnergy
+from chemworld.physchem.property_packages import PropertyPackageThermodynamics
 
 if TYPE_CHECKING:
     from chemworld.physchem.catalysis_thermochemistry import CatalyticThermodynamics
@@ -19,8 +22,15 @@ if TYPE_CHECKING:
     from chemworld.physchem.molecular_mixture import MolecularIsochoricThermodynamics
     from chemworld.physchem.water_if97_thermal import IF97IsochoricThermodynamics
 
-from chemworld.physchem.coupled_system import ConstantCvThermodynamics, SpeciesInternalEnergy
-from chemworld.physchem.property_packages import PropertyPackageThermodynamics
+    SpeciesThermodynamics: TypeAlias = (
+        ConstantCvThermodynamics | PropertyPackageThermodynamics | NASA7GasThermodynamics
+        | CatalyticThermodynamics
+    )
+    EOSThermodynamics: TypeAlias = (
+        HelmholtzIsochoricThermodynamics | HelmholtzEquilibriumIsochoricThermodynamics
+        | IF97IsochoricThermodynamics | HumidAirIsochoricThermodynamics
+        | MolecularIsochoricThermodynamics
+    )
 
 HeatTransferSurface = Literal["jacket", "coil", "shell"]
 PhaseChangeMode = Literal["none", "boiling", "condensation"]
@@ -118,13 +128,7 @@ class CondensedBackgroundSpec:
 class ThermalSystemSpec:
     """Constitutive data for one local system; owns no evolving inventory."""
 
-    thermodynamics: (
-        ConstantCvThermodynamics | PropertyPackageThermodynamics | NASA7GasThermodynamics
-        | HelmholtzIsochoricThermodynamics | HelmholtzEquilibriumIsochoricThermodynamics
-        | IF97IsochoricThermodynamics | HumidAirIsochoricThermodynamics
-        | CatalyticThermodynamics
-        | MolecularIsochoricThermodynamics
-    )
+    thermodynamics: SpeciesThermodynamics | EOSThermodynamics
     pressure_law: Literal[
         "ideal_gas", "fixed_pressure", "helmholtz", "if97", "humid_air", "molecular"
     ] = "ideal_gas"
