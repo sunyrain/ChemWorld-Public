@@ -6,14 +6,19 @@ rate/energy assembler. Its geometry strategy uses the common ODE backend; new
 nuclei retain the declared temporal birth quadrature.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from math import isclose, isfinite, pi, ulp
 from time import monotonic
+from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 from chemworld.physchem.coupled_system import (
     CoupledEvent,
     CoupledProcess,
     CoupledState,
+    CoupledStateView,
     CoupledSystem,
     HeatFlux,
     InternalTransfer,
@@ -25,6 +30,20 @@ from chemworld.physchem.crystallization_units import (
     _occlusion_loading_ratio,
 )
 from chemworld.physchem.enthalpy import caloric_temperature
+
+if TYPE_CHECKING:
+    from chemworld.physchem.legacy_crystal_enthalpy import LegacyCrystalEnthalpy
+    from chemworld.physchem.property_packages import (
+        PropertyPackageThermodynamics,
+        SpeciesCaloricModel,
+    )
+
+CrystalThermodynamics: TypeAlias = "PropertyPackageThermodynamics | LegacyCrystalEnthalpy"
+LiquidKeys: TypeAlias = Mapping[str, tuple[str, ...]]
+SolidKeys: TypeAlias = Sequence[Mapping[str, str]]
+KineticTerms: TypeAlias = Callable[
+    ["CrystalThermalSpec", CoupledStateView, LiquidKeys], tuple[float, float, float]
+]
 
 
 @dataclass(frozen=True)
@@ -56,7 +75,7 @@ class CrystalThermalSpec:
         if not 0 < self.impurity_resolution_fraction <= 1e-8:
             raise ValueError("impurity supply resolution must lie within the material tolerance")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "target_component": self.target_component,
             "impurity_component": self.impurity_component,
@@ -68,7 +87,7 @@ class CrystalThermalSpec:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> CrystalThermalSpec:
         return cls(
             **{
                 **payload,
@@ -77,7 +96,7 @@ class CrystalThermalSpec:
             }
         )
 
-    def particle_moles(self, diameter_m):
+    def particle_moles(self, diameter_m: float) -> float:
         return (
             self.kinetics.crystal_density_kg_m3
             * pi
@@ -131,11 +150,15 @@ class CrystalThermalAdvance:
     heat_loss_J: float
     energy_balance_residual_J: float
     stopping_event: str | None
-    solver_diagnostics: tuple[dict, ...]
+    solver_diagnostics: tuple[dict[str, Any], ...]
     trajectory: tuple[CrystalPopulationState, ...]
 
 
-def _layout(model, population, thermodynamics, *, newborn=False):
+def _layout(
+    model: CrystalThermalSpec, population: CrystalPopulationState,
+    thermodynamics: CrystalThermodynamics, *, newborn: bool = False,
+) -> tuple[CrystalThermodynamics, dict[str, float], dict[str, tuple[str, ...]],
+           list[dict[str, str]], list[ThermalCrystalCohort | None]]:
     target, impurity = model.target_component, model.impurity_component
     liquid = population.liquid_amounts_mol
     if (
@@ -145,8 +168,9 @@ def _layout(model, population, thermodynamics, *, newborn=False):
         or not 0 <= population.dissolved_seed_mol <= liquid[target]
     ):
         raise ValueError("finite liquid and dissolved seed must share the actual molecular stock")
-    amounts, properties = {}, {}
-    liquid_keys = {}
+    amounts: dict[str, float] = {}
+    properties: dict[str, SpeciesCaloricModel | float] = {}
+    liquid_keys: dict[str, tuple[str, ...]] = {}
     # JSON object order is not a physical parameter. Fix the solver coordinate
     # order so a sorted-key trajectory replay takes the same numerical path.
     for key, n in sorted(liquid.items()):
@@ -193,19 +217,27 @@ def _layout(model, population, thermodynamics, *, newborn=False):
     from chemworld.physchem.property_packages import PropertyPackageThermodynamics
 
     # Do not replace custom caloric subclasses or the legacy enthalpy boundary.
-    packed = (
-        CrystalCaloricLayout(
-            properties,
-            thermodynamics.support_heat_capacity_J_K,
-            thermodynamics.reference_temperature_K,
+    packed_thermal: CrystalThermodynamics
+    if isinstance(thermodynamics, PropertyPackageThermodynamics):
+        caloric_species = cast("dict[str, SpeciesCaloricModel]", properties)
+        packed_thermal = (
+            CrystalCaloricLayout(
+                caloric_species,
+                thermodynamics.support_heat_capacity_J_K,
+                thermodynamics.reference_temperature_K,
+            )
+            if type(thermodynamics) is PropertyPackageThermodynamics
+            else replace(thermodynamics, species=caloric_species)
         )
-        if type(thermodynamics) is PropertyPackageThermodynamics
-        else replace(thermodynamics, species=properties)
-    )
-    return (packed, amounts, liquid_keys, solid_keys, cohorts)
+    else:
+        packed_thermal = replace(thermodynamics, species=cast(dict[str, float], properties))
+    return (packed_thermal, amounts, liquid_keys, solid_keys, cohorts)
 
 
-def _unpack(model, packed, liquid_keys, solid_keys, cohorts):
+def _unpack(
+    model: CrystalThermalSpec, packed: CoupledStateView, liquid_keys: LiquidKeys,
+    solid_keys: SolidKeys, cohorts: Sequence[ThermalCrystalCohort | None],
+) -> CrystalPopulationState:
     liquid = {
         key: sum(packed.amounts_mol[k] for k in fields) for key, fields in liquid_keys.items()
     }
@@ -238,18 +270,21 @@ def _unpack(model, packed, liquid_keys, solid_keys, cohorts):
     )
 
 
-def crystal_population_energy(model, state, thermodynamics):
+def crystal_population_energy(
+    model: CrystalThermalSpec, state: CrystalPopulationState, thermodynamics: CrystalThermodynamics,
+) -> float:
     thermal, amounts, *_ = _layout(model, state, thermodynamics)
     packed = CoupledState(amounts, state.temperature_K, state.volume_L, state.time_s)
     energy = thermal.internal_energy_j(packed)
     if energy is None:
-        energy = thermal.control_volume_enthalpy_j(packed)
+        energy = cast("LegacyCrystalEnthalpy", thermal).control_volume_enthalpy_j(packed)
     return energy
 
 
 def _release_vanished_hosts(
-    model, packed, thermal, liquid_keys, solid_keys, *, isothermal, impurity_stock_mol
-):
+    model: CrystalThermalSpec, packed: CoupledState, thermal: CrystalThermodynamics,
+    liquid_keys: LiquidKeys, solid_keys: SolidKeys, *, isothermal: bool, impurity_stock_mol: float,
+) -> tuple[CoupledState, list[dict[str, float]]]:
     """Finish the defined host-disappearance boundary, retaining every molecule.
 
     Only unresolved residue within the existing 1e-8 stock tolerance qualifies.
@@ -276,9 +311,10 @@ def _release_vanished_hosts(
     if total > tolerance:
         raise RuntimeError(f"vanished host has unresolved impurity {total} mol > {tolerance} mol")
 
-    def energy(candidate):
+    def energy(candidate: CoupledStateView) -> float:
         value = thermal.internal_energy_j(candidate)
-        return thermal.control_volume_enthalpy_j(candidate) if value is None else value
+        return (cast("LegacyCrystalEnthalpy", thermal).control_volume_enthalpy_j(candidate)
+                if value is None else value)
 
     initial_energy = energy(packed)
     candidate = replace(packed, amounts_mol=amounts)
@@ -301,7 +337,10 @@ def _release_vanished_hosts(
     return candidate, releases
 
 
-def crystal_kinetic_terms(model, state, liquid_keys, *, impurity_resolution_mol=0.0):
+def crystal_kinetic_terms(
+    model: CrystalThermalSpec, state: CoupledStateView, liquid_keys: LiquidKeys,
+    *, impurity_resolution_mol: float = 0.0,
+) -> tuple[float, float, float]:
     kinetics = model.kinetics
     concentration = (
         sum(state.amounts_mol[k] for k in liquid_keys[model.target_component]) / state.volume_L
@@ -349,8 +388,10 @@ def crystal_kinetic_terms(model, state, liquid_keys, *, impurity_resolution_mol=
 
 
 def _process(
-    model, thermal, liquid_keys, solid_keys, cohorts, *, kinetic_terms=crystal_kinetic_terms
-):
+    model: CrystalThermalSpec, thermal: CrystalThermodynamics, liquid_keys: LiquidKeys,
+    solid_keys: SolidKeys, cohorts: Sequence[ThermalCrystalCohort | None], *,
+    kinetic_terms: KineticTerms = crystal_kinetic_terms,
+) -> CoupledProcess:
     from chemworld.physchem.crystal_caloric_layout import CrystalCaloricLayout
     from chemworld.physchem.legacy_crystal_enthalpy import LegacyCrystalEnthalpy
 
@@ -382,7 +423,7 @@ def _process(
                     raise ValueError(
                         "internal transfer endpoints must belong to the compiled inventory")
 
-    def evaluate(state):
+    def evaluate(state: CoupledStateView) -> ProcessContribution:
         temperature = state.temperature_K
         liquid_target = sum(state.amounts_mol[k] for k in liquid_keys[target])
         diameter_rate, nucleation_rate, capture_ratio = kinetic_terms(model, state, liquid_keys)
@@ -396,7 +437,7 @@ def _process(
         ):
             raise ValueError("crystal caloric offsets disagree with the solubility energy")
         transfers = []
-        amount_rates = {}
+        amount_rates: dict[str, float] = {}
         for fields, cohort, exchanges in layout:
             n = state.amounts_mol[fields["seed"]] + state.amounts_mol[fields["grown"]]
             if cohort is None:
@@ -456,7 +497,10 @@ def _process(
     )
 
 
-def _inventory_scales(amounts, liquid_keys, solid_keys, cohorts):
+def _inventory_scales(
+    amounts: Mapping[str, float], liquid_keys: LiquidKeys, solid_keys: SolidKeys,
+    cohorts: Sequence[ThermalCrystalCohort | None],
+) -> dict[str, float]:
     """Resolve each existing cohort relative to its own actual molecular stock.
 
     A common large floor badly perturbs the finite-difference diameter of tiny
@@ -478,23 +522,23 @@ def _inventory_scales(amounts, liquid_keys, solid_keys, cohorts):
 
 
 def advance_crystal_population(
-    model,
-    state,
-    thermodynamics,
-    duration_s,
+    model: CrystalThermalSpec,
+    state: CrystalPopulationState,
+    thermodynamics: CrystalThermodynamics,
+    duration_s: float,
     *,
-    heat_flux=None,
-    inventory_independent_heat_flux=None,
-    isothermal=False,
-    evaluation_times_s=(),
-    events=(),
-    progress=None,
-):
+    heat_flux: Callable[[CoupledStateView], HeatFlux] | None = None,
+    inventory_independent_heat_flux: bool | None = None,
+    isothermal: bool = False,
+    evaluation_times_s: Sequence[float] = (),
+    events: Sequence[CoupledEvent] = (),
+    progress: Callable[[dict[str, float]], None] | None = None,
+) -> CrystalThermalAdvance:
     if not isfinite(duration_s) or duration_s < 0:
         raise ValueError("crystal advance needs a finite nonnegative duration")
     if heat_flux is None:
 
-        def heat_flux(_):
+        def heat_flux(_: CoupledStateView) -> HeatFlux:
             return HeatFlux()
 
         if inventory_independent_heat_flux is None:
@@ -515,9 +559,12 @@ def advance_crystal_population(
     )
     impurity_resolution = impurity_stock * model.impurity_resolution_fraction
 
-    last_candidate, last_terms = None, None
+    last_candidate: CoupledStateView | None = None
+    last_terms: tuple[float, float, float] | None = None
 
-    def kinetic_terms(model, candidate, liquid_keys):
+    def kinetic_terms(
+        model: CrystalThermalSpec, candidate: CoupledStateView, liquid_keys: LiquidKeys,
+    ) -> tuple[float, float, float]:
         nonlocal last_candidate, last_terms
         # Process assembly and the geometry RHS ask for these same terms on
         # the very same immutable state. No rounding or cross-state cache.
@@ -527,7 +574,7 @@ def advance_crystal_population(
             )
             last_terms = (values[0], values[1], 0.0) if impurity_stock == 0 else values
             last_candidate = candidate
-        return last_terms
+        return cast(tuple[float, float, float], last_terms)
 
     while state.time_s < end:
         birth = model.kinetics.primary_nucleation_coefficient_per_L_s > 0
@@ -551,11 +598,11 @@ def advance_crystal_population(
             cohort_count = len(cohorts)
 
             def counted(
-                candidate,
-                evaluate=original_evaluate,
-                cohort_count=cohort_count,
-                liquid_keys=liquid_keys,
-            ):
+                candidate: CoupledStateView,
+                evaluate: Callable[[CoupledStateView], ProcessContribution] = original_evaluate,
+                cohort_count: int = cohort_count,
+                liquid_keys: LiquidKeys = liquid_keys,
+            ) -> ProcessContribution:
                 nonlocal rhs_calls, last_report
                 rhs_calls += 1
                 now = monotonic()
@@ -584,12 +631,12 @@ def advance_crystal_population(
             processes = (replace(processes[0], evaluate=counted),)
         laws = {}
         for component, keys in liquid_keys.items():
-            keys = list(keys)
+            component_keys = list(keys)
             if component == model.target_component:
-                keys += [k[label] for k in solid_keys for label in ("seed", "grown")]
+                component_keys += [k[label] for k in solid_keys for label in ("seed", "grown")]
             elif component == model.impurity_component:
-                keys += [k["impurity"] for k in solid_keys]
-            laws[component] = dict.fromkeys(keys, 1.0)
+                component_keys += [k["impurity"] for k in solid_keys]
+            laws[component] = dict.fromkeys(component_keys, 1.0)
         laws["seed-provenance"] = dict.fromkeys(
             (liquid_keys[model.target_component][0], *(k["seed"] for k in solid_keys)), 1.0
         )

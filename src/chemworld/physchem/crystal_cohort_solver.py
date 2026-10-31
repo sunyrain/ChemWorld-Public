@@ -5,34 +5,62 @@ invented molar stocks: every candidate reconstructs its actual cohort molecules
 before using the common CoupledSystem rate assembler and ODE backend.
 """
 
+from __future__ import annotations
+
+from collections.abc import Iterable, Sequence
 from math import isfinite
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.sparse import csc_matrix
 
 from chemworld.physchem import solver_backend
 from chemworld.physchem.coupled_system import (
     CoupledAdvanceResult,
+    CoupledEvent,
     CoupledState,
     CoupledStateView,
+    CoupledSystem,
     assemble_coupled_rates,
 )
 from chemworld.physchem.solver_backend import ODESolverPolicy
 
+if TYPE_CHECKING:
+    from chemworld.physchem.crystal_thermal_kinetics import (
+        CrystalThermalSpec,
+        CrystalThermodynamics,
+        KineticTerms,
+        LiquidKeys,
+        SolidKeys,
+        ThermalCrystalCohort,
+    )
+    from chemworld.physchem.legacy_crystal_enthalpy import LegacyCrystalEnthalpy
+
+
+class _TerminalEvent(Protocol):
+    terminal: bool
+    direction: int
+
+    def __call__(self, time: float, scaled: NDArray[np.float64]) -> float: ...
+
 
 def solve_crystal_interval(
-    system,
-    initial,
-    duration_s,
-    model,
-    liquid_keys,
-    solid_keys,
-    cohorts,
+    system: CoupledSystem,
+    initial: CoupledState,
+    duration_s: float,
+    model: CrystalThermalSpec,
+    liquid_keys: LiquidKeys,
+    solid_keys: SolidKeys,
+    cohorts: Sequence[ThermalCrystalCohort | None],
     *,
-    kinetic_terms,
-    evaluation_times_s=(),
-    inventory_independent_heat_flux=False,
-):
+    kinetic_terms: KineticTerms,
+    evaluation_times_s: Sequence[float] = (),
+    inventory_independent_heat_flux: bool | None = False,
+) -> CoupledAdvanceResult:
+    # The crystal layout supplies species-resolved calorics (or the retained
+    # constant-enthalpy law); generic CoupledSystem has a broader thermal API.
+    thermal = cast("CrystalThermodynamics", system.thermodynamics)
     keys = system.thermodynamics.inventory_keys
     position = {key: i for i, key in enumerate(keys)}
     count = len(keys)
@@ -103,22 +131,24 @@ def solve_crystal_interval(
         particle_factor = model.kinetics.crystal_density_kg_m3 * pi / 6
         molecular_weight = model.kinetics.target_molecular_weight_kg_mol
 
-        def particle_moles(diameter):
-            return particle_factor * diameter**3 / molecular_weight
+        def particle_moles(diameter_m: float) -> float:
+            return particle_factor * diameter_m**3 / molecular_weight
     else:
         particle_moles = model.particle_moles
-    inactive = set()
-    corrections = {}
+    inactive: set[int] = set()
+    corrections: dict[str, float] = {}
     deaths = []
     diagnostics = []
-    points = []
+    points: list[CoupledState] = []
     elapsed = 0.0
     stopping = None
 
-    def amounts(raw, *, accepted=False):
+    def amounts(raw: NDArray[np.float64], *, accepted: bool = False) -> dict[str, float]:
         # Keep the canonical key order while avoiding float conversions that
         # would immediately be overwritten by the geometry reconstruction.
-        result = dict.fromkeys(keys)
+        # Molecular and geometry positions partition all keys; every slot is
+        # filled below before the resulting inventory is read or returned.
+        result = cast(dict[str, float], dict.fromkeys(keys))
         for key, index in molecular_positions:
             result[key] = float(raw[index])
         for index, diameter, seed_fraction, impurity_ratio, particles in geometry:
@@ -171,7 +201,9 @@ def solve_crystal_interval(
                     result[key] = 0.0
         return result
 
-    def view(time, raw, *, accepted=False):
+    def view(
+        time: float, raw: NDArray[np.float64], *, accepted: bool = False,
+    ) -> CoupledStateView:
         return CoupledStateView(
             amounts(raw, accepted=accepted),
             float(raw[count]),
@@ -179,17 +211,20 @@ def solve_crystal_interval(
             initial.time_s + time,
         )
 
-    def snapshot(time, raw):
+    def snapshot(time: float, raw: NDArray[np.float64]) -> CoupledState:
         state = view(time, raw, accepted=True)
         return CoupledState(
             state.amounts_mol,
             state.temperature_K,
             state.volume_L,
             state.time_s,
-            *map(float, raw[count + 1 : count + 5]),
+            boundary_heat_J=float(raw[count + 1]),
+            chemical_energy_change_J=float(raw[count + 2]),
+            heat_loss_J=float(raw[count + 3]),
+            work_J=float(raw[count + 4]),
         )
 
-    def rhs(time, scaled):
+    def rhs(time: float, scaled: NDArray[np.float64]) -> NDArray[np.float64]:
         raw = scaled * scales
         state = view(time, raw)
         rates = assemble_coupled_rates(
@@ -229,7 +264,7 @@ def solve_crystal_interval(
                 derivative[impurity_ratio] = growth * (capture - float(raw[impurity_ratio]))
         return derivative / scales
 
-    def jacobian(time, scaled):
+    def jacobian(time: float, scaled: NDArray[np.float64]) -> csc_matrix:
         """Local cohort columns are analytic; shared C/T columns use differences.
 
         Liquid balance rows are dense but are sums of independent cohort
@@ -245,27 +280,31 @@ def solve_crystal_interval(
         # vector to a LIL column scans the entire population for every cohort.
         rows, columns, values = [], [], []
 
-        def append_column(column, entries):
+        def append_column(column: int, entries: Iterable[tuple[int, float]]) -> None:
             for row, value in entries:
                 if value != 0.0:
                     rows.append(row)
                     columns.append(column)
                     values.append(value)
 
-        for column in (*[i for i in range(count) if i not in geometry_positions], count):
-            step = np.sqrt(np.finfo(float).eps) * max(abs(scaled[column]), 1.0)
+        for global_column in (*[i for i in range(count) if i not in geometry_positions], count):
+            step = np.sqrt(np.finfo(float).eps) * max(abs(scaled[global_column]), 1.0)
             if (
                 model.impurity_component is not None
-                and column == position[liquid_keys[model.impurity_component][0]]
+                and global_column == position[liquid_keys[model.impurity_component][0]]
                 and impurity_stock > 0
             ):
                 step = min(
-                    step, 0.1 * model.impurity_resolution_fraction * impurity_stock / scales[column]
+                    step,
+                    0.1 * model.impurity_resolution_fraction * impurity_stock
+                    / scales[global_column],
                 )
             shifted = scaled.copy()
-            shifted[column] += step
+            shifted[global_column] += step
             difference = (rhs(time, shifted) - base) / step
-            append_column(column, ((row, difference[row]) for row in np.flatnonzero(difference)))
+            append_column(
+                global_column, ((row, difference[row]) for row in np.flatnonzero(difference)),
+            )
 
         velocity, _, capture = kinetic_terms(model, state, liquid_keys)
         fluid_target = liquid_keys[model.target_component]
@@ -273,10 +312,10 @@ def solve_crystal_interval(
         free_target = sum(state.amounts_mol[k] for k in fluid_target)
         theta_fluid = state.amounts_mol[fluid_target[0]] / free_target if free_target else 0.0
         capacity = system.thermodynamics.heat_capacity_j_k(state)
-        cv_cache = {}
+        cv_cache: dict[int, float] = {}
 
-        def cv(key):
-            prop = system.thermodynamics.species[key]
+        def cv(key: str) -> float:
+            prop = thermal.species[key]
             identity = id(prop)
             if identity not in cv_cache:
                 if isinstance(prop, (int, float)):
@@ -302,15 +341,15 @@ def solve_crystal_interval(
             growth = 3 * max(velocity, 0.0) / d
             source_seed = theta_fluid if velocity >= 0 else theta
             source_impurity = capture if velocity >= 0 else loading
-            target_delta = system.thermodynamics.species_energy_j_mol(
+            target_delta = thermal.species_energy_j_mol(
                 fields["seed"], state.temperature_K
-            ) - system.thermodynamics.species_energy_j_mol(fluid_target[0], state.temperature_K)
+            ) - thermal.species_energy_j_mol(fluid_target[0], state.temperature_K)
             impurity_delta = 0.0
             if impurity_ratio is not None:
-                impurity_delta = system.thermodynamics.species_energy_j_mol(
+                impurity_delta = thermal.species_energy_j_mol(
                     fields["impurity"], state.temperature_K
-                ) - system.thermodynamics.species_energy_j_mol(
-                    liquid_keys[model.impurity_component][0], state.temperature_K
+                ) - thermal.species_energy_j_mol(
+                    liquid_keys[cast(str, model.impurity_component)][0], state.temperature_K
                 )
             for column in (diameter, seed_fraction, impurity_ratio):
                 if column is None:
@@ -342,14 +381,17 @@ def solve_crystal_interval(
                     if velocity < 0 and 0 < raw[seed_fraction] < 1:
                         seed_rate = rate
                 else:
-                    derivative[impurity_ratio] = -growth
-                    if velocity < 0 and raw[impurity_ratio] > 0:
+                    # The remaining coordinate is the non-None impurity ratio.
+                    derivative[column] = -growth
+                    if velocity < 0 and raw[column] > 0:
                         impurity_rate = rate
                     capacity_derivative = host * cv(fields["impurity"])
                 derivative[fluid_seed] = -seed_rate
                 derivative[fluid_grown] = -(host_rate - seed_rate)
                 if impurity_ratio is not None:
-                    derivative[position[liquid_keys[model.impurity_component][0]]] = -impurity_rate
+                    derivative[
+                        position[liquid_keys[cast(str, model.impurity_component)][0]]
+                    ] = -impurity_rate
                 chemical = target_delta * host_rate + impurity_delta * impurity_rate
                 derivative[count] = (
                     0.0
@@ -384,38 +426,46 @@ def solve_crystal_interval(
                     }
                 )
         callbacks, names = [], []
-        event_candidate = None
-        event_time = None
-        event_view = None
+        event_candidate: NDArray[np.float64] | None = None
+        event_time: float | None = None
+        event_view: CoupledStateView | None = None
 
-        def event_state(time, scaled):
+        def event_state(time: float, scaled: NDArray[np.float64]) -> CoupledStateView:
             nonlocal event_candidate, event_time, event_view
             # All event callbacks at one candidate inspect the same immutable
             # state. Reset at every topology restart; never cache callbacks.
-            if event_time != time or not np.array_equal(event_candidate, scaled):
+            if event_time != time or not np.array_equal(
+                cast(NDArray[np.float64], event_candidate), scaled,
+            ):
                 event_candidate, event_time = scaled.copy(), time
                 event_view = view(time, scaled * scales)
-            return event_view
+            return cast(CoupledStateView, event_view)
 
         for spec in system.all_events:
 
-            def root(time, scaled, spec=spec):
+            def root(
+                time: float, scaled: NDArray[np.float64], spec: CoupledEvent = spec,
+            ) -> float:
                 return spec.value(event_state(time, scaled))
 
-            root.terminal, root.direction = True, spec.direction
-            callbacks.append(root)
+            event_callback = cast(_TerminalEvent, root)
+            event_callback.terminal, event_callback.direction = True, spec.direction
+            callbacks.append(event_callback)
             names.append(spec.event_id)
         death_indices = {}
         for index, diameter, _, _, _ in geometry:
             if index in inactive:
                 continue
 
-            def death(time, scaled, diameter=diameter):
+            def death(
+                time: float, scaled: NDArray[np.float64], diameter: int = diameter,
+            ) -> float:
                 return scaled[diameter] * scales[diameter]
 
-            death.terminal, death.direction = True, -1
+            death_callback = cast(_TerminalEvent, death)
+            death_callback.terminal, death_callback.direction = True, -1
             death_indices[len(callbacks)] = (index, diameter)
-            callbacks.append(death)
+            callbacks.append(death_callback)
             names.append(f"cohort_disappearance:{index}")
         for callback, name in zip(callbacks, names, strict=True):
             if callback(elapsed, vector / scales) <= 0 and not name.startswith(
@@ -512,9 +562,10 @@ def solve_crystal_interval(
         if abs(residuals[name]) > 1e-8 * max(stock, 1e-12):
             raise RuntimeError(f"crystal geometry component/provenance balance failed: {name}")
 
-    def energy(state):
-        value = system.thermodynamics.internal_energy_j(state)
-        return system.thermodynamics.control_volume_enthalpy_j(state) if value is None else value
+    def energy(state: CoupledStateView) -> float:
+        value = thermal.internal_energy_j(state)
+        return (cast("LegacyCrystalEnthalpy", thermal).control_volume_enthalpy_j(state)
+                if value is None else value)
 
     energy_residual = (
         energy(final)
@@ -542,7 +593,8 @@ def solve_crystal_interval(
                 else "finite_difference"
             ),
             "segments": diagnostics,
-            **{k: sum(int(d.get(k, 0) or 0) for d in diagnostics) for k in ("nfev", "njev", "nlu")},
+            **{k: sum(int(cast(int, d.get(k, 0) or 0)) for d in diagnostics)
+               for k in ("nfev", "njev", "nlu")},
             "cohort_disappearances": deaths,
             "coordinate_units": {
                 "liquid_and_birth_stock": "mol",
