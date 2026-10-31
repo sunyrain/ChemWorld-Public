@@ -7,11 +7,16 @@ phase property, not a volume inferred from a pressure-independent database.
 from dataclasses import dataclass, replace
 from math import isfinite
 from types import MappingProxyType
+from typing import cast
 
 import numpy as np
 
 from chemworld.physchem.elements import ELEMENTS
-from chemworld.physchem.gibbs_phase import GibbsPhaseModel, gibbs_phase_from_dict
+from chemworld.physchem.gibbs_phase import (
+    GibbsPhaseModel,
+    GibbsPhaseProperties,
+    gibbs_phase_from_dict,
+)
 from chemworld.physchem.residual_system import (
     ResidualDomainError,
     ResidualVariable,
@@ -128,7 +133,9 @@ class CefMaterialSpec:
         capacity = total*cp + self.support_heat_capacity_J_K
         if not isfinite(capacity) or capacity <= 0:
             raise ValueError("CEF material has nonpositive total effective heat capacity")
-        properties = constitution.properties
+        # The shared stationary solver supplies properties only on success;
+        # its failed-result branch was rejected above.
+        properties = cast(GibbsPhaseProperties, constitution.properties)
         enthalpy = total*properties.enthalpy_J_mol + self.support_heat_capacity_J_K*(
             temperature-self.reference_temperature_K)
         return CefMaterialState(float(temperature), MappingProxyType(dict(amounts)), constitution,

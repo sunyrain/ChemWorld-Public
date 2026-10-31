@@ -19,7 +19,12 @@ import numpy as np
 from chemworld.data.tdb import AuxiliaryBalances, TdbDatabase, TdbParameter, TdbPhase
 from chemworld.physchem.caloric_math import FirstDerivative, exponential, logarithm
 from chemworld.physchem.calphad_extrapolation import qkt_weight, validate_qkt
-from chemworld.physchem.gibbs_phase import GibbsPhaseModel, GibbsPhaseProperties, _slope
+from chemworld.physchem.gibbs_phase import (
+    GibbsPhaseModel,
+    GibbsPhaseProperties,
+    SiteFractions,
+    _slope,
+)
 from chemworld.physchem.second_order_pair import SecondOrderPair
 from chemworld.physchem.tdb_expressions import TDB_GAS_CONSTANT_J_MOL_K as R
 from chemworld.physchem.tdb_expressions import scalar_value
@@ -495,6 +500,20 @@ class CefPhaseModel(GibbsPhaseModel):
             va = self._sum({"VA"}, fractions, temperature, pressure)
             contributions["volume"] = v0 * exponential(va) * (pressure - 101325)
         return contributions
+
+    def _response_diagnostics(
+        self, fractions: SiteFractions, temperature: float, pressure: float,
+    ) -> list[str]:
+        diagnostics = list(self._diagnostics)
+        hints = self._phase.model_hints
+        if "magnetic_structure_factor" in hints:
+            tc = self._sum({"TC"}, fractions, temperature, pressure)
+            afm = cast(float, hints["magnetic_afm_factor"])
+            criticals = ([tc / afm if tc < 0 else tc] if afm != 0 else
+                         [tc, self._sum({"NT"}, fractions, temperature, pressure)])
+            if any(c > 0 and isclose(temperature, c, rel_tol=1e-12) for c in criticals):
+                diagnostics.append("magnetic critical point: declared one-sided branch derivative")
+        return diagnostics
 
     def _ordering_views(self, fractions):
         if not self._substitutional:

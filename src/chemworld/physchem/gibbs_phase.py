@@ -4,16 +4,26 @@ Phase-specific classes supply energy, composition and constraints. All material
 consumers share the same caloric derivatives, constrained root and state.
 """
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isclose, isfinite
 from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, TypeAlias
 
-from chemworld.physchem.caloric_math import FirstDerivative
+from chemworld.physchem.caloric_math import FirstDerivative, JetCoefficient
 from chemworld.physchem.tdb_expressions import scalar_value
 
+if TYPE_CHECKING:
+    from chemworld.physchem.calphad_response import CefDerivativeResponse, CefTemperatureResponse
+    from chemworld.physchem.calphad_stationary import CefChemicalPotentials, CefConstitutionResult
 
-def gibbs_phase_from_dict(payload):
+SiteFractions: TypeAlias = Sequence[Mapping[str, float]]
+JetSiteFractions: TypeAlias = tuple[Mapping[str, JetCoefficient], ...]
+
+
+def gibbs_phase_from_dict(payload: Mapping[str, Any]) -> GibbsPhaseModel:
     from chemworld.physchem.calphad import CefPhaseModel
     from chemworld.physchem.mqmqa import MQMQAPhaseModel
 
@@ -26,7 +36,7 @@ def gibbs_phase_from_dict(payload):
     raise ValueError("unknown native Gibbs phase model type")
 
 
-def _slope(value):
+def _slope(value: JetCoefficient) -> JetCoefficient:
     return value.slope if isinstance(value, FirstDerivative) else 0.0
 
 
@@ -39,8 +49,8 @@ class GibbsPhaseProperties:
     enthalpy_J_mol: float
     entropy_J_mol_K: float
     pressure_derivative_m3_mol: float | None
-    element_fractions: object
-    contributions_J_mol: object
+    element_fractions: Mapping[str, float]
+    contributions_J_mol: Mapping[str, float]
     diagnostics: tuple[str, ...]
 
 
@@ -48,10 +58,38 @@ class GibbsPhaseProperties:
 class GibbsPhaseModel:
     """Shared native Gibbs interface; no phase-specific inventory or solver."""
 
-    def _ordering_views(self, fractions):
+    _diagnostics: tuple[str, ...]
+
+    @property
+    def constituents(self) -> tuple[tuple[str, ...], ...]:
+        raise NotImplementedError("A phase model must declare its constituents")
+
+    def _constraints(self, fractions: JetSiteFractions) -> tuple[JetCoefficient, ...]:
+        raise NotImplementedError("A phase model must define its constitution constraints")
+
+    def _composition(
+        self, fractions: JetSiteFractions,
+    ) -> tuple[JetCoefficient, Mapping[str, JetCoefficient]]:
+        raise NotImplementedError("A phase model must define its real-atom composition")
+
+    def _energies(
+        self, fractions: JetSiteFractions, temperature: JetCoefficient, pressure: JetCoefficient,
+    ) -> Mapping[str, JetCoefficient]:
+        raise NotImplementedError("A phase model must define its energy contributions")
+
+    def _response_diagnostics(
+        self, fractions: SiteFractions, temperature: float, pressure: float,
+    ) -> list[str]:
+        return list(self._diagnostics)
+
+    def _ordering_views(
+        self, fractions: JetSiteFractions,
+    ) -> tuple[GibbsPhaseModel, JetSiteFractions, JetSiteFractions] | None:
         return None
 
-    def _fractions(self, fractions, *, check_constraints=True):
+    def _fractions(
+        self, fractions: SiteFractions, *, check_constraints: bool = True,
+    ) -> tuple[dict[str, float], ...]:
         if not isinstance(fractions, (tuple, list)) or len(fractions) != len(self.constituents):
             raise ValueError("CEF needs one fraction mapping per declared sublattice")
         result = []
@@ -73,7 +111,9 @@ class GibbsPhaseModel:
         return normalized
 
 
-    def gibbs(self, fractions, temperature_K, pressure_Pa=101325.0):
+    def gibbs(
+        self, fractions: SiteFractions, temperature_K: float, pressure_Pa: float = 101325.0,
+    ) -> float:
         fractions = self._fractions(fractions)
         temperature, pressure = self._potentials(temperature_K, pressure_Pa)
         value = scalar_value(sum(self._energies(fractions, temperature, pressure).values()))
@@ -83,14 +123,17 @@ class GibbsPhaseModel:
 
 
     @staticmethod
-    def _potentials(temperature_K, pressure_Pa):
+    def _potentials(temperature_K: float, pressure_Pa: float) -> tuple[float, float]:
         temperature, pressure = scalar_value(temperature_K), scalar_value(pressure_Pa)
         if not isfinite(temperature) or temperature <= 0 or not isfinite(pressure) or pressure <= 0:
             raise ValueError("CEF temperature and pressure must be finite and positive")
         return temperature, pressure
 
 
-    def evaluate(self, fractions, temperature_K, pressure_Pa=101325.0, *, pressure_derivative=True):
+    def evaluate(
+        self, fractions: SiteFractions, temperature_K: float, pressure_Pa: float = 101325.0,
+        *, pressure_derivative: bool = True,
+    ) -> GibbsPhaseProperties:
         fractions = self._fractions(fractions)
         temperature, pressure = self._potentials(temperature_K, pressure_Pa)
         energies = self._energies(fractions, FirstDerivative(temperature, 1), pressure)
@@ -104,15 +147,7 @@ class GibbsPhaseModel:
             dg_dp = scalar_value(_slope(response))
         if not all(isfinite(v) for v in (g, dg_dt, *(() if dg_dp is None else (dg_dp,)))):
             raise ValueError("nonfinite CEF energy or first derivative")
-        diagnostics = list(self._diagnostics)
-        hints = self._phase.model_hints
-        if "magnetic_structure_factor" in hints:
-            tc = self._sum({"TC"}, fractions, temperature, pressure)
-            afm = hints["magnetic_afm_factor"]
-            criticals = ([tc / afm if tc < 0 else tc] if afm != 0 else
-                         [tc, self._sum({"NT"}, fractions, temperature, pressure)])
-            if any(c > 0 and isclose(temperature, c, rel_tol=1e-12) for c in criticals):
-                diagnostics.append("magnetic critical point: declared one-sided branch derivative")
+        diagnostics = self._response_diagnostics(fractions, temperature, pressure)
         if dg_dp == 0:
             diagnostics.append("zero pressure derivative is not a measured material volume")
         return GibbsPhaseProperties(
@@ -123,14 +158,16 @@ class GibbsPhaseModel:
         )
 
 
-    def site_partials(self, fractions, temperature_K, pressure_Pa=101325.0):
+    def site_partials(
+        self, fractions: SiteFractions, temperature_K: float, pressure_Pa: float = 101325.0,
+    ) -> dict[tuple[int, str], float]:
         fractions = self._fractions(fractions)
         # Check thermodynamic domains before returning any partial result.
         self.gibbs(fractions, temperature_K, pressure_Pa)
         partials = {}
         for index, subl in enumerate(fractions):
             for species, value in subl.items():
-                seeded = [dict(s) for s in fractions]
+                seeded: list[dict[str, JetCoefficient]] = [dict(s) for s in fractions]
                 seeded[index][species] = FirstDerivative(value, 1)
                 energy = sum(self._energies(tuple(seeded), temperature_K, pressure_Pa).values())
                 derivative = scalar_value(_slope(energy))
@@ -140,29 +177,40 @@ class GibbsPhaseModel:
         return partials
 
 
-    def temperature_response(self, fractions, temperature_K, pressure_Pa=101325.0, **kwargs):
+    def temperature_response(
+        self, fractions: SiteFractions, temperature_K: float, pressure_Pa: float = 101325.0,
+        **kwargs: Any,
+    ) -> CefTemperatureResponse:
         """G/H/S and Cp at fixed site fractions, rather than relaxed-site Cp."""
         from chemworld.physchem.calphad_response import temperature_response
 
         return temperature_response(self, fractions, temperature_K, pressure_Pa, **kwargs)
 
 
-    def derivatives(self, fractions, temperature_K, pressure_Pa=101325.0, **kwargs):
+    def derivatives(
+        self, fractions: SiteFractions, temperature_K: float, pressure_Pa: float = 101325.0,
+        **kwargs: Any,
+    ) -> CefDerivativeResponse:
         """Analytic T/P/site gradient and Hessian, with coordinate units."""
         from chemworld.physchem.calphad_response import derivatives
 
         return derivatives(self, fractions, temperature_K, pressure_Pa, **kwargs)
 
 
-    def chemical_potentials(self, fractions, temperature_K, pressure_Pa=101325.0, **kwargs):
+    def chemical_potentials(
+        self, fractions: SiteFractions, temperature_K: float, pressure_Pa: float = 101325.0,
+        **kwargs: Any,
+    ) -> CefChemicalPotentials:
         """Determine elemental mu only when stationarity and rank permit it."""
         from chemworld.physchem.calphad_stationary import chemical_potentials
 
         return chemical_potentials(self, fractions, temperature_K, pressure_Pa, **kwargs)
 
 
-    def stationary_constitution(self, element_fractions, initial_sites, temperature_K,
-                                pressure_Pa=101325.0, **kwargs):
+    def stationary_constitution(
+        self, element_fractions: Mapping[str, float], initial_sites: SiteFractions,
+        temperature_K: float, pressure_Pa: float = 101325.0, **kwargs: Any,
+    ) -> CefConstitutionResult:
         """A local constrained root; no global/multiphase minimum is promised."""
         from chemworld.physchem.calphad_stationary import stationary_constitution
 

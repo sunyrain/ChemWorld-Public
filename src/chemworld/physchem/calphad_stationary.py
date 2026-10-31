@@ -18,6 +18,7 @@ from chemworld.physchem.calphad_response import (
     site_values,
     unpack_sites,
 )
+from chemworld.physchem.gibbs_phase import GibbsPhaseProperties
 from chemworld.physchem.residual_system import (
     ResidualDomainError,
     ResidualNumericalError,
@@ -203,7 +204,7 @@ class CefConstitutionResult:
     success: bool
     failure_reason: str
     site_fractions: tuple | None
-    properties: object | None
+    properties: GibbsPhaseProperties | None
     chemical_potentials: CefChemicalPotentials | None
     relaxed_heat_capacity_J_mol_K: float | None
     site_temperature_derivatives_per_K: tuple | None
