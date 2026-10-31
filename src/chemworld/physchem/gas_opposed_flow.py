@@ -315,7 +315,7 @@ class _OpposedResidual:
                 },
                 volume_L=float(spec.mesh.cell_volumes_m3[0]) * 1000,
                 temperature_K=point.temperature_K,
-                **({"species_thermo": self.thermo_views} if self.thermo_views is not None else {}),
+                species_thermo=self.thermo_views,
             )
         if not isinstance(initial, Mapping) or set(initial) != _INITIAL_FIELDS:
             raise ValueError("opposed initial profile has missing or unknown fields")
@@ -677,11 +677,7 @@ class _OpposedResidual:
                     row,
                     volume_L=float(spec.mesh.cell_volumes_m3[i]) * 1000,
                     temperature_K=float(t[i]),
-                    **(
-                        {"species_thermo": self.thermo_views}
-                        if self.thermo_views is not None
-                        else {}
-                    ),
+                    species_thermo=self.thermo_views,
                 )
             except (ValueError, ArithmeticError) as exc:
                 raise ResidualDomainError("opposed chemistry trial: " + str(exc)) from exc

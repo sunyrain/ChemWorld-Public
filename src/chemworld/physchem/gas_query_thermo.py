@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from math import isfinite
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 from chemworld.physchem.thermochemistry import NASA7SpeciesThermo, SpeciesThermoState
 
@@ -31,7 +31,7 @@ _NUMERIC_STATE_FIELDS = (
 )
 
 
-def _cacheable(state, species_id, temperature):
+def _cacheable(state: object, species_id: str, temperature: float) -> bool:
     # Never introduce a new failure merely while inspecting a raw return.
     # Unsupported or nonfinite returns pass through unchanged and are not cached.
     if type(state) is not SpeciesThermoState:
@@ -68,13 +68,13 @@ class _ExactStateLRU:
         "uncacheable_results",
     )
 
-    def __init__(self, capacity):
+    def __init__(self, capacity: int) -> None:
         self.capacity = capacity
-        self.entries = OrderedDict()
+        self.entries: OrderedDict[tuple[str, float], SpeciesThermoState] = OrderedDict()
         self.requests = self.hits = self.misses = self.delegated_calls = 0
         self.uncacheable_results = self.evictions = self.peak_entries = 0
 
-    def evaluate(self, model, temperature):
+    def evaluate(self, model: NASA7SpeciesThermo, temperature: float) -> SpeciesThermoState:
         self.requests += 1
         if type(temperature) is not float:
             # In particular, do not coerce bool/int/numpy/Decimal/string inputs.
@@ -84,11 +84,11 @@ class _ExactStateLRU:
         # Outer min/max alone would incorrectly permit a declared segment gap.
         model.select_segment(temperature)
         key = (model.species_id, temperature)
-        state = self.entries.get(key, _MISSING)
-        if state is not _MISSING:
+        cached = self.entries.get(key, _MISSING)
+        if cached is not _MISSING:
             self.hits += 1
             self.entries.move_to_end(key)
-            return state
+            return cast(SpeciesThermoState, cached)
         self.misses += 1
         state = model.evaluate(temperature)  # exceptions propagate and are never cached
         if not _cacheable(state, model.species_id, temperature):
@@ -102,7 +102,7 @@ class _ExactStateLRU:
         self.peak_entries = max(self.peak_entries, len(self.entries))
         return state
 
-    def statistics(self):
+    def statistics(self) -> dict[str, int]:
         return {
             "requests": self.requests,
             "hits": self.hits,
@@ -121,45 +121,48 @@ class _QueryThermoView:
 
     __slots__ = ("__memo", "__model")
 
-    def __init__(self, model, memo):
+    __model: NASA7SpeciesThermo
+    __memo: _ExactStateLRU
+
+    def __init__(self, model: NASA7SpeciesThermo, memo: _ExactStateLRU) -> None:
         object.__setattr__(self, "_QueryThermoView__model", model)
         object.__setattr__(self, "_QueryThermoView__memo", memo)
 
-    def __setattr__(self, name, value):
+    def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("query thermo metadata is read-only")
 
     @property
-    def species_id(self):
+    def species_id(self) -> str:
         return self.__model.species_id
 
     @property
-    def reference_pressure_Pa(self):  # noqa: N802 -- existing thermo protocol
+    def reference_pressure_Pa(self) -> float:  # noqa: N802 -- existing thermo protocol
         return self.__model.reference_pressure_Pa
 
     @property
-    def min_temperature_K(self):  # noqa: N802 -- existing thermo protocol
+    def min_temperature_K(self) -> float:  # noqa: N802 -- existing thermo protocol
         return self.__model.min_temperature_K
 
     @property
-    def max_temperature_K(self):  # noqa: N802 -- existing thermo protocol
+    def max_temperature_K(self) -> float:  # noqa: N802 -- existing thermo protocol
         return self.__model.max_temperature_K
 
     @property
-    def composition(self):
+    def composition(self) -> Mapping[str, float]:
         return MappingProxyType(self.__model.composition)
 
     @property
-    def source_note(self):
+    def source_note(self) -> str:
         return deepcopy(self.__model.source_note)
 
     @property
-    def boundary_policy(self):
+    def boundary_policy(self) -> str:
         return self.__model.boundary_policy
 
-    def evaluate(self, temperature_K):
+    def evaluate(self, temperature_K: float) -> SpeciesThermoState:
         return self.__memo.evaluate(self.__model, temperature_K)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         # The original schema only: no memo, proxy or query state is persisted.
         return deepcopy(self.__model.to_dict())
 
@@ -178,7 +181,9 @@ class GasQueryThermoMemo:
 
     __slots__ = ("_memo", "_views")
 
-    def __init__(self, models: Mapping[str, NASA7SpeciesThermo], *, maximum_states: int):
+    def __init__(
+        self, models: Mapping[str, NASA7SpeciesThermo], *, maximum_states: int,
+    ) -> None:
         if type(maximum_states) is not int or maximum_states < 1:
             raise ValueError("maximum_states must be an explicit positive Python int")
         if not isinstance(models, Mapping) or not models:
@@ -199,7 +204,7 @@ class GasQueryThermoMemo:
         )
 
     @property
-    def views(self) -> Mapping[str, Any]:
+    def views(self) -> Mapping[str, _QueryThermoView]:
         return self._views
 
     def statistics(self) -> dict[str, int]:

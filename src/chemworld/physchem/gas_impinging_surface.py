@@ -790,11 +790,7 @@ class _ImpingingResidual:
                     row,
                     volume_L=float(spec.mesh.cell_volumes_m3[i]) * 1000,
                     temperature_K=float(t[i]),
-                    **(
-                        {"species_thermo": self.thermo_views}
-                        if self.thermo_views is not None
-                        else {}
-                    ),
+                    species_thermo=self.thermo_views,
                 )
             except (ValueError, ArithmeticError) as exc:
                 raise ResidualDomainError("impinging chemistry trial: " + str(exc)) from exc
