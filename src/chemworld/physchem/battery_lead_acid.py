@@ -8,15 +8,21 @@ they are NOT the Sulzer material set. No hidden solvent or porosity state,
 ohmic transport, thermal/chemical energy model, or private integrator exists.
 """
 
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from math import isclose, isfinite
+from typing import Any, Literal, NotRequired, TypeAlias, TypedDict, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import sparse
 
 from chemworld.data.scientific_inputs import _text
 from chemworld.physchem.battery_models import BATTERY_ALGEBRAIC, BATTERY_COORDINATES, F, R
 from chemworld.physchem.coupled_system import (
+    CoupledAdvanceResult,
     CoupledAlgebraic,
     CoupledCoordinate,
     CoupledEvent,
@@ -26,6 +32,7 @@ from chemworld.physchem.coupled_system import (
     CoupledSystem,
     ProcessContribution,
 )
+from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.reactor_shared import ScalarControlProgram
 from chemworld.physchem.residual_system import (
     ResidualDerivatives,
@@ -56,7 +63,47 @@ _ELEMENTS = {
 }
 
 
-def _numbers(values, name, *, positive=True):
+_Vector: TypeAlias = NDArray[np.float64]
+_ControlMode: TypeAlias = Literal[
+    "constant_current", "constant_voltage", "positive_current_limit", "negative_current_limit",
+]
+
+
+class _CompositionFields(TypedDict):
+    amounts_mol: dict[str, float]
+    porosities: tuple[float, float, float]
+    pore_volumes_m3: tuple[float, ...]
+    total_pore_volume_m3: float
+    acid_concentration_mol_m3: float
+    water_concentration_mol_m3: float
+    molality_mol_kg: float
+    dc_dn: _Vector
+    dw_dn: _Vector
+    dlogm_dn: _Vector
+
+
+class LeadAcidFields(TypedDict):
+    amounts_mol: dict[str, float]
+    porosities: tuple[float, float, float]
+    pore_volumes_m3: tuple[float, ...]
+    total_pore_volume_m3: float
+    acid_concentration_mol_m3: float
+    water_concentration_mol_m3: float
+    molality_mol_kg: float
+    current_A: float
+    voltage_V: float
+    negative_ocp_V: float
+    positive_ocp_V: float
+    negative_overpotential_V: float
+    positive_overpotential_V: float
+    negative_exchange_current_A_m2: float
+    positive_exchange_current_A_m2: float
+    negative_interfacial_current_A_m2: float
+    positive_interfacial_current_A_m2: float
+    closure_diagnostic: NotRequired[dict[str, Any]]
+
+
+def _numbers(values: Iterable[float], name: str, *, positive: bool = True) -> None:
     if any(
         isinstance(v, (bool, np.bool_)) or not isfinite(v) or (v <= 0 if positive else v < 0)
         for v in values
@@ -96,17 +143,17 @@ class LeadAcidGeometrySpec:
             raise ValueError("inactive solid cannot fill an entire electrode")
 
     @property
-    def layer_volumes_m3(self):
+    def layer_volumes_m3(self) -> tuple[float, ...]:
         return tuple(self.area_m2 * length for length in self.lengths_m)
 
     @property
-    def reaction_areas_m2(self):
+    def reaction_areas_m2(self) -> tuple[float, ...]:
         return tuple(
             self.layer_volumes_m3[i] * a
             for i, a in zip((0, 2), self.reaction_area_densities_m_inv, strict=True)
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             key: list(value) if isinstance(value, tuple) else value
             for key, value in asdict(self).items()
@@ -153,11 +200,11 @@ class LeadAcidMaterialSpec:
         _text(self.provenance, "LOQS material provenance")
 
     @property
-    def reference_water_concentration_mol_m3(self):
+    def reference_water_concentration_mol_m3(self) -> float:
         _, _, _, acid, water = self.molar_volumes_m3_mol
         return (1 - acid * self.reference_acid_concentration_mol_m3) / water
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             key: list(value) if isinstance(value, tuple) else value
             for key, value in asdict(self).items()
@@ -168,6 +215,7 @@ class LeadAcidMaterialSpec:
 class BatteryLeadAcidSpec:
     geometry: LeadAcidGeometrySpec = field(default_factory=LeadAcidGeometrySpec)
     material: LeadAcidMaterialSpec = field(default_factory=LeadAcidMaterialSpec)
+    # None requests the default; __post_init__ always stores six validated amounts.
     initial_amounts_mol: tuple[float, ...] | None = None
     temperature_K: float = 298.15
     minimum_acid_concentration_mol_m3: float = 10.0
@@ -245,11 +293,11 @@ class BatteryLeadAcidSpec:
             raise ValueError("initial LOQS electrolyte and pores must lie inside event limits")
 
     @property
-    def model_family(self):
+    def model_family(self) -> str:
         return LOQS_FAMILY
 
     @property
-    def model_id(self):
+    def model_id(self) -> str:
         return LOQS_FAMILY
 
     @property
@@ -257,25 +305,25 @@ class BatteryLeadAcidSpec:
         return "residual"
 
     @property
-    def inventory_keys(self):
+    def inventory_keys(self) -> tuple[str, ...]:
         return LOQS_KEYS
 
     @property
-    def inventory_species(self):
+    def inventory_species(self) -> dict[str, str]:
         return {
             key: "leadacid:" + species for key, species in zip(LOQS_KEYS, _COMPOUNDS, strict=True)
         }
 
     @property
-    def species_formulas(self):
+    def species_formulas(self) -> dict[str, str]:
         return {"leadacid:" + species: species for species in _COMPOUNDS}
 
     @property
-    def coordinate_keys(self):
+    def coordinate_keys(self) -> tuple[str, ...]:
         return BATTERY_COORDINATES
 
     @property
-    def hysteresis_keys(self):
+    def hysteresis_keys(self) -> tuple[str, ...]:
         return ()
 
     @property
@@ -299,32 +347,32 @@ class BatteryLeadAcidSpec:
         return 0.0
 
     @property
-    def volume_l(self):
+    def volume_l(self) -> float:
         return 1000 * sum(self.geometry.layer_volumes_m3)
 
     @property
-    def usable_charge_c(self):
+    def usable_charge_c(self) -> float:
         # A numerical scale, not an assertion that pore/voltage cutoffs are later.
-        n = self.initial_amounts_mol
+        n = cast(tuple[float, ...], self.initial_amounts_mol)
         return 2 * F * max(min(n[0], n[2], n[4] / 2), min(n[1], n[3], n[5] / 2))
 
-    def current_at_c_rate(self, rate):
+    def current_at_c_rate(self, rate: float) -> float:
         if isinstance(rate, bool) or not isfinite(rate):
             raise ValueError("LOQS C rate must be finite")
         return rate * self.usable_charge_c / 3600
 
-    def initial_coordinates(self):
+    def initial_coordinates(self) -> dict[str, float]:
         return dict.fromkeys(self.coordinate_keys, 0.0)
 
-    def initial_state(self):
+    def initial_state(self) -> CoupledState:
         return CoupledState(
-            dict(zip(LOQS_KEYS, self.initial_amounts_mol, strict=True)),
+            dict(zip(LOQS_KEYS, cast(tuple[float, ...], self.initial_amounts_mol), strict=True)),
             self.temperature_K,
             self.volume_l,
             coordinates=self.initial_coordinates(),
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model_family": LOQS_FAMILY,
             **{
@@ -339,14 +387,14 @@ class BatteryLeadAcidSpec:
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> BatteryLeadAcidSpec:
         value = dict(value)
         if value.pop("model_family", None) != LOQS_FAMILY:
             raise ValueError("unsupported lead-acid LOQS family")
         return cls(**value)
 
 
-def _composition(spec, state):
+def _composition(spec: BatteryLeadAcidSpec, state: CoupledStateView) -> _CompositionFields:
     n = np.asarray([state.amounts_mol[k] for k in LOQS_KEYS])
     pb, pbo2, sulfate, _, _ = spec.material.molar_volumes_m3_mol
     volumes = np.asarray(spec.geometry.layer_volumes_m3)
@@ -378,7 +426,7 @@ def _composition(spec, state):
     dlogm = dc / (acid / v) - dw / (water / v)
     return {
         "amounts_mol": dict(state.amounts_mol),
-        "porosities": tuple(pores / volumes),
+        "porosities": cast(tuple[float, float, float], tuple(pores / volumes)),
         "pore_volumes_m3": tuple(pores),
         "total_pore_volume_m3": pore,
         "acid_concentration_mol_m3": acid / v,
@@ -390,10 +438,12 @@ def _composition(spec, state):
     }
 
 
-def _voltage(spec, state, current):
+def _voltage(
+    spec: BatteryLeadAcidSpec, state: CoupledStateView, current: float,
+) -> tuple[LeadAcidFields, tuple[_Vector, float, float]]:
     f = _composition(spec, state)
     ca, cw, m = (
-        f[k] for k in ("acid_concentration_mol_m3", "water_concentration_mol_m3", "molality_mol_kg")
+        f["acid_concentration_mol_m3"], f["water_concentration_mol_m3"], f["molality_mol_kg"],
     )
     if any(not isfinite(v) or v <= 0 for v in (ca, cw, m)):
         raise ValueError("LOQS concentrations and molality must be representable and positive")
@@ -421,7 +471,7 @@ def _voltage(spec, state, current):
     voltage = up - un + etap - etan
     if not isfinite(voltage) or not np.all(np.isfinite(dvn)) or not isfinite(dvi) or dvi >= 0:
         raise ValueError("LOQS voltage/monotone derivative is not representable")
-    return {
+    return cast(LeadAcidFields, {
         **{k: v for k, v in f.items() if not k.startswith("d")},
         "current_A": float(current),
         "voltage_V": float(voltage),
@@ -433,10 +483,10 @@ def _voltage(spec, state, current):
         "positive_exchange_current_A_m2": float(j0p),
         "negative_interfacial_current_A_m2": current / areas[0],
         "positive_interfacial_current_A_m2": -current / areas[1],
-    }, (dvn, dvi, (etap - etan) / state.temperature_K)
+    }), (dvn, dvi, (etap - etan) / state.temperature_K)
 
 
-def validate_lead_acid_state(spec, state):
+def validate_lead_acid_state(spec: BatteryLeadAcidSpec, state: CoupledStateView) -> None:
     if set(state.amounts_mol) != set(LOQS_KEYS) or set(state.coordinates) != set(
         BATTERY_COORDINATES
     ):
@@ -462,7 +512,10 @@ def validate_lead_acid_state(spec, state):
     ):
         raise ValueError("LOQS acid/water volume does not fill the actual pore volume")
     q = state.coordinates[BATTERY_COORDINATES[0]]
-    for key, n0, nu in zip(LOQS_KEYS, spec.initial_amounts_mol, LOQS_STOICHIOMETRY, strict=True):
+    for key, n0, nu in zip(
+        LOQS_KEYS, cast(tuple[float, ...], spec.initial_amounts_mol), LOQS_STOICHIOMETRY,
+        strict=True,
+    ):
         if not isclose(
             2 * F * (state.amounts_mol[key] - n0),
             nu * q,
@@ -472,7 +525,7 @@ def validate_lead_acid_state(spec, state):
             raise ValueError("LOQS true material inventory and Q violate Faraday balance")
 
 
-def _check_program(spec, program):
+def _check_program(spec: BatteryLeadAcidSpec, program: ScalarControlProgram) -> None:
     if (
         not isinstance(program, ScalarControlProgram)
         or program.unit not in {"A", "V"}
@@ -486,7 +539,9 @@ def _check_program(spec, program):
         raise ValueError("LOQS requires an in-domain CC or finite-source CV program")
 
 
-def lead_acid_control_mode(spec, state, program):
+def lead_acid_control_mode(
+    spec: BatteryLeadAcidSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> tuple[_ControlMode, float]:
     _check_program(spec, program)
     target = program.value_at(state.time_s)
     if program.unit == "A":
@@ -498,16 +553,18 @@ def lead_acid_control_mode(spec, state, program):
     return "constant_voltage", target
 
 
-def lead_acid_algebraic(spec, program):
+def lead_acid_algebraic(
+    spec: BatteryLeadAcidSpec, program: ScalarControlProgram,
+) -> CoupledAlgebraic:
     _check_program(spec, program)
     ik, vk = BATTERY_ALGEBRAIC
 
-    def initial(state):
+    def initial(state: CoupledStateView) -> dict[str, float]:
         mode, target = lead_acid_control_mode(spec, state, program)
         current = 0.0 if mode == "constant_voltage" else target
         return {ik: current, vk: _voltage(spec, state, current)[0]["voltage_V"]}
 
-    def residual(state):
+    def residual(state: CoupledStateView) -> _Vector:
         current, voltage = (state.algebraic_values[k] for k in BATTERY_ALGEBRAIC)
         physical = _voltage(spec, state, current)[0]["voltage_V"]
         mode, target = lead_acid_control_mode(spec, state, program)
@@ -534,7 +591,10 @@ def lead_acid_algebraic(spec, program):
     )
 
 
-def _closure_jacobian(spec, state, program, identities):
+def _closure_jacobian(
+    spec: BatteryLeadAcidSpec, state: CoupledStateView, program: ScalarControlProgram,
+    identities: Sequence[str],
+) -> sparse.csc_matrix:
     index = {key: i for i, key in enumerate(identities)}
     ik, vk = BATTERY_ALGEBRAIC
     _, (dvn, dvi, dvt) = _voltage(spec, state, state.algebraic_values[ik])
@@ -552,7 +612,10 @@ def _closure_jacobian(spec, state, program, identities):
     return sparse.csc_matrix(jac)
 
 
-def lead_acid_fields(spec, state, *, current_A=None, program=None):
+def lead_acid_fields(
+    spec: BatteryLeadAcidSpec, state: CoupledStateView, *, current_A: float | None = None,
+    program: ScalarControlProgram | None = None,
+) -> LeadAcidFields:
     if (current_A is None) == (program is None):
         raise ValueError("supply exactly one LOQS current or control program")
     if isinstance(state, CoupledState):
@@ -565,12 +628,14 @@ def lead_acid_fields(spec, state, *, current_A=None, program=None):
         ):
             raise ValueError("LOQS current exceeds the declared finite source")
         return _voltage(spec, state, current_A)[0]
+    # The exclusive-current/program check above establishes this control mode.
+    program = cast(ScalarControlProgram, program)
     closure = lead_acid_algebraic(spec, program)
     if all(key in state.algebraic_values for key in BATTERY_ALGEBRAIC):
         f = _voltage(spec, state, state.algebraic_values[BATTERY_ALGEBRAIC[0]])[0]
         return {**f, "voltage_V": state.algebraic_values[BATTERY_ALGEBRAIC[1]]}
 
-    def view(y):
+    def view(y: Sequence[float] | _Vector) -> CoupledStateView:
         return CoupledStateView(
             state.amounts_mol,
             state.temperature_K,
@@ -628,17 +693,22 @@ class LeadAcidReadout:
     delivered_work_J: float
 
 
-def lead_acid_readout(spec, state, current_A):
-    f = lead_acid_fields(spec, state, current_A=current_A)
+def lead_acid_readout(
+    spec: BatteryLeadAcidSpec, state: CoupledStateView, current_A: float,
+) -> LeadAcidReadout:
+    f: Mapping[str, object] = lead_acid_fields(spec, state, current_A=current_A)
     return LeadAcidReadout(
-        **{
+        **cast(dict[str, Any], {
             key: state.coordinates[key] if key in state.coordinates else f[key]
             for key in LeadAcidReadout.__dataclass_fields__
-        }
+        })
     )
 
 
-def lead_acid_profile(spec, state, *, current_A=None, program=None):
+def lead_acid_profile(
+    spec: BatteryLeadAcidSpec, state: CoupledStateView, *, current_A: float | None = None,
+    program: ScalarControlProgram | None = None,
+) -> dict[str, Any]:
     """Return a JSON-safe read-only six-inventory LOQS profile.
 
     The profile is derived from the existing material state and voltage law.
@@ -659,7 +729,8 @@ def lead_acid_profile(spec, state, *, current_A=None, program=None):
     faradaic = {
         key: float(2 * F * (amounts[key] - initial) - nu * charge)
         for key, initial, nu in zip(
-            LOQS_KEYS, spec.initial_amounts_mol, LOQS_STOICHIOMETRY, strict=True
+            LOQS_KEYS, cast(tuple[float, ...], spec.initial_amounts_mol),
+            LOQS_STOICHIOMETRY, strict=True,
         )
     }
     return {
@@ -690,32 +761,40 @@ def lead_acid_profile(spec, state, *, current_A=None, program=None):
     }
 
 
-def lead_acid_control_current(spec, state, program):
+def lead_acid_control_current(
+    spec: BatteryLeadAcidSpec, state: CoupledStateView, program: ScalarControlProgram,
+) -> float:
     return lead_acid_fields(spec, state, program=program)["current_A"]
 
 
 class _LeadAcidThermodynamics:
     inventory_keys = LOQS_KEYS
 
-    def heat_capacity_j_k(self, state):
+    def heat_capacity_j_k(self, state: CoupledStateView) -> float:
         return 1.0
 
-    def internal_energy_j(self, state):
+    def internal_energy_j(self, state: CoupledStateView) -> None:
         return None
 
-    def chemical_energy_rate_w(self, state, rates, contributions):
+    def chemical_energy_rate_w(
+        self, state: CoupledStateView, rates: Mapping[str, float],
+        contributions: Sequence[ProcessContribution],
+    ) -> float:
         return 0.0
 
 
-def lead_acid_system(spec, program, *, thermal_device=None, control_events=()):
+def lead_acid_system(
+    spec: BatteryLeadAcidSpec, program: ScalarControlProgram, *,
+    thermal_device: ThermalDeviceSpec | None = None, control_events: Sequence[CoupledEvent] = (),
+) -> CoupledSystem:
     if thermal_device is not None:
         raise ValueError("lead-acid LOQS is isothermal; external thermal coupling is unsupported")
     closure = lead_acid_algebraic(spec, program)
 
-    def fields(state):
+    def fields(state: CoupledStateView) -> LeadAcidFields:
         return lead_acid_fields(spec, state, program=program)
 
-    def evaluate(state):
+    def evaluate(state: CoupledStateView) -> ProcessContribution:
         f = fields(state)
         current, voltage = f["current_A"], f["voltage_V"]
         return ProcessContribution(
@@ -731,24 +810,36 @@ def lead_acid_system(spec, program, *, thermal_device=None, control_events=()):
 
     events = []
     for key, nu in zip(LOQS_KEYS[:4], LOQS_STOICHIOMETRY[:4], strict=True):
+        def depleted(s: CoupledStateView, k: str = key, v: int = nu) -> float:
+            return s.amounts_mol[k] if v * fields(s)["current_A"] < 0 else 1.0
+
         events.append(
             CoupledEvent(
                 f"lead-acid:{key}:depleted",
-                lambda s, k=key, v=nu: s.amounts_mol[k] if v * fields(s)["current_A"] < 0 else 1.0,
+                depleted,
             )
         )
     for name, minimum in (
         ("acid", spec.minimum_acid_concentration_mol_m3),
         ("water", spec.minimum_water_concentration_mol_m3),
     ):
+        def minimum_concentration(
+            s: CoupledStateView, n: str = name, m: float = minimum,
+        ) -> float:
+            concentration_key = cast(
+                Literal["acid_concentration_mol_m3", "water_concentration_mol_m3"],
+                n + "_concentration_mol_m3",
+            )
+            return (
+                fields(s)[concentration_key] - m
+                if (fields(s)["current_A"] > 0 if n == "acid" else fields(s)["current_A"] < 0)
+                else 1.0
+            )
+
         events.append(
             CoupledEvent(
                 f"lead-acid:minimum-{name}",
-                lambda s, n=name, m=minimum: (
-                    fields(s)[n + "_concentration_mol_m3"] - m
-                    if (fields(s)["current_A"] > 0 if n == "acid" else fields(s)["current_A"] < 0)
-                    else 1.0
-                ),
+                minimum_concentration,
             )
         )
     for index, name in ((0, "negative"), (2, "positive")):
@@ -759,14 +850,19 @@ def lead_acid_system(spec, program, *, thermal_device=None, control_events=()):
             ("minimum", spec.minimum_porosity, 1),
             ("maximum", spec.maximum_porosity, -1),
         ):
+            def porosity_limit(
+                s: CoupledStateView, i: int = index, bound_value: float = limit,
+                d: int = sense, c: float = change,
+            ) -> float:
+                return (
+                    d * (fields(s)["porosities"][i] - bound_value)
+                    if d * c * fields(s)["current_A"] < 0 else 1.0
+                )
+
             events.append(
                 CoupledEvent(
                     f"lead-acid:{name}:{bound}-porosity",
-                    lambda s, i=index, bound_value=limit, d=sense, c=change: (
-                        d * (fields(s)["porosities"][i] - bound_value)
-                        if d * c * fields(s)["current_A"] < 0
-                        else 1.0
-                    ),
+                    porosity_limit,
                 )
             )
     events.extend(
@@ -780,7 +876,7 @@ def lead_acid_system(spec, program, *, thermal_device=None, control_events=()):
         )
     )
 
-    def jacobian(state, identities):
+    def jacobian(state: CoupledStateView, identities: tuple[str, ...]) -> sparse.csc_matrix:
         index = {key: i for i, key in enumerate(identities)}
         ik, vk = BATTERY_ALGEBRAIC
         jac = np.zeros((len(identities), len(identities)))
@@ -794,7 +890,7 @@ def lead_acid_system(spec, program, *, thermal_device=None, control_events=()):
         ).toarray()
         return sparse.csc_matrix(jac)
 
-    laws = {
+    laws: dict[str, dict[str, float]] = {
         "element:" + element: dict(zip(LOQS_KEYS, counts, strict=True))
         for element, counts in _ELEMENTS.items()
     }
@@ -816,7 +912,9 @@ def lead_acid_system(spec, program, *, thermal_device=None, control_events=()):
         events=(*events, *control_events),
         inventory_scales_mol={
             key: max(n, spec.usable_charge_c / (2 * F))
-            for key, n in zip(LOQS_KEYS, spec.initial_amounts_mol, strict=True)
+            for key, n in zip(
+                LOQS_KEYS, cast(tuple[float, ...], spec.initial_amounts_mol), strict=True,
+            )
         },
         coordinates=(
             CoupledCoordinate(BATTERY_COORDINATES[0], "C", spec.usable_charge_c),
@@ -827,15 +925,15 @@ def lead_acid_system(spec, program, *, thermal_device=None, control_events=()):
 
 
 def advance_lead_acid(
-    spec,
-    state,
-    program,
-    duration_s,
+    spec: BatteryLeadAcidSpec,
+    state: CoupledState,
+    program: ScalarControlProgram,
+    duration_s: float,
     *,
-    evaluation_times_s=None,
-    thermal_device=None,
-    control_events=(),
-):
+    evaluation_times_s: Sequence[float] | None = None,
+    thermal_device: ThermalDeviceSpec | None = None,
+    control_events: Sequence[CoupledEvent] = (),
+) -> CoupledAdvanceResult:
     result = lead_acid_system(
         spec, program, thermal_device=thermal_device, control_events=control_events
     ).advance(state, duration_s, evaluation_times_s=evaluation_times_s)
