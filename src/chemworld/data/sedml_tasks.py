@@ -1,15 +1,19 @@
 """Whole-graph task validation and expansion costs before any native execution."""
 
+from collections.abc import Mapping, Set
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from chemworld.data.sbml_parser import acyclic_order
 from chemworld.data.sedml_declarations import SEDMLDocument, integer, mathematics, records
 from chemworld.data.sedml_ranges import SEDMLRanges, _range_reference
-from chemworld.data.sedml_simulations import resolve_simulations
+from chemworld.data.sedml_simulations import UniformTimeCourse, resolve_simulations
+from chemworld.data.sedml_xml import ExperimentXMLNode
 
 
-def _calculation_inputs(node, range_ids, model_ids):
+def _calculation_inputs(
+    node: ExperimentXMLNode, range_ids: Set[str], model_ids: Set[str],
+) -> None:
     shorthand = node.attributes.get("range")
     if shorthand is not None and shorthand not in range_ids:
         raise ValueError("task calculation refers to an unknown range")
@@ -34,14 +38,14 @@ def _calculation_inputs(node, range_ids, model_ids):
 class SEDMLTasks:
     document: SEDMLDocument
     maximum_invocations: int = 10000
-    nodes: object = field(init=False, repr=False)
-    simulations: object = field(init=False, repr=False)
-    ranges: object = field(init=False, repr=False)
-    sub_tasks: object = field(init=False, repr=False)
-    model_ids: object = field(init=False, repr=False)
-    invocations: object = field(init=False)
-    samples: object = field(init=False)
-    roots: tuple = field(init=False)
+    nodes: Mapping[str, ExperimentXMLNode] = field(init=False, repr=False)
+    simulations: Mapping[str, UniformTimeCourse] = field(init=False, repr=False)
+    ranges: Mapping[str, SEDMLRanges] = field(init=False, repr=False)
+    sub_tasks: Mapping[str, tuple[ExperimentXMLNode, ...]] = field(init=False, repr=False)
+    model_ids: Mapping[str, frozenset[str]] = field(init=False, repr=False)
+    invocations: Mapping[str, int] = field(init=False)
+    samples: Mapping[str, int] = field(init=False)
+    roots: tuple[str, ...] = field(init=False)
 
     def __post_init__(self) -> None:
         if type(self.maximum_invocations) is not int or not 1 <= self.maximum_invocations <= 100000:
@@ -52,7 +56,9 @@ class SEDMLTasks:
             raise ValueError("experiment requires a bounded nonempty task graph")
         simulations = resolve_simulations(self.document)
         models = {n.attributes["id"] for n in records(root, "listOfModels")}
-        graph, ranges, sub_tasks = {}, {}, {}
+        graph: dict[str, set[str]] = {}
+        ranges: dict[str, SEDMLRanges] = {}
+        sub_tasks: dict[str, tuple[ExperimentXMLNode, ...]] = {}
         for identity, node in nodes.items():
             if node.local_name == "task":
                 if (node.attributes["modelReference"] not in models
@@ -68,7 +74,10 @@ class SEDMLTasks:
                 sub_tasks[identity] = tuple(sorted(children,
                     key=lambda n: integer(n.attributes.get("order", "0"))))
         order = acyclic_order(graph, label="SED-ML task")
-        model_ids, invocations, samples, depths = {}, {}, {}, {}
+        model_ids: dict[str, frozenset[str]] = {}
+        invocations: dict[str, int] = {}
+        samples: dict[str, int] = {}
+        depths: dict[str, int] = {}
         for identity in order:
             node = nodes[identity]
             if node.local_name == "task":
@@ -86,7 +95,7 @@ class SEDMLTasks:
                 *(model_ids[n.attributes["task"]] for n in children))
             # Equal/omitted order permits either ordering. Shared model state
             # would make that choice change the experiment, so refuse ambiguity.
-            def effects(child):
+            def effects(child: ExperimentXMLNode) -> set[str]:
                 involved = set(model_ids[child.attributes["task"]])
                 for change in records(child, "listOfChanges"):
                     involved.add(change.attributes["modelReference"])

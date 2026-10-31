@@ -1,25 +1,47 @@
 """Immutable report arrays with explicit sample coordinates and shared mathematics."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import isfinite, prod
 from types import MappingProxyType
+from typing import TypeAlias, TypedDict, cast
 
+from chemworld.data.sbml import SBMLModel
 from chemworld.data.sedml_declarations import finite_number, mathematics, records
-from chemworld.data.sedml_quantities import model_quantity
+from chemworld.data.sedml_quantities import SEDMLQuantity, model_quantity
 from chemworld.data.sedml_tasks import SEDMLTasks
+from chemworld.data.sedml_xml import ExperimentXMLNode
+
+SampleCoordinate: TypeAlias = tuple[str | int | float, ...]
+
+
+class SEDMLArrayData(TypedDict):
+    values: list[float]
+    shape: list[int]
+    axes: list[str]
+    sample_keys: list[list[str | int | float]]
+    unit: str | None
+
+
+class SEDMLReportData(TypedDict):
+    id: str
+    label: str
+    data_reference: str
+    data: SEDMLArrayData
 
 
 @dataclass(frozen=True)
 class SEDMLArray:
-    values: tuple
-    shape: tuple
-    axes: tuple
-    sample_keys: tuple
+    values: tuple[float, ...]
+    shape: tuple[int, ...]
+    axes: tuple[str, ...]
+    sample_keys: tuple[SampleCoordinate, ...]
     unit: str | None = None
 
     def __post_init__(self) -> None:
-        values, shape, axes, keys = map(tuple,
-            (self.values, self.shape, self.axes, self.sample_keys))
+        values, shape, axes, keys = (
+            tuple(self.values), tuple(self.shape), tuple(self.axes), tuple(self.sample_keys),
+        )
         if (len(shape) > 16 or any(type(n) is not int or n < 1 for n in shape)
                 or prod(shape) != len(values) or not 1 <= len(values) <= 2000000
                 or len(axes) != len(shape) or any(not isinstance(a, str) or not a for a in axes)
@@ -37,7 +59,7 @@ class SEDMLArray:
                             ("sample_keys", keys)):
             object.__setattr__(self, name, value)
 
-    def to_dict(self):
+    def to_dict(self) -> SEDMLArrayData:
         return {"values": list(self.values), "shape": list(self.shape), "axes": list(self.axes),
                 "sample_keys": [list(key) for key in self.sample_keys], "unit": self.unit}
 
@@ -45,13 +67,17 @@ class SEDMLArray:
 @dataclass(frozen=True)
 class SEDMLReports:
     tasks: SEDMLTasks
-    models: object
-    bindings: object = field(init=False, repr=False)
-    generators: object = field(init=False, repr=False)
-    reports: object = field(init=False, repr=False)
+    models: Mapping[str, SBMLModel]
+    bindings: Mapping[tuple[str, str], tuple[str, str, SEDMLQuantity]] = field(
+        init=False, repr=False,
+    )
+    generators: Mapping[str, ExperimentXMLNode] = field(init=False, repr=False)
+    reports: Mapping[str, tuple[ExperimentXMLNode, ...]] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        bindings, generators, reports = {}, {}, {}
+        bindings: dict[tuple[str, str], tuple[str, str, SEDMLQuantity]] = {}
+        generators: dict[str, ExperimentXMLNode] = {}
+        reports: dict[str, tuple[ExperimentXMLNode, ...]] = {}
         models = dict(self.models)
         for node in records(self.tasks.document.declaration, "listOfDataGenerators"):
             identity = node.attributes["id"]
@@ -63,15 +89,17 @@ class SEDMLReports:
                 if task_id not in self.tasks.nodes:
                     raise ValueError("report variables require a known task output")
                 task_ids.add(task_id)
-                involved = self.tasks.model_ids[task_id]
+                involved = self.tasks.model_ids[cast(str, task_id)]
                 model_id = attributes.get("modelReference")
                 if model_id is None and len(involved) == 1:
                     model_id = next(iter(involved))
                 if model_id not in involved or model_id not in models:
                     raise ValueError("multimodel task variables require a known explicit model")
                 model_ids.add(model_id)
-                quantity = model_quantity(models[model_id], variable)
-                bindings[identity, attributes["id"]] = (task_id, model_id, quantity)
+                quantity = model_quantity(models[cast(str, model_id)], variable)
+                bindings[identity, attributes["id"]] = (
+                    cast(str, task_id), cast(str, model_id), quantity,
+                )
             if len(task_ids) > 1:
                 raise ValueError("cross-task data generators require an explicit alignment profile")
             if len(model_ids) > 1:
@@ -91,7 +119,9 @@ class SEDMLReports:
         object.__setattr__(self, "generators", MappingProxyType(generators))
         object.__setattr__(self, "reports", MappingProxyType(reports))
 
-    def evaluate(self, variable_arrays):
+    def evaluate(
+        self, variable_arrays: Mapping[tuple[str, str], SEDMLArray],
+    ) -> dict[str, tuple[SEDMLReportData, ...]]:
         if set(variable_arrays) != set(self.bindings):
             raise ValueError("report evaluation requires exactly the declared observation arrays")
         for key, array in variable_arrays.items():
@@ -122,7 +152,7 @@ class SEDMLReports:
                 values.append(float(result))
             # Only an unchanged variable carries its declared physical unit.
             # Derived mathematics remains unknown until dimensional inference is explicit.
-            unit = (arrays[expression._root.value].unit
+            unit = (arrays[cast(str, expression._root.value)].unit
                     if expression._root.operation == "symbol" and expression._root.value in arrays
                     else None)
             generated[identity] = SEDMLArray(tuple(values), template.shape, template.axes,

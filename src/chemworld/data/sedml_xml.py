@@ -1,7 +1,10 @@
 """Bounded declarative experiment XML, scoped prefixes and closed local paths."""
 
+from __future__ import annotations
+
 import re
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from io import StringIO
 from types import MappingProxyType
@@ -20,9 +23,9 @@ _RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
 @dataclass(frozen=True)
 class ExperimentXMLNode:
     tag: str
-    attributes: object
-    namespaces: object
-    children: tuple = ()
+    attributes: Mapping[str, str]
+    namespaces: Mapping[str, str]
+    children: tuple[ExperimentXMLNode, ...] = ()
     text: str = ""
     tail: str = field(default="", repr=False)
 
@@ -32,10 +35,10 @@ class ExperimentXMLNode:
         object.__setattr__(self, "children", tuple(self.children))
 
     @property
-    def local_name(self):
+    def local_name(self) -> str:
         return self.tag.rsplit("}", 1)[-1]
 
-    def element(self):
+    def element(self) -> ET.Element:
         """A fresh XML view for the existing MathML parser, never owned state."""
         result = ET.Element(self.tag, dict(self.attributes))
         result.text, result.tail = self.text, self.tail
@@ -43,11 +46,13 @@ class ExperimentXMLNode:
         return result
 
 
-def experiment_xml(text):
+def experiment_xml(text: str) -> ExperimentXMLNode:
     # Preflight precedes a second, namespace-aware parse. Both passes are pure;
     # the common SBML/MathML reader and its original default path stay unchanged.
     bounded_xml(text, max_bytes=4*1024*1024, max_nodes=20000, max_depth=64)
-    pending, stack, declarations = {}, [], 0
+    pending: dict[str, str] = {}
+    stack: list[tuple[ET.Element, dict[str, str], list[ExperimentXMLNode]]] = []
+    declarations = 0
     for event, item in ET.iterparse(StringIO(text), events=("start-ns", "start", "end")):
         if event == "start-ns":
             prefix, namespace = item
@@ -74,7 +79,7 @@ def experiment_xml(text):
     raise ValueError("empty declarative experiment")
 
 
-def local_archive_path(location, *, base="", archive_self=False):
+def local_archive_path(location: object, *, base: str = "", archive_self: bool = False) -> str:
     """Resolve a local URI without filesystem access or platform-dependent aliases.
 
     ``base`` is the directory of an already validated archive document. Relative
@@ -112,7 +117,10 @@ def local_archive_path(location, *, base="", archive_self=False):
     return "/".join(parts)
 
 
-def closed_xpath(root, target, namespaces, *, require_attribute=False):
+def closed_xpath(
+    root: ET.Element, target: str, namespaces: Mapping[str, str],
+    *, require_attribute: bool = False,
+) -> tuple[ET.Element, str | None]:
     """Unique absolute child XPath, optional SId predicate and final attribute.
 
     No wildcard, descendant axis, function, arbitrary predicate or XPath engine
@@ -121,7 +129,7 @@ def closed_xpath(root, target, namespaces, *, require_attribute=False):
     if not isinstance(target, str) or len(target) > 2048 or not target.startswith("/"):
         raise ValueError("model target needs a bounded absolute child XPath")
     steps = target[1:].split("/")
-    attribute = _ATTRIBUTE.fullmatch(steps[-1])
+    attribute: re.Match[str] | str | None = _ATTRIBUTE.fullmatch(steps[-1])
     attribute = attribute[1] if attribute is not None else None
     if attribute is not None:
         steps.pop()

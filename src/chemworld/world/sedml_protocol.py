@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from itertools import pairwise
 from math import prod
 from types import MappingProxyType
+from typing import cast
 from xml.etree import ElementTree as ET
 
 from chemworld.data.combine_archive import format_kind
@@ -22,6 +23,7 @@ from chemworld.data.sedml_reports import SEDMLReports
 from chemworld.data.sedml_stochastic import SEDMLStochasticAlgorithm
 from chemworld.data.sedml_tasks import SEDMLTasks
 from chemworld.data.xml_inputs import bounded_xml
+from chemworld.physchem.solver_backend import ODESolverPolicy
 from chemworld.world.domain_modules import normalize_number_map
 from chemworld.world.sbml_world import sbml_world
 
@@ -214,8 +216,10 @@ class SEDMLProtocol:
                     observables=tuple(sorted(observations[model_id], key=lambda o: o.channel_id)))
                 continue
             worlds[model_id] = sbml_world(model, initial_model_time=origin, budget=budget,
-                solver_method=numerical.method, rtol=numerical.rtol, atol=numerical.atol,
-                maximum_step_s=numerical.max_step_s, readout_relative_sd=self.readout_relative_sd,
+                solver_method=numerical.method, rtol=cast(ODESolverPolicy, numerical).rtol,
+                atol=cast(ODESolverPolicy, numerical).atol,
+                maximum_step_s=cast(ODESolverPolicy, numerical).max_step_s,
+                readout_relative_sd=self.readout_relative_sd,
                 controlled_parameters=tuple(sorted(controls.get(model_id, ()))),
                 observables=tuple(sorted(observations[model_id], key=lambda o: o.channel_id)))
         for name, value in (("resources", resources), ("models", models),
@@ -255,7 +259,8 @@ class SEDMLProtocol:
                 and n.attributes["modelReference"] == model_id)
             return sbml_world(model, initial_model_time=spec.initial_model_time,
                 numerical_form="stochastic", budget=self.worlds[model_id].task.budget,
-                solver_method=spec.solver_method, seed=algorithm.seed,
+                solver_method=spec.solver_method,
+                seed=cast(SEDMLStochasticAlgorithm, algorithm).seed,
                 maximum_events=spec.maximum_events, tau_policy=spec.tau_policy,
                 readout_relative_sd=spec.readout_relative_sd,
                 controlled_parameters=spec.controlled_parameters, observables=spec.observables)
