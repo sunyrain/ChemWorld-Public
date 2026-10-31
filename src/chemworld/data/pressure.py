@@ -1,8 +1,12 @@
 """Lazy pressure data on the existing external source and identity contracts."""
 
-from dataclasses import dataclass, fields
+from __future__ import annotations
 
-from chemworld.data.constant_catalog import ConstantField
+from dataclasses import dataclass, fields
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from chemworld.data.constant_catalog import ConstantField, ConstantSource
 from chemworld.data.constants import (
     AmbiguousConstantIdentityError,
     ConstantDatabase,
@@ -11,14 +15,19 @@ from chemworld.data.constants import (
 )
 from chemworld.data.pressure_catalog import PRESSURE_SOURCE_BY_ID, PRESSURE_SOURCES
 
+if TYPE_CHECKING:
+    from chemworld.data.pressure_curves import PressureData
+    from chemworld.physchem.property_inputs import PropertyInputCard
+    from chemworld.physchem.specs import ComponentSpec, PropertyCorrelation
+
 
 @dataclass(frozen=True)
 class PressureRecord(ConstantRecord):
     @property
-    def source(self):
+    def source(self) -> ConstantSource:
         return PRESSURE_SOURCE_BY_ID[self.source_id]
 
-    def descriptor(self, field_id):
+    def descriptor(self, field_id: str) -> ConstantField:
         self.raw(field_id)
         unit = (
             "K" if field_id in {"Tc", "Tm", "Tmin", "Tmax"} else "Pa" if field_id == "Pc" else None
@@ -39,15 +48,15 @@ class PressureDatabase(ConstantDatabase):
     """
 
     @property
-    def catalog(self):
+    def catalog(self) -> tuple[ConstantSource, ...]:
         return PRESSURE_SOURCES
 
-    def source(self, source_id):
+    def source(self, source_id: str) -> ConstantSource:
         if source_id in PRESSURE_SOURCE_BY_ID:
             return PRESSURE_SOURCE_BY_ID[source_id]
         return super().source(source_id)
 
-    def _read_records(self, source, path):
+    def _read_records(self, source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         records = super()._read_records(source, path)
         if source.source_id not in PRESSURE_SOURCE_BY_ID:
             return records
@@ -56,7 +65,7 @@ class PressureDatabase(ConstantDatabase):
             for r in records
         )
 
-    def pressures(self, identity, *, method):
+    def pressures(self, identity: object, *, method: str) -> tuple[PressureData, ...]:
         from chemworld.data.pressure_curves import source_pressures
 
         return tuple(
@@ -65,7 +74,14 @@ class PressureDatabase(ConstantDatabase):
             for curve in source_pressures(record)
         )
 
-    def pressure(self, identity, *, method, curve_id=None, **build_options):
+    def pressure(
+        self,
+        identity: object,
+        *,
+        method: str,
+        curve_id: str | None = None,
+        **build_options: Any,
+    ) -> PropertyCorrelation:
         """Build one explicit source curve; multiple ranges require curve identity."""
         candidates = self.pressures(identity, method=method)
         if curve_id is not None:
@@ -78,7 +94,15 @@ class PressureDatabase(ConstantDatabase):
             )
         return candidates[0].build(**build_options)
 
-    def property_input(self, identity, component, *, method, curve_id=None, **build_options):
+    def property_input(
+        self,
+        identity: object,
+        component: ComponentSpec,
+        *,
+        method: str,
+        curve_id: str | None = None,
+        **build_options: Any,
+    ) -> PropertyInputCard:
         """Import a selected pressure curve using the established input envelope."""
         from chemworld.data.scientific_inputs import InputSource
         from chemworld.physchem.property_inputs import PropertyInputCard

@@ -1,9 +1,11 @@
 """Source pressure coefficients and explicit table intervals become native curves."""
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 from math import e, isfinite, log
 from types import MappingProxyType
+from typing import Any, cast
 from xml.etree import ElementTree
 
 from chemworld.data.caloric_curves import number
@@ -16,7 +18,7 @@ class PressureData:
     record: ConstantRecord
     curve_key: str
     equation_id: str
-    coefficients: dict[str, float | None] = field(default_factory=dict)
+    coefficients: Mapping[str, float | None] = field(default_factory=dict)
     source_bounds_K: tuple[float | None, float | None] | None = None
     property_id: str = "vapor_pressure"
     temperatures_K: tuple[float | None, ...] = ()
@@ -29,25 +31,31 @@ class PressureData:
         object.__setattr__(self, "coefficients", MappingProxyType(dict(self.coefficients)))
 
     @property
-    def curve_id(self):
+    def curve_id(self) -> str:
         return f"{self.record.record_id}:{self.curve_key}"
 
-    def _bounds(self, selected):
+    def _bounds(self, selected: Sequence[float] | None) -> tuple[float, float]:
         bounds = self.source_bounds_K if selected is None else tuple(selected)
         if (
             bounds is None
             or len(bounds) != 2
             or any(not isinstance(v, int | float) or number(v) is None for v in bounds)
-            or not 0 < bounds[0] < bounds[1]
+            or not 0 < cast(float, bounds[0]) < cast(float, bounds[1])
         ):
             raise ValueError("select an explicit finite positive source temperature interval")
+        bounds = cast(tuple[float, float], bounds)
         if self.source_bounds_K is not None:
             low, high = self.source_bounds_K
             if (low is not None and bounds[0] < low) or (high is not None and bounds[1] > high):
                 raise ValueError("requested range extrapolates beyond source bounds")
         return bounds
 
-    def build(self, *, temperature_bounds_K=None, interpolation=None):
+    def build(
+        self,
+        *,
+        temperature_bounds_K: Sequence[float] | None = None,
+        interpolation: str | None = None,
+    ) -> PropertyCorrelation:
         """Build analytic data, or one explicitly selected table interval.
 
         For a full table use build_segments; retaining individual source
@@ -67,9 +75,17 @@ class PressureData:
             raise ValueError(f"source equation definition is unresolved: {self.equation_id}")
         if any(v is None for v in self.coefficients.values()):
             raise ValueError("missing or invalid pressure source coefficients")
-        return self._correlation(self.curve_key, self.equation_id, self.coefficients, bounds)
+        return self._correlation(
+            self.curve_key, self.equation_id, cast(Mapping[str, float], self.coefficients), bounds
+        )
 
-    def _correlation(self, key, equation, coefficients, bounds):
+    def _correlation(
+        self,
+        key: str,
+        equation: str,
+        coefficients: Mapping[str, float],
+        bounds: tuple[float, float],
+    ) -> PropertyCorrelation:
         return PropertyCorrelation(
             f"{self.record.record_id}:{key}",
             equation,
@@ -77,7 +93,7 @@ class PressureData:
             {"temperature": "K"},
             "Pa",
             self.property_id,
-            {"temperature": tuple(bounds)},
+            {"temperature": (bounds[0], bounds[1])},
             self.record.source.provenance.citation + f"; record={self.record.record_id}",
             {
                 "source": self.record.source.provenance.to_dict(),
@@ -92,7 +108,12 @@ class PressureData:
             },
         )
 
-    def build_segments(self, *, interpolation, temperature_bounds_K=None):
+    def build_segments(
+        self,
+        *,
+        interpolation: str | None,
+        temperature_bounds_K: Sequence[float] | None = None,
+    ) -> tuple[PropertyCorrelation, ...]:
         """All source intervals in a range, linear in ln(P) versus inverse T.
 
         Every segment is the existing native Arrhenius formula. No smoothing,
@@ -104,6 +125,7 @@ class PressureData:
         ts, ps = self.temperatures_K, self.pressures_Pa
         if len(ts) != len(ps) or len(ts) < 2 or any(t is None for t in ts):
             raise ValueError("pressure table needs aligned finite temperature points")
+        ts = cast(tuple[float, ...], ts)
         if any(b <= a for a, b in pairwise(ts)):
             raise ValueError("table temperatures must increase; no sorting or merging")
         if bounds[0] < ts[0] or bounds[1] > ts[-1]:
@@ -116,6 +138,7 @@ class PressureData:
             p0, p1 = ps[i : i + 2]
             if any(p is None or not isfinite(p) or p <= 0 for p in (p0, p1)):
                 raise ValueError("selected interval crosses missing or nonpositive pressure")
+            p0, p1 = cast(float, p0), cast(float, p1)
             slope = (log(p1) - log(p0)) / (1 / high - 1 / low)
             curve = self._correlation(
                 f"{self.curve_key}:{i}",
@@ -128,17 +151,23 @@ class PressureData:
         return tuple(segments)
 
 
-def source_pressures(record):
+def source_pressures(record: ConstantRecord) -> tuple[PressureData, ...]:
     """Preserve every pressure range, including missing bounds and unknown XML forms."""
     source = record.source_id
 
-    def raw(key):
+    def raw(key: str) -> object:
         return record.raw(key) if key in record.field_names else None
 
-    def n(key):
+    def n(key: str) -> float | None:
         return number(raw(key))
 
-    def curve(equation, coefficients, bounds=None, key="pressure", **kwargs):
+    def curve(
+        equation: str,
+        coefficients: Mapping[str, float | None],
+        bounds: tuple[float | None, float | None] | None = None,
+        key: str = "pressure",
+        **kwargs: Any,
+    ) -> PressureData:
         return PressureData(
             record,
             key,
@@ -209,16 +238,21 @@ def source_pressures(record):
             if not isinstance(item, SourceCorrelation) or item.source_unit != "Pa":
                 raise ValueError("ChemSep pressure requires an explicit Pa correlation")
             node = ElementTree.fromstring(item.xml)
-            values = {child.tag: child.attrib.get("value") for child in node}
+            xml_values = {child.tag: child.attrib.get("value") for child in node}
             if any(
                 child.attrib.get("units") != "K" for child in node if child.tag in {"Tmin", "Tmax"}
             ):
                 raise ValueError("ChemSep pressure temperatures require K")
-            eq = values.get("eqno")
-            coefficients = {k: number(values.get(k)) for k in ("ABC" if eq == "10" else "ABCDE")}
-            equation = {"10": "antoine", "101": "dippr101", "200": "wagner25"}.get(
-                eq, "unresolved_chemsep_" + str(eq)
-            )
+            eq = xml_values.get("eqno")
+            coefficients = {
+                k: number(xml_values.get(k)) for k in ("ABC" if eq == "10" else "ABCDE")
+            }
+            equations: Mapping[str | None, str] = {
+                "10": "antoine",
+                "101": "dippr101",
+                "200": "wagner25",
+            }
+            equation = equations.get(eq, "unresolved_chemsep_" + str(eq))
             notes = [f"ChemSep equation {eq}; original XML retained in source record"]
             if eq == "10":
                 coefficients["base"] = e
@@ -229,9 +263,9 @@ def source_pressures(record):
                 # Use E from this fit, not a rounded or cross-source Pc value.
                 Tc = record.value("CriticalTemperature")
                 coefficients = {
-                    **{k.lower(): number(values.get(k)) for k in "ABCD"},
+                    **{k.lower(): number(xml_values.get(k)) for k in "ABCD"},
                     "Tc": Tc.quantity("K").value if Tc.quality == "valid" else None,
-                    "Pc": number(values.get("E")),
+                    "Pc": number(xml_values.get("E")),
                 }
                 notes += [
                     "ChemSep Lite 8.50 PCDmanager help, p.5: equation 200, Ambrose-Walton",
@@ -242,13 +276,17 @@ def source_pressures(record):
                 curve(
                     equation,
                     coefficients,
-                    tuple(number(values.get(k)) for k in ("Tmin", "Tmax")),
+                    cast(
+                        tuple[float | None, float | None],
+                        tuple(number(xml_values.get(k)) for k in ("Tmin", "Tmax")),
+                    ),
                     key=key,
                     notes=tuple(notes),
                 )
             )
         return tuple(result)
     if source == "VDI":
-        ts, ps = tuple(number(v) for v in raw("T")), tuple(number(v) for v in raw("P"))
+        ts = tuple(number(v) for v in cast(Iterable[object], raw("T")))
+        ps = tuple(number(v) for v in cast(Iterable[object], raw("P")))
         return (curve("tabulated", {}, (ts[0], ts[-1]), temperatures_K=ts, pressures_Pa=ps),)
     return ()
