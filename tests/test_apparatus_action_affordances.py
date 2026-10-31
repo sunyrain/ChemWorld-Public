@@ -67,3 +67,34 @@ def test_native_column_keeps_total_reflux_available_and_executes_it():
         assert session._state.ledger.time_s == pytest.approx(1.)
     finally:
         session.close()
+
+
+@pytest.mark.parametrize("retained,removed", [("organic", "aqueous"), ("aqueous", "organic")])
+def test_separation_choices_follow_retained_phase_inventory(retained, removed):
+    with gym.make("ChemWorld", task_id="partition-discovery", budget_override=16) as env:
+        env.reset(seed=0)
+        base = env.unwrapped
+        for action in (
+            {"operation": "add_solvent", "volume_L": 0.02, "solvent": 1},
+            {"operation": "add_reagent", "amount_mol": 0.01},
+            {"operation": "add_phase", "phase": "aqueous", "volume_L": 0.01},
+            {"operation": "add_extractant", "extractant": 2, "volume_L": 0.018},
+            {"operation": "mix", "duration_s": 600., "stirring_speed_rpm": 600.},
+            {"operation": "settle", "duration_s": 300.},
+            {"operation": "separate_phase", "target_phase": retained},
+        ):
+            *_, info = env.step(action)
+            assert info["transaction_status"] == "committed", (action, info)
+
+        fields = {f["field"]: f for f in base.action_schema("separate_phase")["fields"]}
+        assert fields["target_phase"]["choices"] == [retained]
+        assert base.validate_action({
+            "operation": "separate_phase", "target_phase": retained,
+        })["valid"]
+        before = base._state
+        *_, info = env.step({"operation": "separate_phase", "target_phase": removed})
+        assert info["transaction_status"] == "validation_failed"
+        assert info["preconditions"]["payload_choice:target_phase"] is False
+        assert base._state.phases == before.phases
+        assert base._state.species_amounts == before.species_amounts
+        assert base._state.ledger.time_s == before.ledger.time_s

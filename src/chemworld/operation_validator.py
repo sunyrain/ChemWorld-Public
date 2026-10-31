@@ -422,6 +422,9 @@ class OperationValidator:
                              if f.name == field), None)
             if declared is not None and declared.choice_provider is not None:
                 return tuple(declared.choice_provider(state, self))
+        if operation_type == "separate_phase" and field == "target_phase":
+            available = () if state.phases is None else state.phases.phases
+            return tuple(choice for choice in choices if choice in available)
         physics = None if self.material_router is None else self.material_router.physics
         if operation_type == "distill" and field == "full_reflux":
             column_installed = (
@@ -1215,7 +1218,10 @@ class OperationValidator:
 
         for (candidate_operation, field), choices in OPERATION_FIELD_CHOICES.items():
             if operation_type == candidate_operation and field in payload:
-                checks[f"payload_choice:{field}"] = payload.get(field) in choices
+                allowed = self.public_field_choices(
+                    operation_type, field, state, choices=choices,
+                )
+                checks[f"payload_choice:{field}"] = payload.get(field) in allowed
 
         # Optional apparatus controls are declared by the installed module, not
         # by the legacy required-field table above. Use the same choices that
