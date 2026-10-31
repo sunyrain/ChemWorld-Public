@@ -5,41 +5,50 @@ observation, numerical policy and finite task expansion is checked before a
 runtime may be created by an experiment runner.
 """
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from itertools import pairwise
 from math import prod
 from types import MappingProxyType
-from typing import cast
+from typing import Any, TypeAlias, cast
 from xml.etree import ElementTree as ET
 
-from chemworld.data.combine_archive import format_kind
+from chemworld.data.combine_archive import CombineArchive, format_kind
 from chemworld.data.sbml import SBMLModel
 from chemworld.data.sedml_declarations import SEDMLDocument, records
 from chemworld.data.sedml_models import _derived, _model_target, resolve_models
-from chemworld.data.sedml_quantities import model_quantity
+from chemworld.data.sedml_quantities import SEDMLQuantity, model_quantity
 from chemworld.data.sedml_ranges import _range_reference
 from chemworld.data.sedml_reports import SEDMLReports
+from chemworld.data.sedml_simulations import SEDMLAlgorithm
 from chemworld.data.sedml_stochastic import SEDMLStochasticAlgorithm
 from chemworld.data.sedml_tasks import SEDMLTasks
+from chemworld.data.sedml_xml import ExperimentXMLNode
 from chemworld.data.xml_inputs import bounded_xml
+from chemworld.physchem.sbml_system import SBMLObservable
 from chemworld.physchem.solver_backend import ODESolverPolicy
+from chemworld.world.composition import WorldCompositionSpec
 from chemworld.world.domain_modules import normalize_number_map
+from chemworld.world.physical_world import CompositionPhysics
 from chemworld.world.sbml_world import sbml_world
 
 PROTOCOL_FORMAT = "chemworld_sedml_native_protocol_v1"
+ArrayLayout: TypeAlias = tuple[tuple[int, ...], tuple[str, ...]]
+ModelLayouts: TypeAlias = Mapping[str, ArrayLayout]
 
 
-def _layouts(tasks):
-    layouts = {}
+def _layouts(tasks: SEDMLTasks) -> Mapping[str, ModelLayouts]:
+    layouts: dict[str, ModelLayouts] = {}
 
-    def visit(identity):
+    def visit(identity: str) -> ModelLayouts:
         if identity in layouts:
             return layouts[identity]
         node = tasks.nodes[identity]
         if node.local_name == "task":
             simulation = tasks.simulations[node.attributes["simulationReference"]]
-            result = {node.attributes["modelReference"]:
+            result: dict[str, ArrayLayout] = {node.attributes["modelReference"]:
                       ((len(simulation.source_times),), ("time",))}
         else:
             children = [visit(n.attributes["task"]) for n in tasks.sub_tasks[identity]]
@@ -70,7 +79,7 @@ def _layouts(tasks):
     return MappingProxyType(layouts)
 
 
-def parameter_target(model, change):
+def parameter_target(model: SBMLModel, change: ExperimentXMLNode) -> str:
     node, attribute = _model_target(bounded_xml(model.to_xml()),
         change.attributes["target"], change.namespaces)
     if node.tag.rsplit("}", 1)[-1] != "parameter" or attribute not in (None, "value"):
@@ -78,7 +87,7 @@ def parameter_target(model, change):
     return node.get("id")
 
 
-def _validate_sequential_inputs(protocol):
+def _validate_sequential_inputs(protocol: SEDMLProtocol) -> None:
     for identity, task in protocol.tasks.nodes.items():
         if task.local_name != "repeatedTask":
             continue
@@ -87,7 +96,7 @@ def _validate_sequential_inputs(protocol):
         boundaries.extend((records(child, "listOfChanges"), False)
                            for child in protocol.tasks.sub_tasks[identity])
         for changes, initialize in boundaries:
-            previous = {}
+            previous: dict[str, set[str]] = {}
             xml_models = {change.attributes["modelReference"] for change in changes
                           if change.attributes["target"].endswith("/@value")}
             for change in changes:
@@ -98,7 +107,8 @@ def _validate_sequential_inputs(protocol):
                     observable = quantity.observable
                     if observable is None or model_id not in previous:
                         continue
-                    spec = protocol.worlds[model_id].physics.models_of("sbml")["formal_workspace"]
+                    spec = cast(CompositionPhysics, protocol.worlds[model_id].physics).models_of(
+                        "sbml")["formal_workspace"]
                     initial = initialize and model_id in xml_models
                     initial_assigned = {r.get("symbol") for r in
                         spec.model.declaration.items("listOfInitialAssignments")}
@@ -130,15 +140,15 @@ def _validate_sequential_inputs(protocol):
 @dataclass(frozen=True)
 class SEDMLProtocol:
     document: SEDMLDocument
-    resources: object
+    resources: Mapping[str, SBMLModel]
     document_location: str = ""
     readout_relative_sd: float = 0.
     tasks: SEDMLTasks = field(init=False, repr=False)
-    models: object = field(init=False, repr=False)
+    models: Mapping[str, SBMLModel] = field(init=False, repr=False)
     reports: SEDMLReports = field(init=False, repr=False)
-    quantities: object = field(init=False, repr=False)
-    worlds: object = field(init=False, repr=False)
-    layouts: object = field(init=False, repr=False)
+    quantities: Mapping[str, tuple[str, SEDMLQuantity]] = field(init=False, repr=False)
+    worlds: Mapping[str, WorldCompositionSpec] = field(init=False, repr=False)
+    layouts: Mapping[str, ModelLayouts] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         resources = dict(self.resources)
@@ -150,8 +160,10 @@ class SEDMLProtocol:
         if (sum(tasks.invocations[key] for key in selected) > tasks.maximum_invocations
                 or sum(tasks.samples[key] for key in selected) > 2000000):
             raise ValueError("requested output tasks exceed the finite execution budget")
-        quantities, controls, policies = {}, {}, {}
-        observations = {key: set() for key in models}
+        quantities: dict[str, tuple[str, SEDMLQuantity]] = {}
+        controls: dict[str, set[str]] = {}
+        policies: dict[str, tuple[float, SEDMLAlgorithm | SEDMLStochasticAlgorithm]] = {}
+        observations: dict[str, set[SBMLObservable]] = {key: set() for key in models}
         for _, model_id, quantity in reports.bindings.values():
             if quantity.observable is not None:
                 observations[model_id].add(quantity.observable)
@@ -176,7 +188,7 @@ class SEDMLProtocol:
             for change in changes:
                 model_id = change.attributes["modelReference"]
                 controls.setdefault(model_id, set()).add(parameter_target(models[model_id], change))
-            reset_targets = {}
+            reset_targets: dict[str, set[bool]] = {}
             for change in records(node, "listOfChanges"):
                 reset_targets.setdefault(change.attributes["modelReference"], set()).add(
                     change.attributes["target"].endswith("/@value"))
@@ -200,7 +212,7 @@ class SEDMLProtocol:
                             for identity, model_id, _ in reports.bindings.values())
         if max(native_values, report_values) > 2000000:
             raise ValueError("total native/readout values exceed the finite output budget")
-        worlds = {}
+        worlds: dict[str, WorldCompositionSpec] = {}
         budget = 2*sum(tasks.samples[key] for key in tasks.roots)+3*sum(
             tasks.invocations[key] for key in tasks.roots)+10
         for model_id, (origin, algorithm) in policies.items():
@@ -230,16 +242,19 @@ class SEDMLProtocol:
         object.__setattr__(self, "layouts", layouts)
         _validate_sequential_inputs(self)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"format": PROTOCOL_FORMAT, "document": self.document.to_dict(),
             "resources": {key: value.to_dict() for key, value in self.resources.items()},
             "document_location": self.document_location,
             "readout_relative_sd": self.readout_relative_sd}
 
-    def world_with_parameters(self, model_id, values):
+    def world_with_parameters(
+        self, model_id: str, values: Mapping[str, float],
+    ) -> WorldCompositionSpec:
         """An XML-input recipe for a fresh reset, never a write to a live session."""
         original = self.models[model_id]
-        spec = self.worlds[model_id].physics.models_of("sbml")["formal_workspace"]
+        spec = cast(CompositionPhysics, self.worlds[model_id].physics).models_of(
+            "sbml")["formal_workspace"]
         # A reset to the same lexical inputs still has a reset-input source recipe.
         # The checkpoint decoder must reconstruct that recipe even with no deltas.
         values = {} if isinstance(values, Mapping) and not values else normalize_number_map(values)
@@ -250,7 +265,7 @@ class SEDMLProtocol:
         for node in tree.findall(namespace+"model/"+namespace+"listOfParameters/"
                                  +namespace+"parameter"):
             if node.get("id") in values:
-                node.set("value", format(values[node.get("id")], ".17g"))
+                node.set("value", format(values[cast(str, node.get("id"))], ".17g"))
         model = _derived(original, ET.tostring(tree, encoding="unicode"), self.document,
                          model_id+":reset-inputs")
         if spec.integer_kinetics is not None:
@@ -271,7 +286,7 @@ class SEDMLProtocol:
             controlled_parameters=spec.controlled_parameters, observables=spec.observables)
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Any) -> SEDMLProtocol:
         if (not isinstance(payload, dict) or set(payload) != {"format", "document", "resources",
                 "document_location", "readout_relative_sd"} or payload["format"] != PROTOCOL_FORMAT
                 or not isinstance(payload["resources"], dict)):
@@ -281,8 +296,10 @@ class SEDMLProtocol:
             payload["document_location"], payload["readout_relative_sd"])
 
     @classmethod
-    def from_archive(cls, archive, *, unit_defaults=None, items_per_mole=None,
-                     readout_relative_sd=0.):
+    def from_archive(
+        cls, archive: CombineArchive, *, unit_defaults: Mapping[str, str] | None = None,
+        items_per_mole: float | None = None, readout_relative_sd: float = 0.,
+    ) -> SEDMLProtocol:
         resources = {entry.location: SBMLModel(entry.data.decode("utf-8"),
             archive.source_for(entry.location), {} if unit_defaults is None else unit_defaults,
             items_per_mole) for entry in archive.entries if format_kind(entry.format) == "sbml"}

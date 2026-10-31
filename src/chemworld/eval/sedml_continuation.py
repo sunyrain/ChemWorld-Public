@@ -4,17 +4,25 @@ The task stack contains control positions and historical observations. All evolv
 physical state, clocks, pending events and RNG remain in the existing native sessions.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 from math import isfinite
+from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict, cast
 from uuid import UUID, uuid4, uuid5
 
 from chemworld.agents.base import HistoryRecord
 from chemworld.data.sedml_declarations import boolean, records
-from chemworld.data.sedml_reports import SEDMLArray
+from chemworld.data.sedml_reports import SEDMLArray, SEDMLArrayData
 from chemworld.data.xml_inputs import bounded_xml
 from chemworld.eval.sedml_experiment import (
+    ChannelArrays,
+    IterationData,
+    ModelSnapshots,
+    RootSnapshots,
     SEDMLCourseResult,
     SEDMLExecutionError,
     SEDMLExperimentResult,
@@ -22,9 +30,31 @@ from chemworld.eval.sedml_experiment import (
     _TaskRunner,
 )
 from chemworld.runtime import ChemWorldRuntime
+from chemworld.world.composition import WorldCompositionSpec
+from chemworld.world.physical_world import CompositionPhysics
 from chemworld.world.sedml_protocol import SEDMLProtocol
 
 EXPERIMENT_SNAPSHOT_VERSION = "chemworld-sedml-experiment-v1"
+ModelChannels: TypeAlias = Mapping[str, ChannelArrays]
+
+
+class TaskFrame(TypedDict):
+    task: str
+    phase: str
+    index: int
+    sub_index: int
+    ranges: dict[str, float]
+    parts: list[ModelChannels]
+
+
+class ExperimentProgress(TypedDict):
+    status: str
+    completed_courses: int
+    total_courses: int
+    completed_roots: int
+    total_roots: int
+
+
 _FIELDS = {
     "format",
     "protocol",
@@ -44,18 +74,18 @@ _FIELDS = {
 }
 
 
-def _plain(value):
+def _plain(value: Any) -> Any:
     return json.loads(json.dumps(value, allow_nan=False))
 
 
-def _encode(arrays):
+def _encode(arrays: ModelChannels) -> dict[str, dict[str, SEDMLArrayData]]:
     return {
         model: {key: array.to_dict() for key, array in channels.items()}
         for model, channels in arrays.items()
     }
 
 
-def _array(value):
+def _array(value: Any) -> SEDMLArray:
     if not isinstance(value, dict) or set(value) != {
         "values",
         "shape",
@@ -73,19 +103,19 @@ def _array(value):
     )
 
 
-def _decode(arrays):
+def _decode(arrays: Mapping[str, Mapping[str, Any]]) -> ModelChannels:
     return {
         model: {key: _array(value) for key, value in channels.items()}
         for model, channels in arrays.items()
     }
 
 
-def _world_matches(protocol, model_id, world):
+def _world_matches(protocol: SEDMLProtocol, model_id: str, world: WorldCompositionSpec) -> bool:
     original = protocol.worlds[model_id]
     if original.to_dict() == world.to_dict():
         return True
-    spec = original.physics.models_of("sbml")["formal_workspace"]
-    restored = world.physics.models_of("sbml").get("formal_workspace")
+    spec = cast(CompositionPhysics, original.physics).models_of("sbml")["formal_workspace"]
+    restored = cast(CompositionPhysics, world.physics).models_of("sbml").get("formal_workspace")
     if restored is None:
         return False
     namespace = "{http://www.sbml.org/sbml/level3/version2/core}"
@@ -116,7 +146,14 @@ class SEDMLExperimentSession:
     ``to_dict`` is private continuation data, never an agent-visible observation.
     """
 
-    def __init__(self, protocol, *, seed=0, observation_noise_mode="sequential"):
+    if TYPE_CHECKING:
+        status: str
+        error: str | None
+
+    def __init__(
+        self, protocol: SEDMLProtocol, *, seed: int = 0,
+        observation_noise_mode: str = "sequential",
+    ) -> None:
         if (
             not isinstance(protocol, SEDMLProtocol)
             or type(seed) is not int
@@ -133,16 +170,19 @@ class SEDMLExperimentSession:
             if identity in (selected or set(protocol.tasks.roots))
         )
         self.root_index = self.courses_completed = 0
-        self.stack, self.history, self.iterations = [], [], []
-        self.arrays, self.snapshots = {}, {}
-        self.runner = None
+        self.stack: list[TaskFrame] = []
+        self.history: list[HistoryRecord] = []
+        self.iterations: list[IterationData] = []
+        self.arrays: dict[tuple[str, str], SEDMLArray] = {}
+        self.snapshots: RootSnapshots = {}
+        self.runner: _TaskRunner | None = None
         self.status, self.error = "ready", None
 
     @property
-    def complete(self):
+    def complete(self) -> bool:
         return self.status == "complete"
 
-    def progress(self):
+    def progress(self) -> ExperimentProgress:
         return {
             "status": self.status,
             "completed_courses": self.courses_completed,
@@ -151,7 +191,7 @@ class SEDMLExperimentSession:
             "total_roots": len(self.roots),
         }
 
-    def _push(self, identity):
+    def _push(self, identity: str) -> None:
         self.stack.append(
             {
                 "task": identity,
@@ -163,12 +203,14 @@ class SEDMLExperimentSession:
             }
         )
 
-    def _finish_root(self, channels):
+    def _finish_root(self, channels: ModelChannels) -> None:
         identity = self.roots[self.root_index]
-        runner = self.runner
+        # Only an active runner can return the final course of this root.
+        runner = cast(_TaskRunner, self.runner)
         for key, (task_id, model_id, quantity) in self.protocol.reports.bindings.items():
             if task_id == identity:
-                spec = self.protocol.worlds[model_id].physics.models_of("sbml")["formal_workspace"]
+                spec = cast(CompositionPhysics, self.protocol.worlds[model_id].physics).models_of(
+                    "sbml")["formal_workspace"]
                 course = SEDMLCourseResult(
                     runner.runtimes[model_id], channels[model_id], (), spec.initial_model_time
                 )
@@ -187,7 +229,7 @@ class SEDMLExperimentSession:
             self.protocol.reports.evaluate(self.arrays)  # domain errors are terminal and retained
             self.status = "complete"
 
-    def _accept(self, channels):
+    def _accept(self, channels: ModelChannels) -> None:
         self.stack.pop()
         if not self.stack:
             self._finish_root(channels)
@@ -218,8 +260,8 @@ class SEDMLExperimentSession:
         frame["sub_index"] += 1
         frame["phase"] = "subtask"
 
-    def _collect(self, frame):
-        result = {}
+    def _collect(self, frame: TaskFrame) -> None:
+        result: dict[str, ChannelArrays] = {}
         for model_id, (shape, axes) in self.protocol.layouts[frame["task"]].items():
             parts = [part[model_id] for part in frame["parts"] if model_id in part]
             result[model_id] = {
@@ -234,7 +276,7 @@ class SEDMLExperimentSession:
             }
         self._accept(result)
 
-    def _step(self):
+    def _step(self) -> bool:
         if self.runner is None:
             identity = self.roots[self.root_index]
             self.runner = _TaskRunner(
@@ -289,7 +331,7 @@ class SEDMLExperimentSession:
                 self._push(child.attributes["task"])
         return False
 
-    def _saved_sessions(self):
+    def _saved_sessions(self) -> ModelSnapshots:
         return (
             {}
             if self.runner is None
@@ -299,7 +341,7 @@ class SEDMLExperimentSession:
             }
         )
 
-    def advance(self, *, max_courses=None):
+    def advance(self, *, max_courses: int | None = None) -> ExperimentProgress:
         if max_courses is not None and (type(max_courses) is not int or max_courses < 1):
             raise ValueError("course limit must be a positive integer")
         if self.status == "failed":
@@ -349,7 +391,7 @@ class SEDMLExperimentSession:
             raise error from exc
         return self.progress()
 
-    def result(self):
+    def result(self) -> SEDMLExperimentResult:
         if not self.complete:
             raise ValueError("experiment reports are final only after all requested tasks complete")
         return SEDMLExperimentResult(
@@ -359,7 +401,7 @@ class SEDMLExperimentSession:
             _plain(self.snapshots),
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         runner = (
             None
             if self.runner is None
@@ -399,14 +441,14 @@ class SEDMLExperimentSession:
         )
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Any) -> SEDMLExperimentSession:
         try:
             return cls._from_dict(payload)
         except (KeyError, TypeError, IndexError, AttributeError) as exc:
             raise ValueError("malformed experiment continuation structure") from exc
 
     @classmethod
-    def _from_dict(cls, payload):
+    def _from_dict(cls, payload: Any) -> SEDMLExperimentSession:
         if (
             not isinstance(payload, dict)
             or set(payload) != _FIELDS
@@ -475,7 +517,7 @@ class SEDMLExperimentSession:
         ):
             raise ValueError("checkpoint must retain every completed root and report input")
         self.stack = [
-            {**frame, "parts": [_decode(part) for part in frame["parts"]]}
+            cast(TaskFrame, {**frame, "parts": [_decode(part) for part in frame["parts"]]})
             for frame in payload["stack"]
         ]
         self._restore_runner(payload["runner"])
@@ -497,7 +539,7 @@ class SEDMLExperimentSession:
             self.protocol.reports.evaluate(self.arrays)
         return self
 
-    def _restore_runner(self, payload):
+    def _restore_runner(self, payload: dict[str, Any] | None) -> None:
         if payload is None:
             if self.stack:
                 raise ValueError("checkpoint task stack has no native task runner")
@@ -595,7 +637,8 @@ class SEDMLExperimentSession:
                 if set(part) != set(layouts):
                     raise ValueError("checkpoint collected output has different model identities")
                 for model, channels in part.items():
-                    spec = self.protocol.worlds[model].physics.models_of("sbml")["formal_workspace"]
+                    spec = cast(CompositionPhysics, self.protocol.worlds[model].physics).models_of(
+                        "sbml")["formal_workspace"]
                     units = {
                         observable.channel_id: observable.unit for observable in spec.observables
                     }
