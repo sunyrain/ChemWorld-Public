@@ -2,25 +2,36 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from math import isclose
+from typing import TypeVar, cast, overload
 
 import numpy as np
+from numpy.typing import NDArray
 
-from chemworld.physchem.caloric_math import FirstDerivative, derivative_values
+from chemworld.data.tdb import TdbFunction
+from chemworld.physchem.caloric_math import FirstDerivative, JetCoefficient, derivative_values
+from chemworld.physchem.gibbs_phase import GibbsPhaseModel, SiteFractions
 from chemworld.physchem.residual_system import readonly
-from chemworld.physchem.tdb_expressions import scalar_value
+from chemworld.physchem.tdb_expressions import TdbScalar, scalar_value
+
+_Coordinate = TypeVar("_Coordinate", bound=TdbScalar)
+ResponseArrays = tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
 
 
-def slope(value):
+def slope(value: JetCoefficient) -> JetCoefficient:
     return value.slope if isinstance(value, FirstDerivative) else 0.0
 
 
-def value(value):
+def value(value: JetCoefficient) -> JetCoefficient:
     return value.value if isinstance(value, FirstDerivative) else value
 
 
-def analytic_response(function, coordinates):
+def analytic_response(
+    function: Callable[[tuple[TdbScalar, ...]], Iterable[TdbScalar]],
+    coordinates: Iterable[float],
+) -> ResponseArrays:
     """Pack row/column seeds; all chain arithmetic remains FirstDerivative's.
 
     The inner slope is a row, the outer slope a column. Their existing
@@ -37,18 +48,35 @@ def analytic_response(function, coordinates):
     values = np.array([scalar_value(v) for v in outputs])
     jacobian, hessian = np.zeros((len(values), n)), np.zeros((len(values), n, n))
     for row, output in enumerate(outputs):
-        jacobian[row] = np.broadcast_to(slope(value(output)), (1, n))[0]
-        hessian[row] = np.broadcast_to(slope(slope(output)), (n, n))
+        # The packed row/column seeds leave scalar or array coefficients here.
+        first = cast(float | NDArray[np.float64], slope(value(output)))
+        second = cast(float | NDArray[np.float64], slope(slope(output)))
+        jacobian[row] = np.broadcast_to(first, (1, n))[0]
+        hessian[row] = np.broadcast_to(second, (n, n))
     if not all(np.all(np.isfinite(a)) for a in (values, jacobian, hessian)):
         raise ValueError("CEF requested analytic response is nonfinite")
     return values, jacobian, hessian
 
 
-def site_labels(model):
+def site_labels(model: GibbsPhaseModel) -> tuple[tuple[int, str], ...]:
     return tuple((i, species) for i, subl in enumerate(model.constituents) for species in subl)
 
 
-def unpack_sites(model, coordinates):
+@overload
+def unpack_sites(
+    model: GibbsPhaseModel, coordinates: Sequence[_Coordinate],
+) -> tuple[dict[str, _Coordinate], ...]: ...
+
+
+@overload
+def unpack_sites(
+    model: GibbsPhaseModel, coordinates: NDArray[np.float64],
+) -> tuple[dict[str, float], ...]: ...
+
+
+def unpack_sites(
+    model: GibbsPhaseModel, coordinates: Sequence[_Coordinate] | NDArray[np.float64],
+) -> tuple[dict[str, _Coordinate], ...] | tuple[dict[str, float], ...]:
     result, offset = [], 0
     for subl in model.constituents:
         result.append(dict(zip(subl, coordinates[offset:offset+len(subl)], strict=True)))
@@ -58,49 +86,31 @@ def unpack_sites(model, coordinates):
     return tuple(result)
 
 
-def branch_diagnostics(model, fractions, temperature, pressure, *,
-                       include_sites=True, include_pressure=False):
+def branch_diagnostics(
+    model: GibbsPhaseModel, fractions: SiteFractions, temperature: float, pressure: float,
+    *, include_sites: bool = True, include_pressure: bool = False,
+) -> tuple[str, ...]:
     model.evaluate(fractions, temperature, pressure, pressure_derivative=False)
-    local_models = [(model, fractions)]
-    views = model._ordering_views(fractions)
-    if views is not None:
-        disordered, disordered_fractions, randomized = views
-        local_models.append((disordered, disordered_fractions))
-        if not model._phase.model_hints.get("never_disorder"):
-            local_models.append((model, randomized))
-    diagnostics, curves = [], []
-    for phase, sites in local_models:
-        curves.extend(p.source.function for p in phase._parameters)
-        hints = phase._phase.model_hints
-        if "magnetic_structure_factor" in hints:
-            tc = phase._sum({"TC"}, sites, temperature, pressure)
-            afm = hints["magnetic_afm_factor"]
-            criticals = ([tc / afm if tc < 0 else tc] if afm != 0 else
-                         [tc, phase._sum({"NT"}, sites, temperature, pressure)])
-            if any(c > 0 and isclose(temperature, c, rel_tol=1e-12) for c in criticals):
-                diagnostics.append(f"magnetic critical point: {phase.phase_name}")
-            moment = phase._sum({"BMAGN"}, sites, temperature, pressure)
-            if afm != 0 and moment == 0 and tc != 0:
-                n_potentials = 2 if include_pressure else 1
-                coordinates = ((temperature, pressure) if include_pressure else (temperature,))
-                if include_sites:
-                    coordinates += tuple(sites[i][s] for i, s in site_labels(phase))
+    return model._derivative_branches(
+        fractions, temperature, pressure,
+        include_sites=include_sites, include_pressure=include_pressure,
+    )
 
-                def raw_moment(z, phase=phase, sites=sites, n_potentials=n_potentials):
-                    y = unpack_sites(phase, z[n_potentials:]) if include_sites else sites
-                    p = z[1] if include_pressure else pressure
-                    return (phase._sum({"BMAGN"}, y, z[0], p),)
 
-                _, first, second = analytic_response(raw_moment, coordinates)
-                if np.any(first != 0) or np.any(second != 0):
-                    diagnostics.append(f"magnetic parameter sign boundary: {phase.phase_name}")
+def temperature_segment_diagnostics(
+    parameter_curves: Iterable[TdbFunction], functions: Mapping[str, TdbFunction],
+    temperature: float,
+) -> tuple[str, ...]:
+    """Resolve referenced source functions and retain all temperature boundaries."""
+    curves = list(parameter_curves)
+    diagnostics = []
     names = {s for c in curves for segment in c.segments for s in segment.expression.symbols}
-    visited = set()
+    visited: set[str] = set()
     while names - visited:
         name = sorted(names - visited)[0]
         visited.add(name)
-        if name in model.database.functions:
-            curve = model.database.functions[name]
+        if name in functions:
+            curve = functions[name]
             curves.append(curve)
             names.update(s for segment in curve.segments for s in segment.expression.symbols)
     for curve in curves:
@@ -120,8 +130,10 @@ class CefTemperatureResponse:
     diagnostics: tuple[str, ...] = ()
 
 
-def temperature_response(model, fractions, temperature_K, pressure_Pa=101325.0, *,
-                         allow_one_sided=False):
+def temperature_response(
+    model: GibbsPhaseModel, fractions: SiteFractions, temperature_K: float,
+    pressure_Pa: float = 101325.0, *, allow_one_sided: bool = False,
+) -> CefTemperatureResponse:
     if type(allow_one_sided) is not bool:
         raise ValueError("CEF one-sided selection must be boolean")
     fractions = model._fractions(fractions)
@@ -146,9 +158,9 @@ class CefDerivativeResponse:
     coordinate_units: tuple[str, ...]
     output_names: tuple[str, ...]
     output_units: tuple[str, ...]
-    values: np.ndarray
-    jacobian: np.ndarray
-    hessian: np.ndarray
+    values: NDArray[np.float64]
+    jacobian: NDArray[np.float64]
+    hessian: NDArray[np.float64]
     diagnostics: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -156,8 +168,11 @@ class CefDerivativeResponse:
             object.__setattr__(self, name, readonly(getattr(self, name)))
 
 
-def derivatives(model, fractions, temperature_K, pressure_Pa=101325.0, *,
-                include_pressure=True, allow_one_sided=False):
+def derivatives(
+    model: GibbsPhaseModel, fractions: SiteFractions, temperature_K: float,
+    pressure_Pa: float = 101325.0, *, include_pressure: bool = True,
+    allow_one_sided: bool = False,
+) -> CefDerivativeResponse:
     if type(include_pressure) is not bool or type(allow_one_sided) is not bool:
         raise ValueError("CEF derivative selections must be boolean")
     fractions = model._fractions(fractions)
@@ -180,7 +195,7 @@ def derivatives(model, fractions, temperature_K, pressure_Pa=101325.0, *,
         fractions[i][s] for i, s in labels
     )
 
-    def response(z):
+    def response(z: tuple[TdbScalar, ...]) -> tuple[TdbScalar, ...]:
         t, p = z[0], z[1] if include_pressure else pressure
         y = unpack_sites(model, z[n_potentials:])
         g = sum(model._energies(y, t, p).values())
@@ -200,18 +215,24 @@ def derivatives(model, fractions, temperature_K, pressure_Pa=101325.0, *,
     )
 
 
-def site_response(model, sites, temperature, pressure):
+def site_response(
+    model: GibbsPhaseModel, sites: Sequence[float] | NDArray[np.float64],
+    temperature: float, pressure: float,
+) -> tuple[tuple[str, ...], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """Internal trial response without requiring sums/charge before a KKT solve."""
     elements = tuple(sorted(model._composition(unpack_sites(model, sites))[1]))
 
-    def response(z):
+    def response(z: tuple[TdbScalar, ...]) -> tuple[TdbScalar, ...]:
         return site_values(model, z, temperature, pressure, elements)
 
     values, jacobian, hessian = analytic_response(response, sites)
     return elements, values, jacobian, hessian
 
 
-def site_values(model, sites, temperature, pressure, elements):
+def site_values(
+    model: GibbsPhaseModel, sites: Sequence[TdbScalar] | NDArray[np.float64],
+    temperature: TdbScalar, pressure: TdbScalar, elements: tuple[str, ...],
+) -> tuple[TdbScalar, ...]:
     y = unpack_sites(model, sites)
     composition = model._composition(y)[1]
     return (sum(model._energies(y, temperature, pressure).values()),

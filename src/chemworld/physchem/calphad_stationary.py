@@ -6,8 +6,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from math import isfinite
 from types import MappingProxyType
+from typing import Any, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.linalg import null_space, qr
 
 from chemworld.physchem.calphad_response import (
@@ -18,7 +20,7 @@ from chemworld.physchem.calphad_response import (
     site_values,
     unpack_sites,
 )
-from chemworld.physchem.gibbs_phase import GibbsPhaseProperties
+from chemworld.physchem.gibbs_phase import GibbsPhaseModel, GibbsPhaseProperties, SiteFractions
 from chemworld.physchem.residual_system import (
     ResidualDomainError,
     ResidualNumericalError,
@@ -54,7 +56,9 @@ class CefStationaryPolicy:
 DEFAULT_CEF_STATIONARY_POLICY = CefStationaryPolicy()
 
 
-def independent_constraints(jacobian, tolerance):
+def independent_constraints(
+    jacobian: NDArray[np.float64], tolerance: float,
+) -> tuple[NDArray[np.integer[Any]], NDArray[np.float64]]:
     scales = np.maximum(np.max(np.abs(jacobian), axis=1), 1.0)
     normalized = jacobian / scales[:, None]
     _, r, pivots = qr(normalized.T, mode="economic", pivoting=True)
@@ -64,14 +68,16 @@ def independent_constraints(jacobian, tolerance):
     return indices, scales[indices]
 
 
-def _interior(model, fractions):
+def _interior(model: GibbsPhaseModel, fractions: SiteFractions) -> tuple[dict[str, float], ...]:
     fractions = model._fractions(fractions)
     if any(y <= 0 for subl in fractions for y in subl.values()):
         raise ValueError("CEF constrained derivatives require an interior site constitution")
     return fractions
 
 
-def _stability(hessian, jacobian, policy):
+def _stability(
+    hessian: NDArray[np.float64], jacobian: NDArray[np.float64], policy: CefStationaryPolicy,
+) -> tuple[float | None, bool, NDArray[np.float64] | None]:
     scales = np.maximum(np.max(np.abs(jacobian), axis=1), 1.0)
     tangent = null_space(jacobian / scales[:, None], rcond=policy.rank_tolerance)
     if tangent.shape[1] == 0:
@@ -91,13 +97,21 @@ def _stability(hessian, jacobian, policy):
     return minimum, minimum >= -tolerance, direction
 
 
-def _curvature(hessian, jacobian, policy):
+def _curvature(
+    hessian: NDArray[np.float64], jacobian: NDArray[np.float64], policy: CefStationaryPolicy,
+) -> tuple[float | None, bool]:
     minimum, stable, _ = _stability(hessian, jacobian, policy)
     return minimum, stable
 
 
-def _escape_saddle(model, sites, direction, elements, target, temperature, pressure, policy):
-    baseline = float(site_values(model, tuple(sites), temperature, pressure, elements)[0])
+def _escape_saddle(
+    model: GibbsPhaseModel, sites: NDArray[np.float64], direction: NDArray[np.float64],
+    elements: tuple[str, ...], target: NDArray[np.float64], temperature: float, pressure: float,
+    policy: CefStationaryPolicy,
+) -> tuple[NDArray[np.float64], dict[str, float]] | None:
+    # This trial supplies ordinary scalar coordinates, not derivative seeds.
+    baseline = float(cast(float, site_values(
+        model, tuple(sites), temperature, pressure, elements)[0]))
     best = None
     energy_tolerance = max(1e-8, 1e-12*abs(baseline))
     for sign in (-1, 1):
@@ -133,7 +147,7 @@ def _escape_saddle(model, sites, direction, elements, target, temperature, press
 @dataclass(frozen=True)
 class CefChemicalPotentials:
     status: str
-    values_J_mol: object | None
+    values_J_mol: Mapping[str, float] | None
     matrix_rank: int
     unknowns: int
     condition_number: float | None
@@ -143,9 +157,11 @@ class CefChemicalPotentials:
     diagnostics: tuple[str, ...]
 
 
-def chemical_potentials(model, fractions, temperature_K, pressure_Pa=101325.0, *,
-                        require_local_minimum=True, allow_one_sided=False,
-                        policy=DEFAULT_CEF_STATIONARY_POLICY):
+def chemical_potentials(
+    model: GibbsPhaseModel, fractions: SiteFractions, temperature_K: float,
+    pressure_Pa: float = 101325.0, *, require_local_minimum: bool = True,
+    allow_one_sided: bool = False, policy: CefStationaryPolicy = DEFAULT_CEF_STATIONARY_POLICY,
+) -> CefChemicalPotentials:
     if (type(require_local_minimum) is not bool or type(allow_one_sided) is not bool
             or not isinstance(policy, CefStationaryPolicy)):
         raise ValueError("CEF stationarity requires boolean choices and a CefStationaryPolicy")
@@ -203,15 +219,18 @@ def chemical_potentials(model, fractions, temperature_K, pressure_Pa=101325.0, *
 class CefConstitutionResult:
     success: bool
     failure_reason: str
-    site_fractions: tuple | None
+    site_fractions: tuple[Mapping[str, float], ...] | None
     properties: GibbsPhaseProperties | None
     chemical_potentials: CefChemicalPotentials | None
     relaxed_heat_capacity_J_mol_K: float | None
-    site_temperature_derivatives_per_K: tuple | None
-    diagnostics: dict
+    site_temperature_derivatives_per_K: tuple[tuple[int, str, float], ...] | None
+    diagnostics: dict[str, Any]
 
 
-def _constraints(values, jacobian, hessian, target):
+def _constraints(
+    values: NDArray[np.float64], jacobian: NDArray[np.float64], hessian: NDArray[np.float64],
+    target: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     ne = len(target)
     c = np.r_[values[ne+1:], values[1:ne+1]-target]
     j = np.concatenate((jacobian[ne+1:], jacobian[1:ne+1]))
@@ -219,9 +238,11 @@ def _constraints(values, jacobian, hessian, target):
     return c, j, h
 
 
-def stationary_constitution(model, element_fractions, initial_sites, temperature_K,
-                            pressure_Pa=101325.0, *, require_local_minimum=True,
-                            allow_one_sided=False, policy=DEFAULT_CEF_STATIONARY_POLICY):
+def stationary_constitution(
+    model: GibbsPhaseModel, element_fractions: Mapping[str, float], initial_sites: SiteFractions,
+    temperature_K: float, pressure_Pa: float = 101325.0, *, require_local_minimum: bool = True,
+    allow_one_sided: bool = False, policy: CefStationaryPolicy = DEFAULT_CEF_STATIONARY_POLICY,
+) -> CefConstitutionResult:
     if (type(require_local_minimum) is not bool or type(allow_one_sided) is not bool
             or not isinstance(policy, CefStationaryPolicy)):
         raise ValueError("CEF stationarity requires boolean choices and a CefStationaryPolicy")
@@ -245,9 +266,9 @@ def stationary_constitution(model, element_fractions, initial_sites, temperature
     indices, scales = independent_constraints(cj, policy.rank_tolerance)
     n = len(sites)
     energy_scale = max(1.0, R*temperature, abs(float(values[0])))
-    cached = {}
+    cached: dict[tuple[float, ...], tuple[NDArray[np.float64], ...]] = {}
 
-    def assemble(z):
+    def assemble(z: NDArray[np.float64]) -> tuple[NDArray[np.float64], ...]:
         key = tuple(z)
         if key not in cached:
             try:
@@ -294,22 +315,25 @@ def stationary_constitution(model, element_fractions, initial_sites, temperature
             break
         if total_iterations >= policy.root.maximum_iterations:
             break
-        probe = _escape_saddle(model, root.value[:n], direction, elements, target,
-                               temperature, pressure, policy)
+        # An unstable spectrum has both a lowest eigenvalue and its direction.
+        probe = _escape_saddle(
+            model, root.value[:n], cast(NDArray[np.float64], direction), elements, target,
+            temperature, pressure, policy,
+        )
         if probe is None:
             break
         trial, receipt = probe
-        receipt["minimum_internal_curvature_J_mol"] = minimum
+        receipt["minimum_internal_curvature_J_mol"] = cast(float, minimum)
         escapes.append(receipt)
         initial_root = np.r_[trial, root.value[n:]]
-    diagnostics = {"root": root.diagnostics, "root_attempts": attempts,
+    diagnostics: dict[str, Any] = {"root": root.diagnostics, "root_attempts": attempts,
                    "total_root_iterations": total_iterations, "saddle_escapes": escapes,
                    "constraint_indices": indices.tolist(),
                    "constraint_row_scales": scales.tolist(), "energy_scale_J_mol": energy_scale,
                    "site_floor": policy.site_floor,
                    "branch_scope": "local to the supplied initial sites"}
 
-    def failure(reason):
+    def failure(reason: str) -> CefConstitutionResult:
         return CefConstitutionResult(False, reason, None, None, None, None, None, diagnostics)
 
     if not root.success:

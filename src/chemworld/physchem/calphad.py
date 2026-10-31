@@ -17,7 +17,7 @@ from typing import Any, cast, overload
 
 import numpy as np
 
-from chemworld.data.tdb import AuxiliaryBalances, TdbDatabase, TdbParameter, TdbPhase
+from chemworld.data.tdb import AuxiliaryBalances, TdbDatabase, TdbFunction, TdbParameter, TdbPhase
 from chemworld.physchem.caloric_math import FirstDerivative, JetCoefficient, exponential, logarithm
 from chemworld.physchem.calphad_extrapolation import qkt_weight, validate_qkt
 from chemworld.physchem.gibbs_phase import (
@@ -343,6 +343,10 @@ class CefPhaseModel(GibbsPhaseModel):
         return self._phase.constituents
 
     @property
+    def phase_options(self) -> frozenset[str]:
+        return self._phase.options
+
+    @property
     def generated_parameter_count(self) -> int:
         return sum(p.constituents != p.source.constituents for p in self._parameters)
 
@@ -542,6 +546,70 @@ class CefPhaseModel(GibbsPhaseModel):
             if any(c > 0 and isclose(temperature, c, rel_tol=1e-12) for c in criticals):
                 diagnostics.append("magnetic critical point: declared one-sided branch derivative")
         return diagnostics
+
+    def _derivative_branches(
+        self, fractions: SiteFractions, temperature: float, pressure: float,
+        *, include_sites: bool, include_pressure: bool,
+    ) -> tuple[str, ...]:
+        from chemworld.physchem.calphad_response import (
+            analytic_response,
+            site_labels,
+            temperature_segment_diagnostics,
+            unpack_sites,
+        )
+
+        local_models = [(self, fractions)]
+        views = self._ordering_views(fractions)
+        if views is not None:
+            disordered, disordered_fractions, randomized = views
+            local_models.append((disordered, disordered_fractions))
+            if not self._phase.model_hints.get("never_disorder"):
+                local_models.append((self, randomized))
+        diagnostics: list[str] = []
+        curves: list[TdbFunction] = []
+        for phase, sites in local_models:
+            curves.extend(p.source.function for p in phase._parameters)
+            hints = phase._phase.model_hints
+            if "magnetic_structure_factor" in hints:
+                tc = phase._sum({"TC"}, sites, temperature, pressure)
+                afm = cast(float, hints["magnetic_afm_factor"])
+                criticals = ([tc / afm if tc < 0 else tc] if afm != 0 else
+                             [tc, phase._sum({"NT"}, sites, temperature, pressure)])
+                if any(c > 0 and isclose(temperature, c, rel_tol=1e-12) for c in criticals):
+                    diagnostics.append(f"magnetic critical point: {phase.phase_name}")
+                moment = phase._sum({"BMAGN"}, sites, temperature, pressure)
+                if afm != 0 and moment == 0 and tc != 0:
+                    n_potentials = 2 if include_pressure else 1
+                    coordinates: tuple[float, ...] = (
+                        (temperature, pressure) if include_pressure else (temperature,))
+                    if include_sites:
+                        coordinates += tuple(sites[i][s] for i, s in site_labels(phase))
+
+                    def raw_moment(
+                        z: tuple[TdbScalar, ...], phase: CefPhaseModel = phase,
+                        sites: SiteFractions = sites, n_potentials: int = n_potentials,
+                    ) -> tuple[TdbScalar]:
+                        y = unpack_sites(phase, z[n_potentials:]) if include_sites else sites
+                        p = z[1] if include_pressure else pressure
+                        return (phase._sum({"BMAGN"}, y, z[0], p),)
+
+                    _, first, second = analytic_response(raw_moment, coordinates)
+                    if np.any(first != 0) or np.any(second != 0):
+                        diagnostics.append(f"magnetic parameter sign boundary: {phase.phase_name}")
+        diagnostics.extend(temperature_segment_diagnostics(
+            curves, self.database.functions, temperature,
+        ))
+        return tuple(dict.fromkeys(diagnostics))
+
+    @overload
+    def _ordering_views(
+        self, fractions: SiteFractions,
+    ) -> tuple[CefPhaseModel, SiteFractions, SiteFractions] | None: ...
+
+    @overload
+    def _ordering_views(
+        self, fractions: JetSiteFractions,
+    ) -> tuple[CefPhaseModel, JetSiteFractions, JetSiteFractions] | None: ...
 
     def _ordering_views(
         self, fractions: JetSiteFractions,

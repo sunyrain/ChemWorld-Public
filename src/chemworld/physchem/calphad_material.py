@@ -4,10 +4,13 @@ Amounts are mol of nonvacant atoms. Mechanical volume is an authored condensed
 phase property, not a volume inferred from a pressure-independent database.
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from math import isfinite
 from types import MappingProxyType
-from typing import cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -15,6 +18,7 @@ from chemworld.physchem.elements import ELEMENTS
 from chemworld.physchem.gibbs_phase import (
     GibbsPhaseModel,
     GibbsPhaseProperties,
+    SiteFractions,
     gibbs_phase_from_dict,
 )
 from chemworld.physchem.residual_system import (
@@ -24,12 +28,15 @@ from chemworld.physchem.residual_system import (
     solve_root,
 )
 
+if TYPE_CHECKING:
+    from chemworld.physchem.calphad_stationary import CefConstitutionResult
+
 
 @dataclass(frozen=True)
 class CefMaterialState:
     temperature_K: float
-    amounts_mol: object
-    constitution: object
+    amounts_mol: Mapping[str, float]
+    constitution: CefConstitutionResult
     gibbs_J: float
     enthalpy_J: float
     heat_capacity_J_K: float
@@ -39,7 +46,7 @@ class CefMaterialState:
 @dataclass(frozen=True)
 class CefMaterialSpec:
     phase_model: GibbsPhaseModel
-    initial_sites: tuple
+    initial_sites: SiteFractions
     minimum_temperature_K: float
     maximum_temperature_K: float
     reference_temperature_K: float
@@ -53,7 +60,7 @@ class CefMaterialSpec:
             raise ValueError("CEF material requires an explicit native phase model")
         if self.phase_type not in {"solid", "liquid"}:
             raise ValueError("CEF material needs an authored condensed phase type")
-        if "G" in self.phase_model._phase.options:
+        if "G" in self.phase_model.phase_options:
             raise ValueError("a TDB gas requires a mechanical EOS, not condensed CEF volume")
         positive = (self.minimum_temperature_K, self.maximum_temperature_K,
                     self.reference_temperature_K, self.molar_volume_L_mol, self.pressure_Pa)
@@ -73,25 +80,25 @@ class CefMaterialSpec:
         _ = self.element_symbols
 
     @property
-    def properties(self):
+    def properties(self) -> CefMaterialSpec:
         return self
 
     @property
-    def component_ids(self):
+    def component_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self.phase_model._composition(self.initial_sites)[1]))
 
     @property
-    def element_symbols(self):
+    def element_symbols(self) -> dict[str, str]:
         symbols = {symbol.upper(): symbol for symbol in ELEMENTS}
         if set(self.component_ids) - symbols.keys():
             raise ValueError("CEF material contains a non-elemental inventory counter")
         return {element: symbols[element] for element in self.component_ids}
 
-    def with_sites(self, sites):
+    def with_sites(self, sites: SiteFractions) -> CefMaterialSpec:
         """A disposable closure view seeded by the sole committed constitution."""
         return replace(self, initial_sites=sites)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"model_type": "calphad_material_v1",
                 "phase_model": self.phase_model.to_dict(),
                 "initial_sites": [dict(s) for s in self.initial_sites],
@@ -101,7 +108,7 @@ class CefMaterialSpec:
                     "pressure_Pa", "support_heat_capacity_J_K")}}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> CefMaterialSpec:
         from chemworld.data.scientific_inputs import _keys
 
         _keys(payload, ("model_type", "phase_model", "initial_sites", "minimum_temperature_K",
@@ -113,7 +120,7 @@ class CefMaterialSpec:
         return cls(**{**{k: v for k, v in payload.items() if k != "model_type"},
                       "phase_model": gibbs_phase_from_dict(payload["phase_model"])})
 
-    def at_tp(self, amounts, temperature):
+    def at_tp(self, amounts: Mapping[str, float], temperature: float) -> CefMaterialState:
         if (set(amounts) != set(self.component_ids)
                 or any(isinstance(v, bool) or not isfinite(v) or v <= 0
                        for v in amounts.values())
@@ -141,13 +148,13 @@ class CefMaterialSpec:
         return CefMaterialState(float(temperature), MappingProxyType(dict(amounts)), constitution,
                                 total*properties.gibbs_J_mol, enthalpy, capacity)
 
-    def at_ph(self, index, amounts, enthalpy):
+    def at_ph(self, index: int, amounts: Mapping[str, float], enthalpy: float) -> CefMaterialState:
         if isinstance(enthalpy, bool) or not isfinite(enthalpy):
             raise ValueError("CEF material enthalpy must be finite")
         low, high = self.minimum_temperature_K, self.maximum_temperature_K
-        cache = {}
+        cache: dict[float, CefMaterialState] = {}
 
-        def close(temperature):
+        def close(temperature: float) -> CefMaterialState:
             t = float(temperature)
             if t not in cache:
                 try:

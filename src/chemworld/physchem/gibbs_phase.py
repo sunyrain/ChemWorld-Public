@@ -64,6 +64,23 @@ class GibbsPhaseModel:
     def constituents(self) -> tuple[tuple[str, ...], ...]:
         raise NotImplementedError("A phase model must declare its constituents")
 
+    @property
+    def constraint_labels(self) -> tuple[str, ...]:
+        raise NotImplementedError("A phase model must label its constitution constraints")
+
+    @property
+    def phase_options(self) -> frozenset[str]:
+        raise NotImplementedError("A phase model must expose its declared phase options")
+
+    def to_dict(self) -> dict[str, Any]:
+        raise NotImplementedError("A phase model must serialize its original declarations")
+
+    def _derivative_branches(
+        self, fractions: SiteFractions, temperature: float, pressure: float,
+        *, include_sites: bool, include_pressure: bool,
+    ) -> tuple[str, ...]:
+        raise NotImplementedError("A phase model must declare its derivative branches")
+
     def _constraints(self, fractions: JetSiteFractions) -> tuple[TdbScalar, ...]:
         raise NotImplementedError("A phase model must define its constitution constraints")
 

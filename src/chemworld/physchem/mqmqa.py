@@ -141,8 +141,22 @@ class MQMQAPhaseModel(GibbsPhaseModel):
         return self._phase.constituents
 
     @property
+    def phase_options(self) -> frozenset[str]:
+        return self._phase.options
+
+    @property
     def constraint_labels(self) -> tuple[str, str]:
         return "site_sum:0", "charge"
+
+    def _derivative_branches(
+        self, fractions: SiteFractions, temperature: float, pressure: float,
+        *, include_sites: bool, include_pressure: bool,
+    ) -> tuple[str, ...]:
+        from chemworld.physchem.calphad_response import temperature_segment_diagnostics
+
+        return temperature_segment_diagnostics(
+            (p.source.function for p in self._parameters), self.database.functions, temperature,
+        )
 
     def _composition(
         self, fractions: JetSiteFractions,
