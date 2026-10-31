@@ -11,7 +11,7 @@ CALORIC_DATA_VERSION = "chemicals-caloric-data-1.5.2"
 @dataclass(frozen=True)
 class CaloricSource(ConstantSource):
     @property
-    def provenance(self):
+    def provenance(self) -> DataSourceProvenance:
         return DataSourceProvenance(
             "chemicals-caloric:" + self.source_id,
             100,
@@ -64,7 +64,7 @@ CALORIC_SOURCES = (
 CALORIC_SOURCE_BY_ID = {source.source_id: source for source in CALORIC_SOURCES}
 
 
-def _fields(names, unit, description):
+def _fields(names: str, unit: str, description: str) -> dict[str, ConstantField]:
     return {name: ConstantField(name, unit, description, "22C2") for name in names.split()}
 
 

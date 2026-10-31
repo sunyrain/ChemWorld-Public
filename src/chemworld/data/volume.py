@@ -5,7 +5,11 @@ Caller supplied critical inputs are explicit; source coefficients cannot be
 overridden. CRC constant observations require a stated application temperature.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, fields, replace
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.data.constant_catalog import ConstantField, ConstantSource
 from chemworld.data.constants import (
@@ -14,6 +18,11 @@ from chemworld.data.constants import (
     ConstantIdentityNotFoundError,
     ConstantRecord,
 )
+
+if TYPE_CHECKING:
+    from chemworld.data.volume_curves import VolumeData
+    from chemworld.physchem.property_inputs import PropertyInputCard
+    from chemworld.physchem.specs import ComponentSpec, PropertyCorrelation
 
 VOLUME_SOURCES = tuple(
     ConstantSource(key, "Density/" + filename, citation=citation + "; chemicals 1.5.2")
@@ -50,10 +59,10 @@ VOLUME_SOURCE_BY_ID = {s.source_id: s for s in VOLUME_SOURCES}
 @dataclass(frozen=True)
 class VolumeRecord(ConstantRecord):
     @property
-    def source(self):
+    def source(self) -> ConstantSource:
         return VOLUME_SOURCE_BY_ID[self.source_id]
 
-    def descriptor(self, field_id):
+    def descriptor(self, field_id: str) -> ConstantField:
         self.raw(field_id)
         units = {
             "Tc": "K",
@@ -79,15 +88,15 @@ class VolumeRecord(ConstantRecord):
 
 class VolumeDatabase(ConstantDatabase):
     @property
-    def catalog(self):
+    def catalog(self) -> tuple[ConstantSource, ...]:
         return VOLUME_SOURCES
 
-    def source(self, source_id):
+    def source(self, source_id: str) -> ConstantSource:
         if source_id in VOLUME_SOURCE_BY_ID:
             return VOLUME_SOURCE_BY_ID[source_id]
         return super().source(source_id)
 
-    def _read_records(self, source, path):
+    def _read_records(self, source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         records = super()._read_records(source, path)
         if source.source_id not in VOLUME_SOURCE_BY_ID:
             return records
@@ -96,14 +105,14 @@ class VolumeDatabase(ConstantDatabase):
             for r in records
         )
 
-    def volumes(self, identity, *, method):
+    def volumes(self, identity: object, *, method: str) -> tuple[VolumeData, ...]:
         from chemworld.data.volume_curves import source_volumes
 
         return tuple(
             c for r in self.records_for(identity, method=method) for c in source_volumes(r)
         )
 
-    def _select(self, identity, method, curve_id):
+    def _select(self, identity: object, method: str, curve_id: str | None) -> VolumeData:
         candidates = self.volumes(identity, method=method)
         if curve_id is not None:
             candidates = tuple(c for c in candidates if c.curve_id == curve_id)
@@ -113,10 +122,15 @@ class VolumeDatabase(ConstantDatabase):
             raise AmbiguousConstantIdentityError("select one volume curve_id; no implicit ranking")
         return candidates[0]
 
-    def volume(self, identity, *, method, curve_id=None, **build_options):
+    def volume(
+        self, identity: object, *, method: str, curve_id: str | None = None, **build_options: Any,
+    ) -> PropertyCorrelation:
         return self._select(identity, method, curve_id).build(**build_options)
 
-    def property_input(self, identity, component, *, method, curve_id=None, **build_options):
+    def property_input(
+        self, identity: object, component: ComponentSpec, *, method: str,
+        curve_id: str | None = None, **build_options: Any,
+    ) -> PropertyInputCard:
         from chemworld.data.scientific_inputs import InputSource
         from chemworld.physchem.property_inputs import PropertyInputCard
         from chemworld.physchem.property_packages import ComponentPropertyPackage
@@ -130,9 +144,9 @@ class VolumeDatabase(ConstantDatabase):
         }:
             raise ValueError("volume source identity does not match ComponentSpec")
         if "MW" in record.field_names and record.value("MW").quality == "valid":
-            mw = record.value("MW").value
+            mw = cast(float, record.value("MW").value)
             # Source tables often publish rounded MW. Never silently replace it.
-            if abs(mw - component.molecular_weight_g_mol) > 1e-9 * mw:
+            if abs(mw - cast(float, component.molecular_weight_g_mol)) > 1e-9 * mw:
                 raise ValueError("source MW must match the component molecular weight")
         # A sourced fit may require explicitly selected critical estimates.
         # Keep them as parameter provenance, without replacing table coefficients.

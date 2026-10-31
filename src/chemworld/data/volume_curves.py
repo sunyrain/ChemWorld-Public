@@ -1,9 +1,11 @@
 """Lossless source candidates mapped onto native volume and DIPPR equations."""
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 from math import isfinite
 from types import MappingProxyType
+from typing import Any, cast
 from xml.etree import ElementTree
 
 from chemworld.data.caloric_curves import number
@@ -16,23 +18,23 @@ class VolumeData:
     record: ConstantRecord
     curve_key: str
     equation_id: str
-    coefficients: dict = field(default_factory=dict)
-    source_bounds_K: tuple = (None, None)
+    coefficients: Mapping[str, float | None] = field(default_factory=dict)
+    source_bounds_K: tuple[float | None, float | None] = (None, None)
     property_id: str = "liquid_molar_volume"
     output_unit: str = "m^3/mol"
-    required_inputs: tuple = ()
-    temperatures_K: tuple = ()
-    values: tuple = ()
-    notes: tuple = ()
+    required_inputs: tuple[str, ...] = ()
+    temperatures_K: tuple[float | None, ...] = ()
+    values: tuple[float | None, ...] = ()
+    notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "coefficients", MappingProxyType(dict(self.coefficients)))
 
     @property
-    def curve_id(self):
+    def curve_id(self) -> str:
         return f"{self.record.record_id}:{self.curve_key}"
 
-    def _bounds(self, selected):
+    def _bounds(self, selected: Sequence[float] | None) -> tuple[float, float]:
         bounds = self.source_bounds_K if selected is None else tuple(selected)
         if (
             len(bounds) != 2
@@ -40,15 +42,19 @@ class VolumeData:
                 isinstance(v, bool) or not isinstance(v, int | float) or not isfinite(v)
                 for v in bounds
             )
-            or not 0 < bounds[0] < bounds[1]
+            or not 0 < cast(float, bounds[0]) < cast(float, bounds[1])
         ):
             raise ValueError("select an explicit finite positive temperature interval")
+        bounds = cast(tuple[float, float], bounds)
         low, high = self.source_bounds_K
         if (low is not None and bounds[0] < low) or (high is not None and bounds[1] > high):
             raise ValueError("application interval exceeds source temperature bounds")
-        return tuple(bounds)
+        return cast(tuple[float, float], tuple(bounds))
 
-    def _curve(self, equation, coefficients, bounds, *, key=None, basis="source"):
+    def _curve(
+        self, equation: str, coefficients: dict[str, float], bounds: tuple[float, float], *,
+        key: str | int | None = None, basis: str = "source",
+    ) -> PropertyCorrelation:
         phase = self.property_id.split("_")[0]
         return PropertyCorrelation(
             self.curve_id if key is None else self.curve_id + ":" + str(key),
@@ -74,17 +80,18 @@ class VolumeData:
     def build(
         self,
         *,
-        temperature_bounds_K=None,
-        parameters=None,
-        application_temperature_K=None,
-        application_note=None,
-        interpolation=None,
-    ):
+        temperature_bounds_K: Sequence[float] | None = None,
+        parameters: Mapping[str, float] | None = None,
+        application_temperature_K: float | None = None,
+        application_note: str | None = None,
+        interpolation: str | None = None,
+    ) -> PropertyCorrelation:
         parameters = {} if parameters is None else dict(parameters)
         if set(parameters) != set(self.required_inputs):
             raise ValueError(f"supply exactly the explicit inputs {self.required_inputs}")
         if any(v is None or not isfinite(v) for v in self.coefficients.values()):
             raise ValueError("missing or invalid source volume coefficients")
+        coefficients = cast(Mapping[str, float], self.coefficients)
         if self.equation_id == "unlocated_point":
             if (
                 temperature_bounds_K is not None
@@ -101,7 +108,7 @@ class VolumeData:
                 )
             curve = self._curve(
                 "molar_volume_source_point",
-                {"value": self.coefficients["Vm"], "T_ref": application_temperature_K},
+                {"value": coefficients["Vm"], "T_ref": application_temperature_K},
                 (application_temperature_K, application_temperature_K),
                 basis="caller_point_assumption",
             )
@@ -119,7 +126,7 @@ class VolumeData:
             raise ValueError("analytic source curves do not require interpolation")
         if self.equation_id.startswith("unresolved_"):
             raise ValueError("unresolved source volume equation: " + self.equation_id)
-        coeffs = {**self.coefficients, **parameters}
+        coeffs = {**coefficients, **parameters}
         if self.equation_id.startswith("volume:"):
             from chemworld.physchem.volume_correlations import volume_correlation
 
@@ -140,7 +147,9 @@ class VolumeData:
         curve.metadata["explicit_supplemental_parameters"] = parameters
         return curve
 
-    def build_segments(self, *, interpolation, temperature_bounds_K=None):
+    def build_segments(
+        self, *, interpolation: str | None, temperature_bounds_K: Sequence[float] | None = None,
+    ) -> tuple[PropertyCorrelation, ...]:
         if self.equation_id != "tabulated" or interpolation != "linear":
             raise ValueError("volume table requires explicit linear interpolation")
         bounds = self._bounds(temperature_bounds_K)
@@ -149,11 +158,12 @@ class VolumeData:
             len(ts) != len(values)
             or len(ts) < 2
             or any(v is None for v in ts)
-            or any(b <= a for a, b in pairwise(ts))
+            or any(b <= a for a, b in pairwise(cast(tuple[float, ...], ts)))
         ):
             raise ValueError(
                 "table requires aligned increasing temperature points; no sorting/filling"
             )
+        ts = cast(tuple[float, ...], ts)
         if bounds[0] < ts[0] or bounds[1] > ts[-1]:
             raise ValueError("cannot extrapolate a volume table")
         result = []
@@ -166,6 +176,7 @@ class VolumeData:
                 raise ValueError(
                     "selected interval crosses a missing/nonpositive volume observation"
                 )
+            v0, v1 = cast(float, v0), cast(float, v1)
             slope = (v1 - v0) / (high - low)
             curve = self._curve(
                 "dippr100",
@@ -183,14 +194,17 @@ class VolumeData:
         return tuple(result)
 
 
-def source_volumes(record):
-    def raw(key):
+def source_volumes(record: ConstantRecord) -> tuple[VolumeData, ...]:
+    def raw(key: str) -> object:
         return record.raw(key) if key in record.field_names else None
 
-    def n(key):
+    def n(key: str) -> float | None:
         return number(raw(key))
 
-    def curve(key, equation, coefficients, bounds=(None, None), **kwargs):
+    def curve(
+        key: str, equation: str, coefficients: Mapping[str, float | None],
+        bounds: tuple[float | None, float | None] = (None, None), **kwargs: Any,
+    ) -> VolumeData:
         return VolumeData(record, key, equation, coefficients, bounds, **kwargs)
 
     source = record.source_id
@@ -284,21 +298,23 @@ def source_volumes(record):
             if any(c.attrib.get("units") != "K" for c in node if c.tag in {"Tmin", "Tmax"}):
                 raise ValueError("ChemSep source temperatures require K")
             eq = values.get("eqno")
-            keys = {"2": "AB", "100": "ABCDE", "104": "ABCDE", "105": "ABCD", "106": "ABCDE"}.get(
-                eq, "ABCDE"
-            )
+            coefficient_keys: Mapping[str | None, str] = {
+                "2": "AB", "100": "ABCDE", "104": "ABCDE", "105": "ABCD", "106": "ABCDE",
+            }
+            keys = coefficient_keys.get(eq, "ABCDE")
             params = {k: number(values.get(k)) for k in keys}
             if phase == "gas":
                 equation = "dippr104" if eq == "104" else "unresolved_chemsep_" + str(eq)
                 params = {k: None if v is None else v / 1000 for k, v in params.items()}
                 prop = "second_virial_coefficient"
             else:
-                equation = {
+                equations: Mapping[str | None, str] = {
                     "2": "dippr100_reciprocal",
                     "100": "dippr100_reciprocal",
                     "105": "dippr105_reciprocal",
                     "106": "dippr106_reciprocal",
-                }.get(eq, "unresolved_chemsep_" + str(eq))
+                }
+                equation = equations.get(eq, "unresolved_chemsep_" + str(eq))
                 # Density coefficients in kmol/m3 -> mol/m3 before taking reciprocal.
                 for k in keys if eq in {"2", "100"} else "A":
                     coefficient = params[k]
@@ -312,7 +328,8 @@ def source_volumes(record):
                     key,
                     equation,
                     params,
-                    tuple(number(values.get(k)) for k in ("Tmin", "Tmax")),
+                    cast(tuple[float | None, float | None], tuple(
+                        number(values.get(k)) for k in ("Tmin", "Tmax"))),
                     property_id=prop,
                     notes=(
                         f"ChemSep equation {eq}; PCDman Help 2024 Table 1; original XML retained",
@@ -321,7 +338,7 @@ def source_volumes(record):
             )
         return tuple(result)
     if source == "VDI":
-        ts = tuple(number(v) for v in raw("T"))
+        ts = tuple(number(v) for v in cast(Iterable[object], raw("T")))
         return tuple(
             curve(
                 key,
@@ -331,7 +348,7 @@ def source_volumes(record):
                 property_id=phase + "_" + quantity,
                 output_unit=unit,
                 temperatures_K=ts,
-                values=tuple(number(v) for v in raw(key)),
+                values=tuple(number(v) for v in cast(Iterable[object], raw(key))),
             )
             for phase, letter in (("liquid", "l"), ("gas", "g"))
             for quantity, title, unit in (
