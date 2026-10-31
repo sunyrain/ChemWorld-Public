@@ -250,11 +250,26 @@ def test_disposable_drying_debits_actual_finite_media_and_never_refills_on_mater
         env.close()
 
 
-def test_extractant_identity_volume_and_contact_time_change_partition_outcome() -> None:
-    settings = (
-        (0, 0.012, 60.0),
-        (3, 0.024, 480.0),
-    )
+@pytest.mark.parametrize(
+    "settings, coefficient_direction, recovery_direction",
+    [
+        (((0, 0.012, 240.0), (3, 0.012, 240.0)), -1, -1),
+        (((0, 0.012, 240.0), (0, 0.024, 240.0)), -1, 1),
+        (((0, 0.012, 240.0), (0, 0.012, 480.0)), 1, 1),
+        (((0, 0.012, 60.0), (3, 0.024, 480.0)), -1, 1),
+    ],
+    ids=("identity", "volume", "duration", "original-combined-recipe"),
+)
+def test_extractant_identity_volume_and_contact_time_change_partition_outcome(
+    settings: tuple[tuple[int, float, float], tuple[int, float, float]],
+    coefficient_direction: int,
+    recovery_direction: int,
+) -> None:
+    # The finite organic phase retains high-affinity carrier solvent 2.
+    # Adding solvent 3 or withdrawing more of the aqueous carrier lowers its
+    # mixture coefficient; a larger organic volume can still raise recovery.
+    # At fixed composition, longer contact raises the effective coefficient.
+    # Category indices themselves do not define an ordering of mixed media.
     outcomes: list[tuple[float, float, float]] = []
     for extractant, volume, duration in settings:
         env = _run_to_selected_phase(
@@ -264,6 +279,9 @@ def test_extractant_identity_volume_and_contact_time_change_partition_outcome() 
         )
         try:
             state = _runtime(env)._state
+            assert state.metadata["extraction_converged"]
+            assert state.metadata["extraction_material_balance_error_mol"] < 1.0e-10
+            assert state.process.metrics["process_mass_balance_error"] < 1.0e-10
             outcomes.append(
                 (
                     float(state.metadata["partition_coefficient"]),
@@ -274,8 +292,8 @@ def test_extractant_identity_volume_and_contact_time_change_partition_outcome() 
         finally:
             env.close()
 
-    assert outcomes[1][0] > outcomes[0][0]
-    assert outcomes[1][2] > outcomes[0][2]
+    assert coefficient_direction * (outcomes[1][0] - outcomes[0][0]) > 1.0e-8
+    assert recovery_direction * (outcomes[1][2] - outcomes[0][2]) > 1.0e-8
     assert outcomes[1] != pytest.approx(outcomes[0])
 
 
