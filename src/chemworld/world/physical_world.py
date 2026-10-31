@@ -384,8 +384,8 @@ class CompositionPhysics:
                 op
                 for op in operations
                 if shared_operation_allowed(op, self.initial_states[vessel], modules)
-                and (op != "set_model_parameters" or getattr(
-                    self.models_of("sbml").get(vessel), "controlled_parameters", ()))
+                and (op != "set_model_parameters" or bool(getattr(
+                    self.models_of("sbml").get(vessel), "controlled_parameters", ())))
                 and (
                     op != "queue_lab_heat"
                     or (self.lab_clock.heater_ids and self.declared_temperature_bounds_k(

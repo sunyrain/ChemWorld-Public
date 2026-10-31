@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
@@ -22,12 +22,17 @@ from chemworld.foundation.solvents import (
     SolventInventory,
 )
 from chemworld.foundation.state import PhaseLedger
+from chemworld.foundation.state_ledgers import ProcessLedger
 from chemworld.runtime.action_values import action_float
+from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.runtime.species import MechanismSpeciesView
 from chemworld.world.actions import CATALYSTS, SOLVENTS
 from chemworld.world.mixtures import volumetric_heat_capacity, working_solvents
 from chemworld.world.parameters import ChemWorldParameters
 from chemworld.world.thermal_kernel import account_temperature_transition
+
+if TYPE_CHECKING:
+    from chemworld.runtime.material_routing import ChemWorldMaterialRoutingServices
 
 
 def _action_index(action: dict[str, Any], key: str, default: int, count: int) -> int:
@@ -38,7 +43,8 @@ class ChemWorldPrimitiveOperationServices:
     """Apply primitive material, sampling, quench, evaporation, and penalty updates."""
 
     def __init__(
-        self, world: ChemWorldParameters, species_view: MechanismSpeciesView, material_router=None
+        self, world: ChemWorldParameters, species_view: MechanismSpeciesView,
+        material_router: ChemWorldMaterialRoutingServices | None = None,
     ) -> None:
         self.world = world
         self.species_view = species_view
@@ -78,15 +84,17 @@ class ChemWorldPrimitiveOperationServices:
         *,
         additions_mol: dict[str, float] | None = None,
         added_volume_L: float = 0.0,
-    ) -> tuple[dict[str, float], PhaseLedger | None]:
+    ) -> tuple[dict[str, float], PhaseLedger]:
         additions = additions_mol or {}
         species = state.species_amounts.copy()
         for species_id, addition in additions.items():
             species[species_id] = species.get(species_id, 0.0) + float(addition)
-        if state.phases is None or set(state.phases.phases) == {"reactor_liquid"}:
-            return species, state.phases
+        # WorldState materializes phase/process ledgers at construction.
+        phases_ledger = cast(PhaseLedger, state.phases)
+        if set(phases_ledger.phases) == {"reactor_liquid"}:
+            return species, phases_ledger
 
-        phases = state.phases.phases.copy()
+        phases = phases_ledger.phases.copy()
         for species_id, addition in additions.items():
             destination = self._material_destination_phase(state, species_id)
             if destination is None:
@@ -124,7 +132,9 @@ class ChemWorldPrimitiveOperationServices:
     def add_reagent(self, state: WorldState, action: dict[str, Any]) -> WorldState:
         return self._add_feed(state, self.feed_additions(state, action))
 
-    def add_component(self, state: WorldState, action: dict[str, Any]) -> WorldState:
+    def add_component(
+        self, state: WorldState, action: dict[str, Any],
+    ) -> WorldState | ModelProviderResult:
         if self.material_router is not None and self.material_router.uses_native_packets(state):
             return self.material_router.add_finite_feed(state, action)
         return self._add_feed(state, self.feed_additions(state, action))
@@ -135,7 +145,8 @@ class ChemWorldPrimitiveOperationServices:
             CONTINUOUS_SDE_ALGORITHM,
         )
 
-        continuation = state.process.stochastic_continuation
+        process = cast(ProcessLedger, state.process)
+        continuation = process.stochastic_continuation
         sde = continuation is not None and continuation.get("algorithm") == CONTINUOUS_SDE_ALGORITHM
         adaptive = (continuation is not None
                     and continuation.get("algorithm") == CONTINUOUS_ADAPTIVE_ALGORITHM)
@@ -159,34 +170,33 @@ class ChemWorldPrimitiveOperationServices:
         species_ledger = species_with_added_initial_amounts(state.species, additions)
         amount = sum(additions.values())
         ledger = state.ledger.with_updates(cost=state.ledger.cost + 0.03 * amount / 0.01)
-        process = state.process
-        if discrete and amount > 0:
+        if continuation is not None and discrete and amount > 0:
             process = replace(process, stochastic_continuation={
-                **process.stochastic_continuation, "pending": None, "signature": None})
+                **continuation, "pending": None, "signature": None})
         if sde and amount > 0:
             from chemworld.physchem.stochastic_sde import rebind_sde_continuation
 
             physics = None if self.material_router is None else self.material_router.physics
             model = (None if physics is None else
                      physics.models_of("stochastic_sde").get(state.vessel_id))
-            if model is None:
+            if physics is None or model is None:
                 raise ValueError("SDE dosing requires its actual physical model declaration")
-            process = replace(process, stochastic_continuation=rebind_sde_continuation(
+            process = replace(process, stochastic_continuation=dict(rebind_sde_continuation(
                 physics.network, model, state.species_amounts, species,
                 cast(Mapping[str, object], continuation),
-            ))
+            )))
         if adaptive and amount > 0:
             from chemworld.physchem.stochastic_adaptive_advance import rebind_adaptive_continuation
 
             physics = None if self.material_router is None else self.material_router.physics
             model = (None if physics is None else
                      physics.models_of("stochastic_hybrid").get(state.vessel_id))
-            if model is None:
+            if physics is None or model is None:
                 raise ValueError("adaptive dosing requires its actual physical model declaration")
-            process = replace(process, stochastic_continuation=rebind_adaptive_continuation(
+            process = replace(process, stochastic_continuation=dict(rebind_adaptive_continuation(
                 physics.network, model, state.species_amounts, species,
                 cast(Mapping[str, object], continuation),
-            ).continuation)
+            ).continuation))
         return state.replace(
             species_amounts=species,
             phases=phases,
@@ -248,7 +258,7 @@ class ChemWorldPrimitiveOperationServices:
         target = self._material_destination_phase(state)
         if target is None:
             raise ValueError("Solvent addition requires a material phase")
-        phases = state.phases.phases.copy()
+        phases = cast(PhaseLedger, state.phases).phases.copy()
         current = phases[target]
         phases[target] = replace(
             current,
@@ -392,7 +402,7 @@ class ChemWorldPrimitiveOperationServices:
             energy_jacket_J=state.ledger.energy_jacket_J + sensible + latent,
         )
         target_phase = self._material_destination_phase(state)
-        phases = state.phases.phases.copy()
+        phases = cast(PhaseLedger, state.phases).phases.copy()
         if target_phase is None:
             raise ValueError("Evaporation requires a selected material phase")
         phases[target_phase] = replace(

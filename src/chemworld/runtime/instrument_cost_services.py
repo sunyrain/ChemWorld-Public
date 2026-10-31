@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from math import isfinite
-from typing import Any
+from typing import Any, cast
 
 from chemworld.foundation import (
     PhysicalConstitution,
@@ -39,7 +40,9 @@ class ChemWorldInstrumentCostServices:
         self.constitution = constitution
         self.modules = modules
         self.thermal = thermal
-        self.shared_clock_advance = None
+        self.shared_clock_advance: (
+            Callable[[WorldState, dict[str, Any]], ModelProviderResult] | None
+        ) = None
 
     def _shared_acquisition(self, state, duration):
         """Span finite queued boundaries through the original shared scheduler.
@@ -63,7 +66,9 @@ class ChemWorldInstrumentCostServices:
                 return replace(result, state=None, actual_duration_s=0.)
             slices.append({"duration_s": result.actual_duration_s,
                            "outcome": result.outcome, "diagnostics": dict(result.diagnostics)})
-            candidate = result.state
+            # The bound laboratory scheduler supplies a candidate for every
+            # accepted slice and rejects missing physical/sampling candidates.
+            candidate = cast(WorldState, result.state)
             elapsed = candidate.ledger.time_s-initial
             if result.outcome == "stopped" or elapsed >= duration-1e-10:
                 return replace(result, state=candidate, actual_duration_s=elapsed, diagnostics={

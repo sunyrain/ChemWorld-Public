@@ -167,6 +167,51 @@ def test_earliest_physical_stop_realigns_all_systems():
     assert r.execute({"operation": "wait", "duration_s": 1}).info["operation_outcome"] == "rejected"
 
 
+@pytest.mark.parametrize("missing", ("system", "sample_state", "specimen"))
+def test_missing_provider_candidate_rolls_back_the_shared_slice(missing, monkeypatch):
+    from chemworld.runtime.kernel_contracts import ModelProviderResult
+
+    runtime = make()
+    try:
+        enqueue_both(runtime)
+        before = runtime._state
+        services = runtime.runtime.domain_services
+        if missing == "system":
+            monkeypatch.setattr(
+                services.reaction_thermal.advancer, "batch",
+                lambda *args, **kwargs: ModelProviderResult(
+                    {}, {"source": "candidate-regression"}, actual_duration_s=30,
+                ),
+            )
+        else:
+            original = services.instrument_cost.apply_measurement_cost
+
+            def incomplete_sample(state, action):
+                result = original(state, action)
+                assert result.outcome == "success"
+                return replace(
+                    result, **{"state" if missing == "sample_state" else "measurement_state": None},
+                )
+
+            monkeypatch.setattr(
+                services.instrument_cost, "apply_measurement_cost", incomplete_sample,
+            )
+        result = runtime.execute({"operation": "wait", "duration_s": 120})
+        assert result.info["transaction_status"] == "rolled_back"
+        assert result.info["operation_outcome"] == "numerical_failure"
+        after = runtime._state
+        for field in (
+            "lab_clock", "inactive_vessels", "species_amounts", "phases", "equipment",
+            "samples", "solvent_accounting", "temperature_K", "volume_L",
+        ):
+            assert getattr(after, field) == getattr(before, field), field
+        assert after.ledger.time_s == before.ledger.time_s
+        assert after.ledger.sample_consumed_L == before.ledger.sample_consumed_L
+        assert after.ledger.analysis_time_s == before.ledger.analysis_time_s
+    finally:
+        runtime.close()
+
+
 def test_single_vessel_matches_local_mode_without_contention():
     from chemworld.world.composition import WorldCompositionSpec
 

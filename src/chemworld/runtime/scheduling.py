@@ -5,13 +5,17 @@ the same interval; a failed solve discards the complete candidate, including
 sampling, queue changes and RNG draws. Completion is the publication boundary.
 """
 
+from __future__ import annotations
+
+from collections.abc import Collection, Mapping
 from copy import deepcopy
 from dataclasses import replace
 from math import fsum, isclose, isfinite
-from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
+from chemworld.foundation import WorldState
 from chemworld.foundation.balances import (
     MaterialExchange,
     TransitionBalance,
@@ -20,22 +24,37 @@ from chemworld.foundation.balances import (
 from chemworld.foundation.lab_clock import LabClockState
 from chemworld.foundation.solvents import SolventInventory, total_solvents
 from chemworld.foundation.state_helpers import INSTRUMENT_DEVICE_SELECTION
-from chemworld.foundation.state_ledgers import EquipmentLedger
+from chemworld.foundation.state_ledgers import (
+    EquipmentLedger,
+    EquipmentRecord,
+    ProcessLedger,
+    ThermalLedger,
+)
 from chemworld.runtime.component_network import _local, reconnect_device
 from chemworld.runtime.kernel_contracts import ModelProviderResult
 from chemworld.runtime.shared_systems import declared_shared_systems
 from chemworld.runtime.solvent_transport import finish_solvent_transition, initialize_solvents
+from chemworld.world.domain_modules import DomainModuleRegistry, ServiceContext
+
+if TYPE_CHECKING:
+    from chemworld.runtime.domain_services import ChemWorldDomainServices
+    from chemworld.runtime.instrument_cost_services import ChemWorldInstrumentCostServices
+    from chemworld.runtime.reaction_thermal_services import ChemWorldReactionThermalServices
+    from chemworld.world.composition import WorldCompositionSpec
 
 ALLOWED = {"queue_lab_heat", "queue_lab_measure", "wait", "select_vessel", "terminate",
            "set_flow_rate", "configure_electrical_control", "queue_electrical_stage",
            "add_solvent", "route_material", "create_container", "transfer_material"}
 
 
-def _fixed_isothermal_bath(record):
+def _fixed_isothermal_bath(record: EquipmentRecord) -> bool:
     return record.settings.get("lab_role") == "fixed_isothermal_bath"
 
 
-def shared_operation_allowed(operation, state, modules, action=None):
+def shared_operation_allowed(
+    operation: str, state: WorldState, modules: DomainModuleRegistry,
+    action: Mapping[str, Any] | None = None,
+) -> bool:
     if operation in ALLOWED:
         return True
     if operation == "configure_thermal_bed":
@@ -47,7 +66,7 @@ def shared_operation_allowed(operation, state, modules, action=None):
         CONTINUOUS_SDE_ALGORITHM,
     )
 
-    continuation = state.process.stochastic_continuation
+    continuation = cast(ProcessLedger, state.process).stochastic_continuation
     sde = continuation is not None and continuation.get('algorithm') == CONTINUOUS_SDE_ALGORITHM
     continuous = (continuation is not None
                   and continuation.get('algorithm') in CONTINUOUS_REACTION_ALGORITHMS)
@@ -87,14 +106,16 @@ def shared_operation_allowed(operation, state, modules, action=None):
     )
 
 
-def lab_device_choices(state, kind, *, allowed_instruments=None):
+def lab_device_choices(
+    state: WorldState, kind: str, *, allowed_instruments: Collection[str] | None = None,
+) -> tuple[str, ...]:
     if state.lab_clock is None:
         return ()
     available = state.metadata.get("component_network", {}).get("instruments", {}).get(
         state.vessel_id, (),
     )
     records = [record for local in (state, *state.inactive_vessels.values())
-               for record in local.equipment.equipment.values()]
+               for record in cast(EquipmentLedger, local.equipment).equipment.values()]
     if kind == "heat":
         return tuple(sorted(r.equipment_id for r in records
                             if r.equipment_type == "thermal_device"
@@ -107,27 +128,28 @@ def lab_device_choices(state, kind, *, allowed_instruments=None):
     ))
 
 
-def lab_device_selected(state, action, kind):
+def lab_device_selected(state: WorldState, action: Mapping[str, Any], kind: str) -> bool:
     choices = lab_device_choices(state, kind)
     return (len(choices) == 1 if "device" not in action
             else isinstance(action["device"], str) and action["device"] in choices)
 
 
-def device_record(state, identity):
+def device_record(state: WorldState, identity: str) -> EquipmentRecord:
     records = [record for local in (state, *state.inactive_vessels.values())
-               for record in local.equipment.equipment.values() if record.equipment_id == identity]
+               for record in cast(EquipmentLedger, local.equipment).equipment.values()
+               if record.equipment_id == identity]
     if len(records) != 1:
         raise ValueError("laboratory device must have exactly one physical owner")
     return records[0]
 
 
-def validate_lab(composition):
+def validate_lab(composition: WorldCompositionSpec) -> None:
     physics = composition.physics
-    spec = physics.lab_clock
-    if spec is None:
+    if physics is None or physics.lab_clock is None:
         if any(c.kind == "lab_schedule" for c in composition.components):
             raise ValueError("lab_schedule requires an explicit shared clock declaration")
         return
+    spec = physics.lab_clock
     services = {factory.service_id for factory in composition.modules.service_order()}
     if "lab_schedule" not in services:
         raise ValueError("shared clock requires its declared scheduling service")
@@ -142,10 +164,11 @@ def validate_lab(composition):
         for state in states.values()
     ):
         raise ValueError("lab initial states must be independent, zero-time physical states")
-    equipment = [r for state in states.values() for r in state.equipment.equipment.values()]
+    equipment = [r for state in states.values()
+                 for r in cast(EquipmentLedger, state.equipment).equipment.values()]
     heaters = []
     for local in states.values():
-        for record in local.equipment.equipment.values():
+        for record in cast(EquipmentLedger, local.equipment).equipment.values():
             if record.equipment_type != "thermal_device":
                 continue
             role = record.settings.get("lab_role")
@@ -186,7 +209,10 @@ def validate_lab(composition):
             raise ValueError("analyzer identity and installed instrument type disagree")
 
 
-def initialize_lab(state, composition, rng, *, detector_noise=None):
+def initialize_lab(
+    state: WorldState, composition: WorldCompositionSpec | None, rng: np.random.Generator,
+    *, detector_noise: dict[str, Any] | None = None,
+) -> WorldState:
     if composition is None or composition.physics is None or composition.physics.lab_clock is None:
         return state
     # Shared systems are all enabled from t=0. Initialize declared carrier
@@ -198,7 +224,7 @@ def initialize_lab(state, composition, rng, *, detector_noise=None):
             identity: replace(record, settings={**record.settings,
                                                "lab_analyzer_instrument": roles[identity]})
             if identity in roles else record
-            for identity, record in local.equipment.equipment.items()
+            for identity, record in cast(EquipmentLedger, local.equipment).equipment.items()
         }
         local = local.replace(equipment=EquipmentLedger(equipment))
         state = install_local(state, initialize_solvents(local))
@@ -213,26 +239,26 @@ def initialize_lab(state, composition, rng, *, detector_noise=None):
             initial=SolventInventory(tuple(fsum(values[i] for values in stocks) for i in range(4))),
         ),
         lab_clock=LabClockState(
-            detector_rng=deepcopy(rng.bit_generator.state),
+            detector_rng=deepcopy(dict(rng.bit_generator.state)),
             detector_noise=detector_noise or {},
         )
     )
 
 
-def public_lab(state):
+def public_lab(state: WorldState) -> dict[str, Any]:
     if state.lab_clock is None:
         return {"mode": "local"}
     return {"time_s": state.ledger.time_s, **state.lab_clock.to_dict(include_hidden=False)}
 
 
-def local_states(state):
+def local_states(state: WorldState) -> dict[str, WorldState]:
     # Numerical assembly and resource accumulation must not depend on the
     # selected vessel or on input/JSON mapping enumeration order.
     states = {state.vessel_id: _local(state), **state.inactive_vessels}
     return {key: states[key] for key in sorted(states)}
 
 
-def install_local(state, local):
+def install_local(state: WorldState, local: WorldState) -> WorldState:
     if state.vessel_id == local.vessel_id:
         return local.replace(
             ledger=state.ledger,
@@ -251,7 +277,7 @@ def install_local(state, local):
     return state.replace(inactive_vessels={**state.inactive_vessels, local.vessel_id: local})
 
 
-def fail(reason, *, outcome="rejected", **diagnostics):
+def fail(reason: str, *, outcome: str = "rejected", **diagnostics: Any) -> ModelProviderResult:
     return ModelProviderResult(
         {},
         state=None,
@@ -262,13 +288,13 @@ def fail(reason, *, outcome="rejected", **diagnostics):
     )
 
 
-def ready_lab_jobs(state):
+def ready_lab_jobs(lab: LabClockState | None) -> tuple[dict[str, Any], ...]:
     """One FIFO/device admission rule, also used by resource preflight."""
-    if state.lab_clock is None or state.lab_clock.stopped:
+    if lab is None or lab.stopped:
         return ()
-    occupied = list(state.lab_clock.running)
+    occupied = list(lab.running)
     ready = []
-    for job in sorted(state.lab_clock.queued, key=lambda item: item["sequence"]):
+    for job in sorted(lab.queued, key=lambda item: item["sequence"]):
         if any(item["device"] == job["device"] or (
             item["kind"] == job["kind"] == "heat" and item["vessel"] == job["vessel"]
         ) for item in occupied):
@@ -278,7 +304,10 @@ def ready_lab_jobs(state):
     return tuple(ready)
 
 
-def lab_instrument_reservation(state, action, *, modules=None):
+def lab_instrument_reservation(
+    state: WorldState | None, action: Mapping[str, Any], *,
+    modules: DomainModuleRegistry | None = None,
+) -> dict[str, int]:
     """Reserve potential starts, without advancing physics or reading an instrument.
 
     A wait commits one scheduling slice. A timed formal acquisition can span
@@ -291,14 +320,16 @@ def lab_instrument_reservation(state, action, *, modules=None):
         return _acquisition_reservation(state, action, modules)
     if action.get("operation") != "wait":
         return {}
-    counts = {}
-    for job in ready_lab_jobs(state):
+    counts: dict[str, int] = {}
+    for job in ready_lab_jobs(state.lab_clock):
         if job["kind"] == "measure":
             counts[job["instrument"]] = counts.get(job["instrument"], 0) + 1
     return counts
 
 
-def _acquisition_reservation(state, action, modules):
+def _acquisition_reservation(
+    state: WorldState, action: Mapping[str, Any], modules: DomainModuleRegistry | None,
+) -> dict[str, int]:
     from chemworld.world.operations import instrument_name
 
     if modules is None or not shared_operation_allowed("measure", state, modules, action):
@@ -312,10 +343,11 @@ def _acquisition_reservation(state, action, modules):
     if (contract.clock_semantics != "in_situ_end" or not contract.physical_duration_s
             or contract.sample_consumption_L or contract.destructive):
         return {}
-    counts, lab = {identity: 1}, state.lab_clock
+    # The reservation entry point checked that this is a shared-clock state.
+    counts, lab = {identity: 1}, cast(LabClockState, state.lab_clock)
     now, horizon = state.ledger.time_s, state.ledger.time_s+contract.physical_duration_s
     for _ in range(len(lab.queued)+len(lab.running)+1):
-        ready = ready_lab_jobs(SimpleNamespace(lab_clock=lab))
+        ready = ready_lab_jobs(lab)
         started = {job["sequence"] for job in ready}
         running = list(lab.running)
         for job in ready:
@@ -338,20 +370,22 @@ def _acquisition_reservation(state, action, modules):
 
 
 class LabScheduleServices:
-    def __init__(self, context):
-        self.composition = context.composition
+    # Bound once by the service owner after registry construction.
+    _domains: ChemWorldDomainServices
+    def __init__(self, context: ServiceContext) -> None:
+        self.composition: WorldCompositionSpec | None = context.composition
         self.spec = (
             None
             if context.composition is None or context.composition.physics is None
             else context.composition.physics.lab_clock
         )
-        self.modules = context.modules
+        self.modules = context.modules or DomainModuleRegistry.default()
         self.constitution = context.constitution
-        self.thermal = context.services["reaction_thermal"]
-        self.instrument_cost = context.services["instrument_cost"]
+        self.thermal: ChemWorldReactionThermalServices = context.services["reaction_thermal"]
+        self.instrument_cost: ChemWorldInstrumentCostServices = context.services["instrument_cost"]
         self.systems = () if self.spec is None else declared_shared_systems(self.composition)
 
-    def queue(self, state, action):
+    def queue(self, state: WorldState, action: dict[str, Any]) -> WorldState | ModelProviderResult:
         lab = state.lab_clock
         if lab is None or self.spec is None or lab.stopped:
             return fail("shared_lab_not_available")
@@ -402,7 +436,9 @@ class LabScheduleServices:
             lab_clock=replace(lab, next_sequence=lab.next_sequence + 1, queued=(*lab.queued, job))
         )
 
-    def _acquire(self, state, job):
+    def _acquire(
+        self, state: WorldState, job: dict[str, Any],
+    ) -> tuple[WorldState, dict[str, Any], ModelProviderResult | None]:
         """Existing sampler/observer owns physics; queue only owns timing/publication."""
         from chemworld.runtime.material_balance import ServiceMaterialBoundary
 
@@ -419,6 +455,11 @@ class LabScheduleServices:
         result = self.instrument_cost.apply_measurement_cost(before, action)
         if result.outcome != "success":
             return state, job, result
+        if result.state is None or result.measurement_state is None:
+            return state, job, fail(
+                "lab_sampling_candidate_missing", outcome="numerical_failure",
+                provider_diagnostics=dict(result.diagnostics),
+            )
         after = finish_solvent_transition(before, result.state, action)
         # Reuse the installed trusted receipt resolver, including persistent
         # chromatography carryover and integer solute capture. No balance deficit
@@ -426,8 +467,9 @@ class LabScheduleServices:
         boundary = ServiceMaterialBoundary(self._domains).resolve(before, after, action)
         spec = self.modules.instrument_specs()[instrument]
         rng = np.random.Generator(np.random.PCG64())
-        rng.bit_generator.state = deepcopy(state.lab_clock.detector_rng)
-        noise = state.lab_clock.detector_noise
+        lab = cast(LabClockState, state.lab_clock)
+        rng.bit_generator.state = deepcopy(lab.detector_rng)
+        noise = lab.detector_noise
         keyed = noise.get("mode") == "keyed"
         if keyed:
             from chemworld.runtime.observation_noise import (
@@ -460,7 +502,7 @@ class LabScheduleServices:
             # its invalid result until the same publication boundary.
             reading = None
             job = {**job, "measurement_status": "invalid", "readout_error": str(exc)}
-            rng.bit_generator.state = deepcopy(state.lab_clock.detector_rng)
+            rng.bit_generator.state = deepcopy(lab.detector_rng)
         else:
             job = {**job, "measurement_status": "valid"}
         now = state.ledger.time_s
@@ -480,7 +522,7 @@ class LabScheduleServices:
             # Queue envelope fields remain for the existing lab publication API.
             native.update(timing)
             job["observation"] = native
-        equipment = after.equipment.equipment.copy()
+        equipment = cast(EquipmentLedger, after.equipment).equipment.copy()
         device = equipment[identity]
         settings = deepcopy(device.settings)
         settings["elapsed_time_s"] -= duration
@@ -514,12 +556,12 @@ class LabScheduleServices:
                 sample_consumed_L=state.ledger.sample_consumed_L + spec.definition.sample_volume_L,
             ),
             lab_clock=replace(
-                state.lab_clock,
+                lab,
                 detector_rng=(
-                    state.lab_clock.detector_rng if keyed else deepcopy(rng.bit_generator.state)
+                    lab.detector_rng if keyed else deepcopy(dict(rng.bit_generator.state))
                 ),
                 exchanges=(
-                    *state.lab_clock.exchanges,
+                    *lab.exchanges,
                     *(
                         {
                             **receipt.to_dict(),
@@ -532,16 +574,18 @@ class LabScheduleServices:
         )
         return state, job, None
 
-    def advance(self, state, action):
+    def advance(self, state: WorldState, action: dict[str, Any]) -> ModelProviderResult:
         from chemworld.runtime.coupled_thermal import reconnect_thermal_device, set_thermal_enabled
 
-        if state.lab_clock.stopped:
+        original_lab = state.lab_clock
+        if original_lab is None or self.spec is None:
+            return fail("shared_lab_not_available")
+        if original_lab.stopped:
             return fail("lab_stopped_requires_full_reset")
-        original = state
-        running = list(state.lab_clock.running)
-        ready = ready_lab_jobs(state)
+        running = list(original_lab.running)
+        ready = ready_lab_jobs(state.lab_clock)
         sequences = {job["sequence"] for job in ready}
-        queued = [job for job in state.lab_clock.queued if job["sequence"] not in sequences]
+        queued = [job for job in original_lab.queued if job["sequence"] not in sequences]
         # Start at most one request per device. Global sequence breaks ties;
         # waiting jobs do not reserve specimens from a changing reactor.
         for job in ready:
@@ -550,7 +594,7 @@ class LabScheduleServices:
                     state, job["device"], job["vessel"], park_idle=True,
                 )
                 local = local_states(state)[job["vessel"]]
-                records = dict(local.equipment.equipment)
+                records = dict(cast(EquipmentLedger, local.equipment).equipment)
                 records[job["device"]] = replace(records[job["device"]], status="busy")
                 state = install_local(state, local.replace(equipment=EquipmentLedger(records)))
                 job = {
@@ -582,7 +626,9 @@ class LabScheduleServices:
             ) for system in self.systems
         }
 
-        def solve(duration, previous=None):
+        def solve(
+            duration: float, previous: dict[str, ModelProviderResult] | None = None,
+        ) -> dict[str, ModelProviderResult]:
             results = {}
             for key, local in groups.items():
                 if previous is not None and previous[key].actual_duration_s == duration:
@@ -601,7 +647,15 @@ class LabScheduleServices:
                 }
                 if heat:
                     interval["target_temperature_K"] = heat["target_temperature_K"]
-                results[key] = self.thermal.advancer.batch(local, interval, heat=bool(heat))
+                result = self.thermal.advancer.batch(local, interval, heat=bool(heat))
+                if result.state is None and result.outcome not in {"rejected", "numerical_failure"}:
+                    result = fail(
+                        "lab_system_candidate_missing", outcome="numerical_failure",
+                        provider_outcome=result.outcome,
+                        provider_failure_reason=result.failure_reason,
+                        provider_diagnostics=dict(result.diagnostics),
+                    )
+                results[key] = result
             return results
 
         results = solve(dt)
@@ -634,7 +688,8 @@ class LabScheduleServices:
         ledger = base.ledger.to_dict()
         ledger["time_s"] = now + dt
         for key, result in results.items():
-            before, after = groups[key], result.state
+            # solve() rejects missing candidates before alignment or assembly.
+            before, after = groups[key], cast(WorldState, result.state)
             members = {key: after, **after.inactive_vessels}
             system = next(system for system in self.systems if system.system_id == key)
             if set(members) != set(system.vessels):
@@ -655,16 +710,18 @@ class LabScheduleServices:
                 ledger[name] += getattr(after.ledger, name) - getattr(before.ledger, name)
             for name in sorted(members):
                 local = members[name]
-                thermal = local.thermal.vessels[name]
+                local_thermal = cast(ThermalLedger, local.thermal)
+                thermal = local_thermal.vessels[name]
+                previous_thermal = cast(ThermalLedger, previous_members[name].thermal).vessels[name]
                 local_heat = (
-                    {field: getattr(previous_members[name].thermal.vessels[name], field)
+                    {field: getattr(previous_thermal, field)
                      + thermal_deltas[name].get(field, 0.0) for field in thermal_fields}
                     if thermal_deltas is not None else
                     {field: getattr(local.ledger, field) for field in thermal_fields}
                 )
                 local = local.replace(
                     inactive_vessels={}, vessel_elapsed_s={}, lab_clock=None,
-                    thermal=replace(local.thermal, vessels={name: replace(
+                    thermal=replace(local_thermal, vessels={name: replace(
                         thermal, **local_heat,
                     )}),
                 )
@@ -677,7 +734,7 @@ class LabScheduleServices:
         for job in running:
             if job["kind"] == "measure":
                 local = local_states(state)[job["vessel"]]
-                equipment = local.equipment.equipment.copy()
+                equipment = cast(EquipmentLedger, local.equipment).equipment.copy()
                 identity = job["device"]
                 device = equipment[identity]
                 equipment[identity] = replace(
@@ -693,19 +750,21 @@ class LabScheduleServices:
                         analysis_time_s=state.ledger.analysis_time_s + dt
                     )
                 )
-        completed, active = list(state.lab_clock.completed), []
+        # install_local preserves the shared clock, including acquired samples.
+        lab = cast(LabClockState, state.lab_clock)
+        completed, active = list(lab.completed), []
         for job in sorted(running, key=lambda j: j["sequence"]):
             if isclose(job["available_at"], now + dt, abs_tol=1e-9, rel_tol=1e-12):
                 completed.append({**job, "status": "completed"})
                 if job["kind"] == "heat":
                     local = local_states(state)[job["vessel"]]
                     local = set_thermal_enabled(local, False)
-                    records = dict(local.equipment.equipment)
+                    records = dict(cast(EquipmentLedger, local.equipment).equipment)
                     records[job["device"]] = replace(records[job["device"]], status="used")
                     state = install_local(state, local.replace(equipment=EquipmentLedger(records)))
                 else:
                     local = local_states(state)[job["vessel"]]
-                    equipment = dict(local.equipment.equipment)
+                    equipment = dict(cast(EquipmentLedger, local.equipment).equipment)
                     identity = job["device"]
                     equipment[identity] = replace(equipment[identity], status="used")
                     state = install_local(
@@ -715,7 +774,7 @@ class LabScheduleServices:
                 active.append(job)
         state = state.replace(
             lab_clock=replace(
-                state.lab_clock,
+                lab,
                 queued=tuple(queued),
                 running=tuple(active),
                 completed=tuple(completed),
@@ -743,14 +802,15 @@ class LabScheduleServices:
                     key: {"outcome": r.outcome, **r.diagnostics} for key, r in results.items()
                 },
                 "completed_sequences": [
-                    job["sequence"] for job in completed[len(original.lab_clock.completed) :]
+                    job["sequence"] for job in completed[len(original_lab.completed) :]
                 ],
             },
         )
 
     @staticmethod
-    def boundary(before, after):
-        previous, current = before.lab_clock.exchanges, after.lab_clock.exchanges
+    def boundary(before: WorldState, after: WorldState) -> TransitionBalance:
+        previous = cast(LabClockState, before.lab_clock).exchanges
+        current = cast(LabClockState, after.lab_clock).exchanges
         if current[: len(previous)] != previous:
             raise ValueError("shared sampling history was rewritten")
         return TransitionBalance(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from chemworld.foundation import (
     WorldState,
@@ -25,9 +25,18 @@ from chemworld.world.parameters import ChemWorldParameters
 from chemworld.world.reaction_kernel import ReactionValidityError, integrate_compiled_reaction_ode
 from chemworld.world.thermal_kernel import account_temperature_transition, pressure_and_risk
 
+if TYPE_CHECKING:
+    from chemworld.runtime.concentration import ConcentrationRuntime
+    from chemworld.runtime.liquid_equilibrium import LiquidEquilibriumRuntime
+
 
 class ChemWorldReactionThermalServices:
     """Advance reaction state and apply thermal pressure/risk ledgers."""
+
+    # Optional strategies are installed by the domain registry. An annotation
+    # describes the installed service without creating it for absent modules.
+    liquid: LiquidEquilibriumRuntime
+    concentration: ConcentrationRuntime
 
     def __init__(
         self,

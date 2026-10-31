@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from math import fsum, isclose
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.foundation import (
     OperationRecord,
@@ -18,6 +18,7 @@ from chemworld.foundation import (
     WorldState,
 )
 from chemworld.foundation.balances import TransitionBalance
+from chemworld.foundation.state_ledgers import ThermalLedger
 from chemworld.runtime.constitution_factory import make_chemworld_constitution
 from chemworld.runtime.domain_service_registry import (
     DomainServiceContract,
@@ -32,6 +33,12 @@ from chemworld.world.domain_modules import DomainModuleRegistry, ServiceContext
 from chemworld.world.operations import operation_name
 from chemworld.world.parameters import ChemWorldParameters
 
+if TYPE_CHECKING:
+    from chemworld.runtime.instrument_cost_services import ChemWorldInstrumentCostServices
+    from chemworld.runtime.reaction_thermal_services import ChemWorldReactionThermalServices
+    from chemworld.runtime.scheduling import LabScheduleServices
+    from chemworld.world.composition import WorldCompositionSpec
+
 
 class ChemWorldDomainServices:
     """Runtime domain services called by operation kernels.
@@ -39,6 +46,12 @@ class ChemWorldDomainServices:
     Operation dispatch is table-driven so adding a new operation does not
     require editing a central ``if/elif`` block.
     """
+
+    # Installed dynamically from the declared service factories. An annotation
+    # does not create an attribute for a module that is absent from this world.
+    instrument_cost: ChemWorldInstrumentCostServices
+    reaction_thermal: ChemWorldReactionThermalServices
+    lab_schedule: LabScheduleServices
 
     def __init__(
         self,
@@ -48,7 +61,7 @@ class ChemWorldDomainServices:
         service_registry: DomainServiceRegistry | None = None,
         partition_nominal_pair_contract: str | None = None,
         modules: DomainModuleRegistry | None = None,
-        composition=None,
+        composition: WorldCompositionSpec | None = None,
     ) -> None:
         self.world = world
         self.constitution = constitution
@@ -210,16 +223,19 @@ class ChemWorldDomainServices:
                     )
                 for name, increments in thermal_deltas.items():
                     local = members[name]
-                    record = local.thermal.vessels[name]
+                    local_thermal = cast(ThermalLedger, local.thermal)
+                    record = local_thermal.vessels[name]
+                    previous_thermal = cast(ThermalLedger, previous[name].thermal).vessels[name]
                     members[name] = local.replace(thermal=replace(
-                        local.thermal, vessels={name: replace(record, **{
-                            key: getattr(previous[name].thermal.vessels[name], key)
+                        local_thermal, vessels={name: replace(record, **{
+                            key: getattr(previous_thermal, key)
                             + increments.get(key, 0.0) for key in thermal_fields
                         })},
                     ))
                 active = members.pop(next_state.vessel_id)
                 next_state = active.replace(inactive_vessels=members)
-            thermal = next_state.thermal.vessels[next_state.vessel_id]
+            thermal_ledger = cast(ThermalLedger, next_state.thermal)
+            thermal = thermal_ledger.vessels[next_state.vessel_id]
             if operation != "select_vessel" and thermal_deltas is None:
                 thermal = replace(
                     thermal,
@@ -234,7 +250,7 @@ class ChemWorldDomainServices:
                 )
             next_state = next_state.replace(
                 vessel_elapsed_s=elapsed,
-                thermal=replace(next_state.thermal, vessels={next_state.vessel_id: thermal}),
+                thermal=replace(thermal_ledger, vessels={next_state.vessel_id: thermal}),
             )
         if operation == "route_material" and context_thermal is not None:
             edge = state.metadata["component_network"]["connections"][action["connection"]]
@@ -242,7 +258,7 @@ class ChemWorldDomainServices:
             next_state = next_state.replace(
                 inactive_vessels={
                     **next_state.inactive_vessels,
-                    target: self.reaction_thermal.with_risk_and_pressure(
+                    target: context_thermal.with_risk_and_pressure(
                         next_state.inactive_vessels[target]
                     ),
                 }
