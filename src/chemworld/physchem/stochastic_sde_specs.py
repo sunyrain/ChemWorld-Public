@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, fields
 from math import isfinite
 from numbers import Real
+from typing import Any, Self, cast
+from xml.etree.ElementTree import Element
 
 from chemworld.data.xml_inputs import bounded_xml
 from chemworld.foundation.dimensions import DimensionVector, dimension_definition
@@ -17,7 +19,7 @@ POPULATION_BASIS = "continuous-particle-count"
 NOISE_UNIT = "particle/sqrt(s)"
 
 
-def finite_real(value, label, *, positive=False):
+def finite_real(value: object, label: str, *, positive: bool = False) -> float:
     if (
         isinstance(value, bool)
         or not isinstance(value, Real)
@@ -42,7 +44,7 @@ class SDEParameter:
         object.__setattr__(self, "value", finite_real(self.value, "SDE parameter"))
 
     @classmethod
-    def from_unit(cls, name, value, unit):
+    def from_unit(cls, name: str, value: float, unit: str) -> Self:
         definition = dimension_definition(unit_spec(unit).dimension)
         return cls(
             name,
@@ -50,11 +52,11 @@ class SDEParameter:
             definition.vector,
         )
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"name": self.name, "value": self.value, "dimension": self.dimension.to_dict()}
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         if (
             not isinstance(value, Mapping)
             or set(value) != {"name", "value", "dimension"}
@@ -96,7 +98,7 @@ class ReactionNoise:
         if expression is not None:
             # The Core Avogadro csymbol has its own historical numeric convention.
             # The SDE language uses the explicitly typed native SI avogadro symbol.
-            def check(node):
+            def check(node: Element) -> None:
                 if (
                     node.tag == "{" + MATHML_NS + "}csymbol"
                     and node.get("definitionURL") != "http://www.sbml.org/sbml/symbols/time"
@@ -112,15 +114,17 @@ class ReactionNoise:
         object.__setattr__(self, "expression", expression)
         object.__setattr__(self, "parameters", parameters)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "reaction_id": self.reaction_id,
-            "expression": None if self.expression is None else self.expression.xml,
+            "expression": (
+                None if self.expression is None else cast(MathExpression, self.expression).xml
+            ),
             "parameters": [value.to_dict() for value in self.parameters],
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         if (
             not isinstance(value, Mapping)
             or set(value) != {"reaction_id", "expression", "parameters"}
@@ -154,17 +158,21 @@ class ReactionFlux:
         object.__setattr__(self, "expression", declaration.expression)
         object.__setattr__(self, "parameters", declaration.parameters)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "reaction_id": self.reaction_id,
-            "expression": self.expression.xml,
+            "expression": cast(MathExpression, self.expression).xml,
             "parameters": [value.to_dict() for value in self.parameters],
         }
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         declaration = ReactionNoise.from_dict(value)
-        return cls(declaration.reaction_id, declaration.expression, declaration.parameters)
+        # The flux constructor retains its original rejection of null expressions.
+        return cls(
+            declaration.reaction_id, cast(MathExpression, declaration.expression),
+            declaration.parameters,
+        )
 
 
 @dataclass(frozen=True)
@@ -196,11 +204,11 @@ class SDEControl:
         if self.lower > self.upper or (self.target == "rate_multiplier" and self.lower < 0):
             raise ValueError("SDE control bounds must be ordered and multipliers nonnegative")
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, Any]) -> Self:
         if not isinstance(value, Mapping) or set(value) != {f.name for f in fields(cls)}:
             raise ValueError("unknown SDE control fields")
         return cls(**value)
@@ -272,7 +280,7 @@ class StochasticSDESpec:
                 raise ValueError("SDE volume floor exceeds its initial volume")
             object.__setattr__(self, "minimum_volume_L", minimum)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema": SDE_MODEL_SCHEMA,
             "population_basis": POPULATION_BASIS,
@@ -289,7 +297,7 @@ class StochasticSDESpec:
         }
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> Self:
         if not isinstance(payload, Mapping):
             raise ValueError("SDE model requires a declared mapping")
         values = dict(payload)
