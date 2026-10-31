@@ -7,12 +7,24 @@ This numerical primitive owns no inventory, clock, RNG stream or boundary rule.
 Trial values remain signed; physical acceptance belongs to the caller's transaction.
 """
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from math import isfinite, sqrt
 from numbers import Real
+from typing import Self, TypeAlias, TypedDict, cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
+
+RI5Callback: TypeAlias = Callable[[float, NDArray[np.float64]], ArrayLike]
+
+
+class RI5DrawData(TypedDict):
+    schema: str
+    hat: list[float]
+    tilde: list[int]
 
 RI5_DRAW_SCHEMA = "chemworld-ri5-weak-draw-v1"
 MAX_RI5_NOISE_CHANNELS = 256
@@ -34,7 +46,8 @@ class RI5Draw:
         if len(hat) != len(tilde) or len(hat) > MAX_RI5_NOISE_CHANNELS:
             raise ValueError("RI5 random variables require matching bounded dimensions")
         if any(
-            isinstance(v, bool) or not isinstance(v, Real) or v not in {-_SQRT3, 0.0, _SQRT3}
+            isinstance(v, bool) or not isinstance(cast(object, v), Real)
+            or v not in {-_SQRT3, 0.0, _SQRT3}
             for v in hat
         ):
             raise ValueError("RI5 hat variables must lie on the declared three-point lattice")
@@ -44,14 +57,14 @@ class RI5Draw:
         object.__setattr__(self, "tilde", tilde)
 
     @property
-    def dimension(self):
+    def dimension(self) -> int:
         return len(self.hat)
 
-    def to_dict(self):
+    def to_dict(self) -> RI5DrawData:
         return {"schema": RI5_DRAW_SCHEMA, "hat": list(self.hat), "tilde": list(self.tilde)}
 
     @classmethod
-    def from_dict(cls, value):
+    def from_dict(cls, value: Mapping[str, object]) -> Self:
         if (
             not isinstance(value, Mapping)
             or set(value) != {"schema", "hat", "tilde"}
@@ -60,10 +73,11 @@ class RI5Draw:
             or not isinstance(value["tilde"], list)
         ):
             raise ValueError("unknown RI5 random-variable encoding")
-        return cls(tuple(value["hat"]), tuple(value["tilde"]))
+        # The constructor validates each element against the two exact lattices.
+        return cls(tuple(cast(list[float], value["hat"])), tuple(cast(list[int], value["tilde"])))
 
 
-def draw_ri5(rng, dimension):
+def draw_ri5(rng: np.random.Generator, dimension: int) -> RI5Draw:
     """Draw only from the caller-owned generator; an empty diffusion consumes none."""
     if (
         not isinstance(rng, np.random.Generator)
@@ -86,7 +100,9 @@ class RI5Step:
     diffusion_evaluations: int
 
 
-def _finite_array(value, shape, label):
+def _finite_array(
+    value: ArrayLike, shape: tuple[int, ...], label: str,
+) -> NDArray[np.float64]:
     try:
         raw = np.asarray(value)
         if raw.dtype.kind not in "iuf":
@@ -99,7 +115,14 @@ def _finite_array(value, shape, label):
     return result.copy()
 
 
-def ri5_step(drift, diffusion, time_s, values, duration_s, draw):
+def ri5_step(
+    drift: RI5Callback,
+    diffusion: RI5Callback | None,
+    time_s: float,
+    values: ArrayLike,
+    duration_s: float,
+    draw: RI5Draw,
+) -> RI5Step:
     """Evaluate one fixed step using already drawn weak random variables.
 
     Callbacks receive time and a private state vector. Drift returns shape (n,),
@@ -116,7 +139,7 @@ def ri5_step(drift, diffusion, time_s, values, duration_s, draw):
     for value in (time_s, duration_s):
         if (
             isinstance(value, bool)
-            or not isinstance(value, Real)
+            or not isinstance(cast(object, value), Real)
             or not isfinite(value)
             or value < 0
         ):
@@ -133,15 +156,15 @@ def ri5_step(drift, diffusion, time_s, values, duration_s, draw):
         raise ValueError("RI5 step cannot advance its finite physical clock")
     evaluations = [0, 0]
 
-    def a(at, state):
+    def a(at: float, state: NDArray[np.float64]) -> NDArray[np.float64]:
         evaluations[0] += 1
         return _finite_array(drift(at, state.copy()), (n,), "drift")
 
-    def b(at, state):
+    def b(at: float, state: NDArray[np.float64]) -> NDArray[np.float64]:
         if not m:
             return np.zeros((n, 0))
         evaluations[1] += 1
-        return _finite_array(diffusion(at, state.copy()), (n, m), "diffusion")
+        return _finite_array(cast(RI5Callback, diffusion)(at, state.copy()), (n, m), "diffusion")
 
     xi = np.array(draw.hat)
     eta = np.array(draw.tilde)

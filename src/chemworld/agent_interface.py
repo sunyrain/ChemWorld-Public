@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from contextvars import ContextVar
 from copy import deepcopy
 from functools import wraps
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -533,7 +534,7 @@ def action_schema(env: Any, operation: str) -> dict[str, Any]:
                         'type': 'number', 'minimum': metadata['bounds'][0],
                         'maximum': metadata['bounds'][1], 'unit': metadata['unit'],
                         'dimension': metadata['dimension'],
-                        'current_value': model.control_values[name],
+                        'current_value': cast(Mapping[str, float], model.control_values)[name],
                     } for name, metadata in model.control_metadata.items()},
                     additionalProperties=False, partial_updates=True)
     if operation in {"configure_electrical_control", "queue_electrical_stage"}:

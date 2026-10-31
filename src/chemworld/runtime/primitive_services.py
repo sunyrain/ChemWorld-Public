@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -171,7 +172,8 @@ class ChemWorldPrimitiveOperationServices:
             if model is None:
                 raise ValueError("SDE dosing requires its actual physical model declaration")
             process = replace(process, stochastic_continuation=rebind_sde_continuation(
-                physics.network, model, state.species_amounts, species, continuation,
+                physics.network, model, state.species_amounts, species,
+                cast(Mapping[str, object], continuation),
             ))
         if adaptive and amount > 0:
             from chemworld.physchem.stochastic_adaptive_advance import rebind_adaptive_continuation

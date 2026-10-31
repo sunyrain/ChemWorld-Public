@@ -6,26 +6,86 @@ endpoint physically. None is a strong Brownian bridge. Continuation holds solver
 memory only. No stock, global RNG or independently advancing clock lives here.
 """
 
+from __future__ import annotations
+
 import json
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 from math import isfinite
-from typing import cast
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 import numpy as np
 
 from chemworld.foundation.discrete_inventory import AVOGADRO
 from chemworld.physchem.stochastic_kinetics import EventBudgetError
-from chemworld.physchem.stochastic_ri5 import RI5Draw, _finite_array, draw_ri5, ri5_step
+from chemworld.physchem.stochastic_ri5 import (
+    RI5Draw,
+    RI5DrawData,
+    _finite_array,
+    draw_ri5,
+    ri5_step,
+)
 from chemworld.physchem.stochastic_sde_model import ReactionSDE
-from chemworld.physchem.stochastic_sde_specs import SDE_ALGORITHM, finite_real
+from chemworld.physchem.stochastic_sde_specs import SDE_ALGORITHM, StochasticSDESpec, finite_real
+
+if TYPE_CHECKING:
+    from chemworld.physchem.reaction_network import ReactionNetworkSpec
+
+
+class _PCG64Words(TypedDict):
+    state: int
+    inc: int
+
+
+class _PCG64State(TypedDict):
+    bit_generator: str
+    state: _PCG64Words
+    has_uint32: int
+    uinteger: int
+
+
+class SDEPacket(TypedDict):
+    schema: str
+    left_time_s: float
+    end_time_s: float
+    left_populations: list[float]
+    right_populations: list[float]
+    draw: RI5DrawData
+    proposal_index: int
+
+
+class _SDECounters(TypedDict):
+    completed_steps: int
+    proposals: int
+    rejections: int
+    backtracks: int
+    invalidations: int
+
+
+class SDEContinuation(_SDECounters):
+    algorithm: str
+    model_signature: str
+    inventory_signature: str
+    time_s: float
+    mesh_time_s: float
+    control_values: dict[str, float]
+    volume_L: float
+    rng_state: _PCG64State
+    pending: SDEPacket | None
+
+
+class SDEDiagnostics(_SDECounters):
+    packets_created: int
+    evaluations: int
 
 SDE_PACKET_SCHEMA = "ri5-linear-dense-packet-v1"
 SDE_FRACTIONAL_PACKET_SCHEMA = "ri5-fractional-dense-packet-v1"
 SDE_TRUNCATED_PACKET_SCHEMA = "ri5-truncated-endpoint-packet-v1"
-_COUNTERS = ("completed_steps", "proposals", "rejections", "backtracks", "invalidations")
+_COUNTERS: tuple[
+    Literal["completed_steps", "proposals", "rejections", "backtracks", "invalidations"], ...,
+] = ("completed_steps", "proposals", "rejections", "backtracks", "invalidations")
 _FIELDS = {
     "algorithm",
     "model_signature",
@@ -40,7 +100,7 @@ _FIELDS = {
 }
 
 
-def _amounts(model, values):
+def _amounts(model: ReactionSDE, values: Mapping[str, float]) -> dict[str, float]:
     if not isinstance(values, Mapping) or set(values) != set(model.network.species_ids):
         raise ValueError("SDE inventory must cover exactly the declared species")
     result = {
@@ -51,13 +111,13 @@ def _amounts(model, values):
     return result
 
 
-def _signature(model, amounts, time_s):
+def _signature(model: ReactionSDE, amounts: Mapping[str, float], time_s: float) -> str:
     return sha256(
         json.dumps([model.signature, amounts, time_s], sort_keys=True, allow_nan=False).encode()
     ).hexdigest()
 
 
-def _rng(value):
+def _rng(value: _PCG64State) -> np.random.Generator:
     if (
         not isinstance(value, Mapping)
         or set(value) != {"bit_generator", "state", "has_uint32", "uinteger"}
@@ -80,19 +140,23 @@ def _rng(value):
     return result
 
 
-def sde_model(network, spec, continuation):
+def sde_model(
+    network: ReactionNetworkSpec, spec: StochasticSDESpec, continuation: Mapping[str, object],
+) -> ReactionSDE:
     """Rebuild callbacks from the actual declaration and its sole live inputs."""
     if not isinstance(continuation, Mapping):
         raise ValueError("SDE requires declared continuation data")
     return ReactionSDE(
         network,
         spec,
-        control_values=continuation.get("control_values"),
-        volume_L=continuation.get("volume_L"),
+        control_values=cast(Mapping[str, float] | None, continuation.get("control_values")),
+        volume_L=cast(float | None, continuation.get("volume_L")),
     )
 
 
-def _validate_current_callbacks(model, amounts, time_s):
+def _validate_current_callbacks(
+    model: ReactionSDE, amounts: Mapping[str, float], time_s: float,
+) -> None:
     """A bounded current-domain check for initialization/material/control changes."""
     values = np.array([amounts[key] * AVOGADRO for key in model.network.species_ids])
     try:
@@ -109,14 +173,17 @@ def _validate_current_callbacks(model, amounts, time_s):
         ) from exc
 
 
-def initial_sde_continuation(network, spec, amounts_mol, *, seed, time_s=0.0):
+def initial_sde_continuation(
+    network: ReactionNetworkSpec, spec: StochasticSDESpec, amounts_mol: Mapping[str, float],
+    *, seed: int, time_s: float = 0.0,
+) -> SDEContinuation:
     model = ReactionSDE(network, spec)
     amounts = _amounts(model, amounts_mol)
     time_s = finite_real(time_s, "SDE initial clock")
     if type(seed) is not int or seed < 0 or time_s != 0:
         raise ValueError("SDE initialization requires a nonnegative seed and a fresh zero clock")
     _validate_current_callbacks(model, amounts, time_s)
-    return {
+    return cast(SDEContinuation, {
         "algorithm": SDE_ALGORITHM,
         "model_signature": model.signature,
         "inventory_signature": _signature(model, amounts, time_s),
@@ -127,16 +194,16 @@ def initial_sde_continuation(network, spec, amounts_mol, *, seed, time_s=0.0):
         "rng_state": deepcopy(np.random.PCG64(seed).state),
         "pending": None,
         **dict.fromkeys(_COUNTERS, 0),
-    }
+    })
 
 
 class _Work:
-    def __init__(self, model):
+    def __init__(self, model: ReactionSDE) -> None:
         self.model = model
         self.evaluations = 0
         self.packets_created = 0
 
-    def step(self, start, values, end, draw):
+    def step(self, start: float, values: list[float], end: float, draw: RI5Draw) -> list[float]:
         m = self.model.noise_dimension
         required = 3 + (1 + 4 * m if m else 0)
         if self.evaluations + required > self.model.spec.max_evaluations_per_advance:
@@ -146,7 +213,7 @@ class _Work:
         return list(result.values)
 
 
-def _populations(value, dimension):
+def _populations(value: list[float], dimension: int) -> list[float]:
     if not isinstance(value, list) or len(value) != dimension:
         raise ValueError("SDE numerical packet requires a declared population vector")
     result = [finite_real(v, "SDE packet population") for v in value]
@@ -155,7 +222,7 @@ def _populations(value, dimension):
     return result
 
 
-def _packet_schema(model):
+def _packet_schema(model: ReactionSDE) -> str:
     return {
         "linear": SDE_PACKET_SCHEMA,
         "ri5_fractional": SDE_FRACTIONAL_PACKET_SCHEMA,
@@ -163,7 +230,9 @@ def _packet_schema(model):
     }[model.spec.output_policy]
 
 
-def _dense_amounts(model, packet, time_s, work):
+def _dense_amounts(
+    model: ReactionSDE, packet: SDEPacket, time_s: float, work: _Work,
+) -> dict[str, float]:
     if time_s == packet["end_time_s"]:
         values = packet["right_populations"]
     elif time_s == packet["left_time_s"]:
@@ -194,10 +263,14 @@ def _dense_amounts(model, packet, time_s, work):
     }
 
 
-def _continuation(model, amounts, continuation, work, *, verify_endpoint=True):
+def _continuation(
+    model: ReactionSDE, amounts: Mapping[str, float], continuation: Mapping[str, object],
+    work: _Work, *, verify_endpoint: bool = True,
+) -> tuple[SDEContinuation, np.random.Generator]:
     if not isinstance(continuation, Mapping) or set(continuation) != _FIELDS:
         raise ValueError("unknown SDE continuation fields")
-    state = deepcopy(dict(continuation))
+    # Shape and values are checked below before the copied memory can be consumed.
+    state = cast(SDEContinuation, deepcopy(dict(continuation)))
     time_s = finite_real(state["time_s"], "SDE continuation clock")
     mesh_time_s = finite_real(state["mesh_time_s"], "SDE continuation mesh anchor")
     if (
@@ -265,7 +338,10 @@ def _continuation(model, amounts, continuation, work, *, verify_endpoint=True):
     return state, rng
 
 
-def validate_sde_continuation(network, spec, amounts_mol, continuation, *, verify_endpoint=True):
+def validate_sde_continuation(
+    network: ReactionNetworkSpec, spec: StochasticSDESpec, amounts_mol: Mapping[str, float],
+    continuation: Mapping[str, object], *, verify_endpoint: bool = True,
+) -> None:
     """Validate solver data; a trusted advance performs its own budgeted endpoint check.
 
     The original runtime uses metadata-only checks around that one advance.
@@ -276,7 +352,10 @@ def validate_sde_continuation(network, spec, amounts_mol, continuation, *, verif
     _continuation(model, amounts, continuation, _Work(model), verify_endpoint=verify_endpoint)
 
 
-def _new_packet(model, amounts, state, rng, work, target):
+def _new_packet(
+    model: ReactionSDE, amounts: Mapping[str, float], state: SDEContinuation,
+    rng: np.random.Generator, work: _Work, target: float,
+) -> SDEPacket:
     if work.packets_created >= model.spec.max_steps_per_advance:
         raise EventBudgetError("SDE numerical step budget exhausted")
     start = state["time_s"]
@@ -304,7 +383,7 @@ def _new_packet(model, amounts, state, rng, work, target):
         if any(v < 0 for v in right):
             if model.spec.boundary_policy == "reject":
                 raise ValueError("SDE negative candidate rejected without inventory clipping")
-            lower, upper, accepted = start, end, None
+            lower, upper, accepted = start, end, cast(list[float] | None, None)
             # A bounded feasible-side bracket, not a claim of a universal first root.
             for _root in range(model.spec.max_root_iterations):
                 midpoint = lower + (upper - lower) / 2
@@ -339,13 +418,16 @@ def _new_packet(model, amounts, state, rng, work, target):
 
 @dataclass(frozen=True)
 class SDEAdvance:
-    amounts_mol: dict
-    continuation: dict
+    amounts_mol: dict[str, float]
+    continuation: SDEContinuation
     actual_duration_s: float
-    diagnostics: dict
+    diagnostics: SDEDiagnostics
 
 
-def advance_sde(network, spec, amounts_mol, continuation, duration_s):
+def advance_sde(
+    network: ReactionNetworkSpec, spec: StochasticSDESpec, amounts_mol: Mapping[str, float],
+    continuation: Mapping[str, object], duration_s: float,
+) -> SDEAdvance:
     """Build a complete candidate; caller commits through its original transaction."""
     model = sde_model(network, spec, continuation)
     amounts = _amounts(model, amounts_mol)
@@ -371,31 +453,31 @@ def advance_sde(network, spec, amounts_mol, continuation, duration_s):
             state["pending"] = None
         else:
             state["pending"] = packet
-    state["rng_state"] = deepcopy(rng.bit_generator.state)
+    state["rng_state"] = cast(_PCG64State, deepcopy(rng.bit_generator.state))
     state["inventory_signature"] = _signature(model, amounts, state["time_s"])
     return SDEAdvance(
         amounts,
         state,
         duration,
-        {
+        cast(SDEDiagnostics, {
             "packets_created": work.packets_created,
             "evaluations": work.evaluations,
             **{k: state[k] - old_counters[k] for k in _COUNTERS},
-        },
+        }),
     )
 
 
 def rebind_sde_continuation(
-    network,
-    spec,
-    old_amounts_mol,
-    new_amounts_mol,
-    continuation,
+    network: ReactionNetworkSpec,
+    spec: StochasticSDESpec,
+    old_amounts_mol: Mapping[str, float],
+    new_amounts_mol: Mapping[str, float],
+    continuation: Mapping[str, object],
     *,
-    control_values=None,
-    volume_L=None,
-    force_invalidate=False,
-):
+    control_values: Mapping[str, float] | None = None,
+    volume_L: float | None = None,
+    force_invalidate: bool = False,
+) -> SDEContinuation:
     """Invalidate solver lookahead after an actual caller-owned material change.
 
     The consumed process stream is retained. The material transaction, not this
@@ -422,7 +504,7 @@ def rebind_sde_continuation(
         state["mesh_time_s"] = state["time_s"]
         state["invalidations"] += 1
         state["control_values"] = dict(cast(Mapping[str, float], changed.control_values))
-        state["volume_L"] = changed.volume_L
+        state["volume_L"] = cast(float, changed.volume_L)
         state["model_signature"] = changed.signature
         state["inventory_signature"] = _signature(changed, new, state["time_s"])
     return state
