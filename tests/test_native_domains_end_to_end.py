@@ -540,7 +540,12 @@ def test_capability_export_follows_installed_declarations():
         assert set(row["operations"]) == {op.operation.id for op in module.operations}
         assert set(row["components"]) == {key for key, _ in module.components}
     document = Path(__file__).parents[1] / "docs/native_capabilities.md"
-    assert document.read_text() == markdown()
+    # The public export adds provenance, while the generated table stays identical.
+    export_banner = (
+        "<!-- Generated from https://github.com/sunyrain/ChemWorld/blob/main/"
+        "docs/native_capabilities.md; edit the upstream guide. -->\n\n"
+    )
+    assert document.read_text(encoding="utf-8").removeprefix(export_banner) == markdown()
 
 
 @pytest.mark.parametrize("name", ("heater", "shared-clock", "solid"))
