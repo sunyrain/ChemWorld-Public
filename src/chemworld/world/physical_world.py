@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from chemworld.foundation import WorldState
 from chemworld.foundation.lab_clock import LabClockSpec
+from chemworld.foundation.state_ledgers import EquipmentLedger, VesselLedger
 from chemworld.physchem.heat_transfer_units import ThermalDeviceSpec
 from chemworld.physchem.reaction_network import ReactionNetworkSpec
 from chemworld.runtime.constitution_factory import make_chemworld_constitution
@@ -17,6 +18,9 @@ from chemworld.runtime.mechanisms import compile_native_network
 from chemworld.world.domain_modules import DomainModuleRegistry
 from chemworld.world.parameters import load_chemworld_parameters
 from chemworld.world.scenario import WORLD_LAW_ID, ScenarioInstance, ScenarioSpec
+
+if TYPE_CHECKING:
+    from chemworld.world.composition import WorldCompositionSpec
 
 
 @dataclass(frozen=True, init=False)
@@ -28,7 +32,7 @@ class CompositionPhysics:
     """
 
     network: ReactionNetworkSpec
-    initial_states: dict[str, WorldState]
+    initial_states: Mapping[str, WorldState]
     parameter_seed: int = 0
     feed_sources: dict[str, str] = field(default_factory=dict)
     lab_clock: LabClockSpec | None = None
@@ -40,17 +44,17 @@ class CompositionPhysics:
 
     def __init__(
         self,
-        network,
-        initial_states,
-        parameter_seed=0,
+        network: ReactionNetworkSpec,
+        initial_states: Mapping[str, WorldState],
+        parameter_seed: int = 0,
         *,
-        feed_sources=None,
-        lab_clock=None,
-        models=None,
-        advance_bindings=None,
-        modules=None,
-        **legacy_models,
-    ):
+        feed_sources: Mapping[str, str] | None = None,
+        lab_clock: LabClockSpec | None = None,
+        models: Mapping[str, Mapping[str, Any]] | None = None,
+        advance_bindings: Mapping[str, str] | None = None,
+        modules: DomainModuleRegistry | None = None,
+        **legacy_models: Mapping[str, Any],
+    ) -> None:
         modules = modules if modules is not None else DomainModuleRegistry.default()
         declarations = modules.model_specs()
         aliases = {
@@ -118,12 +122,14 @@ class CompositionPhysics:
                 bindings[vessel] = candidates[0]
         object.__setattr__(self, "advance_bindings", bindings)
 
-    def declared_advance_strategies(self, modules):
+    def declared_advance_strategies(self, modules: DomainModuleRegistry) -> dict[str, Any]:
         # Capability queries need physical bindings, not a TaskSpec or a live
         # thermal service. World validators receive the full composition below.
         return modules.build_advance_strategies(SimpleNamespace(physics=self, modules=modules))
 
-    def advance_strategy(self, state, modules, *, required=False):
+    def advance_strategy(
+        self, state: WorldState, modules: DomainModuleRegistry, *, required: bool = False,
+    ) -> tuple[str, Any] | None:
         from chemworld.runtime.advance_paths import select_advance_strategy
 
         return select_advance_strategy(
@@ -133,14 +139,14 @@ class CompositionPhysics:
             required=required,
         )
 
-    def supports_measurement_clock(self, state, modules):
+    def supports_measurement_clock(self, state: WorldState, modules: DomainModuleRegistry) -> bool:
         selected = self.advance_strategy(state, modules)
         return selected is not None and modules.advance_specs()[selected[0]].timed_measurements
 
     def models_of(self, model_id: str) -> Mapping[str, Any]:
         return self.models.get(model_id, {})
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         # Historical Python readers receive the same collection, never a second
         # stored configuration. Production consumers use models_of explicitly.
         modules = object.__getattribute__(self, "modules")
@@ -150,7 +156,9 @@ class CompositionPhysics:
         raise AttributeError(name)
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any], *, modules=None) -> CompositionPhysics:
+    def from_dict(
+        cls, payload: Mapping[str, Any], *, modules: DomainModuleRegistry | None = None,
+    ) -> CompositionPhysics:
         modules = modules if modules is not None else DomainModuleRegistry.default()
         declarations = modules.model_specs()
         aliases = {s.legacy_field: s for s in declarations.values() if s.legacy_field is not None}
@@ -273,7 +281,7 @@ class CompositionPhysics:
         )
 
     @property
-    def finite_supply_vessels(self):
+    def finite_supply_vessels(self) -> set[str]:
         return set(self.feed_sources.values()) | {
             m.condensed_background.source_vessel_id
             for m in self.models_of("thermal").values()
@@ -281,13 +289,17 @@ class CompositionPhysics:
             and m.condensed_background.source_vessel_id is not None
         }
 
-    def declared_temperature_bounds_k(self, state, modules):
+    def declared_temperature_bounds_k(
+        self, state: WorldState, modules: DomainModuleRegistry,
+    ) -> tuple[float, float] | None:
         """Native constitutive domain, independent of the legacy liquid schema."""
         selected = self.advance_strategy(state, modules)
         bounds = None if selected is None else getattr(selected[1], "temperature_bounds_k", None)
         return None if bounds is None else bounds(state)
 
-    def available_operations(self, operations, modules, vessel: str) -> tuple[str, ...]:
+    def available_operations(
+        self, operations: Iterable[str], modules: DomainModuleRegistry, vessel: str,
+    ) -> tuple[str, ...]:
         """Intersect declared thermal actions with the installed device capability."""
         from chemworld.runtime.aqueous_filtration import aqueous_filter_record
         from chemworld.runtime.aqueous_gas_transfer import aqueous_gas_transfer_record
@@ -349,7 +361,7 @@ class CompositionPhysics:
             })
         elif not any(
             record.attached_vessel_id == vessel and "electrical_control" in record.settings
-            for record in local_state.equipment.equipment.values()
+            for record in cast(EquipmentLedger, local_state.equipment).equipment.values()
         ):
             operations = tuple(op for op in operations if op != "configure_electrical_control")
 
@@ -559,7 +571,7 @@ class CompositionPhysics:
             state_operations = getattr(selected[1], "supported_operations_for_state", None)
             if state_operations is not None:
                 supported = set(state_operations(state))
-            for record in state.equipment.equipment.values():
+            for record in cast(EquipmentLedger, state.equipment).equipment.values():
                 if (
                     record.equipment_type == "thermal_device"
                     and record.attached_vessel_id == vessel
@@ -577,7 +589,9 @@ class CompositionPhysics:
             or op in supported
         )
 
-    def generate(self, spec: ScenarioSpec, seed: int, interventions=()) -> ScenarioInstance:
+    def generate(
+        self, spec: ScenarioSpec, seed: int, interventions: tuple[dict[str, Any], ...] = (),
+    ) -> ScenarioInstance:
         if interventions:
             raise ValueError(
                 "native compositions declare physics directly; scenario interventions do not apply"
@@ -594,7 +608,7 @@ class CompositionPhysics:
             compile_native_network(self.network, initial_amounts=amounts),
         )
 
-    def validate(self, spec) -> None:
+    def validate(self, spec: WorldCompositionSpec) -> None:
         from chemworld.runtime.scheduling import validate_lab
 
         validate_lab(spec)
@@ -602,7 +616,7 @@ class CompositionPhysics:
         if set(self.initial_states) != set(vessels):
             raise ValueError("physics.initial_states must match the declared vessels exactly")
         declarations = spec.modules.model_specs()
-        owners = {}
+        owners: dict[tuple[str, str], str] = {}
         for model_id, declaration in declarations.items():
             if model_id in self.models and declaration != self.modules.model_specs().get(model_id):
                 raise ValueError(
@@ -682,7 +696,8 @@ class CompositionPhysics:
                 raise ValueError(
                     "initial states must be unstarted; use snapshots to resume a session"
                 )
-            if state.vessels.vessels[name].max_volume_L != vessels[name]["capacity_L"]:
+            local_vessels = cast(VesselLedger, state.vessels)
+            if local_vessels.vessels[name].max_volume_L != vessels[name]["capacity_L"]:
                 raise ValueError("initial-state vessel capacity differs from the composition")
             bulk_species = {s.species_id for s in self.network.species if s.phase != "surface"}
             if not set(state.species_amounts) <= bulk_species:

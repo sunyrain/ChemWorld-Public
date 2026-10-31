@@ -5,16 +5,24 @@ Only the existing transaction commits candidates. No pressure-flow kinetics,
 extra phase stock, integration loop or external source is introduced here.
 """
 
-from dataclasses import replace
+from __future__ import annotations
 
-from chemworld.foundation import species_with_added_initial_amounts
+from collections.abc import Mapping
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
+
+from chemworld.foundation import WorldState, species_with_added_initial_amounts
 from chemworld.foundation.balances import MaterialPacket
-from chemworld.foundation.state_ledgers import PhaseLedger, ProcessLedger
+from chemworld.foundation.state_ledgers import PhaseLedger, ProcessLedger, SpeciesLedger
 from chemworld.physchem.coupled_system import CoupledState
 from chemworld.physchem.humid_air_thermal import HumidAirIsochoricThermodynamics
 
+if TYPE_CHECKING:
+    from chemworld.physchem.heat_transfer_units import ThermalSystemSpec
+    from chemworld.world.physical_world import CompositionPhysics
 
-def humid_air_model(state, physics):
+
+def humid_air_model(state: WorldState, physics: CompositionPhysics) -> ThermalSystemSpec | None:
     model = physics.models_of("thermal").get(state.vessel_id)
     return (
         model
@@ -23,22 +31,25 @@ def humid_air_model(state, physics):
     )
 
 
-def _replace_amounts(state, amounts):
-    if state.phase not in {"fluid", "gas"} or len(state.phases.phases) != 1:
+def _replace_amounts(state: WorldState, amounts: dict[str, float]) -> WorldState:
+    phases = cast(PhaseLedger, state.phases)
+    if state.phase not in {"fluid", "gas"} or len(phases.phases) != 1:
         raise ValueError("humid-air material requires one original aggregate inventory")
     return state.replace(
         species_amounts=amounts,
         phases=PhaseLedger(
             {
                 key: replace(phase, species_amounts_mol=amounts)
-                for key, phase in state.phases.phases.items()
+                for key, phase in phases.phases.items()
             }
         ),
         process=replace(state.process or ProcessLedger(), last_observation_record=None),
     )
 
 
-def route_humid_air_packet(state, physics, action):
+def route_humid_air_packet(
+    state: WorldState, physics: CompositionPhysics, action: Mapping[str, Any],
+) -> WorldState:
     from chemworld.runtime.component_network import resolve_material_connection
     from chemworld.runtime.thermal_material_routing import _energy, _set_energy
 
@@ -47,13 +58,16 @@ def route_humid_air_packet(state, physics, action):
     source_model, target_model = humid_air_model(state, physics), humid_air_model(target, physics)
     if source_model is None or target_model is None:
         raise ValueError("humid-air packets require two same-G8 thermal endpoints")
-    if source_model.thermodynamics.components != target_model.thermodynamics.components:
+    # humid_air_model admits only these thermodynamic endpoints.
+    source_thermo = cast(HumidAirIsochoricThermodynamics, source_model.thermodynamics)
+    target_thermo = cast(HumidAirIsochoricThermodynamics, target_model.thermodynamics)
+    if source_thermo.components != target_thermo.components:
         raise ValueError("humid-air packet endpoints must share component identities and weights")
     if action["mixing"] != 1:
         raise ValueError("occupied humid-air destination requires explicit mixing")
     # Validates original support ownership and all four component amounts.
     source_u, target_u = _energy(state, source_model), _energy(target, target_model)
-    outlet = source_model.thermodynamics.material_outlet(
+    outlet = source_thermo.material_outlet(
         CoupledState(state.species_amounts, state.temperature_K, state.volume_L), fraction
     )
     amounts, energy = outlet["amounts_mol"], outlet["enthalpy_J"]
@@ -64,22 +78,24 @@ def route_humid_air_packet(state, physics, action):
         _replace_amounts(target, target_amounts), target_model, target_u + energy
     )
     # A phase-selective packet has a separate retained fraction for each species.
+    source_species = cast(SpeciesLedger, state.species)
+    target_species = cast(SpeciesLedger, target.species)
     reference = {
         key: initial
         * (amounts[key] / state.species_amounts[key] if state.species_amounts[key] else 0.0)
-        for key, initial in state.species.initial_amounts_mol.items()
+        for key, initial in source_species.initial_amounts_mol.items()
     }
     source = source.replace(
         species=replace(
-            state.species,
+            source_species,
             initial_amounts_mol={
                 key: initial - reference[key]
-                for key, initial in state.species.initial_amounts_mol.items()
+                for key, initial in source_species.initial_amounts_mol.items()
             },
         )
     )
     destination = destination.replace(
-        species=species_with_added_initial_amounts(target.species, reference)
+        species=species_with_added_initial_amounts(target_species, reference)
     )
     source_error = _energy(source, source_model) - source_u + energy
     target_error = _energy(destination, target_model) - target_u - energy
