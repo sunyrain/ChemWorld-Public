@@ -8,6 +8,10 @@ The explicit condensed surface excludes liquid/ice melting transitions.
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from math import exp, isfinite, log
+from typing import Any, cast
+
+import numpy as np
+from numpy.typing import NDArray
 
 from chemworld.physchem.humid_air import (
     HumidAirState,
@@ -58,18 +62,18 @@ class HumidAirVolumeState:
     condensed_surface: str
     derivative_scope: str = "selected_phase_branch_one_sided_at_condensate_disappearance"
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {**asdict(self), "gas": self.gas.to_dict(),
                 "condensate": self.condensate.to_dict() if self.condensate else None}
 
 
-def _positive(value, name, *, zero=False):
+def _positive(value: float, name: str, *, zero: bool = False) -> None:
     if (isinstance(value, bool) or not isfinite(value)
             or (value < 0 if zero else value <= 0)):
         raise ValueError(f"{name} must be finite and {'nonnegative' if zero else 'positive'}")
 
 
-def _condensed(T, p, phase):
+def _condensed(T: float, p: float, phase: str) -> CondensedWaterState:
     # Only the existing gas pressure root's roundoff band may reach this
     # strict pure-condensate API. This is not an extended pressure domain.
     if 5e6 < p <= 5e6*(1+2e-12):
@@ -77,7 +81,7 @@ def _condensed(T, p, phase):
     return condensed_water_state(T, p, phase=phase)
 
 
-def _dry_energy_response(T, rho):
+def _dry_energy_response(T: float, rho: float) -> tuple[float, float, float, float]:
     """Finite U derivatives at zero water, without evaluating log(0)."""
     t = SecondOrderPair(T, dx=1)
     f = _pure_energy(iapws_dry_air(), t, SecondOrderPair(rho, dy=1))
@@ -92,7 +96,9 @@ def _dry_energy_response(T, rho):
     return u, -T*f.dxx, uw, ur
 
 
-def _homogeneous(gas, a, b, volume, phase, chemical):
+def _homogeneous(
+    gas: HumidAirState, a: float, b: float, volume: float, phase: str, chemical: float | None,
+) -> HumidAirVolumeState:
     T, rho, w = gas.temperature_K, gas.mass_density_kg_m3, gas.water_mass_fraction
     if b == 0:
         u, ut, uw, ur = _dry_energy_response(T, rho)
@@ -105,8 +111,10 @@ def _homogeneous(gas, a, b, volume, phase, chemical):
         u-w*uw+rho*ur, u+(1-w)*uw+rho*ur, chemical, 0., phase)
 
 
-def humid_air_volume(temperature_K, dry_air_mass_kg, total_water_mass_kg, volume_m3,
-                     *, condensed_phase):
+def humid_air_volume(
+    temperature_K: float, dry_air_mass_kg: float, total_water_mass_kg: float, volume_m3: float,
+    *, condensed_phase: str,
+) -> HumidAirVolumeState:
     """Equilibrium and U response at fixed total volume, in SI mass units.
 
     Dry mass must be positive. At zero water the finite one-sided energy
@@ -128,7 +136,7 @@ def humid_air_volume(temperature_K, dry_air_mass_kg, total_water_mass_kg, volume
 
 
 @lru_cache(maxsize=128)
-def _volume(T, a, b, volume, phase):
+def _volume(T: float, a: float, b: float, volume: float, phase: str) -> HumidAirVolumeState:
     bulk_w = b/(a+b)
     homogeneous_error = None
     try:
@@ -140,7 +148,8 @@ def _volume(T, a, b, volume, phase):
         if b == 0:
             return _homogeneous(gas, a, b, volume, phase, None)
         condensed = _condensed(T, gas.pressure_Pa, phase)
-        chemical = gas.water_chemical_potential_J_kg-condensed.gibbs_energy_J_kg
+        # Positive dry and water masses above select the finite mixture branch.
+        chemical = cast(float, gas.water_chemical_potential_J_kg)-condensed.gibbs_energy_J_kg
         if chemical <= 1e-5:
             return _homogeneous(gas, a, b, volume, phase, chemical)
     if b == 0:
@@ -161,7 +170,10 @@ def _volume(T, a, b, volume, phase):
     rho0 = a/(1-w0)/vg0
 
     @lru_cache(maxsize=8)
-    def trial(logw, logrho):
+    def trial(logw: float, logrho: float) -> tuple[
+        float, float, dict[str, float], CondensedWaterState, float, float, float, float, float,
+        list[list[float]], list[float],
+    ]:
         w, rho = exp(logw), exp(logrho)
         A, mass = 1-w, a/(1-w)
         c = b-a*w/A
@@ -178,7 +190,7 @@ def _volume(T, a, b, volume, phase):
         residual = [d["mu"]-cond.gibbs_energy_J_kg, mass/rho+c*v-volume]
         return w, rho, d, cond, mass, c, v, vp, vt, jac, residual
 
-    def jacobian(point):
+    def jacobian(point: NDArray[np.float64]) -> list[list[float]]:
         w, rho, *_, jac, _ = trial(*point)
         return [[row[0]*w, row[1]*rho] for row in jac]
 
@@ -205,7 +217,7 @@ def _volume(T, a, b, volume, phase):
     ur = mass*d["u_rho"]+c*ucp*d["p_rho"]
     ut = mass*d["u_T"]+c*(uct+ucp*d["p_T"])
 
-    def response(first, second, explicit):
+    def response(first: float, second: float, explicit: float) -> float:
         dw, dr = map(float, linear_solve(jac, [-first, -second]))
         return explicit+uw*dw+ur*dr
 
