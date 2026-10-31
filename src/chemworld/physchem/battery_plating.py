@@ -642,7 +642,8 @@ def plating_inventory_ledger(
     """
     validate_plating_state(spec, state)
     plating = cast(LithiumPlatingSpec, spec.plating)
-    negative_keys = spec.negative.keys("negative")
+    negative_keys = tuple(key for name, _, _, keys, _ in _plating_bins(spec)
+                          if name == "negative" for key in keys)
     negative_mobile_mol = float(sum(state.amounts_mol[key] for key in negative_keys))
     plated_mol = float(state.amounts_mol["plating:Li"])
     dead_mol = float(state.amounts_mol["dead:Li"])
