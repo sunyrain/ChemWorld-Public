@@ -1,9 +1,7 @@
 name: Documentation
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Publishing documentation is explicit, not a side effect of a code push.
   workflow_dispatch:
 
 permissions:

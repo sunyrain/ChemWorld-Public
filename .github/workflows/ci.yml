@@ -1,9 +1,7 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # Maintainer-requested only; ordinary pushes are validated locally.
   workflow_dispatch:
 
 permissions:
