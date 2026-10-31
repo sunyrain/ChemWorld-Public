@@ -1,11 +1,20 @@
 """Five external surface-tension tables using the existing source/input API."""
 
+from __future__ import annotations
+
+from collections.abc import Sequence
 from dataclasses import dataclass, fields
 from math import isfinite, log
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from chemworld.data.constant_catalog import ConstantField, ConstantSource
 from chemworld.data.constants import ConstantDatabase, ConstantRecord
 from chemworld.physchem.specs import PropertyCorrelation
+
+if TYPE_CHECKING:
+    from chemworld.physchem.property_inputs import PropertyInputCard
+    from chemworld.physchem.specs import ComponentSpec
 
 INTERFACE_SOURCES = tuple(
     ConstantSource(source, "Interface/" + filename, citation=citation + "; chemicals 1.5.2")
@@ -31,10 +40,10 @@ _SOURCES = {s.source_id: s for s in INTERFACE_SOURCES}
 @dataclass(frozen=True)
 class InterfaceRecord(ConstantRecord):
     @property
-    def source(self):
+    def source(self) -> ConstantSource:
         return _SOURCES[self.source_id]
 
-    def descriptor(self, field_id):
+    def descriptor(self, field_id: str) -> ConstantField:
         self.raw(field_id)
         return ConstantField(
             field_id,
@@ -43,8 +52,10 @@ class InterfaceRecord(ConstantRecord):
             "22E4",
         )
 
-    def correlation(self, *, temperature_bounds_K=None, source_point=False):
-        def number(key):
+    def correlation(
+        self, *, temperature_bounds_K: Sequence[float] | None = None, source_point: bool = False,
+    ) -> PropertyCorrelation:
+        def number(key: str) -> float:
             result = self.value(key)
             if result.quality != "valid" or result.value is None or not isfinite(result.value):
                 raise ValueError(f"missing or invalid interface field {key}")
@@ -52,7 +63,7 @@ class InterfaceRecord(ConstantRecord):
 
         source = self.source_id
 
-        def bound(key):
+        def bound(key: str) -> float | None:
             result = self.value(key)
             return (result.value if result.quality == "valid" and result.value is not None
                     and isfinite(result.value) else None)
@@ -101,9 +112,10 @@ class InterfaceRecord(ConstantRecord):
                 isinstance(t, bool) or not isinstance(t, int | float) or not isfinite(t)
                 for t in bounds
             )
-            or not (0 < bounds[0] < bounds[1] or source_point)
+            or not (0 < cast(float, bounds[0]) < cast(float, bounds[1]) or source_point)
         ):
             raise ValueError("select an explicit finite positive temperature interval")
+        bounds = cast(tuple[float, float], bounds)
         # A zero lower bound in a source means no positive lower bound is supplied.
         # Preserve it in metadata, but require an explicit application interval.
         if (source_bounds[0] is not None and bounds[0] < source_bounds[0]) or (
@@ -140,13 +152,13 @@ class InterfaceRecord(ConstantRecord):
 
 class InterfaceDatabase(ConstantDatabase):
     @property
-    def catalog(self):
+    def catalog(self) -> tuple[ConstantSource, ...]:
         return INTERFACE_SOURCES
 
-    def source(self, source_id):
+    def source(self, source_id: str) -> ConstantSource:
         return _SOURCES[source_id] if source_id in _SOURCES else super().source(source_id)
 
-    def _read_records(self, source, path):
+    def _read_records(self, source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         records = super()._read_records(source, path)
         if source.source_id not in _SOURCES:
             return records
@@ -155,7 +167,10 @@ class InterfaceDatabase(ConstantDatabase):
             for r in records
         )
 
-    def surface_tension(self, identity, *, method, temperature_bounds_K=None, source_point=False):
+    def surface_tension(
+        self, identity: object, *, method: str,
+        temperature_bounds_K: Sequence[float] | None = None, source_point: bool = False,
+    ) -> PropertyCorrelation:
         record = self.record(identity, method=method)
         if not isinstance(record, InterfaceRecord):
             raise ValueError("select a interface correlation source")
@@ -164,8 +179,9 @@ class InterfaceDatabase(ConstantDatabase):
         )
 
     def property_input(
-        self, identity, component, *, method, temperature_bounds_K=None, source_point=False
-    ):
+        self, identity: object, component: ComponentSpec, *, method: str,
+        temperature_bounds_K: Sequence[float] | None = None, source_point: bool = False,
+    ) -> PropertyInputCard:
         from chemworld.data.scientific_inputs import InputSource
         from chemworld.physchem.property_inputs import PropertyInputCard
         from chemworld.physchem.property_packages import ComponentPropertyPackage

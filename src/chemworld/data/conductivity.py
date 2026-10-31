@@ -1,11 +1,20 @@
 """Four complete external conductivity tables on the original lazy source API."""
 
+from __future__ import annotations
+
+from collections.abc import Sequence
 from dataclasses import dataclass, fields
 from math import isfinite
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from chemworld.data.constant_catalog import ConstantField, ConstantSource
 from chemworld.data.constants import ConstantDatabase, ConstantRecord
 from chemworld.physchem.specs import PropertyCorrelation
+
+if TYPE_CHECKING:
+    from chemworld.physchem.property_inputs import PropertyInputCard
+    from chemworld.physchem.specs import ComponentSpec
 
 CONDUCTIVITY_SOURCES = tuple(
     ConstantSource(
@@ -40,10 +49,10 @@ _SOURCES = {s.source_id: s for s in CONDUCTIVITY_SOURCES}
 @dataclass(frozen=True)
 class ConductivityRecord(ConstantRecord):
     @property
-    def source(self):
+    def source(self) -> ConstantSource:
         return _SOURCES[self.source_id]
 
-    def descriptor(self, field_id):
+    def descriptor(self, field_id: str) -> ConstantField:
         self.raw(field_id)
         return ConstantField(
             field_id,
@@ -52,8 +61,10 @@ class ConductivityRecord(ConstantRecord):
             "22E3",
         )
 
-    def correlation(self, *, temperature_bounds_K=None):
-        def number(key):
+    def correlation(
+        self, *, temperature_bounds_K: Sequence[float] | None = None,
+    ) -> PropertyCorrelation:
+        def number(key: str) -> float:
             value = self.value(key)
             if value.quality != "valid" or value.value is None or not isfinite(value.value):
                 raise ValueError(f"missing or invalid conductivity field {key}")
@@ -71,6 +82,7 @@ class ConductivityRecord(ConstantRecord):
             or not 0 < bounds[0] < bounds[1]
         ):
             raise ValueError("select an explicit finite positive temperature interval")
+        bounds = cast(tuple[float, float], bounds)
         if source_bounds and (bounds[0] < source_bounds[0] or bounds[1] > source_bounds[1]):
             raise ValueError("application interval exceeds source temperature bounds")
         gas = self.source_id in {"PERRY_GAS_CONDUCTIVITY", "VDI_GAS_CONDUCTIVITY"}
@@ -107,13 +119,13 @@ class ConductivityRecord(ConstantRecord):
 
 class ConductivityDatabase(ConstantDatabase):
     @property
-    def catalog(self):
+    def catalog(self) -> tuple[ConstantSource, ...]:
         return CONDUCTIVITY_SOURCES
 
-    def source(self, source_id):
+    def source(self, source_id: str) -> ConstantSource:
         return _SOURCES[source_id] if source_id in _SOURCES else super().source(source_id)
 
-    def _read_records(self, source, path):
+    def _read_records(self, source: ConstantSource, path: Path) -> tuple[ConstantRecord, ...]:
         records = super()._read_records(source, path)
         if source.source_id not in _SOURCES:
             return records
@@ -122,7 +134,9 @@ class ConductivityDatabase(ConstantDatabase):
             for r in records
         )
 
-    def thermal_conductivity(self, identity, *, method, temperature_bounds_K=None):
+    def thermal_conductivity(
+        self, identity: object, *, method: str, temperature_bounds_K: Sequence[float] | None = None,
+    ) -> PropertyCorrelation:
         record = self.record(identity, method=method)
         if not isinstance(record, ConductivityRecord):
             raise ValueError("select a conductivity correlation source")
@@ -130,7 +144,10 @@ class ConductivityDatabase(ConstantDatabase):
             temperature_bounds_K=temperature_bounds_K
         )
 
-    def property_input(self, identity, component, *, method, temperature_bounds_K=None):
+    def property_input(
+        self, identity: object, component: ComponentSpec, *, method: str,
+        temperature_bounds_K: Sequence[float] | None = None,
+    ) -> PropertyInputCard:
         from chemworld.data.scientific_inputs import InputSource
         from chemworld.physchem.property_inputs import PropertyInputCard
         from chemworld.physchem.property_packages import ComponentPropertyPackage
