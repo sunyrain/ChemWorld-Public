@@ -30,8 +30,8 @@ from chemworld.physchem.residual_system import (
 
 @dataclass(frozen=True)
 class HelmholtzTwoPhaseState:
-    liquid: HelmholtzState
-    gas: HelmholtzState
+    liquid: HelmholtzState[float]
+    gas: HelmholtzState[float]
     vapor_fraction: float
 
     def __post_init__(self) -> None:
@@ -99,7 +99,7 @@ class HelmholtzTwoPhaseState:
 
 @dataclass(frozen=True)
 class HelmholtzFlashReport:
-    state: HelmholtzState | HelmholtzTwoPhaseState | None
+    state: HelmholtzState[float] | HelmholtzTwoPhaseState | None
     success: bool
     phase: str = "unresolved"
     failure_reason: str = ""
@@ -109,7 +109,7 @@ class HelmholtzFlashReport:
         object.__setattr__(self, "diagnostics", MappingProxyType(dict(self.diagnostics)))
 
 
-def _values(state: HelmholtzState | HelmholtzTwoPhaseState) -> dict[str, float]:
+def _values(state: HelmholtzState[float] | HelmholtzTwoPhaseState) -> dict[str, float]:
     result = {"T": state.temperature_K, "P": state.pressure_Pa,
               "rho": state.molar_density_mol_m3, "H": state.enthalpy_J_mol,
               "U": state.internal_energy_J_mol, "S": state.entropy_J_mol_K}
@@ -304,7 +304,7 @@ def solve_two_phase_state(model: HelmholtzPhaseModel, inputs: Mapping[str, float
 
 def flash_at_pressure(model: HelmholtzPhaseModel, *, pressure_Pa: float,
                        coordinate: str, value: float,
-                       initial_state: HelmholtzState | None = None,
+                       initial_state: HelmholtzState[float] | None = None,
                        policy: RootPolicy = PHASE_ROOT_POLICY) -> HelmholtzFlashReport:
     """Stable pure-fluid PH/PS/PU/Prho flash, including the two-phase interval.
 

@@ -28,7 +28,7 @@ from chemworld.physchem.residual_system import RootPolicy
 
 @dataclass(frozen=True)
 class HelmholtzStream:
-    state: HelmholtzState | HelmholtzTwoPhaseState
+    state: HelmholtzState[float] | HelmholtzTwoPhaseState
     molar_rate_mol_s: float
 
     def __post_init__(self) -> None:

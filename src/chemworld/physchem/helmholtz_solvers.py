@@ -74,7 +74,7 @@ class HelmholtzAncillary:
 
 @dataclass(frozen=True)
 class HelmholtzSolveReport:
-    state: HelmholtzState | None
+    state: HelmholtzState[float] | None
     success: bool
     failure_reason: str = ""
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
@@ -87,8 +87,8 @@ class HelmholtzSolveReport:
 class HelmholtzSaturationReport:
     temperature_K: float
     pressure_Pa: float | None
-    liquid: HelmholtzState | None
-    gas: HelmholtzState | None
+    liquid: HelmholtzState[float] | None
+    gas: HelmholtzState[float] | None
     success: bool
     failure_reason: str = ""
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
@@ -119,7 +119,7 @@ class HelmholtzPhaseModel:
             raise ValueError("Helmholtz phase model needs both density guesses")
         object.__setattr__(self, "ancillaries", MappingProxyType(dict(self.ancillaries)))
 
-    def _trial(self, temperature: float, density: float) -> HelmholtzState:
+    def _trial(self, temperature: float, density: float) -> HelmholtzState[float]:
         try:
             state = self.fluid.state(temperature_K=temperature, molar_density_mol_m3=density,
                                     require_stable=False)
@@ -179,7 +179,7 @@ class HelmholtzPhaseModel:
             return HelmholtzSaturationReport(T, None, None, None, False,
                                                "saturation_initial_branches_not_separated")
         separator = (liquid_guess+gas_guess)/2
-        def states(x: Any) -> tuple[HelmholtzState, HelmholtzState]:
+        def states(x: Any) -> tuple[HelmholtzState[float], HelmholtzState[float]]:
             return self._trial(T, exp(x[0])), self._trial(T, exp(x[1]))
 
         def residual(x: Any) -> list[float]:
@@ -278,7 +278,7 @@ class HelmholtzPhaseModel:
             diagnostics.update(selected_phase="supercritical_homogeneous",
                                stability_scope="homogeneous_local_only")
 
-        def state(x: Any) -> HelmholtzState:
+        def state(x: Any) -> HelmholtzState[float]:
             return self._trial(T, exp(x[0]))
 
         def residual(x: Any) -> list[float]:
@@ -302,7 +302,7 @@ class HelmholtzPhaseModel:
         return HelmholtzSolveReport(final, root.success, root.failure_reason, diagnostics)
 
     def solve_homogeneous_state(self, inputs: Mapping[str, float], *,
-                                initial_state: HelmholtzState,
+                                initial_state: HelmholtzState[float],
                                 policy: RootPolicy = PHASE_ROOT_POLICY) -> HelmholtzSolveReport:
         """Two-input local homogeneous closure; two-phase flash remains separate.
 
@@ -321,10 +321,10 @@ class HelmholtzPhaseModel:
         keys = tuple(inputs)
         scales = [max(abs(inputs[k]), 1.0) for k in keys]
 
-        def state(x: Any) -> HelmholtzState:
+        def state(x: Any) -> HelmholtzState[float]:
             return self._trial(exp(x[0]), exp(x[1]))
 
-        def values(current: HelmholtzState) -> dict[str, float]:
+        def values(current: HelmholtzState[float]) -> dict[str, float]:
             return {"T": current.temperature_K, "rho": current.molar_density_mol_m3,
                     "P": current.pressure_Pa, "H": current.enthalpy_J_mol,
                     "U": current.internal_energy_J_mol, "S": current.entropy_J_mol_K}
@@ -375,7 +375,7 @@ class HelmholtzPhaseModel:
         return cls(**values)
 
 
-def homogeneous_state_derivatives(fluid: HelmholtzFluid, state: HelmholtzState
+def homogeneous_state_derivatives(fluid: HelmholtzFluid, state: HelmholtzState[float]
                                    ) -> dict[str, tuple[float, float]]:
     """Same-potential (d/dT|rho, d/drho|T) for caloric closure and real inventories."""
     if state.fluid_id != fluid.fluid_id:

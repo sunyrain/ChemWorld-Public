@@ -5,9 +5,18 @@ All roots use the original native potentials and shared residual solver.
 The selected condensed surface may be metastable; no inventory is created.
 """
 
+from __future__ import annotations
+
 from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from math import exp, isfinite, log
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
+
+    from chemworld.physchem.helmholtz import HelmholtzFluid, HelmholtzState
 
 from chemworld.physchem.humid_air import (
     HumidAirState,
@@ -30,7 +39,7 @@ from chemworld.physchem.residual_system import (
     RootPolicy,
     solve_root,
 )
-from chemworld.physchem.second_order_pair import SecondOrderPair
+from chemworld.physchem.second_order_pair import PairScalar, SecondOrderPair
 from chemworld.physchem.water_ice import ice_ih_state
 from chemworld.physchem.water_ice_boundaries import (
     ice_sublimation_pressure,
@@ -42,13 +51,13 @@ from chemworld.physchem.water_saturation import (
 )
 
 
-def _validate_pressure(p):
+def _validate_pressure(p: float) -> None:
     if isinstance(p, bool) or not isfinite(p) or not 0 < p <= 5e6:
         raise ValueError("humid-air equilibrium requires 0 < p <= 5 MPa")
 
 
 @lru_cache(maxsize=1)
-def _liquid_water_model():
+def _liquid_water_model() -> HelmholtzFluid:
     # Explicit narrow extension, needed to compare ice/liquid near the
     # pressure-depressed freezing point. The general factory is unchanged.
     return replace(iapws95_water(), minimum_temperature_K=270)
@@ -70,15 +79,15 @@ class CondensedWaterState:
     metastable_against_other_condensed_phase: bool
     selection_scope: str = "pure_condensed_water_air_dissolution_neglected"
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
 
-def _liquid(T, p):
+def _liquid(T: float, p: float) -> CondensedWaterState:
     fluid = _liquid_water_model()
 
     @lru_cache(maxsize=8)
-    def trial(density):
+    def trial(density: float) -> HelmholtzState[PairScalar]:
         try:
             state = fluid.state(temperature_K=PreciseScalar(T),
                                 molar_density_mol_m3=PreciseScalar(density)/MW,
@@ -108,7 +117,7 @@ def _liquid(T, p):
                                float(state.isothermal_compressibility_Pa_inv), error, False)
 
 
-def _ice(T, p):
+def _ice(T: float, p: float) -> CondensedWaterState:
     state = ice_ih_state(T, p)
     return CondensedWaterState(T, p, "ice", state.mass_density_kg_m3,
                                state.gibbs_energy_J_kg, state.enthalpy_J_kg,
@@ -117,7 +126,9 @@ def _ice(T, p):
                                state.isothermal_compressibility_Pa_inv, 0., False)
 
 
-def condensed_water_state(temperature_K, pressure_Pa, *, phase="auto"):
+def condensed_water_state(
+    temperature_K: float, pressure_Pa: float, *, phase: str = "auto",
+) -> CondensedWaterState:
     """Pure condensate, choosing lower g in the 270--273.16 K overlap.
 
     Liquid is supported at 270--473 K; ice at 193--273.16 K, p<=5 MPa.
@@ -147,7 +158,7 @@ def condensed_water_state(temperature_K, pressure_Pa, *, phase="auto"):
                    metastable_against_other_condensed_phase=selected != stable)
 
 
-def _gas_trial(V, T, rho):
+def _gas_trial(V: float, T: float, rho: float) -> dict[str, float]:
     """Pressure, water chemical potential and analytic derivatives in V,T,rho."""
     A = 1-V
     vr = _mixture_energy(SecondOrderPair(A, dx=-1), SecondOrderPair(V, dx=1),
@@ -181,16 +192,18 @@ class HumidAirSaturation:
     chemical_potential_residual_J_kg: float
 
     @property
-    def temperature_K(self):  # noqa: N802 - shared SI quantity spelling
+    def temperature_K(self) -> float:  # noqa: N802 - shared SI quantity spelling
         return self.gas.temperature_K
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, object]:
         return {"pressure_Pa": self.pressure_Pa, "temperature_K": self.temperature_K,
                 "gas": self.gas.to_dict(), "condensate": self.condensate.to_dict(),
                 "chemical_potential_residual_J_kg": self.chemical_potential_residual_J_kg}
 
 
-def _accepted(V, T, rho, p, condensed):
+def _accepted(
+    V: float, T: float, rho: float, p: float, condensed: CondensedWaterState,
+) -> HumidAirSaturation:
     gas = _state_from_fractions(1-V, V, T, rho)
     error = gas.water_chemical_potential_J_kg-condensed.gibbs_energy_J_kg
     if abs(error) > 1e-5 or abs(gas.pressure_Pa-p) > 5e-11*p:
@@ -198,15 +211,17 @@ def _accepted(V, T, rho, p, condensed):
     return HumidAirSaturation(p, gas, condensed, error)
 
 
-def _water_mass_fraction(mole_fraction):
+def _water_mass_fraction(mole_fraction: float) -> float:
     return mole_fraction*MW/(mole_fraction*MW+(1-mole_fraction)*MA)
 
 
-def _water_mole_fraction(V):
+def _water_mole_fraction(V: float) -> float:
     return (V/MW)/(V/MW+(1-V)/MA)
 
 
-def humid_air_saturation(temperature_K, pressure_Pa, *, condensed_phase="auto"):
+def humid_air_saturation(
+    temperature_K: float, pressure_Pa: float, *, condensed_phase: str = "auto",
+) -> HumidAirSaturation:
     """Solve equal pressure and water chemical potential; never a vapor-pressure fit."""
     T, p = temperature_K, pressure_Pa
     condensed = condensed_water_state(T, p, phase=condensed_phase)
@@ -217,15 +232,15 @@ def humid_air_saturation(temperature_K, pressure_Pa, *, condensed_phase="auto"):
     V0 = _water_mass_fraction(min(.95, vapor_guess/p))
     rho0 = p/(T*((1-V0)*8.31451/MA+V0*461.51805))
 
-    def trial(point):
+    def trial(point: NDArray[np.float64]) -> tuple[float, float, dict[str, float]]:
         V, rho = exp(point[0]), exp(point[1])
         return V, rho, _gas_trial(V, T, rho)
 
-    def residual(point):
+    def residual(point: NDArray[np.float64]) -> list[float]:
         _, _, gas = trial(point)
         return [gas["p"]-p, gas["mu"]-condensed.gibbs_energy_J_kg]
 
-    def jacobian(point):
+    def jacobian(point: NDArray[np.float64]) -> list[list[float]]:
         V, rho, gas = trial(point)
         return [[gas["p_V"]*V, gas["p_rho"]*rho],
                 [gas["mu_V"]*V, gas["mu_rho"]*rho]]
@@ -242,8 +257,10 @@ def humid_air_saturation(temperature_K, pressure_Pa, *, condensed_phase="auto"):
     return _accepted(V, T, rho, p, condensed)
 
 
-def humid_air_from_relative_humidity(temperature_K, pressure_Pa, relative_humidity,
-                                     *, condensed_phase="auto"):
+def humid_air_from_relative_humidity(
+    temperature_K: float, pressure_Pa: float, relative_humidity: float,
+    *, condensed_phase: str = "auto",
+) -> HumidAirState:
     """WMO RH = x_water / x_water,sat, not a humidity-ratio or fugacity ratio."""
     rh = relative_humidity
     if isinstance(rh, bool) or not isfinite(rh) or not 0 <= rh <= 1:
@@ -255,15 +272,19 @@ def humid_air_from_relative_humidity(temperature_K, pressure_Pa, relative_humidi
     return humid_air_from_water_fraction(V, temperature_K, pressure_Pa)
 
 
-def humid_air_relative_humidity(water_mass_fraction, temperature_K, pressure_Pa,
-                                *, condensed_phase="auto"):
+def humid_air_relative_humidity(
+    water_mass_fraction: float, temperature_K: float, pressure_Pa: float,
+    *, condensed_phase: str = "auto",
+) -> float:
     """Composition diagnostic; a supersaturated input can return RH > 1."""
     _validate(water_mass_fraction, temperature_K)
     saturated = humid_air_saturation(temperature_K, pressure_Pa, condensed_phase=condensed_phase)
     return _water_mole_fraction(water_mass_fraction)/saturated.gas.water_mole_fraction
 
 
-def humid_air_condensation_point(water_mass_fraction, pressure_Pa, *, condensed_phase="auto"):
+def humid_air_condensation_point(
+    water_mass_fraction: float, pressure_Pa: float, *, condensed_phase: str = "auto",
+) -> HumidAirSaturation:
     """Fixed-composition/pressure dew or frost point, returned with its surface.
 
     Auto selects the thermodynamically favored condensed phase. Explicit
@@ -288,7 +309,9 @@ def humid_air_condensation_point(water_mass_fraction, pressure_Pa, *, condensed_
     T0 = min(upper, max(lower, guess))
     rho0 = p/(T0*((1-V)*8.31451/MA+V*461.51805))
 
-    def trial(point):
+    def trial(
+        point: NDArray[np.float64],
+    ) -> tuple[float, float, dict[str, float], CondensedWaterState]:
         T, rho = float(point[0]), exp(point[1])
         try:
             condensed = condensed_water_state(T, p, phase=condensed_phase)
@@ -299,11 +322,11 @@ def humid_air_condensation_point(water_mass_fraction, pressure_Pa, *, condensed_
             # never substitute a correlation or an unconverged liquid state.
             raise ResidualDomainError(str(exc)) from exc
 
-    def residual(point):
+    def residual(point: NDArray[np.float64]) -> list[float]:
         _, _, gas, condensed = trial(point)
         return [gas["p"]-p, gas["mu"]-condensed.gibbs_energy_J_kg]
 
-    def jacobian(point):
+    def jacobian(point: NDArray[np.float64]) -> list[list[float]]:
         _, rho, gas, condensed = trial(point)
         return [[gas["p_T"], gas["p_rho"]*rho],
                 [gas["mu_T"]+condensed.entropy_J_kg_K, gas["mu_rho"]*rho]]

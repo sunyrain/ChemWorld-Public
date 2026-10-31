@@ -10,35 +10,37 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from math import isfinite, sqrt
-from typing import Any
+from typing import Any, Generic, TypeVar, overload
 
 from chemworld.physchem.caloric_math import compensated_sum, partial_derivative
 from chemworld.physchem.helmholtz_response import residual_response
 from chemworld.physchem.helmholtz_terms import HelmholtzTerm
-from chemworld.physchem.second_order_pair import SecondOrderPair
+from chemworld.physchem.second_order_pair import PairScalar, SecondOrderPair
+
+_StateScalar = TypeVar("_StateScalar", bound=PairScalar, covariant=True)
 
 
 @dataclass(frozen=True)
-class HelmholtzState:
+class HelmholtzState(Generic[_StateScalar]):
     fluid_id: str
     temperature_K: float
     molar_density_mol_m3: float
-    mass_density_kg_m3: float
-    pressure_Pa: float
-    enthalpy_J_mol: float
-    internal_energy_J_mol: float
-    entropy_J_mol_K: float
-    cp_J_mol_K: float
-    cv_J_mol_K: float
+    mass_density_kg_m3: _StateScalar
+    pressure_Pa: _StateScalar
+    enthalpy_J_mol: _StateScalar
+    internal_energy_J_mol: _StateScalar
+    entropy_J_mol_K: _StateScalar
+    cp_J_mol_K: _StateScalar
+    cv_J_mol_K: _StateScalar
     speed_of_sound_m_s: float
-    gibbs_energy_J_mol: float
-    helmholtz_energy_J_mol: float
-    compressibility_factor: float
-    dP_dT_rho_Pa_K: float
-    dP_drho_T_Pa_m3_mol: float
-    isothermal_compressibility_Pa_inv: float
-    thermal_expansion_K_inv: float
-    stability_margin: float
+    gibbs_energy_J_mol: _StateScalar
+    helmholtz_energy_J_mol: _StateScalar
+    compressibility_factor: _StateScalar
+    dP_dT_rho_Pa_K: _StateScalar
+    dP_drho_T_Pa_m3_mol: _StateScalar
+    isothermal_compressibility_Pa_inv: _StateScalar
+    thermal_expansion_K_inv: _StateScalar
+    stability_margin: _StateScalar
     locally_stable: bool
     warnings: tuple[str, ...] = ()
 
@@ -124,7 +126,7 @@ class HelmholtzFluid:
         return partial_derivative(lambda x: self.alpha(kind, x["delta"], x["tau"]),
                                   {"delta": delta, "tau": tau}, coordinates)
 
-    def _state_derivatives(self, delta: float, tau: float) -> tuple[float, ...]:
+    def _state_derivatives(self, delta: PairScalar, tau: PairScalar) -> tuple[PairScalar, ...]:
         """Evaluate each contribution once for all state-response derivatives."""
         density, temperature = SecondOrderPair(delta, dx=1), SecondOrderPair(tau, dy=1)
         ideal = SecondOrderPair(0) + self.alpha("ideal", density, temperature)
@@ -144,8 +146,16 @@ class HelmholtzFluid:
             raise ValueError("nonfinite Helmholtz state derivative")
         return values
 
+    @overload
     def state(self, *, temperature_K: float, molar_density_mol_m3: float,
-              require_stable: bool = True) -> HelmholtzState:
+              require_stable: bool = True) -> HelmholtzState[float]: ...
+
+    @overload
+    def state(self, *, temperature_K: PairScalar, molar_density_mol_m3: PairScalar,
+              require_stable: bool = True) -> HelmholtzState[PairScalar]: ...
+
+    def state(self, *, temperature_K: PairScalar, molar_density_mol_m3: PairScalar,
+              require_stable: bool = True) -> HelmholtzState[PairScalar]:
         """Evaluate a supplied homogeneous state inside the declared T/P domain.
 
         This does not replace a two-phase T/rho flash. Mechanical and thermal

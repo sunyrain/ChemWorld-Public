@@ -37,7 +37,9 @@ class HelmholtzEquilibriumIsochoricThermodynamics:
     def inventory_keys(self) -> tuple[str, ...]:
         return (self.inventory_key,)
 
-    def molar_state(self, state: CoupledStateView) -> HelmholtzState | HelmholtzTwoPhaseState:
+    def molar_state(
+        self, state: CoupledStateView,
+    ) -> HelmholtzState[float] | HelmholtzTwoPhaseState:
         if set(state.amounts_mol) != {self.inventory_key}:
             raise ValueError("equilibrium thermal inventory contains an undeclared fluid")
         if state.volume_L != self.volume_L:
@@ -64,7 +66,7 @@ class HelmholtzEquilibriumIsochoricThermodynamics:
     def validate_state(self, state: CoupledStateView) -> None:
         self.molar_state(state)
 
-    def _energy_derivatives(self, current: HelmholtzState | HelmholtzTwoPhaseState
+    def _energy_derivatives(self, current: HelmholtzState[float] | HelmholtzTwoPhaseState
                             ) -> tuple[float, float]:
         if isinstance(current, HelmholtzState):
             return homogeneous_state_derivatives(self.phase_model.fluid, current)["U"]

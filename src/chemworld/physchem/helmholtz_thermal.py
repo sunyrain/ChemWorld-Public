@@ -38,7 +38,7 @@ class HelmholtzIsochoricThermodynamics:
     def inventory_keys(self) -> tuple[str, ...]:
         return (self.inventory_key,)
 
-    def molar_state(self, state: CoupledStateView) -> HelmholtzState:
+    def molar_state(self, state: CoupledStateView) -> HelmholtzState[float]:
         if set(state.amounts_mol) != {self.inventory_key}:
             raise ValueError("Helmholtz thermal inventory must contain only its declared fluid")
         if state.volume_L != self.volume_L:
