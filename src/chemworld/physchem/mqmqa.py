@@ -1,35 +1,39 @@
 """Native MQMQA phase contributions on the common Gibbs/material interface."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from math import isfinite
 from types import MappingProxyType
-from typing import cast
+from typing import Any, cast
 
 from chemworld.data.chem_sage import ChemSageDatabase
-from chemworld.data.chem_sage_records import ChemSageMQMQA
-from chemworld.physchem.gibbs_phase import GibbsPhaseModel
+from chemworld.data.chem_sage_records import ChemSageMQMQA, ChemSagePhase
+from chemworld.data.tdb import TdbParameter, TdbPhase
+from chemworld.physchem.gibbs_phase import GibbsPhaseModel, JetSiteFractions, SiteFractions
 from chemworld.physchem.mqmqa_energy import energies
-from chemworld.physchem.mqmqa_topology import compile_topology
-from chemworld.physchem.tdb_expressions import scalar_value
+from chemworld.physchem.mqmqa_topology import MQMQATopology, compile_topology
+from chemworld.physchem.tdb_expressions import TdbScalar, scalar_value
 
 
 @dataclass(frozen=True)
 class _Curve:
-    source: object
+    source: TdbParameter
 
 
 @dataclass(frozen=True)
 class MQMQAPhaseModel(GibbsPhaseModel):
     database: ChemSageDatabase
     phase_name: str
-    components: tuple | None = None
+    components: tuple[str, ...] | None = None
     extrapolation: str = "reject"
     activate_suppressed: bool = False
-    _phase: object = field(init=False, repr=False)
-    _parameters: tuple = field(init=False, repr=False)
-    _source: object = field(init=False, repr=False)
-    _topology: object = field(init=False, repr=False)
-    _diagnostics: tuple = field(init=False, repr=False)
+    _phase: TdbPhase = field(init=False, repr=False)
+    _parameters: tuple[_Curve, ...] = field(init=False, repr=False)
+    _source: ChemSagePhase = field(init=False, repr=False)
+    _topology: MQMQATopology = field(init=False, repr=False)
+    _diagnostics: tuple[str, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.database, ChemSageDatabase):
@@ -108,11 +112,13 @@ class MQMQAPhaseModel(GibbsPhaseModel):
                 raise ValueError("MQMQA ternary anion needs its index and positive exponent")
         active = set(topology.ions)
 
-        def is_active(parameter):
+        def is_active(parameter: _Curve) -> bool:
+            # Compiled ChemSage curves retain their endmember/interaction index.
+            source_index = cast(int, parameter.source.source_index)
             if parameter.source.kind == "MQMG":
-                c, a = mqmqa.pair_indices[parameter.source.source_index]
+                c, a = mqmqa.pair_indices[source_index]
                 return {c-1, nc+a-1} <= active
-            item = source.interactions[parameter.source.source_index]
+            item = source.interactions[source_index]
             indices = (*item.indices, item.additional_constituent,
                        item.additional_anion_constituent)
             return {i-1 for i in indices if i} <= active
@@ -131,15 +137,17 @@ class MQMQAPhaseModel(GibbsPhaseModel):
         object.__setattr__(self, "_diagnostics", diagnostics)
 
     @property
-    def constituents(self):
+    def constituents(self) -> tuple[tuple[str, ...], ...]:
         return self._phase.constituents
 
     @property
     def constraint_labels(self) -> tuple[str, str]:
         return "site_sum:0", "charge"
 
-    def _composition(self, fractions):
-        amounts = {}
+    def _composition(
+        self, fractions: JetSiteFractions,
+    ) -> tuple[TdbScalar, dict[str, TdbScalar]]:
+        amounts: dict[str, TdbScalar] = {}
         for i, n in self._topology.ion_amounts(fractions[0]).items():
             for e, count in self._topology.ions[i].constituents:
                 if e not in {"VA", "/-"}:
@@ -149,22 +157,24 @@ class MQMQAPhaseModel(GibbsPhaseModel):
             raise ValueError("MQMQA real atom normalization must be positive and finite")
         return total, {e: value/total for e, value in amounts.items()}
 
-    def _constraints(self, fractions):
+    def _constraints(self, fractions: JetSiteFractions) -> tuple[TdbScalar, TdbScalar]:
         charge = sum(self._topology.ions[i].charge*n
                      for i, n in self._topology.ion_amounts(fractions[0]).items())
         return sum(fractions[0].values())-1, charge
 
-    def _energies(self, fractions, temperature, pressure):
+    def _energies(
+        self, fractions: JetSiteFractions, temperature: TdbScalar, pressure: TdbScalar,
+    ) -> dict[str, TdbScalar]:
         return energies(self, fractions, temperature, pressure)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"model_type": "calphad_mqmqa_v1", "database": self.database.to_dict(),
                 "phase_name": self.phase_name, "components": self.components,
                 "extrapolation": self.extrapolation,
                 "activate_suppressed": self.activate_suppressed}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> MQMQAPhaseModel:
         from chemworld.data.scientific_inputs import _keys
 
         _keys(payload, ("model_type", "database", "phase_name", "components", "extrapolation",
@@ -174,7 +184,7 @@ class MQMQAPhaseModel(GibbsPhaseModel):
         return cls(ChemSageDatabase.from_dict(payload["database"]), payload["phase_name"],
                    payload["components"], payload["extrapolation"], payload["activate_suppressed"])
 
-    def ion_amounts_per_quadruplet(self, fractions):
+    def ion_amounts_per_quadruplet(self, fractions: SiteFractions) -> Mapping[str, float]:
         fractions = self._fractions(fractions)
         return MappingProxyType({self._topology.ions[i].name: scalar_value(n)
             for i, n in self._topology.ion_amounts(fractions[0]).items()})

@@ -13,14 +13,14 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, TypeAlias
 
 from chemworld.physchem.caloric_math import FirstDerivative, JetCoefficient
-from chemworld.physchem.tdb_expressions import scalar_value
+from chemworld.physchem.tdb_expressions import TdbScalar, scalar_value
 
 if TYPE_CHECKING:
     from chemworld.physchem.calphad_response import CefDerivativeResponse, CefTemperatureResponse
     from chemworld.physchem.calphad_stationary import CefChemicalPotentials, CefConstitutionResult
 
 SiteFractions: TypeAlias = Sequence[Mapping[str, float]]
-JetSiteFractions: TypeAlias = tuple[Mapping[str, JetCoefficient], ...]
+JetSiteFractions: TypeAlias = Sequence[Mapping[str, TdbScalar]]
 
 
 def gibbs_phase_from_dict(payload: Mapping[str, Any]) -> GibbsPhaseModel:
@@ -64,17 +64,17 @@ class GibbsPhaseModel:
     def constituents(self) -> tuple[tuple[str, ...], ...]:
         raise NotImplementedError("A phase model must declare its constituents")
 
-    def _constraints(self, fractions: JetSiteFractions) -> tuple[JetCoefficient, ...]:
+    def _constraints(self, fractions: JetSiteFractions) -> tuple[TdbScalar, ...]:
         raise NotImplementedError("A phase model must define its constitution constraints")
 
     def _composition(
         self, fractions: JetSiteFractions,
-    ) -> tuple[JetCoefficient, Mapping[str, JetCoefficient]]:
+    ) -> tuple[TdbScalar, Mapping[str, TdbScalar]]:
         raise NotImplementedError("A phase model must define its real-atom composition")
 
     def _energies(
-        self, fractions: JetSiteFractions, temperature: JetCoefficient, pressure: JetCoefficient,
-    ) -> Mapping[str, JetCoefficient]:
+        self, fractions: JetSiteFractions, temperature: TdbScalar, pressure: TdbScalar,
+    ) -> Mapping[str, TdbScalar]:
         raise NotImplementedError("A phase model must define its energy contributions")
 
     def _response_diagnostics(
@@ -167,7 +167,7 @@ class GibbsPhaseModel:
         partials = {}
         for index, subl in enumerate(fractions):
             for species, value in subl.items():
-                seeded: list[dict[str, JetCoefficient]] = [dict(s) for s in fractions]
+                seeded: list[dict[str, TdbScalar]] = [dict(s) for s in fractions]
                 seeded[index][species] = FirstDerivative(value, 1)
                 energy = sum(self._energies(tuple(seeded), temperature_K, pressure_Pa).values())
                 derivative = scalar_value(_slope(energy))

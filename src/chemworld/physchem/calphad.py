@@ -9,25 +9,27 @@ same atom-molar basis per kelvin. Vacancies and electrons add no real atoms.
 
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from itertools import permutations, product
 from math import isclose, prod
-from typing import cast
+from typing import Any, cast, overload
 
 import numpy as np
 
 from chemworld.data.tdb import AuxiliaryBalances, TdbDatabase, TdbParameter, TdbPhase
-from chemworld.physchem.caloric_math import FirstDerivative, exponential, logarithm
+from chemworld.physchem.caloric_math import FirstDerivative, JetCoefficient, exponential, logarithm
 from chemworld.physchem.calphad_extrapolation import qkt_weight, validate_qkt
 from chemworld.physchem.gibbs_phase import (
     GibbsPhaseModel,
     GibbsPhaseProperties,
+    JetSiteFractions,
     SiteFractions,
     _slope,
 )
 from chemworld.physchem.second_order_pair import SecondOrderPair
 from chemworld.physchem.tdb_expressions import TDB_GAS_CONSTANT_J_MOL_K as R
-from chemworld.physchem.tdb_expressions import scalar_value
+from chemworld.physchem.tdb_expressions import TdbScalar, scalar_value
 
 CefPhaseProperties = GibbsPhaseProperties
 
@@ -36,7 +38,7 @@ _GIBBS_PARAMETERS = frozenset({
 })
 
 
-def _zero_jet(value):
+def _zero_jet(value: JetCoefficient) -> bool:
     """Require every scalar coefficient to be zero, including nested directions."""
     if isinstance(value, FirstDerivative):
         return _zero_jet(value.value) and _zero_jet(value.slope)
@@ -48,7 +50,7 @@ def _zero_jet(value):
     return bool(value == 0)
 
 
-def _xlogx(value):
+def _xlogx(value: TdbScalar) -> TdbScalar:
     if scalar_value(value) == 0:
         if not _zero_jet(value):
             raise ValueError("CEF site derivative diverges at zero site fraction")
@@ -56,12 +58,12 @@ def _xlogx(value):
     return value * logarithm(value)
 
 
-def _softplus(value):
+def _softplus(value: TdbScalar) -> TdbScalar:
     return (value + logarithm(1 + exponential(-value)) if scalar_value(value) > 0
             else logarithm(1 + exponential(value)))
 
 
-def _einstein_energy(log_theta, temperature):
+def _einstein_energy(log_theta: TdbScalar, temperature: TdbScalar) -> TdbScalar:
     theta = exponential(log_theta)
     x = theta / temperature
     if scalar_value(x) <= 0:
@@ -74,7 +76,10 @@ def _einstein_energy(log_theta, temperature):
     return 1.5 * R * theta + 3 * R * temperature * log_population
 
 
-def _magnetic_energy(temperature, tc, nt, moment, *, afm, structure):
+def _magnetic_energy(
+    temperature: TdbScalar, tc: TdbScalar, nt: TdbScalar, moment: TdbScalar,
+    *, afm: float, structure: float,
+) -> TdbScalar:
     if afm != 0:
         beta = moment / afm if scalar_value(moment) <= 0 else moment
         critical = tc / afm if scalar_value(tc) <= 0 else tc
@@ -92,7 +97,7 @@ def _magnetic_energy(temperature, tc, nt, moment, *, afm, structure):
         beta = moment
         d = .33471979 + .49649686 * (1 / structure - 1)
 
-        def xiong(critical):
+        def xiong(critical: TdbScalar) -> TdbScalar:
             if scalar_value(critical) <= 0:
                 return 0.0
             tau = temperature / critical
@@ -116,17 +121,20 @@ class _Parameter:
     constituents: tuple[tuple[str, ...], ...]
 
     @property
-    def kind(self):
+    def kind(self) -> str:
         return self.source.kind
 
     @property
-    def order(self):
+    def order(self) -> int:
         return self.source.order
 
 
-def _symmetry_arrays(array, option):
+def _symmetry_arrays(
+    array: tuple[tuple[str, ...], ...], option: str,
+) -> list[tuple[tuple[str, ...], ...]]:
     if len(array) < 4:
         raise ValueError("CEF four-sublattice symmetry needs at least four sublattices")
+    indices: Iterable[tuple[int, ...]]
     if option == "F":
         indices = permutations(range(4))
     else:
@@ -235,7 +243,7 @@ class CefPhaseModel(GibbsPhaseModel):
             diagnostics.append("nonzero VK/VC only permit reference-pressure G/H/S")
         object.__setattr__(self, "_diagnostics", (*type_diagnostics, *diagnostics))
 
-    def _active_phase(self, phase, eligible):
+    def _active_phase(self, phase: TdbPhase, eligible: Collection[str]) -> TdbPhase:
         array = tuple(tuple(s for s in subl if s in eligible) for subl in phase.constituents)
         if any(not subl for subl in array):
             raise ValueError(f"CEF phase {phase.name} has an inactive sublattice")
@@ -244,9 +252,9 @@ class CefPhaseModel(GibbsPhaseModel):
         return TdbPhase(phase.name, phase.site_ratios, array, phase.options,
                         phase.type_characters, phase.model_hints)
 
-    def _extend_ordered(self, phase, eligible):
+    def _extend_ordered(self, phase: TdbPhase, eligible: Collection[str]) -> TdbPhase:
         disordered = self._active_phase(
-            self.database.phases[phase.model_hints["disordered_phase"]], eligible,
+            self.database.phases[cast(str, phase.model_hints["disordered_phase"])], eligible,
         )
         remaining = set(range(len(phase.constituents)))
         interstitial = []
@@ -272,7 +280,7 @@ class CefPhaseModel(GibbsPhaseModel):
         return TdbPhase(phase.name, phase.site_ratios, array, phase.options,
                         phase.type_characters, phase.model_hints)
 
-    def _select_parameters(self):
+    def _select_parameters(self) -> tuple[_Parameter, ...]:
         phase = self._phase
         selected = []
         for parameter in self.database.parameters:
@@ -298,18 +306,19 @@ class CefPhaseModel(GibbsPhaseModel):
                     raise ValueError("CEF interaction order has no declared R-K/Muggianu meaning")
             selected.append(_Parameter(parameter, array))
         explicit = {(p.kind, p.constituents, p.order, p.source.diffusing_species) for p in selected}
-        generated = {}
+        generated: dict[tuple[str, tuple[tuple[str, ...], ...], int, str | None], _Parameter] = {}
         if phase.name == phase.model_hints.get("ordered_phase"):
             for option in sorted(phase.options & {"F", "B"}):
-                for parameter in selected:
-                    for array in _symmetry_arrays(parameter.constituents, option):
-                        key = (parameter.kind, array, parameter.order,
-                               parameter.source.diffusing_species)
+                for selected_parameter in selected:
+                    for array in _symmetry_arrays(selected_parameter.constituents, option):
+                        key = (selected_parameter.kind, array, selected_parameter.order,
+                               selected_parameter.source.diffusing_species)
                         if key not in explicit:
                             previous = generated.get(key)
-                            if previous and previous.source.function != parameter.source.function:
+                            if (previous and previous.source.function
+                                    != selected_parameter.source.function):
                                 raise ValueError("contradictory CEF symmetry-generated parameters")
-                            generated[key] = _Parameter(parameter.source, array)
+                            generated[key] = _Parameter(selected_parameter.source, array)
         return (*selected, *generated.values())
 
     def _check_endmembers(self) -> None:
@@ -330,14 +339,14 @@ class CefPhaseModel(GibbsPhaseModel):
                 raise ValueError(f"CEF endmember energy is unspecified: {endmember}")
 
     @property
-    def constituents(self):
+    def constituents(self) -> tuple[tuple[str, ...], ...]:
         return self._phase.constituents
 
     @property
-    def generated_parameter_count(self):
+    def generated_parameter_count(self) -> int:
         return sum(p.constituents != p.source.constituents for p in self._parameters)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"model_type": "calphad_cef_v1", "database": self.database.to_dict(),
                 "phase_name": self.phase_name, "components": self.components,
                 "extrapolation": self.extrapolation,
@@ -345,7 +354,7 @@ class CefPhaseModel(GibbsPhaseModel):
                 **({"activate_suppressed": True} if self.activate_suppressed else {})}
 
     @classmethod
-    def from_dict(cls, payload):
+    def from_dict(cls, payload: Mapping[str, Any]) -> CefPhaseModel:
         from chemworld.data.calphad_databases import calphad_database_from_dict
         from chemworld.data.scientific_inputs import _keys
 
@@ -359,7 +368,7 @@ class CefPhaseModel(GibbsPhaseModel):
                    payload["unspecified_endmembers"], payload.get("activate_suppressed", False))
 
 
-    def _ratios(self, fractions):
+    def _ratios(self, fractions: JetSiteFractions) -> tuple[TdbScalar, ...]:
         if "Y" not in self._phase.options:
             return self._phase.site_ratios
         cation_charge = sum(y * self.database.species[s].charge for s, y in fractions[0].items())
@@ -367,7 +376,7 @@ class CefPhaseModel(GibbsPhaseModel):
                            for s, y in fractions[1].items())
         return anion_charge + cation_charge * fractions[1].get("VA", 0), cation_charge
 
-    def _constraints(self, fractions):
+    def _constraints(self, fractions: JetSiteFractions) -> tuple[TdbScalar, ...]:
         ratios = self._ratios(fractions)
         charge = sum(ratio * y * self.database.species[s].charge
                      for ratio, subl in zip(ratios, fractions, strict=True)
@@ -384,13 +393,15 @@ class CefPhaseModel(GibbsPhaseModel):
         return (*(sum(subl.values()) - 1 for subl in fractions), charge, *auxiliary)
 
     @property
-    def constraint_labels(self):
+    def constraint_labels(self) -> tuple[str, ...]:
         return (*(f"site_sum:{i}" for i in range(len(self.constituents))), "charge",
                 *(f"auxiliary:{name}" for name, _ in cast(
                     AuxiliaryBalances, self._phase.model_hints.get("auxiliary_balances", ()))))
 
-    def _composition(self, fractions):
-        amounts = {}
+    def _composition(
+        self, fractions: JetSiteFractions,
+    ) -> tuple[TdbScalar, dict[str, TdbScalar]]:
+        amounts: dict[str, TdbScalar] = {}
         for ratio, subl in zip(self._ratios(fractions), fractions, strict=True):
             for name, y in subl.items():
                 for element, count in self.database.species[name].constituents:
@@ -401,7 +412,7 @@ class CefPhaseModel(GibbsPhaseModel):
             raise ValueError("CEF atom-molar normalization must be positive")
         return total, {element: amount / total for element, amount in amounts.items()}
 
-    def _weight(self, parameter, fractions):
+    def _weight(self, parameter: _Parameter, fractions: JetSiteFractions) -> TdbScalar:
         if parameter.kind == "QKT":
             return qkt_weight(parameter, fractions, self._phase)
         array = parameter.constituents
@@ -414,7 +425,7 @@ class CefPhaseModel(GibbsPhaseModel):
             for s in (fractions[index] if subl == ("*",) else subl)
         )
         vacancy_endmember = any("VA" in subl for subl in array) and not mixing
-        weight = 1.0
+        weight: TdbScalar = 1.0
         for index, subl in zip(targets, array, strict=True):
             if subl == ("*",):
                 values = [v * fractions[1].get("VA", 0)
@@ -446,8 +457,23 @@ class CefPhaseModel(GibbsPhaseModel):
             weight *= self._ratios(fractions)[1]
         return weight
 
-    def _sum(self, kind, fractions, temperature, pressure, *, pure=None):
-        result = 0.0
+    @overload
+    def _sum(
+        self, kind: Collection[str], fractions: SiteFractions, temperature: float, pressure: float,
+        *, pure: bool | None = None,
+    ) -> float: ...
+
+    @overload
+    def _sum(
+        self, kind: Collection[str], fractions: JetSiteFractions,
+        temperature: TdbScalar, pressure: TdbScalar, *, pure: bool | None = None,
+    ) -> TdbScalar: ...
+
+    def _sum(
+        self, kind: Collection[str], fractions: JetSiteFractions,
+        temperature: TdbScalar, pressure: TdbScalar, *, pure: bool | None = None,
+    ) -> TdbScalar:
+        result: TdbScalar = 0.0
         for parameter in self._parameters:
             if parameter.kind not in kind:
                 continue
@@ -460,11 +486,13 @@ class CefPhaseModel(GibbsPhaseModel):
             result += self._weight(parameter, fractions) * coefficient
         return result
 
-    def _core(self, fractions, temperature, pressure):
+    def _core(
+        self, fractions: JetSiteFractions, temperature: TdbScalar, pressure: TdbScalar,
+    ) -> dict[str, TdbScalar]:
         normalization, _ = self._composition(fractions)
         ratios = self._ratios(fractions)
         has = {p.kind for p in self._parameters}
-        contributions = {
+        contributions: dict[str, TdbScalar] = {
             "reference": self._sum({"G"}, fractions, temperature, pressure, pure=True),
             "ideal": R * temperature * sum(
                 a * _xlogx(y) for a, subl in zip(ratios, fractions, strict=True)
@@ -478,8 +506,8 @@ class CefPhaseModel(GibbsPhaseModel):
             nt = self._sum({"NT"}, fractions, temperature, pressure)
             moment = self._sum({"BMAGN"}, fractions, temperature, pressure)
             contributions["magnetic"] = _magnetic_energy(
-                temperature, tc, nt, moment, afm=hints["magnetic_afm_factor"],
-                structure=hints["magnetic_structure_factor"],
+                temperature, tc, nt, moment, afm=cast(float, hints["magnetic_afm_factor"]),
+                structure=cast(float, hints["magnetic_structure_factor"]),
             )
         if "GD" in has:
             gd = self._sum({"GD"}, fractions, temperature, pressure)
@@ -515,7 +543,9 @@ class CefPhaseModel(GibbsPhaseModel):
                 diagnostics.append("magnetic critical point: declared one-sided branch derivative")
         return diagnostics
 
-    def _ordering_views(self, fractions):
+    def _ordering_views(
+        self, fractions: JetSiteFractions,
+    ) -> tuple[CefPhaseModel, JetSiteFractions, JetSiteFractions] | None:
         if not self._substitutional:
             return None
         indices = self._substitutional
@@ -531,7 +561,9 @@ class CefPhaseModel(GibbsPhaseModel):
                            for i, subl in enumerate(fractions))
         return disordered, disordered_fractions, randomized
 
-    def _energies(self, fractions, temperature, pressure):
+    def _energies(
+        self, fractions: JetSiteFractions, temperature: TdbScalar, pressure: TdbScalar,
+    ) -> dict[str, TdbScalar]:
         raw = self._core(fractions, temperature, pressure)
         views = self._ordering_views(fractions)
         if views is None:

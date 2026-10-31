@@ -1,38 +1,55 @@
 """Immutable MQMQA coordination and atom maps over original source indices."""
 
+from __future__ import annotations
+
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
 from functools import cache
 from itertools import combinations_with_replacement, product
 from math import isclose, isfinite
 from types import MappingProxyType
+from typing import TYPE_CHECKING, overload
+
+from chemworld.physchem.tdb_expressions import TdbScalar
+
+if TYPE_CHECKING:
+    from chemworld.data.chem_sage import ChemSageDatabase
+    from chemworld.data.chem_sage_records import ChemSageEndmember
+    from chemworld.data.tdb import TdbSpecies
 
 
-def canonical_quad(quad):
+def canonical_quad(quad: tuple[int, ...]) -> tuple[int, ...]:
     return (*sorted(quad[:2]), *sorted(quad[2:]))
 
 
 @dataclass(frozen=True)
 class MQMQATopology:
-    cations: tuple
-    anions: tuple
-    labels: tuple
-    quadruplets: tuple
-    charges: object
-    groups: object
-    ions: object
-    coordinations: object
-    pairs: object
+    cations: tuple[int, ...]
+    anions: tuple[int, ...]
+    labels: tuple[str, ...]
+    quadruplets: tuple[tuple[int, ...], ...]
+    charges: Mapping[int, float]
+    groups: Mapping[int, int]
+    ions: Mapping[int, TdbSpecies]
+    coordinations: Mapping[tuple[int, ...], tuple[float, ...]]
+    pairs: Mapping[tuple[int, int], ChemSageEndmember]
 
-    def z(self, species, quad):
+    def z(self, species: int, quad: tuple[int, ...]) -> float:
         quad = canonical_quad(quad)
         return self.coordinations[quad][quad.index(species)]
 
-    def ion_amounts(self, fractions):
+    @overload
+    def ion_amounts(self, fractions: Mapping[str, float]) -> Mapping[int, float]: ...
+
+    @overload
+    def ion_amounts(self, fractions: Mapping[str, TdbScalar]) -> Mapping[int, TdbScalar]: ...
+
+    def ion_amounts(self, fractions: Mapping[str, TdbScalar]) -> Mapping[int, TdbScalar]:
         return {i: sum(fractions[label]*quad.count(i)/self.z(i, quad)
                        for label, quad in zip(self.labels, self.quadruplets, strict=True)
                        if i in quad) for i in self.ions}
 
-    def restrict(self, eligible):
+    def restrict(self, eligible: Collection[str]) -> MQMQATopology:
         cations = tuple(i for i in self.cations if self.ions[i].name in eligible)
         anions = tuple(i for i in self.anions if self.ions[i].name in eligible)
         if not cations or not anions:
@@ -47,7 +64,7 @@ class MQMQATopology:
             pairs=MappingProxyType({p: m for p, m in self.pairs.items() if set(p) <= active}))
 
 
-def compile_topology(database, phase_name):
+def compile_topology(database: ChemSageDatabase, phase_name: str) -> MQMQATopology:
     source = database.phase_records[phase_name]
     raw = source.mqmqa
     if raw is None or source.phase_type not in {"SUBG", "SUBQ"}:
@@ -67,7 +84,7 @@ def compile_topology(database, phase_name):
         if (len(stoich) != 5 or stoich[0] <= 0 or stoich[1] <= 0 or any(stoich[2:])
                 or member.zeta is None or member.zeta <= 0):
             raise ValueError("MQMQA needs positive pair stoichiometry/zeta and no extra pair terms")
-        derived = {}
+        derived: dict[str, float] = {}
         for i, count in ((c, stoich[0]), (a, stoich[1])):
             for e, number in ions[i].constituents:
                 if e not in {"VA", "/-"}:
@@ -82,7 +99,7 @@ def compile_topology(database, phase_name):
         if (real_pair and not isclose(stoich[0]*charges[c], stoich[1]*charges[a],
                                      abs_tol=1e-9, rel_tol=1e-8)):
             raise ValueError("MQMQA pair stoichiometry must be charge neutral")
-    explicit = {}
+    explicit: dict[tuple[int, ...], tuple[float, ...]] = {}
     for indices, values in raw.coordinations:
         indices = tuple(i-1 for i in indices)
         if (any(i not in cations for i in indices[:2])
@@ -98,7 +115,7 @@ def compile_topology(database, phase_name):
         explicit[quad] = zs
 
     @cache
-    def coordination(i, quad):
+    def coordination(i: int, quad: tuple[int, ...]) -> float:
         a, b, x, y = canonical_quad(quad)
         quad = (a, b, x, y)
         if quad in explicit:
@@ -126,8 +143,9 @@ def compile_topology(database, phase_name):
         return 2*charges[i]/(charges[x]/coordination(x, (i, i, x, x))
                              +charges[y]/coordination(y, (i, i, y, y)))
 
-    zs = {quad: tuple(coordination(i, quad) for i in quad) for quad in quads}
-    for quad, values in zs.items():
+    coordinations: dict[tuple[int, ...], tuple[float, ...]] = {
+        quad: tuple(coordination(i, quad) for i in quad) for quad in quads}
+    for quad, values in coordinations.items():
         if any(not isfinite(v) or v <= 0 for v in values):
             raise ValueError("MQMQA derived coordination must be positive and finite")
         charge = sum((1 if i in cations else -1)*charges[i]/z
@@ -136,4 +154,4 @@ def compile_topology(database, phase_name):
             raise ValueError("MQMQA quadruplet coordination violates charge neutrality")
     return MQMQATopology(cations, anions, tuple("Q"+"_".join(str(i+1) for i in q) for q in quads),
         quads, MappingProxyType(charges), MappingProxyType(groups), MappingProxyType(ions),
-        MappingProxyType(zs), MappingProxyType(pairs))
+        MappingProxyType(coordinations), MappingProxyType(pairs))

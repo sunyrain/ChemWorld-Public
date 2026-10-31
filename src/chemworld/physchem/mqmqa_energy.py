@@ -4,16 +4,26 @@ The source-index topology is immutable. These local moments are disposable
 expressions of the supplied quadruplet fractions, never a second inventory.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
+from functools import partial
 from itertools import combinations_with_replacement, product
 from math import prod
+from typing import TYPE_CHECKING, cast
 
+from chemworld.data.chem_sage_records import ChemSageInteraction, ChemSageMQMQA
 from chemworld.physchem.caloric_math import FirstDerivative, logarithm
+from chemworld.physchem.gibbs_phase import JetSiteFractions
 from chemworld.physchem.mqmqa_topology import canonical_quad
 from chemworld.physchem.tdb_expressions import TDB_GAS_CONSTANT_J_MOL_K as R
-from chemworld.physchem.tdb_expressions import scalar_value
+from chemworld.physchem.tdb_expressions import TdbScalar, scalar_value
+
+if TYPE_CHECKING:
+    from chemworld.physchem.mqmqa import MQMQAPhaseModel
 
 
-def _log_term(weight, argument):
+def _log_term(weight: TdbScalar, argument: Callable[[], TdbScalar]) -> TdbScalar:
     if scalar_value(weight) == 0:
         if isinstance(weight, FirstDerivative):
             raise ValueError("MQMQA derivative requires positive ion/pair/quadruplet amounts")
@@ -21,65 +31,79 @@ def _log_term(weight, argument):
     return weight*logarithm(argument())
 
 
-def energies(model, fractions, temperature, pressure):
+def energies(
+    model: MQMQAPhaseModel, fractions: JetSiteFractions,
+    temperature: TdbScalar, pressure: TdbScalar,
+) -> dict[str, TdbScalar]:
     topology, source = model._topology, model._source
+    # Model construction validates the MQMQA declaration and positive pair zeta.
+    mqmqa = cast(ChemSageMQMQA, source.mqmqa)
     cations, anions = topology.cations, topology.anions
     q = {quad: fractions[0][label] for label, quad in zip(
         topology.labels, topology.quadruplets, strict=True)}
 
-    def fraction(a, b, x, y):
+    def fraction(a: int, b: int, x: int, y: int) -> TdbScalar:
         return q[canonical_quad((a, b, x, y))]
 
     n = topology.ion_amounts(fractions[0])
     pair_n = {(i, k): sum(value*quad.count(i)*quad.count(k) for quad, value in q.items())
               for i, k in product(cations, anions)}
-    pair_star_n = {p: count/topology.pairs[p].zeta for p, count in pair_n.items()}
+    pair_star_n = {p: count/cast(float, topology.pairs[p].zeta) for p, count in pair_n.items()}
     pair_x = {p: count/sum(pair_n.values()) for p, count in pair_n.items()}
     pair_star_x = {p: count/sum(pair_star_n.values()) for p, count in pair_star_n.items()}
     equivalent = {i: sum(value*quad.count(i)/2 for quad, value in q.items()) for i in n}
     fpair = pair_x if source.phase_type == "SUBG" else pair_star_x
     coordination_fraction = {i: sum(value for p, value in fpair.items() if i in p) for i in n}
     total_cat, total_an = sum(n[i] for i in cations), sum(n[k] for k in anions)
-    entropy = sum(_log_term(count, lambda i=i, count=count: count/(
-        total_cat if i in cations else total_an)) for i, count in n.items())
+    def ion_ratio(i: int, count: TdbScalar) -> TdbScalar:
+        return count/(total_cat if i in cations else total_an)
+
+    def pair_ratio(i: int, k: int, pair: TdbScalar) -> TdbScalar:
+        return pair/(coordination_fraction[i]*coordination_fraction[k])
+
+    # Keep these arguments lazy: zero-weight terms must not evaluate a singular ratio.
+    entropy: TdbScalar = sum(_log_term(count, partial(ion_ratio, i, count))
+                             for i, count in n.items())
     for (i, k), pair in fpair.items():
         weight = pair_n[i, k] if source.phase_type == "SUBG" else pair_star_n[i, k]
-        entropy += _log_term(weight, lambda i=i, k=k, pair=pair:
-            pair/(coordination_fraction[i]*coordination_fraction[k]))
+        entropy += _log_term(weight, partial(pair_ratio, i, k, pair))
     alpha, beta = (1, 1) if source.phase_type == "SUBG" else (.75, .5)
     for (a, b, x, y), value in q.items():
-        def argument(a=a, b=b, x=x, y=y, value=value):
+        def argument(
+            a: int = a, b: int = b, x: int = x, y: int = y, value: TdbScalar = value,
+        ) -> TdbScalar:
             multiplicity = (2-(a == b))*(2-(x == y))
             pairs = ((a, x), (a, y), (b, x), (b, y))
             return (value*prod(equivalent[i] for i in (a, b, x, y))**beta
                     /(multiplicity*prod(pair_x[p] for p in pairs)**alpha))
 
         entropy += _log_term(value, argument)
-    reference = 0.
+    reference: TdbScalar = 0.
     for parameter in model._parameters:
         if parameter.source.kind != "MQMG":
             continue
-        member = source.endmembers[parameter.source.source_index]
-        c, a = source.mqmqa.pair_indices[parameter.source.source_index]
-        c, a = c-1, len(source.mqmqa.cations)+a-1
+        source_index = cast(int, parameter.source.source_index)
+        member = source.endmembers[source_index]
+        c, a = mqmqa.pair_indices[source_index]
+        c, a = c-1, len(mqmqa.cations)+a-1
         amount = sum(value*quad.count(c)*quad.count(a)/(2*topology.z(c, quad))
                      for quad, value in q.items() if c in quad and a in quad)
         reference += amount*model.database.evaluate_parameter(parameter.source, temperature,
             pressure, extrapolation=model.extrapolation)/member.pair_stoichiometry[0]
 
-    def group(i, j):
+    def group(i: int, j: int) -> tuple[int, ...]:
         lattice = cations if i in cations else anions
         return (i, *(m for m in lattice if m not in {i, j}
                      and topology.groups[m] == topology.groups[i]
                      and topology.groups[m] != topology.groups[j]))
 
-    def xi(i, j, spectator):
+    def xi(i: int, j: int, spectator: int) -> TdbScalar:
         return sum(pair_n[m, spectator] if i in cations else pair_n[spectator, m]
                    for m in group(i, j))/4
 
-    def chi(i, j, spectator):
-        def selected(members):
-            result = 0.
+    def chi(i: int, j: int, spectator: int) -> TdbScalar:
+        def selected(members: tuple[int, ...]) -> TdbScalar:
+            result: TdbScalar = 0.
             for a, b in combinations_with_replacement(members, 2):
                 if source.phase_type == "SUBG":
                     result += (fraction(a, b, spectator, spectator) if i in cations else
@@ -93,7 +117,7 @@ def energies(model, fractions, temperature, pressure):
 
         return selected(group(i, j))/selected((*group(i, j), *group(j, i)))
 
-    def mixing(item, a, b, x, y):
+    def mixing(item: ChemSageInteraction, a: int, b: int, x: int, y: int) -> TdbScalar:
         p, s, r_cat, r_an = item.exponents
         if a != b and x != y:
             m, k = item.additional_constituent-1, item.additional_anion_constituent-1
@@ -122,11 +146,11 @@ def energies(model, fractions, temperature, pressure):
                 value *= (1-first-second)**(exponent-1)
         return value
 
-    excess = 0.
+    excess: TdbScalar = 0.
     for parameter in model._parameters:
         if parameter.source.kind != "MQMX":
             continue
-        item = source.interactions[parameter.source.source_index]
+        item = source.interactions[cast(int, parameter.source.source_index)]
         a, b, x, y = (i-1 for i in item.indices)
         quad = (a, b, x, y)
         weight = fraction(*quad)
