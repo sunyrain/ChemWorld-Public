@@ -12,6 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 from math import isfinite
+from typing import cast
 
 import numpy as np
 
@@ -121,7 +122,7 @@ def initial_sde_continuation(network, spec, amounts_mol, *, seed, time_s=0.0):
         "inventory_signature": _signature(model, amounts, time_s),
         "time_s": time_s,
         "mesh_time_s": time_s,
-        "control_values": dict(model.control_values),
+        "control_values": dict(cast(Mapping[str, float], model.control_values)),
         "volume_L": model.volume_L,
         "rng_state": deepcopy(np.random.PCG64(seed).state),
         "pending": None,
@@ -201,7 +202,7 @@ def _continuation(model, amounts, continuation, work, *, verify_endpoint=True):
     mesh_time_s = finite_real(state["mesh_time_s"], "SDE continuation mesh anchor")
     if (
         state["algorithm"] != SDE_ALGORITHM
-        or state["control_values"] != dict(model.control_values)
+        or state["control_values"] != dict(cast(Mapping[str, float], model.control_values))
         or finite_real(state["volume_L"], "SDE continuation volume", positive=True)
         != model.volume_L
         or state["model_signature"] != model.signature
@@ -408,7 +409,7 @@ def rebind_sde_continuation(
         raise ValueError("SDE material invalidation policy must be explicitly Boolean")
     if control_values is not None and not isinstance(control_values, Mapping):
         raise ValueError("SDE control change must be a declared mapping")
-    current = {**model.control_values, **(control_values or {})}
+    current = {**cast(Mapping[str, float], model.control_values), **(control_values or {})}
     changed = ReactionSDE(
         network,
         spec,
@@ -420,7 +421,7 @@ def rebind_sde_continuation(
         state["pending"] = None
         state["mesh_time_s"] = state["time_s"]
         state["invalidations"] += 1
-        state["control_values"] = dict(changed.control_values)
+        state["control_values"] = dict(cast(Mapping[str, float], changed.control_values))
         state["volume_L"] = changed.volume_L
         state["model_signature"] = changed.signature
         state["inventory_signature"] = _signature(changed, new, state["time_s"])

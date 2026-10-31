@@ -1,13 +1,42 @@
 """Resolve current inputs against immutable channel/parameter declarations."""
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from chemworld.foundation.dimensions import DimensionVector
 from chemworld.physchem.stochastic_sde_specs import finite_real
 
+if TYPE_CHECKING:
+    from chemworld.physchem.reaction_network import ReactionNetworkSpec
+    from chemworld.physchem.stochastic_sde_specs import ReactionNoise, StochasticSDESpec
 
-def resolve_sde_controls(network, spec, noises, values):
-    metadata, defaults, rate_scales, flux_parameters, noise_parameters = {}, {}, {}, {}, {}
+
+class SDEControlMetadata(TypedDict):
+    reaction_id: str
+    target: str
+    parameter: str | None
+    initial_value: float
+    bounds: list[float]
+    dimension: dict[str, float]
+    unit: str
+
+
+def resolve_sde_controls(
+    network: ReactionNetworkSpec,
+    spec: StochasticSDESpec,
+    noises: Sequence[ReactionNoise],
+    values: Mapping[str, float] | None,
+) -> tuple[
+    dict[str, float], dict[str, SDEControlMetadata], dict[str, float],
+    dict[str, dict[str, float]], dict[str, dict[str, float]],
+]:
+    metadata: dict[str, SDEControlMetadata] = {}
+    defaults: dict[str, float] = {}
+    rate_scales: dict[str, float] = {}
+    flux_parameters: dict[str, dict[str, float]] = {}
+    noise_parameters: dict[str, dict[str, float]] = {}
     fluxes = {f.reaction_id: f for f in spec.fluxes}
     noise_map = {n.reaction_id: n for n in noises}
     for control in spec.controls:
@@ -53,5 +82,6 @@ def resolve_sde_controls(network, spec, noises, values):
             rate_scales[control.reaction_id] = value
         else:
             parameters = flux_parameters if control.target == "flux_parameter" else noise_parameters
-            parameters.setdefault(control.reaction_id, {})[control.parameter] = value
+            # Parameter controls validate their nonempty name during construction.
+            parameters.setdefault(control.reaction_id, {})[cast(str, control.parameter)] = value
     return current, metadata, rate_scales, flux_parameters, noise_parameters

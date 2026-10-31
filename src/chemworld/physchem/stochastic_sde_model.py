@@ -1,21 +1,35 @@
 """Compile reaction SDE callbacks from one immutable chemical network and noise model."""
 
+from __future__ import annotations
+
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
 from math import isfinite, sqrt
 from types import MappingProxyType
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 from chemworld.foundation.dimensions import DimensionVector
 from chemworld.foundation.discrete_inventory import AVOGADRO
+from chemworld.physchem.mathml import MathExpression
 from chemworld.physchem.mathml_dimensions import mathml_dimension
 from chemworld.physchem.reaction_rate_laws import mass_action_rate
 from chemworld.physchem.stochastic_ri5 import MAX_RI5_NOISE_CHANNELS
-from chemworld.physchem.stochastic_sde_controls import resolve_sde_controls
-from chemworld.physchem.stochastic_sde_specs import ReactionNoise, StochasticSDESpec, finite_real
+from chemworld.physchem.stochastic_sde_controls import SDEControlMetadata, resolve_sde_controls
+from chemworld.physchem.stochastic_sde_specs import (
+    ReactionFlux,
+    ReactionNoise,
+    StochasticSDESpec,
+    finite_real,
+)
 from chemworld.physchem.stoichiometric_rates import stoichiometric_amount_rates
+
+if TYPE_CHECKING:
+    from chemworld.physchem.reaction_network import ReactionNetworkSpec
 
 _ONE = DimensionVector()
 _T = DimensionVector(time=1)
@@ -27,18 +41,24 @@ _V = DimensionVector(length=3)
 class ReactionSDE:
     """Configuration and callbacks only. Evolving stock is always supplied by the caller."""
 
-    network: object
+    network: ReactionNetworkSpec
     spec: StochasticSDESpec
-    control_values: object = None
+    control_values: Mapping[str, float] | None = None
     volume_L: float | None = None
-    noises: tuple = field(init=False)
-    dimensions: object = field(init=False, repr=False, compare=False)
+    noises: tuple[ReactionNoise, ...] = field(init=False)
+    dimensions: Mapping[str, DimensionVector] = field(init=False, repr=False, compare=False)
     signature: str = field(init=False)
-    _stoichiometry: object = field(init=False, repr=False, compare=False)
-    control_metadata: object = field(init=False, repr=False, compare=False)
-    _rate_scales: object = field(init=False, repr=False, compare=False)
-    _flux_parameters: object = field(init=False, repr=False, compare=False)
-    _noise_parameters: object = field(init=False, repr=False, compare=False)
+    _stoichiometry: NDArray[np.float64] = field(init=False, repr=False, compare=False)
+    control_metadata: Mapping[str, SDEControlMetadata] = field(
+        init=False, repr=False, compare=False,
+    )
+    _rate_scales: Mapping[str, float] = field(init=False, repr=False, compare=False)
+    _flux_parameters: Mapping[str, Mapping[str, float]] = field(
+        init=False, repr=False, compare=False,
+    )
+    _noise_parameters: Mapping[str, Mapping[str, float]] = field(
+        init=False, repr=False, compare=False,
+    )
 
     def __post_init__(self) -> None:
         from chemworld.physchem.reaction_network import ReactionNetworkSpec
@@ -119,7 +139,9 @@ class ReactionSDE:
             "flux": _ONE / _T,
             **{f"f{i}": _ONE / _T for i in range(len(self.network.reactions))},
         }
-        for declaration in (*self.spec.fluxes, *noises):
+        for declaration in cast(
+            tuple[ReactionFlux | ReactionNoise, ...], (*self.spec.fluxes, *noises),
+        ):
             if {p.name for p in declaration.parameters} & noise_dimensions.keys():
                 raise ValueError("SDE parameter shadows a physical quantity symbol")
             if declaration.expression is not None:
@@ -167,10 +189,11 @@ class ReactionSDE:
         )
 
     @property
-    def noise_dimension(self):
+    def noise_dimension(self) -> int:
         return len(self.noises)
 
-    def _view(self, values, time_s):
+    def _view(self, values: ArrayLike, time_s: float) -> tuple[dict[str, float], dict[str, float]]:
+        # Construction normalizes the optional volume and parses every expression.
         values = np.asarray(values)
         if (
             values.dtype.kind not in "iuf"
@@ -184,13 +207,13 @@ class ReactionSDE:
             raise ValueError("SDE population view must be a finite vector of the declared species")
         values = values.astype(float)
         concentrations = {
-            key: float(v) / (AVOGADRO * self.volume_L)
+            key: float(v) / (AVOGADRO * cast(float, self.volume_L))
             for key, v in zip(self.network.species_ids, values, strict=True)
         }
         scope = {
             "$time": time_s,
             "time_s": time_s,
-            "volume_m3": self.volume_L / 1000.0,
+            "volume_m3": cast(float, self.volume_L) / 1000.0,
             "avogadro": AVOGADRO,
         }
         for i, value in enumerate(values):
@@ -206,7 +229,7 @@ class ReactionSDE:
         for reaction in self.network.reactions:
             declaration = fluxes.get(reaction.reaction_id)
             rates[reaction.reaction_id] = (
-                declaration.expression.evaluate(
+                cast(MathExpression, declaration.expression).evaluate(
                     {
                         **scope,
                         **{p.name: p.value for p in declaration.parameters},
@@ -222,7 +245,7 @@ class ReactionSDE:
                         allow_signed_trial=True,
                     )
                     * AVOGADRO
-                    * self.volume_L
+                    * cast(float, self.volume_L)
                 )
             ) * self._rate_scales.get(reaction.reaction_id, 1.0)
         if any(isinstance(value, bool) or not isfinite(value) for value in rates.values()):
@@ -230,7 +253,7 @@ class ReactionSDE:
         scope.update({f"f{i}": rates[r.reaction_id] for i, r in enumerate(self.network.reactions)})
         return rates, scope
 
-    def drift(self, time_s, values):
+    def drift(self, time_s: float, values: ArrayLike) -> NDArray[np.float64]:
         rates, _ = self._view(values, time_s)
         result = stoichiometric_amount_rates(
             self.network.species_ids,
@@ -239,7 +262,7 @@ class ReactionSDE:
         )
         return np.array([result[key] for key in self.network.species_ids])
 
-    def diffusion(self, time_s, values):
+    def diffusion(self, time_s: float, values: ArrayLike) -> NDArray[np.float64]:
         rates, scope = self._view(values, time_s)
         result = np.empty((len(self.network.species), self.noise_dimension))
         indices = {key: i for i, key in enumerate(self.network.reaction_ids)}
@@ -247,7 +270,7 @@ class ReactionSDE:
             amplitude = (
                 sqrt(abs(rates[noise.reaction_id]))
                 if noise.expression is None
-                else noise.expression.evaluate(
+                else cast(MathExpression, noise.expression).evaluate(
                     {
                         **scope,
                         "flux": rates[noise.reaction_id],
