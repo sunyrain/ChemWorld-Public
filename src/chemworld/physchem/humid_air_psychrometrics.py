@@ -8,6 +8,10 @@ different enthalpies. These functions own no material or process state.
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from math import exp, isfinite, log
+from typing import Any, cast
+
+import numpy as np
+from numpy.typing import NDArray
 
 from chemworld.physchem.humid_air import (
     HumidAirState,
@@ -38,7 +42,9 @@ from chemworld.physchem.water_ice_boundaries import (
 from chemworld.physchem.water_saturation import water_saturation_temperature
 
 
-def humid_air_ph(water_mass_fraction, pressure_Pa, enthalpy_J_kg):
+def humid_air_ph(
+    water_mass_fraction: float, pressure_Pa: float, enthalpy_J_kg: float,
+) -> HumidAirState:
     """Homogeneous gas root at fixed water fraction and mass-specific enthalpy.
 
     The gas TP seed at 473 K connects to the dilute branch. Like humid_air_tp,
@@ -52,7 +58,9 @@ def humid_air_ph(water_mass_fraction, pressure_Pa, enthalpy_J_kg):
     A = 1-V
     initial = humid_air_from_water_fraction(V, 473., p)
 
-    def trial(point):
+    def trial(point: NDArray[np.float64]) -> tuple[
+        float, float, float, float, float, float, float, float,
+    ]:
         T, rho = float(point[0]), exp(point[1])
         f = _mixture_energy(A, V, SecondOrderPair(T, dx=1), SecondOrderPair(rho, dy=1))
         dpdr = 2*rho*f.dy+rho*rho*f.dyy
@@ -63,11 +71,11 @@ def humid_air_ph(water_mass_fraction, pressure_Pa, enthalpy_J_kg):
                 rho*rho*f.dxy, dpdr, -T*f.dxx+rho*f.dxy,
                 2*f.dy-T*f.dxy+rho*f.dyy)
 
-    def residual(point):
+    def residual(point: NDArray[np.float64]) -> list[float]:
         _, _, pressure, h, *_ = trial(point)
         return [pressure-p, h-target]
 
-    def jacobian(point):
+    def jacobian(point: NDArray[np.float64]) -> list[list[float]]:
         _, rho, _, _, pt, pr, ht, hr = trial(point)
         return [[pt, pr*rho], [ht, hr*rho]]
 
@@ -92,11 +100,13 @@ class HumidAirSaturationResponse:
     dhumidity_ratio_dT_K_inv: float
     denthalpy_dT_J_kg_dry_air_K: float
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {**asdict(self), "equilibrium": self.equilibrium.to_dict()}
 
 
-def humid_air_saturation_response(temperature_K, pressure_Pa, *, condensed_phase):
+def humid_air_saturation_response(
+    temperature_K: float, pressure_Pa: float, *, condensed_phase: str,
+) -> HumidAirSaturationResponse:
     """Analytic constant-pressure saturation response on one explicit surface."""
     if condensed_phase not in ("liquid", "ice"):
         raise ValueError("saturation derivatives require an explicit liquid or ice surface")
@@ -120,10 +130,10 @@ class HumidAirWetBulb:
     definition: str = "adiabatic_isobaric_saturation_condensate_feed_at_outlet_temperature"
 
     @property
-    def temperature_K(self):  # noqa: N802 - shared SI quantity spelling
+    def temperature_K(self) -> float:  # noqa: N802 - shared SI quantity spelling
         return self.outlet.temperature_K
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         return {"temperature_K": self.temperature_K, "inlet": self.inlet.to_dict(),
                 "outlet": self.outlet.to_dict(),
                 "water_added_kg_per_kg_dry_air": self.water_added_kg_per_kg_dry_air,
@@ -131,8 +141,10 @@ class HumidAirWetBulb:
                 "definition": self.definition}
 
 
-def humid_air_wet_bulb(dry_bulb_temperature_K, pressure_Pa, water_mass_fraction,
-                       *, condensed_phase):
+def humid_air_wet_bulb(
+    dry_bulb_temperature_K: float, pressure_Pa: float, water_mass_fraction: float,
+    *, condensed_phase: str,
+) -> HumidAirWetBulb:
     """Thermodynamic wet/ice bulb with explicit liquid/ice supply, no phase jump.
 
     No kinetic psychrometer correction is implied. An explicit supercooled
@@ -157,17 +169,19 @@ def humid_air_wet_bulb(dry_bulb_temperature_K, pressure_Pa, water_mass_fraction,
     if (inlet.water_chemical_potential_J_kg is not None
             and inlet.water_chemical_potential_J_kg-inlet_surface.gibbs_energy_J_kg > 1e-5):
         raise ValueError("supersaturated wet-bulb inlet requires a condensation flash")
-    W_in, h_in = inlet.humidity_ratio_kg_water_kg_dry_air, inlet.enthalpy_J_kg_dry_air
+    # The dry-air endpoint is required above; both dry-mass quantities are finite.
+    W_in = cast(float, inlet.humidity_ratio_kg_water_kg_dry_air)
+    h_in = cast(float, inlet.enthalpy_J_kg_dry_air)
 
     @lru_cache(maxsize=16)
-    def trial(Tw):
+    def trial(Tw: float) -> tuple[HumidAirSaturation, float, float, float]:
         try:
             response = humid_air_saturation_response(Tw, p, condensed_phase=condensed_phase)
             saturated = response.equilibrium
-            W_out = saturated.gas.humidity_ratio_kg_water_kg_dry_air
+            W_out = cast(float, saturated.gas.humidity_ratio_kg_water_kg_dry_air)
             delta = W_out-W_in
             hc = saturated.condensate.enthalpy_J_kg
-            residual = h_in+delta*hc-saturated.gas.enthalpy_J_kg_dry_air
+            residual = h_in+delta*hc-cast(float, saturated.gas.enthalpy_J_kg_dry_air)
             slope = (response.dhumidity_ratio_dT_K_inv*hc
                      + delta*saturated.condensate.cp_J_kg_K
                      - response.denthalpy_dT_J_kg_dry_air_K)
@@ -175,7 +189,7 @@ def humid_air_wet_bulb(dry_bulb_temperature_K, pressure_Pa, water_mass_fraction,
         except (ValueError, OverflowError) as exc:
             raise ResidualDomainError(str(exc)) from exc
 
-    def accepted(Tw):
+    def accepted(Tw: float) -> HumidAirWetBulb:
         saturated, delta, residual, _ = trial(Tw)
         if abs(residual) > 1e-6 or delta < -1e-12 or Tw > T+2e-8:
             raise ValueError("wet-bulb water/energy balance or operating direction failed")
