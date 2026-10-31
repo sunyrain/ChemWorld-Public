@@ -157,7 +157,14 @@ GOLDEN: dict[str, dict[str, Any]] = {
     "partition-discovery": {
         "mechanism_id": "reaction_extraction",
         "steps": 8,
-        "score": 0.7440182504956406,
+        # 2026-10-31: direct product feed uses its initial charge as the assay
+        # denominator (77a7193), not its recovered amount. The eight actions,
+        # physical states and score weights are unchanged. Recovery is
+        # 0.002732299944564943 / 0.008805788504423727 = 0.31028452968093984;
+        # the noisy organic reading is 0.30324717732286993, so the score is
+        # 0.85 * reading - 0.10 * phase_ratio (1.0). The former 0.7440182504956406
+        # expectation normalized incomplete recovery to 1.0 before noise.
+        "score": 0.15776010072443944,
     },
     "public-private-generalization": {
         "mechanism_id": "parallel_series_reaction",
