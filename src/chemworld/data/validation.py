@@ -80,7 +80,7 @@ def validate_record(record: dict[str, Any]) -> None:
             raise ValueError(f"trajectory v0.3 prohibits compatibility aliases: {sorted(aliases)}")
         if not isinstance(record["task_id"], str) or not record["task_id"]:
             raise ValueError("task_id must be a non-empty string")
-        required_children = {
+        required_children: dict[str, dict[str, type | tuple[type, ...]]] = {
             "environment_outcome": {"observation": dict},
             "agent_visible_observation": {
                 "observation": dict,

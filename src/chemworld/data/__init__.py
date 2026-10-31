@@ -1,5 +1,7 @@
 """Data schemas, trajectory logging, and validation helpers."""
 
+from typing import Any
+
 from chemworld.data.logging import TrajectoryLogger, load_jsonl
 from chemworld.data.records import trajectory_value
 from chemworld.data.schema import (
@@ -69,7 +71,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     if name in {"MultifluidCalibration", "MultifluidFitParameter"}:
         from chemworld.data import multifluid_calibration
 
